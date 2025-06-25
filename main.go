@@ -4,16 +4,24 @@ import (
 	"log"
 
 	"github.com/AtRiskMedia/tractstack-go/api"
+	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 )
 
+var GlobalCacheManager *cache.Manager
+
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
+
+	// Initialize global cache manager
+	GlobalCacheManager = cache.NewManager()
+	cache.GlobalInstance = GlobalCacheManager // Set the global instance
+	log.Println("Global cache manager initialized")
 
 	// Initialize tenant manager
 	tenantManager, err := tenant.NewManager()
@@ -35,7 +43,7 @@ func main() {
 		}
 		defer tenantCtx.Close()
 
-		// Store both tenant context and manager for handlers
+		// Store tenant context and manager for handlers
 		c.Set("tenant", tenantCtx)
 		c.Set("tenantManager", tenantManager)
 		c.Next()
@@ -48,6 +56,19 @@ func main() {
 	r.GET("/api/v1/auth/profile/decode", api.DecodeProfileHandler)
 	r.POST("/api/v1/auth/login", api.LoginHandler)
 	r.GET("/api/v1/db/status", api.DBStatusHandler)
+
+	// Content API routes
+	v1 := r.Group("/api/v1")
+	{
+		nodes := v1.Group("/nodes")
+		{
+			// Pane endpoints
+			nodes.GET("/panes", api.GetAllPaneIDsHandler)
+			nodes.GET("/panes/:id", api.GetPaneByIDHandler)
+			nodes.GET("/panes/slug/:slug", api.GetPaneBySlugHandler)
+			nodes.GET("/panes/context", api.GetContextPanesHandler)
+		}
+	}
 
 	r.Run(":8080")
 }
