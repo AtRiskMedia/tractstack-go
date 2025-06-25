@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -89,6 +90,37 @@ func (ps *PaneService) GetByID(id string) (*models.PaneNode, error) {
 	cache.GetGlobalManager().SetPane(ps.ctx.TenantID, pane)
 
 	return pane, nil
+}
+
+// GetByIDs returns multiple panes by IDs (cache-first with bulk loading)
+func (ps *PaneService) GetByIDs(ids []string) ([]*models.PaneNode, error) {
+	var result []*models.PaneNode
+	var missingIDs []string
+
+	// Check cache for each ID
+	for _, id := range ids {
+		if pane, found := cache.GetGlobalManager().GetPane(ps.ctx.TenantID, id); found {
+			result = append(result, pane)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	// If we have cache misses, bulk load from database
+	if len(missingIDs) > 0 {
+		missingPanes, err := ps.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add to cache and result
+		for _, pane := range missingPanes {
+			cache.GetGlobalManager().SetPane(ps.ctx.TenantID, pane)
+			result = append(result, pane)
+		}
+	}
+
+	return result, nil
 }
 
 // GetBySlug returns a pane by slug (cache-first)
@@ -188,6 +220,132 @@ func (ps *PaneService) loadFromDB(id string) (*models.PaneNode, error) {
 	}
 
 	return paneNode, nil
+}
+
+// loadMultipleFromDB loads multiple panes from database using IN clause
+func (ps *PaneService) loadMultipleFromDB(ids []string) ([]*models.PaneNode, error) {
+	if len(ids) == 0 {
+		return []*models.PaneNode{}, nil
+	}
+
+	// Build IN clause with placeholders
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `SELECT id, title, slug, pane_type, created, changed, options_payload, is_context_pane, markdown_id 
+          FROM panes WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+
+	rows, err := ps.ctx.Database.Conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query panes: %w", err)
+	}
+	defer rows.Close()
+
+	var panes []*models.PaneNode
+	var markdownIDs []string
+	markdownMap := make(map[string]*MarkdownRowData)
+
+	// First pass: collect pane data and markdown IDs
+	var paneRows []*PaneRowData
+	for rows.Next() {
+		var paneRow PaneRowData
+		var markdownID sql.NullString
+
+		err := rows.Scan(
+			&paneRow.ID,
+			&paneRow.Title,
+			&paneRow.Slug,
+			&paneRow.PaneType,
+			&paneRow.Created,
+			&paneRow.Changed,
+			&paneRow.OptionsPayload,
+			&paneRow.IsContextPane,
+			&markdownID,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan pane: %w", err)
+		}
+
+		if markdownID.Valid {
+			paneRow.MarkdownID = &markdownID.String
+			markdownIDs = append(markdownIDs, markdownID.String)
+		}
+
+		paneRows = append(paneRows, &paneRow)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	// Second pass: bulk load markdown data if needed
+	if len(markdownIDs) > 0 {
+		markdownMap, err = ps.loadMultipleMarkdownFromDB(markdownIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load markdown data: %w", err)
+		}
+	}
+
+	// Third pass: deserialize all panes
+	for _, paneRow := range paneRows {
+		var markdownRow *MarkdownRowData
+		if paneRow.MarkdownID != nil {
+			markdownRow = markdownMap[*paneRow.MarkdownID]
+		}
+
+		paneNode, err := ps.deserializeRowData(paneRow, markdownRow)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize pane %s: %w", paneRow.ID, err)
+		}
+
+		panes = append(panes, paneNode)
+	}
+
+	return panes, nil
+}
+
+// loadMultipleMarkdownFromDB loads multiple markdown records
+func (ps *PaneService) loadMultipleMarkdownFromDB(ids []string) (map[string]*MarkdownRowData, error) {
+	if len(ids) == 0 {
+		return make(map[string]*MarkdownRowData), nil
+	}
+
+	// Build IN clause with placeholders
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`SELECT id, body FROM markdowns WHERE id IN (%s)`,
+		strings.Join(placeholders, ","))
+
+	rows, err := ps.ctx.Database.Conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query markdowns: %w", err)
+	}
+	defer rows.Close()
+
+	markdownMap := make(map[string]*MarkdownRowData)
+	for rows.Next() {
+		var markdownRow MarkdownRowData
+		err := rows.Scan(&markdownRow.ID, &markdownRow.MarkdownBody)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan markdown: %w", err)
+		}
+		markdownMap[markdownRow.ID] = &markdownRow
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("markdown row iteration error: %w", err)
+	}
+
+	return markdownMap, nil
 }
 
 // getIDBySlugFromDB gets pane ID by slug from database
