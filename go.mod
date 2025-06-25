@@ -6,13 +6,11 @@ require (
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-jwt/jwt/v4 v4.5.2
-	github.com/oklog/ulid/v2 v2.1.0
-	golang.org/x/crypto v0.39.0 // indirect
-)
-
-require (
 	github.com/joho/godotenv v1.5.1
+	github.com/mattn/go-sqlite3 v1.14.24
+	github.com/oklog/ulid/v2 v2.1.0
 	github.com/tursodatabase/libsql-client-go v0.0.0-20240902231107-85af5b9d094d
+	golang.org/x/crypto v0.39.0 // indirect
 )
 
 require (
