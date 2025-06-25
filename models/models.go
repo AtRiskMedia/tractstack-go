@@ -1,3 +1,4 @@
+// Package models defines data structures for the application's core entities and API payloads.
 package models
 
 import (
