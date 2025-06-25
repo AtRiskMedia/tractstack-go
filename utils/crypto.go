@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
-	"os"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -76,9 +75,9 @@ func GetProfileFromClaims(claims jwt.MapClaims) *models.Profile {
 	return nil
 }
 
-func GenerateProfileToken(profile *models.Profile) (string, error) {
+func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (string, error) {
 	sharedULID := GenerateULID()
-	encryptedULID, err := Encrypt(sharedULID, os.Getenv("AES_KEY"))
+	encryptedULID, err := Encrypt(sharedULID, aesKey)
 	if err != nil {
 		return "", err
 	}
@@ -97,12 +96,12 @@ func GenerateProfileToken(profile *models.Profile) (string, error) {
 		"exp":            time.Now().Add(30 * 24 * time.Hour).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	return token.SignedString([]byte(jwtSecret))
 }
 
-func ValidateJWT(tokenString string) (jwt.MapClaims, error) {
+func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return []byte(os.Getenv("JWT_SECRET")), nil
+		return []byte(jwtSecret), nil
 	})
 	if err != nil {
 		return nil, err
@@ -113,14 +112,14 @@ func ValidateJWT(tokenString string) (jwt.MapClaims, error) {
 	return nil, errors.New("invalid token")
 }
 
-func encryptEmail(email string) string {
+func EncryptEmail(email, aesKey string) string {
 	sharedULID := GenerateULID()
-	encrypted, _ := Encrypt(sharedULID, os.Getenv("AES_KEY"))
+	encrypted, _ := Encrypt(sharedULID, aesKey)
 	return encrypted
 }
 
-func generateEncryptedCode() string {
+func GenerateEncryptedCode(aesKey string) string {
 	sharedULID := GenerateULID()
-	encrypted, _ := Encrypt(sharedULID, os.Getenv("AES_KEY "))
+	encrypted, _ := Encrypt(sharedULID, aesKey)
 	return encrypted
 }
