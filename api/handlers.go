@@ -1,3 +1,4 @@
+// Package api provides HTTP handlers for processing API requests.
 package api
 
 import (

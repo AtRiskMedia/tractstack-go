@@ -1,3 +1,4 @@
+// Package utils contains encryption helpers
 package utils
 
 import (
