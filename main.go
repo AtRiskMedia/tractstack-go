@@ -64,6 +64,7 @@ func main() {
 		{
 			// Pane endpoints
 			nodes.GET("/panes", api.GetAllPaneIDsHandler)
+			nodes.POST("/panes", api.GetPanesByIDsHandler) // Bulk load panes
 			nodes.GET("/panes/:id", api.GetPaneByIDHandler)
 			nodes.GET("/panes/slug/:slug", api.GetPaneBySlugHandler)
 			nodes.GET("/panes/context", api.GetContextPanesHandler)

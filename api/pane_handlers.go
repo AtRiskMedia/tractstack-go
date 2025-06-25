@@ -11,6 +11,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// PaneIDsRequest represents the request body for bulk pane loading
+type PaneIDsRequest struct {
+	PaneIDs []string `json:"paneIds" binding:"required"`
+}
+
 // GetAllPaneIDsHandler returns all pane IDs using cache-first pattern
 func GetAllPaneIDsHandler(c *gin.Context) {
 	ctx, err := getTenantContext(c)
@@ -38,6 +43,48 @@ func GetAllPaneIDsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"paneIds": paneIDs,
 		"count":   len(paneIDs),
+	})
+}
+
+// GetPanesByIDsHandler returns multiple panes by IDs using cache-first pattern
+func GetPanesByIDsHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Activate tenant if needed
+	if ctx.Status == "inactive" {
+		if err := tenant.ActivateTenant(ctx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
+			return
+		}
+	}
+
+	// Parse request body
+	var req PaneIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if len(req.PaneIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "paneIds array cannot be empty"})
+		return
+	}
+
+	// Use cache-first pane service with global cache manager
+	paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
+	panes, err := paneService.GetByIDs(req.PaneIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"panes": panes,
+		"count": len(panes),
 	})
 }
 
