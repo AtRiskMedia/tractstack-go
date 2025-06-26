@@ -50,8 +50,8 @@ func (cp *CSSProcessorImpl) ExtractParentCSSClasses(optionsPayload map[string]in
 	if nodes, ok := optionsPayload["nodes"].([]interface{}); ok {
 		for _, nodeInterface := range nodes {
 			if node, ok := nodeInterface.(map[string]interface{}); ok {
-				if parentCss, ok := node["parentCss"].([]interface{}); ok {
-					for _, cssInterface := range parentCss {
+				if parentCSS, ok := node["parentCss"].([]interface{}); ok {
+					for _, cssInterface := range parentCSS {
 						if cssString, ok := cssInterface.(string); ok {
 							parentCSSClasses = append(parentCSSClasses, cssString)
 						}
