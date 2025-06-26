@@ -186,13 +186,6 @@ type HTMLChunk struct {
 	DependsOn []string  `json:"dependsOn"` // Content IDs this chunk depends on
 }
 
-type PaneVariant string
-
-const (
-	VariantDefault PaneVariant = "default"
-	VariantHidden  PaneVariant = "hidden"
-)
-
 const EmptyPaneHTML = `<div class="pane-empty"></div>`
 
 // =============================================================================
