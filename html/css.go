@@ -44,13 +44,13 @@ func (cp *CSSProcessorImpl) GetNodeStringStyles(nodeID string) string {
 
 // ExtractParentCSSClasses extracts parentCss array from optionsPayload nodes
 // Returns array of CSS class strings for nested wrapper elements
-func (cp *CSSProcessorImpl) ExtractParentCSSClasses(optionsPayload map[string]interface{}) []string {
+func (cp *CSSProcessorImpl) ExtractParentCSSClasses(optionsPayload map[string]any) []string {
 	var parentCSSClasses []string
 
-	if nodes, ok := optionsPayload["nodes"].([]interface{}); ok {
+	if nodes, ok := optionsPayload["nodes"].([]any); ok {
 		for _, nodeInterface := range nodes {
-			if node, ok := nodeInterface.(map[string]interface{}); ok {
-				if parentCSS, ok := node["parentCss"].([]interface{}); ok {
+			if node, ok := nodeInterface.(map[string]any); ok {
+				if parentCSS, ok := node["parentCss"].([]any); ok {
 					for _, cssInterface := range parentCSS {
 						if cssString, ok := cssInterface.(string); ok {
 							parentCSSClasses = append(parentCSSClasses, cssString)

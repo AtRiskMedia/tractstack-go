@@ -62,7 +62,7 @@ func Decrypt(encrypted, key string) (string, error) {
 }
 
 func GetProfileFromClaims(claims jwt.MapClaims) *models.Profile {
-	if profileData, ok := claims["profile"].(map[string]interface{}); ok {
+	if profileData, ok := claims["profile"].(map[string]any); ok {
 		return &models.Profile{
 			Fingerprint:    claims["fingerprint"].(string),
 			LeadID:         claims["leadId"].(string),
@@ -100,7 +100,7 @@ func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (st
 }
 
 func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
 		return []byte(jwtSecret), nil
 	})
 	if err != nil {

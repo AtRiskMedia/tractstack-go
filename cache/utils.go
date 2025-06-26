@@ -301,11 +301,11 @@ func ValidateTenantID(tenantID string) error {
 }
 
 // GetMemoryStats returns memory usage statistics for the cache
-func GetMemoryStats(manager *Manager) map[string]interface{} {
+func GetMemoryStats(manager *Manager) map[string]any {
 	manager.Mu.RLock()
 	defer manager.Mu.RUnlock()
 
-	stats := make(map[string]interface{})
+	stats := make(map[string]any)
 
 	totalTenants := len(manager.ContentCache)
 	totalContent := 0

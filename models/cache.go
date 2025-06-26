@@ -71,7 +71,7 @@ type PaneNode struct {
 	Slug            string                 `json:"slug"`
 	IsContextPane   bool                   `json:"isContextPane"`
 	IsDecorative    bool                   `json:"isDecorative"`
-	OptionsPayload  map[string]interface{} `json:"optionsPayload,omitempty"`
+	OptionsPayload  map[string]any `json:"optionsPayload,omitempty"`
 	BgColour        *string                `json:"bgColour,omitempty"`
 	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
 	CodeHookPayload map[string]string      `json:"codeHookPayload,omitempty"`
@@ -95,7 +95,7 @@ type ResourceNode struct {
 	CategorySlug   *string                `json:"categorySlug,omitempty"`
 	Oneliner       string                 `json:"oneliner"`
 	ActionLisp     *string                `json:"actionLisp,omitempty"`
-	OptionsPayload map[string]interface{} `json:"optionsPayload"`
+	OptionsPayload map[string]any `json:"optionsPayload"`
 }
 
 type BeliefNode struct {
@@ -308,7 +308,7 @@ type LineDataSeries struct {
 }
 
 type LineDataPoint struct {
-	X interface{} `json:"x"` // string or number
+	X any `json:"x"` // string or number
 	Y int         `json:"y"`
 }
 

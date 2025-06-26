@@ -29,7 +29,7 @@ type ResourceService struct {
 }
 
 // NewResourceService creates a cache-first resource service
-func NewResourceService(ctx *tenant.Context, _ interface{}) *ResourceService {
+func NewResourceService(ctx *tenant.Context, _ any) *ResourceService {
 	// Ignore the cache manager parameter - we use the global instance directly
 	return &ResourceService{
 		ctx: ctx,
@@ -213,7 +213,7 @@ func (rs *ResourceService) loadMultipleFromDB(ids []string) ([]*models.ResourceN
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
@@ -377,7 +377,7 @@ func (rs *ResourceService) getResourceRowData(id string) (*ResourceRowData, erro
 // deserializeRowData converts database rows to client ResourceNode
 func (rs *ResourceService) deserializeRowData(resourceRow *ResourceRowData) (*models.ResourceNode, error) {
 	// Parse options payload
-	var optionsPayload map[string]interface{}
+	var optionsPayload map[string]any
 	if err := json.Unmarshal([]byte(resourceRow.OptionsPayload), &optionsPayload); err != nil {
 		return nil, fmt.Errorf("failed to parse options payload: %w", err)
 	}

@@ -10,7 +10,7 @@ type RenderContext struct {
 	TenantID    string
 	PaneID      string
 	UserState   *UserState
-	AllNodes    map[string]interface{} // Node storage - will be typed properly later
+	AllNodes    map[string]any // Node storage - will be typed properly later
 	ParentNodes map[string][]string    // Parent->Children mapping
 }
 
@@ -48,8 +48,8 @@ type NodeRenderData struct {
 
 // ButtonRenderData holds button-specific rendering data
 type ButtonRenderData struct {
-	CallbackPayload interface{} // Lisp payload
-	BunnyPayload    interface{} // Video payload
+	CallbackPayload any // Lisp payload
+	BunnyPayload    any // Video payload
 	IsVideo         bool
 }
 
@@ -62,15 +62,15 @@ type PaneRenderData struct {
 	BgColour        *string
 	CodeHookTarget  *string
 	CodeHookPayload map[string]string
-	HeldBeliefs     map[string]interface{}
-	WithheldBeliefs map[string]interface{}
-	OptionsPayload  map[string]interface{} // CSS and styling data
+	HeldBeliefs     map[string]any
+	WithheldBeliefs map[string]any
+	OptionsPayload  map[string]any // CSS and styling data
 }
 
 // UserState represents user's current belief and badge state for rendering decisions
 type UserState struct {
 	FingerprintID string
-	Beliefs       map[string]interface{}
+	Beliefs       map[string]any
 	Badges        []string
 	ConsentGiven  bool
 	IsAnonymous   bool
@@ -97,7 +97,7 @@ func (us *UserState) HasBadges(required []string) bool {
 }
 
 // MeetsBeliefConditions checks if user meets belief-based visibility rules
-func (us *UserState) MeetsBeliefConditions(conditions map[string]interface{}) bool {
+func (us *UserState) MeetsBeliefConditions(conditions map[string]any) bool {
 	if len(conditions) == 0 {
 		return true
 	}

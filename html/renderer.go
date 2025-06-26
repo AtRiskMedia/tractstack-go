@@ -13,7 +13,7 @@ import (
 type CSSProcessor interface {
 	GetNodeClasses(nodeID string, defaultClasses string) string
 	GetNodeStringStyles(nodeID string) string
-	ExtractParentCSSClasses(optionsPayload map[string]interface{}) []string
+	ExtractParentCSSClasses(optionsPayload map[string]any) []string
 }
 
 // NodeRenderer interface for child node rendering
@@ -309,13 +309,13 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	return html.String()
 }
 
-func (pr *PaneRenderer) getPaneBeliefs(nodeID string) map[string]interface{} {
+func (pr *PaneRenderer) getPaneBeliefs(nodeID string) map[string]any {
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.PaneData == nil {
-		return make(map[string]interface{})
+		return make(map[string]any)
 	}
 
-	beliefs := make(map[string]interface{})
+	beliefs := make(map[string]any)
 
 	// Combine held and withheld beliefs
 	if nodeData.PaneData.HeldBeliefs != nil {
@@ -332,7 +332,7 @@ func (pr *PaneRenderer) getPaneBeliefs(nodeID string) map[string]interface{} {
 	return beliefs
 }
 
-func (pr *PaneRenderer) checkBeliefVisibility(beliefs map[string]interface{}) bool {
+func (pr *PaneRenderer) checkBeliefVisibility(beliefs map[string]any) bool {
 	// For Stage 2, always return true - implement belief checking in Stage 4
 	// This will check user state against held/withheld beliefs
 	return true

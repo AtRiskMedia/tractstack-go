@@ -27,7 +27,7 @@ type BeliefService struct {
 }
 
 // NewBeliefService creates a cache-first belief service
-func NewBeliefService(ctx *tenant.Context, _ interface{}) *BeliefService {
+func NewBeliefService(ctx *tenant.Context, _ any) *BeliefService {
 	// Ignore the cache manager parameter - we use the global instance directly
 	return &BeliefService{
 		ctx: ctx,
@@ -190,7 +190,7 @@ func (bs *BeliefService) loadMultipleFromDB(ids []string) ([]*models.BeliefNode,
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id

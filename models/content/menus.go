@@ -26,7 +26,7 @@ type MenuService struct {
 }
 
 // NewMenuService creates a cache-first menu service
-func NewMenuService(ctx *tenant.Context, _ interface{}) *MenuService {
+func NewMenuService(ctx *tenant.Context, _ any) *MenuService {
 	// Ignore the cache manager parameter - we use the global instance directly
 	return &MenuService{
 		ctx: ctx,
@@ -169,7 +169,7 @@ func (ms *MenuService) loadMultipleFromDB(ids []string) ([]*models.MenuNode, err
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
