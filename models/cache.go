@@ -71,6 +71,7 @@ type PaneNode struct {
 	Slug            string                 `json:"slug"`
 	IsContextPane   bool                   `json:"isContextPane"`
 	IsDecorative    bool                   `json:"isDecorative"`
+	OptionsPayload  map[string]interface{} `json:"optionsPayload,omitempty"`
 	BgColour        *string                `json:"bgColour,omitempty"`
 	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
 	CodeHookPayload map[string]string      `json:"codeHookPayload,omitempty"`
