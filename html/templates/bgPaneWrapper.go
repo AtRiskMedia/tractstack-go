@@ -44,63 +44,149 @@ func (bpwr *BgPaneWrapperRenderer) isArtpackImageNode(nodeData *models.NodeRende
 	return nodeData.BgImageData != nil && nodeData.BgImageData.Type == "artpack-image"
 }
 
-// renderBgImage renders background image - matches <BgImage payload={node as BgImageNode} />
+// renderBgImage renders background image - EXACT BgImage.astro implementation
 func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *models.NodeRenderData) string {
 	if nodeData.BgImageData == nil {
 		return `<div class="bg-error">Missing image data</div>`
 	}
 
+	bgData := nodeData.BgImageData
+
+	// Check if we should render as normal image - EXACT match: const isFlexImage = payload.position === "left" || payload.position === "right";
+	isFlexImage := bgData.Position == "left" || bgData.Position == "right"
+
+	// Build responsive class - EXACT match to BgImage.astro buildResponsiveClass()
+	responsiveClass := bpwr.buildResponsiveClass(nodeData)
+
 	var html strings.Builder
 
-	// Build background image container
-	html.WriteString(`<div class="bg-image-container"`)
-
-	// Add positioning based on BgImageData
-	position := nodeData.BgImageData.Position
-
-	// Apply positioning classes
-	switch position {
-	case "background":
-		html.WriteString(` style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0;"`)
-	case "left", "right":
-		// These are handled in Markdown.astro with flex layout
-		html.WriteString(fmt.Sprintf(` data-position="%s"`, position))
-	case "leftBleed", "rightBleed":
-		// These are handled in Pane.astro with flex layout
-		html.WriteString(fmt.Sprintf(` data-position="%s"`, position))
-	}
-
-	html.WriteString(`>`)
-
-	// Render the actual image
-	if nodeData.ImageURL != nil && *nodeData.ImageURL != "" {
+	if isFlexImage {
+		// Render as <img> for flex positioned images - EXACT match to BgImage.astro flex branch
 		html.WriteString(`<img`)
-		html.WriteString(fmt.Sprintf(` src="%s"`, *nodeData.ImageURL))
 
+		// Add src attribute
+		if nodeData.ImageURL != nil && *nodeData.ImageURL != "" {
+			html.WriteString(fmt.Sprintf(` src="%s"`, *nodeData.ImageURL))
+		}
+
+		// Add srcSet if available - EXACT match: {...(payload.srcSet ? { srcSet: payload.srcSet } : {})}
 		if nodeData.SrcSet != nil && *nodeData.SrcSet != "" {
 			html.WriteString(fmt.Sprintf(` srcset="%s"`, *nodeData.SrcSet))
 		}
 
-		html.WriteString(` class="w-full h-full object-cover"`)
+		// Add CSS classes - EXACT match: class={`w-full h-full object-${payload.objectFit || "cover"} ${buildResponsiveClass()}`}
+		objectFit := "cover" // Default from TypeScript: payload.objectFit || "cover"
+		// TODO: Add ObjectFit field to BackgroundImageData struct when extending the model
+		html.WriteString(fmt.Sprintf(` class="w-full h-full object-%s %s"`, objectFit, responsiveClass))
 
-		altText := "background image"
+		// Add alt attribute - EXACT match: alt={payload.alt || "Background image"}
+		altText := "Background image"
 		if nodeData.AltText != nil && *nodeData.AltText != "" {
 			altText = *nodeData.AltText
 		}
 		html.WriteString(fmt.Sprintf(` alt="%s"`, altText))
 
 		html.WriteString(` />`)
+	} else {
+		// Render as background div - EXACT match to BgImage.astro background branch
+		// This produces the EXACT output we need:
+		// <div class="w-full h-full absolute top-0 left-0 block" style="background-image:url(...);..." role="img" aria-label="...">
+
+		html.WriteString(fmt.Sprintf(`<div class="w-full h-full absolute top-0 left-0 %s"`, responsiveClass))
+
+		// Add inline styles - EXACT match to BgImage.astro style object
+		html.WriteString(` style="`)
+
+		if nodeData.ImageURL != nil && *nodeData.ImageURL != "" {
+			html.WriteString(fmt.Sprintf(`background-image:url(%s);`, *nodeData.ImageURL))
+		}
+
+		// Background size - EXACT match: backgroundSize: payload.objectFit || "cover"
+		objectFit := "cover" // Default from TypeScript
+		html.WriteString(fmt.Sprintf(`background-size:%s;`, objectFit))
+		html.WriteString(`background-repeat:no-repeat;`)
+		html.WriteString(`background-position:center;`)
+		html.WriteString(`z-index:0`)
+
+		html.WriteString(`"`)
+
+		// Add accessibility attributes - EXACT match to BgImage.astro
+		html.WriteString(` role="img"`)
+
+		altText := "Background image"
+		if nodeData.AltText != nil && *nodeData.AltText != "" {
+			altText = *nodeData.AltText
+		}
+		html.WriteString(fmt.Sprintf(` aria-label="%s"`, altText))
+
+		html.WriteString(`></div>`)
 	}
 
-	html.WriteString(`</div>`)
 	return html.String()
+}
+
+// buildResponsiveClass implements BgImage.astro buildResponsiveClass() function EXACTLY
+func (bpwr *BgPaneWrapperRenderer) buildResponsiveClass(nodeData *models.NodeRenderData) string {
+	// EXACT implementation of BgImage.astro isHiddenOnViewport and buildResponsiveClass
+	// const isHiddenOnViewport = (viewport: "Mobile" | "Tablet" | "Desktop"): boolean => {
+	//   const key = `hiddenViewport${viewport}` as keyof BgImageNode;
+	//   return !!payload[key];
+	// };
+
+	// For now, use CustomData to access hiddenViewport fields until BackgroundImageData is extended
+	isHiddenOnViewport := func(viewport string) bool {
+		if nodeData.CustomData == nil {
+			return false
+		}
+		key := fmt.Sprintf("hiddenViewport%s", viewport)
+		if val, exists := nodeData.CustomData[key]; exists {
+			if hidden, ok := val.(bool); ok {
+				return hidden
+			}
+		}
+		return false
+	}
+
+	hiddenMobile := isHiddenOnViewport("Mobile")
+	hiddenTablet := isHiddenOnViewport("Tablet")
+	hiddenDesktop := isHiddenOnViewport("Desktop")
+
+	var classes []string
+
+	// EXACT implementation of BgImage.astro buildResponsiveClass logic:
+	// if (hiddenMobile) classes.push("hidden xs:hidden");
+	// else classes.push("block");
+	if hiddenMobile {
+		classes = append(classes, "hidden", "xs:hidden")
+	} else {
+		classes = append(classes, "block")
+	}
+
+	// if (hiddenTablet) classes.push("md:hidden");
+	// else if (hiddenMobile) classes.push("md:block");
+	if hiddenTablet {
+		classes = append(classes, "md:hidden")
+	} else if hiddenMobile {
+		classes = append(classes, "md:block")
+	}
+
+	// if (hiddenDesktop) classes.push("xl:hidden");
+	// else if (hiddenTablet) classes.push("xl:block");
+	if hiddenDesktop {
+		classes = append(classes, "xl:hidden")
+	} else if hiddenTablet {
+		classes = append(classes, "xl:block")
+	}
+
+	// return classes.join(" ");
+	return strings.Join(classes, " ")
 }
 
 // renderBgVisualBreak renders visual break - matches <BgVisualBreak payload={node as VisualBreakNode} />
 func (bpwr *BgPaneWrapperRenderer) renderBgVisualBreak(nodeData *models.NodeRenderData) string {
 	var html strings.Builder
 
-	// Create a visual break element
+	// Create a visual break element - matches the expected output from visual breaks
 	html.WriteString(`<div class="visual-break"`)
 
 	// Add any element CSS
@@ -110,7 +196,7 @@ func (bpwr *BgPaneWrapperRenderer) renderBgVisualBreak(nodeData *models.NodeRend
 
 	html.WriteString(`>`)
 
-	// Visual break content - can be expanded based on actual VisualBreak patterns
+	// Visual break content - matches the pattern we see in the Go 2.0 output
 	html.WriteString(`<div class="visual-break-content"></div>`)
 
 	html.WriteString(`</div>`)

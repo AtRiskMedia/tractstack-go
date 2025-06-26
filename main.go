@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/api"
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -31,7 +32,25 @@ func main() {
 
 	r := gin.Default()
 	r.SetTrustedProxies([]string{"127.0.0.1"})
-	r.Use(cors.Default())
+
+	// Configure CORS to allow localhost origins
+	r.Use(cors.New(cors.Config{
+		AllowOrigins: []string{
+			"http://localhost:3000",
+			"http://localhost:4321", // Astro dev server
+			"http://127.0.0.1:3000",
+			"http://127.0.0.1:4321",
+		},
+		AllowMethods: []string{
+			"GET", "POST", "PUT", "DELETE", "OPTIONS",
+		},
+		AllowHeaders: []string{
+			"Origin", "Content-Type", "Accept", "Authorization",
+			"X-TractStack-Tenant", "X-Requested-With",
+			"hx-current-url", "hx-request", "hx-target", "hx-trigger", "hx-boosted",
+		},
+		AllowCredentials: true,
+	}))
 
 	// Add tenant context middleware
 	r.Use(func(c *gin.Context) {
@@ -46,6 +65,34 @@ func main() {
 		// Store tenant context and manager for handlers
 		c.Set("tenant", tenantCtx)
 		c.Set("tenantManager", tenantManager)
+		c.Next()
+	})
+
+	// Domain whitelist middleware (after tenant context)
+	r.Use(func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		host := c.Request.Host
+
+		// Allow localhost by default for development
+		if strings.HasPrefix(origin, "http://localhost:") ||
+			strings.HasPrefix(origin, "http://127.0.0.1:") ||
+			strings.HasPrefix(host, "localhost:") ||
+			strings.HasPrefix(host, "127.0.0.1:") {
+			c.Next()
+			return
+		}
+
+		// Get tenant context for domain validation
+		//if !exists {
+		//	c.JSON(http.StatusForbidden, gin.H{"error": "tenant context required"})
+		//	c.Abort()
+		//	return
+		//}
+
+		// TODO: Implement tenant-based domain whitelist check
+		// For now, allow all origins for tenants
+		// In production, check tenantCtx.AllowedDomains against origin
+
 		c.Next()
 	})
 
@@ -104,7 +151,7 @@ func main() {
 			nodes.GET("/files/:id", api.GetFileByIDHandler)
 		}
 
-		// Fragment rendering endpoints - NEW ADDITION
+		// Fragment rendering endpoints
 		fragments := v1.Group("/fragments")
 		{
 			fragments.GET("/panes/:id", api.GetPaneFragmentHandler)
