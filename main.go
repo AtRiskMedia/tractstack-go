@@ -91,7 +91,6 @@ func main() {
 			nodes.POST("/resources", api.GetResourcesByIDsHandler) // Bulk load resources
 			nodes.GET("/resources/:id", api.GetResourceByIDHandler)
 			nodes.GET("/resources/slug/:slug", api.GetResourceBySlugHandler)
-			nodes.GET("/resources/category/:category", api.GetResourcesByCategoryHandler)
 
 			// Belief endpoints
 			nodes.GET("/beliefs", api.GetAllBeliefIDsHandler)
@@ -104,7 +103,16 @@ func main() {
 			nodes.POST("/files", api.GetFilesByIDsHandler) // Bulk load files
 			nodes.GET("/files/:id", api.GetFileByIDHandler)
 		}
+
+		// Fragment rendering endpoints - NEW ADDITION
+		fragments := v1.Group("/fragments")
+		{
+			fragments.GET("/panes/:id", api.GetPaneFragmentHandler)
+		}
 	}
 
-	r.Run(":8080")
+	log.Println("Starting server on :8080")
+	if err := r.Run(":8080"); err != nil {
+		log.Fatal("Failed to start server:", err)
+	}
 }

@@ -64,18 +64,18 @@ func (cp *CSSProcessorImpl) ExtractParentCSSClasses(optionsPayload map[string]an
 	return parentCSSClasses
 }
 
-// Helper function to get node render data - will be connected to cache in Stage 4
+// getNodeRenderData retrieves node data - FIXED TO USE REAL DATA
 func (cp *CSSProcessorImpl) getNodeRenderData(nodeID string) *models.NodeRenderData {
-	// For Stage 2, return basic data structure
-	// This will be replaced with actual cache integration in Stage 4
 	if cp.ctx.AllNodes == nil {
 		return nil
 	}
 
-	// Placeholder - will be replaced with actual node data extraction
-	return &models.NodeRenderData{
-		ID:       nodeID,
-		NodeType: "EmptyNode",
-		Children: []string{},
+	// Look up node in the real data map - THIS IS THE KEY FIX
+	nodeInterface, exists := cp.ctx.AllNodes[nodeID]
+	if !exists {
+		return nil
 	}
+
+	// nodeInterface is already *NodeRenderData based on the map type
+	return nodeInterface
 }
