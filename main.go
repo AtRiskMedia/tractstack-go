@@ -49,7 +49,7 @@ func main() {
 		c.Next()
 	})
 
-	// Routes with tenant context
+	// Authentication and system routes
 	r.POST("/api/v1/auth/visit", api.VisitHandler)
 	r.GET("/api/v1/auth/sse", api.SseHandler)
 	r.POST("/api/v1/auth/state", api.StateHandler)
@@ -68,6 +68,41 @@ func main() {
 			nodes.GET("/panes/:id", api.GetPaneByIDHandler)
 			nodes.GET("/panes/slug/:slug", api.GetPaneBySlugHandler)
 			nodes.GET("/panes/context", api.GetContextPanesHandler)
+
+			// TractStack endpoints
+			nodes.GET("/tractstacks", api.GetAllTractStackIDsHandler)
+			nodes.POST("/tractstacks", api.GetTractStacksByIDsHandler) // Bulk load tractstacks
+			nodes.GET("/tractstacks/:id", api.GetTractStackByIDHandler)
+			nodes.GET("/tractstacks/slug/:slug", api.GetTractStackBySlugHandler)
+
+			// StoryFragment endpoints
+			nodes.GET("/storyfragments", api.GetAllStoryFragmentIDsHandler)
+			nodes.POST("/storyfragments", api.GetStoryFragmentsByIDsHandler) // Bulk load storyfragments
+			nodes.GET("/storyfragments/:id", api.GetStoryFragmentByIDHandler)
+			nodes.GET("/storyfragments/slug/:slug", api.GetStoryFragmentBySlugHandler)
+
+			// Menu endpoints
+			nodes.GET("/menus", api.GetAllMenuIDsHandler)
+			nodes.POST("/menus", api.GetMenusByIDsHandler) // Bulk load menus
+			nodes.GET("/menus/:id", api.GetMenuByIDHandler)
+
+			// Resource endpoints
+			nodes.GET("/resources", api.GetAllResourceIDsHandler)
+			nodes.POST("/resources", api.GetResourcesByIDsHandler) // Bulk load resources
+			nodes.GET("/resources/:id", api.GetResourceByIDHandler)
+			nodes.GET("/resources/slug/:slug", api.GetResourceBySlugHandler)
+			nodes.GET("/resources/category/:category", api.GetResourcesByCategoryHandler)
+
+			// Belief endpoints
+			nodes.GET("/beliefs", api.GetAllBeliefIDsHandler)
+			nodes.POST("/beliefs", api.GetBeliefsByIDsHandler) // Bulk load beliefs
+			nodes.GET("/beliefs/:id", api.GetBeliefByIDHandler)
+			nodes.GET("/beliefs/slug/:slug", api.GetBeliefBySlugHandler)
+
+			// ImageFile endpoints
+			nodes.GET("/files", api.GetAllFileIDsHandler)
+			nodes.POST("/files", api.GetFilesByIDsHandler) // Bulk load files
+			nodes.GET("/files/:id", api.GetFileByIDHandler)
 		}
 	}
 

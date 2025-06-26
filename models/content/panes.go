@@ -470,13 +470,14 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 
 	// Build PaneNode
 	paneNode := &models.PaneNode{
-		ID:            paneRow.ID,
-		Title:         paneRow.Title,
-		Slug:          paneRow.Slug,
-		IsContextPane: paneRow.IsContextPane == 1,
-		IsDecorative:  isDecorative,
-		Created:       created,
-		Changed:       &changed,
+		ID:             paneRow.ID,
+		Title:          paneRow.Title,
+		Slug:           paneRow.Slug,
+		IsContextPane:  paneRow.IsContextPane == 1,
+		IsDecorative:   isDecorative,
+		Created:        created,
+		Changed:        &changed,
+		OptionsPayload: optionsPayload,
 	}
 
 	// Optional fields

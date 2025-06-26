@@ -21,7 +21,13 @@ type Manager struct {
 	*models.CacheManager
 
 	// Content operations
-	PaneOps *content.PaneCacheOperations
+	PaneOps          *content.PaneCacheOperations
+	TractStackOps    *content.TractStackCacheOperations
+	StoryFragmentOps *content.StoryFragmentCacheOperations
+	MenuOps          *content.MenuCacheOperations
+	ResourceOps      *content.ResourceCacheOperations
+	BeliefOps        *content.BeliefCacheOperations
+	ImageFileOps     *content.ImageFileCacheOperations
 }
 
 // NewManager creates a new cache manager
@@ -35,8 +41,14 @@ func NewManager() *Manager {
 	}
 
 	return &Manager{
-		CacheManager: cacheManager,
-		PaneOps:      content.NewPaneCacheOperations(cacheManager),
+		CacheManager:     cacheManager,
+		PaneOps:          content.NewPaneCacheOperations(cacheManager),
+		TractStackOps:    content.NewTractStackCacheOperations(cacheManager),
+		StoryFragmentOps: content.NewStoryFragmentCacheOperations(cacheManager),
+		MenuOps:          content.NewMenuCacheOperations(cacheManager),
+		ResourceOps:      content.NewResourceCacheOperations(cacheManager),
+		BeliefOps:        content.NewBeliefCacheOperations(cacheManager),
+		ImageFileOps:     content.NewImageFileCacheOperations(cacheManager),
 	}
 }
 
@@ -177,37 +189,167 @@ func (m *Manager) InvalidateAllPanes(tenantID string) {
 }
 
 // =============================================================================
-// Future Content Operations (Placeholder)
+// TractStack Operations
 // =============================================================================
 
 func (m *Manager) GetTractStack(tenantID, id string) (*models.TractStackNode, bool) {
-	// TODO: Implement
-	return nil, false
+	return m.TractStackOps.GetTractStack(tenantID, id)
 }
+
+func (m *Manager) SetTractStack(tenantID string, node *models.TractStackNode) {
+	m.TractStackOps.SetTractStack(tenantID, node)
+}
+
+func (m *Manager) GetTractStackBySlug(tenantID, slug string) (*models.TractStackNode, bool) {
+	return m.TractStackOps.GetTractStackBySlug(tenantID, slug)
+}
+
+func (m *Manager) GetAllTractStackIDs(tenantID string) ([]string, bool) {
+	return m.TractStackOps.GetAllTractStackIDs(tenantID)
+}
+
+func (m *Manager) InvalidateTractStack(tenantID, id string) {
+	m.TractStackOps.InvalidateTractStack(tenantID, id)
+}
+
+func (m *Manager) InvalidateAllTractStacks(tenantID string) {
+	m.TractStackOps.InvalidateAllTractStacks(tenantID)
+}
+
+// =============================================================================
+// StoryFragment Operations
+// =============================================================================
 
 func (m *Manager) GetStoryFragment(tenantID, id string) (*models.StoryFragmentNode, bool) {
-	// TODO: Implement
-	return nil, false
+	return m.StoryFragmentOps.GetStoryFragment(tenantID, id)
 }
+
+func (m *Manager) SetStoryFragment(tenantID string, node *models.StoryFragmentNode) {
+	m.StoryFragmentOps.SetStoryFragment(tenantID, node)
+}
+
+func (m *Manager) GetStoryFragmentBySlug(tenantID, slug string) (*models.StoryFragmentNode, bool) {
+	return m.StoryFragmentOps.GetStoryFragmentBySlug(tenantID, slug)
+}
+
+func (m *Manager) GetAllStoryFragmentIDs(tenantID string) ([]string, bool) {
+	return m.StoryFragmentOps.GetAllStoryFragmentIDs(tenantID)
+}
+
+func (m *Manager) InvalidateStoryFragment(tenantID, id string) {
+	m.StoryFragmentOps.InvalidateStoryFragment(tenantID, id)
+}
+
+func (m *Manager) InvalidateAllStoryFragments(tenantID string) {
+	m.StoryFragmentOps.InvalidateAllStoryFragments(tenantID)
+}
+
+// =============================================================================
+// Menu Operations
+// =============================================================================
 
 func (m *Manager) GetMenu(tenantID, id string) (*models.MenuNode, bool) {
-	// TODO: Implement
-	return nil, false
+	return m.MenuOps.GetMenu(tenantID, id)
 }
+
+func (m *Manager) SetMenu(tenantID string, node *models.MenuNode) {
+	m.MenuOps.SetMenu(tenantID, node)
+}
+
+func (m *Manager) GetAllMenuIDs(tenantID string) ([]string, bool) {
+	return m.MenuOps.GetAllMenuIDs(tenantID)
+}
+
+func (m *Manager) InvalidateMenu(tenantID, id string) {
+	m.MenuOps.InvalidateMenu(tenantID, id)
+}
+
+func (m *Manager) InvalidateAllMenus(tenantID string) {
+	m.MenuOps.InvalidateAllMenus(tenantID)
+}
+
+// =============================================================================
+// Resource Operations
+// =============================================================================
 
 func (m *Manager) GetResource(tenantID, id string) (*models.ResourceNode, bool) {
-	// TODO: Implement
-	return nil, false
+	return m.ResourceOps.GetResource(tenantID, id)
 }
+
+func (m *Manager) SetResource(tenantID string, node *models.ResourceNode) {
+	m.ResourceOps.SetResource(tenantID, node)
+}
+
+func (m *Manager) GetResourceBySlug(tenantID, slug string) (*models.ResourceNode, bool) {
+	return m.ResourceOps.GetResourceBySlug(tenantID, slug)
+}
+
+func (m *Manager) GetResourcesByCategory(tenantID, category string) ([]*models.ResourceNode, bool) {
+	return m.ResourceOps.GetResourcesByCategory(tenantID, category)
+}
+
+func (m *Manager) GetAllResourceIDs(tenantID string) ([]string, bool) {
+	return m.ResourceOps.GetAllResourceIDs(tenantID)
+}
+
+func (m *Manager) InvalidateResource(tenantID, id string) {
+	m.ResourceOps.InvalidateResource(tenantID, id)
+}
+
+func (m *Manager) InvalidateAllResources(tenantID string) {
+	m.ResourceOps.InvalidateAllResources(tenantID)
+}
+
+// =============================================================================
+// Belief Operations
+// =============================================================================
 
 func (m *Manager) GetBelief(tenantID, id string) (*models.BeliefNode, bool) {
-	// TODO: Implement
-	return nil, false
+	return m.BeliefOps.GetBelief(tenantID, id)
 }
 
+func (m *Manager) SetBelief(tenantID string, node *models.BeliefNode) {
+	m.BeliefOps.SetBelief(tenantID, node)
+}
+
+func (m *Manager) GetBeliefBySlug(tenantID, slug string) (*models.BeliefNode, bool) {
+	return m.BeliefOps.GetBeliefBySlug(tenantID, slug)
+}
+
+func (m *Manager) GetAllBeliefIDs(tenantID string) ([]string, bool) {
+	return m.BeliefOps.GetAllBeliefIDs(tenantID)
+}
+
+func (m *Manager) InvalidateBelief(tenantID, id string) {
+	m.BeliefOps.InvalidateBelief(tenantID, id)
+}
+
+func (m *Manager) InvalidateAllBeliefs(tenantID string) {
+	m.BeliefOps.InvalidateAllBeliefs(tenantID)
+}
+
+// =============================================================================
+// ImageFile Operations
+// =============================================================================
+
 func (m *Manager) GetFile(tenantID, id string) (*models.ImageFileNode, bool) {
-	// TODO: Implement
-	return nil, false
+	return m.ImageFileOps.GetFile(tenantID, id)
+}
+
+func (m *Manager) SetFile(tenantID string, node *models.ImageFileNode) {
+	m.ImageFileOps.SetFile(tenantID, node)
+}
+
+func (m *Manager) GetAllFileIDs(tenantID string) ([]string, bool) {
+	return m.ImageFileOps.GetAllFileIDs(tenantID)
+}
+
+func (m *Manager) InvalidateFile(tenantID, id string) {
+	m.ImageFileOps.InvalidateFile(tenantID, id)
+}
+
+func (m *Manager) InvalidateAllFiles(tenantID string) {
+	m.ImageFileOps.InvalidateAllFiles(tenantID)
 }
 
 // =============================================================================
