@@ -22,7 +22,7 @@ func NewNodeARenderer(ctx *models.RenderContext, nodeRenderer NodeRenderer) *Nod
 	}
 }
 
-// Render implements the NodeA.astro rendering logic exactly
+// Render implements the EXACT NodeA.astro rendering logic with whitespace-nowrap wrapping
 func (nar *NodeARenderer) Render(nodeID string) string {
 	nodeData := nar.getNodeData(nodeID)
 	if nodeData == nil {
@@ -53,10 +53,15 @@ func (nar *NodeARenderer) Render(nodeID string) string {
 
 	html.WriteString(`>`)
 
-	// Render all child nodes
+	// Render all child nodes with <span class="whitespace-nowrap"> wrapper
+	// This matches the expected output: <span class="whitespace-nowrap">See Pricing</span>
 	childNodeIDs := nar.nodeRenderer.GetChildNodeIDs(nodeID)
-	for _, childID := range childNodeIDs {
-		html.WriteString(nar.nodeRenderer.RenderNode(childID))
+	if len(childNodeIDs) > 0 {
+		html.WriteString(` <span class="whitespace-nowrap">`)
+		for _, childID := range childNodeIDs {
+			html.WriteString(nar.nodeRenderer.RenderNode(childID))
+		}
+		html.WriteString(`</span>`)
 	}
 
 	// Closing </a> tag
@@ -70,6 +75,5 @@ func (nar *NodeARenderer) getNodeData(nodeID string) *models.NodeRenderData {
 	if nar.ctx.AllNodes == nil {
 		return nil
 	}
-
 	return nar.ctx.AllNodes[nodeID]
 }

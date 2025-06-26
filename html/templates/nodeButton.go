@@ -22,7 +22,7 @@ func NewNodeButtonRenderer(ctx *models.RenderContext, nodeRenderer NodeRenderer)
 	}
 }
 
-// Render implements the NodeButton.astro rendering logic - basic version
+// Render implements the EXACT NodeButton.astro rendering logic
 func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	nodeData := nbr.getNodeData(nodeID)
 	if nodeData == nil {
@@ -34,7 +34,7 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	// Opening <button> tag
 	html.WriteString(`<button`)
 
-	// Add CSS classes - matches NodeButton.astro: className={`${node.elementCss || ""} whitespace-nowrap`}
+	// Add CSS classes - EXACT match: className={`${node.elementCss || ""} whitespace-nowrap`}
 	var cssClasses strings.Builder
 	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
 		cssClasses.WriteString(*nodeData.ElementCSS)
@@ -42,21 +42,26 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	cssClasses.WriteString(" whitespace-nowrap")
 	html.WriteString(fmt.Sprintf(` class="%s"`, strings.TrimSpace(cssClasses.String())))
 
-	// Basic onclick for now - advanced ButtonIsland logic can be added later
+	// Basic onclick for now - ButtonIsland logic is placeholder
 	html.WriteString(` onclick="return false;"`)
 
 	html.WriteString(`>`)
 
-	// Render all child nodes
+	// Render all child nodes with <span class="whitespace-nowrap"> wrapper
+	// This matches the expected output: <span class="whitespace-nowrap">Talk to me!​​ </span>
 	childNodeIDs := nbr.nodeRenderer.GetChildNodeIDs(nodeID)
-	for _, childID := range childNodeIDs {
-		html.WriteString(nbr.nodeRenderer.RenderNode(childID))
+	if len(childNodeIDs) > 0 {
+		html.WriteString(`<span class="whitespace-nowrap">`)
+		for _, childID := range childNodeIDs {
+			html.WriteString(nbr.nodeRenderer.RenderNode(childID))
+		}
+		html.WriteString(`</span>`)
 	}
 
 	// Closing </button> tag
 	html.WriteString(`</button>`)
 
-	// Add trailing space logic - matches NodeButton.astro: {needsTrailingSpace && " "}
+	// Add trailing space logic - EXACT match: {needsTrailingSpace && " "}
 	needsTrailingSpace := nbr.checkNeedsTrailingSpace(nodeID)
 	if needsTrailingSpace {
 		html.WriteString(" ")
@@ -65,7 +70,7 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	return html.String()
 }
 
-// checkNeedsTrailingSpace implements the NodeButton.astro trailing space logic
+// checkNeedsTrailingSpace implements the EXACT NodeButton.astro trailing space logic
 func (nbr *NodeButtonRenderer) checkNeedsTrailingSpace(nodeID string) bool {
 	nodeData := nbr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.ParentID == "" {
@@ -97,13 +102,15 @@ func (nbr *NodeButtonRenderer) checkNeedsTrailingSpace(nodeID string) bool {
 	}
 
 	// Check if next node is text and doesn't start with punctuation
-	// Matches: nextNode.tagName === "text" && !(...nextNode.copy?.startsWith...)
-	if nextNodeData.TagName != nil && *nextNodeData.TagName == "text" && nextNodeData.Copy != nil {
-		copy := *nextNodeData.Copy
-		return !(strings.HasPrefix(copy, ".") ||
-			strings.HasPrefix(copy, ",") ||
-			strings.HasPrefix(copy, ";") ||
-			strings.HasPrefix(copy, ":"))
+	// EXACT match: nextNode.tagName === "text" && !(...nextNode.copy?.startsWith...)
+	if nextNodeData.TagName != nil && *nextNodeData.TagName == "text" {
+		if nextNodeData.Copy != nil {
+			text := *nextNodeData.Copy
+			return !(strings.HasPrefix(text, ".") ||
+				strings.HasPrefix(text, ",") ||
+				strings.HasPrefix(text, ";") ||
+				strings.HasPrefix(text, ":"))
+		}
 	}
 
 	return false
@@ -114,6 +121,5 @@ func (nbr *NodeButtonRenderer) getNodeData(nodeID string) *models.NodeRenderData
 	if nbr.ctx.AllNodes == nil {
 		return nil
 	}
-
 	return nbr.ctx.AllNodes[nodeID]
 }

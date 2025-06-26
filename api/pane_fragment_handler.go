@@ -61,13 +61,18 @@ func GetPaneFragmentHandler(c *gin.Context) {
 		return
 	}
 
-	// Find root nodes (nodes whose parentId equals the pane ID)
-	rootNodeIDs := findRootNodes(paneID, nodesData)
-	if len(rootNodeIDs) == 0 {
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, `<div class="pane-empty">No content nodes found</div>`)
-		return
+	// Add the pane itself to the nodes data structure
+	paneNodeData := &models.NodeRenderData{
+		ID:       paneID,
+		NodeType: "Pane",
+		PaneData: &models.PaneRenderData{
+			Title:        paneNode.Title,
+			Slug:         paneNode.Slug,
+			IsDecorative: paneNode.IsDecorative,
+			BgColour:     extractBgColour(paneNode),
+		},
 	}
+	nodesData[paneID] = paneNodeData
 
 	// TODO: Extract user state from cookies/headers for belief-based variants
 	// For now, use default variant
@@ -84,24 +89,54 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	// Create HTML generator
 	generator := html.NewGenerator(renderCtx)
 
-	// Build pane wrapper and render all root nodes
-	var htmlBuilder strings.Builder
-
-	// Pane wrapper opening
-	htmlBuilder.WriteString(fmt.Sprintf(`<div id="pane-%s" class="grid auto">`, paneID))
-
-	// Render each root node
-	for _, rootNodeID := range rootNodeIDs {
-		nodeHTML := generator.Render(rootNodeID)
-		htmlBuilder.WriteString(nodeHTML)
-	}
-
-	// Pane wrapper closing
-	htmlBuilder.WriteString(`</div>`)
+	// Use our PaneRenderer to render the complete pane structure
+	// This will call our PaneRenderer.Render() which implements the complete Pane.astro logic
+	paneHTML := generator.Render(paneID)
 
 	// Return HTML response
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, htmlBuilder.String())
+	c.String(http.StatusOK, paneHTML)
+}
+
+// extractUserIDFromRequest extracts user ID from request context, cookies, or headers
+func extractUserIDFromRequest(c *gin.Context) string {
+	// Try to get user ID from context first
+	if userID, exists := c.Get("userID"); exists {
+		if uid, ok := userID.(string); ok {
+			return uid
+		}
+	}
+
+	// Try to extract from cookies
+	if cookie, err := c.Cookie("user_id"); err == nil && cookie != "" {
+		return cookie
+	}
+
+	// Try to extract from headers
+	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+		// Simple bearer token extraction - adjust based on your auth system
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			return strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	// Return empty string if no user ID found
+	return ""
+}
+
+// Helper function to extract background color from pane options
+func extractBgColour(paneNode *models.PaneNode) *string {
+	if paneNode.OptionsPayload == nil {
+		return nil
+	}
+
+	if bgColour, exists := paneNode.OptionsPayload["bgColour"]; exists {
+		if bgColourStr, ok := bgColour.(string); ok {
+			return &bgColourStr
+		}
+	}
+
+	return nil
 }
 
 // findRootNodes finds nodes that are direct children of the pane
@@ -201,72 +236,75 @@ func parseNodeFromMap(nodeMap map[string]any) (*models.NodeRenderData, error) {
 		nodeData.ParentID = parentID
 	}
 
-	// Extract markdownBody for Markdown nodes
-	if markdownBody, ok := nodeMap["markdownBody"].(string); ok {
-		nodeData.MarkdownBody = &markdownBody
+	// Handle ParentCSS array
+	if parentCSS, ok := nodeMap["parentCss"].([]interface{}); ok {
+		cssStrings := make([]string, 0, len(parentCSS))
+		for _, css := range parentCSS {
+			if cssStr, ok := css.(string); ok {
+				cssStrings = append(cssStrings, cssStr)
+			}
+		}
+		nodeData.ParentCSS = cssStrings
 	}
 
-	// Extract href for link nodes
+	// Handle image-related fields
+	if src, ok := nodeMap["src"].(string); ok {
+		nodeData.ImageURL = &src
+	}
+
+	if srcSet, ok := nodeMap["srcSet"].(string); ok {
+		nodeData.SrcSet = &srcSet
+	}
+
+	if alt, ok := nodeMap["alt"].(string); ok {
+		nodeData.AltText = &alt
+	}
+
+	// Handle link fields
 	if href, ok := nodeMap["href"].(string); ok {
 		nodeData.Href = &href
 	}
 
-	// Extract target for link nodes
 	if target, ok := nodeMap["target"].(string); ok {
 		nodeData.Target = &target
 	}
 
-	// Extract altText for image nodes
-	if altText, ok := nodeMap["altText"].(string); ok {
-		nodeData.AltText = &altText
-	}
+	// Handle BgPane specific fields
+	if nodeData.NodeType == "BgPane" {
+		bgImageData := &models.BackgroundImageData{}
 
-	// Extract imageUrl for image nodes
-	if imageURL, ok := nodeMap["imageUrl"].(string); ok {
-		nodeData.ImageURL = &imageURL
-	}
+		if nodeType, ok := nodeMap["type"].(string); ok {
+			bgImageData.Type = nodeType
+		}
 
-	// Extract parentCss array
-	if parentCSSInterface, ok := nodeMap["parentCss"]; ok {
-		if parentCSSArray, ok := parentCSSInterface.([]any); ok {
-			parentCSS := make([]string, 0, len(parentCSSArray))
-			for _, item := range parentCSSArray {
-				if cssString, ok := item.(string); ok {
-					parentCSS = append(parentCSS, cssString)
-				}
+		if position, ok := nodeMap["position"].(string); ok {
+			bgImageData.Position = position
+		}
+
+		if size, ok := nodeMap["size"].(string); ok {
+			bgImageData.Size = size
+		}
+
+		nodeData.BgImageData = bgImageData
+
+		// Store additional fields in CustomData for viewport visibility
+		nodeData.CustomData = make(map[string]any)
+		if collection, ok := nodeMap["collection"]; ok {
+			nodeData.CustomData["collection"] = collection
+		}
+		if image, ok := nodeMap["image"]; ok {
+			nodeData.CustomData["image"] = image
+		}
+		if objectFit, ok := nodeMap["objectFit"]; ok {
+			nodeData.CustomData["objectFit"] = objectFit
+		}
+		// Copy other fields that might be needed
+		for key, value := range nodeMap {
+			if key != "id" && key != "nodeType" && key != "type" && key != "position" && key != "size" {
+				nodeData.CustomData[key] = value
 			}
-			nodeData.ParentCSS = parentCSS
 		}
 	}
-
-	// Initialize empty children slice (will be populated by parent-child map)
-	nodeData.Children = make([]string, 0)
 
 	return nodeData, nil
-}
-
-// extractUserIDFromRequest extracts user ID from request context, cookies, or headers
-func extractUserIDFromRequest(c *gin.Context) string {
-	// Try to get user ID from context first
-	if userID, exists := c.Get("userID"); exists {
-		if uid, ok := userID.(string); ok {
-			return uid
-		}
-	}
-
-	// Try to extract from cookies
-	if cookie, err := c.Cookie("user_id"); err == nil && cookie != "" {
-		return cookie
-	}
-
-	// Try to extract from headers
-	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-		// Simple bearer token extraction - adjust based on your auth system
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			return strings.TrimPrefix(authHeader, "Bearer ")
-		}
-	}
-
-	// Return empty string if no user ID found
-	return ""
 }
