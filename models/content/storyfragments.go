@@ -31,7 +31,7 @@ type StoryFragmentService struct {
 }
 
 // NewStoryFragmentService creates a cache-first storyfragment service
-func NewStoryFragmentService(ctx *tenant.Context, _ interface{}) *StoryFragmentService {
+func NewStoryFragmentService(ctx *tenant.Context, _ any) *StoryFragmentService {
 	return &StoryFragmentService{ctx: ctx}
 }
 
@@ -162,7 +162,7 @@ func (sfs *StoryFragmentService) loadMultipleFromDB(ids []string) ([]*models.Sto
 	}
 
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
@@ -297,7 +297,7 @@ func (sfs *StoryFragmentService) getBulkPaneIDsFromDB(storyFragmentIDs []string)
 	}
 
 	placeholders := make([]string, len(storyFragmentIDs))
-	args := make([]interface{}, len(storyFragmentIDs))
+	args := make([]any, len(storyFragmentIDs))
 	for i, id := range storyFragmentIDs {
 		placeholders[i] = "?"
 		args[i] = id

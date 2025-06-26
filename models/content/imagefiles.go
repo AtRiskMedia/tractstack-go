@@ -26,7 +26,7 @@ type ImageFileService struct {
 }
 
 // NewImageFileService creates a cache-first imagefile service
-func NewImageFileService(ctx *tenant.Context, _ interface{}) *ImageFileService {
+func NewImageFileService(ctx *tenant.Context, _ any) *ImageFileService {
 	// Ignore the cache manager parameter - we use the global instance directly
 	return &ImageFileService{
 		ctx: ctx,
@@ -166,7 +166,7 @@ func (ifs *ImageFileService) loadMultipleFromDB(ids []string) ([]*models.ImageFi
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id

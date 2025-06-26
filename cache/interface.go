@@ -114,9 +114,9 @@ type Cache interface {
 	GetTenantStats(tenantID string) models.CacheStats
 
 	// Cache management
-	GetMemoryStats() map[string]interface{}
+	GetMemoryStats() map[string]any
 	InvalidateAll()
-	Health() map[string]interface{}
+	Health() map[string]any
 }
 
 // CacheProvider defines the interface for cache implementations
@@ -127,10 +127,10 @@ type CacheProvider interface {
 	// Lifecycle management
 	Start() error
 	Stop() error
-	Health() map[string]interface{}
+	Health() map[string]any
 
 	// Configuration
-	Configure(config map[string]interface{}) error
+	Configure(config map[string]any) error
 }
 
 // CacheMiddleware defines the interface for cache middleware
@@ -138,11 +138,11 @@ type CacheMiddleware interface {
 	// Request interception
 	BeforeGet(tenantID, key string) bool
 	AfterGet(tenantID, key string, hit bool)
-	BeforeSet(tenantID, key string, data interface{}) bool
+	BeforeSet(tenantID, key string, data any) bool
 	AfterSet(tenantID, key string, success bool)
 
 	// Statistics and monitoring
-	GetStats() map[string]interface{}
+	GetStats() map[string]any
 	Reset()
 }
 
@@ -158,23 +158,23 @@ type CacheObserver interface {
 
 // Validator defines the interface for cache data validation
 type Validator interface {
-	ValidateContent(content interface{}) error
-	ValidateUserState(state interface{}) error
-	ValidateAnalytics(analytics interface{}) error
+	ValidateContent(content any) error
+	ValidateUserState(state any) error
+	ValidateAnalytics(analytics any) error
 	ValidateTenantID(tenantID string) error
 }
 
 // Serializer defines the interface for cache serialization
 type Serializer interface {
-	Serialize(data interface{}) ([]byte, error)
-	Deserialize(data []byte, target interface{}) error
+	Serialize(data any) ([]byte, error)
+	Deserialize(data []byte, target any) error
 	ContentType() string
 }
 
 // CacheStrategy defines different caching strategies
 type CacheStrategy interface {
-	ShouldCache(tenantID, key string, data interface{}) bool
-	GetTTL(tenantID, key string, data interface{}) models.CacheTTL
+	ShouldCache(tenantID, key string, data any) bool
+	GetTTL(tenantID, key string, data any) models.CacheTTL
 	GetEvictionPolicy() EvictionPolicy
 }
 

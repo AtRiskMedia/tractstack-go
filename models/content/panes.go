@@ -44,7 +44,7 @@ type PaneService struct {
 }
 
 // NewPaneService creates a cache-first pane service
-func NewPaneService(ctx *tenant.Context, _ interface{}) *PaneService {
+func NewPaneService(ctx *tenant.Context, _ any) *PaneService {
 	// Ignore the cache manager parameter - we use the global instance directly
 	return &PaneService{
 		ctx: ctx,
@@ -230,7 +230,7 @@ func (ps *PaneService) loadMultipleFromDB(ids []string) ([]*models.PaneNode, err
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
@@ -316,7 +316,7 @@ func (ps *PaneService) loadMultipleMarkdownFromDB(ids []string) (map[string]*Mar
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
@@ -422,7 +422,7 @@ func (ps *PaneService) getMarkdownRowData(id string) (*MarkdownRowData, error) {
 // deserializeRowData converts database rows to client PaneNode
 func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *MarkdownRowData) (*models.PaneNode, error) {
 	// Parse options payload
-	var optionsPayload map[string]interface{}
+	var optionsPayload map[string]any
 	if err := json.Unmarshal([]byte(paneRow.OptionsPayload), &optionsPayload); err != nil {
 		return nil, fmt.Errorf("failed to parse options payload: %w", err)
 	}
@@ -454,7 +454,7 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 	}
 
 	var codeHookPayload map[string]string
-	if payload, ok := optionsPayload["codeHookPayload"].(map[string]interface{}); ok {
+	if payload, ok := optionsPayload["codeHookPayload"].(map[string]any); ok {
 		codeHookPayload = make(map[string]string)
 		for k, v := range payload {
 			if str, ok := v.(string); ok {
@@ -501,13 +501,13 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 }
 
 // extractBeliefs helper to parse belief structures from options payload
-func (ps *PaneService) extractBeliefs(optionsPayload map[string]interface{}, key string) map[string]models.BeliefValue {
+func (ps *PaneService) extractBeliefs(optionsPayload map[string]any, key string) map[string]models.BeliefValue {
 	beliefs := make(map[string]models.BeliefValue)
 
 	if beliefsData, ok := optionsPayload[key]; ok {
-		if beliefsMap, ok := beliefsData.(map[string]interface{}); ok {
+		if beliefsMap, ok := beliefsData.(map[string]any); ok {
 			for beliefKey, value := range beliefsMap {
-				if beliefData, ok := value.(map[string]interface{}); ok {
+				if beliefData, ok := value.(map[string]any); ok {
 					beliefValue := models.BeliefValue{}
 					if verb, ok := beliefData["verb"].(string); ok {
 						beliefValue.Verb = verb

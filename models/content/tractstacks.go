@@ -25,7 +25,7 @@ type TractStackService struct {
 }
 
 // NewTractStackService creates a cache-first tractstack service
-func NewTractStackService(ctx *tenant.Context, _ interface{}) *TractStackService {
+func NewTractStackService(ctx *tenant.Context, _ any) *TractStackService {
 	// Ignore the cache manager parameter - we use the global instance directly
 	return &TractStackService{
 		ctx: ctx,
@@ -185,7 +185,7 @@ func (tss *TractStackService) loadMultipleFromDB(ids []string) ([]*models.TractS
 
 	// Build IN clause with placeholders
 	placeholders := make([]string, len(ids))
-	args := make([]interface{}, len(ids))
+	args := make([]any, len(ids))
 	for i, id := range ids {
 		placeholders[i] = "?"
 		args[i] = id
