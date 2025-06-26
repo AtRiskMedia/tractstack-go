@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/AtRiskMedia/tractstack-go/html/templates"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -41,7 +42,7 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 		return nr.renderEmptyNode()
 	}
 
-	// Get node data (simplified for Stage 1)
+	// Get node data - FIXED TO USE REAL DATA
 	nodeData := nr.getNodeRenderData(nodeID)
 	if nodeData == nil {
 		return nr.renderEmptyNode()
@@ -100,8 +101,8 @@ func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) *mode
 		return nil
 	}
 
-	// Match Node.astro regexp patterns
-	regexpHook := regexp.MustCompile(`^(identifyAs|youtube|bunny|bunnyContext|toggle|resource|belief|signup)\((.*)\)$`)
+	// Match Node.astro regexp patterns exactly
+	regexpHook := regexp.MustCompile(`^(identifyAs|youtube|bunny|bunnyContext|toggle|resource|belief|signup)\(([^)]*)\)$`)
 	hookMatch := regexpHook.FindStringSubmatch(*nodeData.Copy)
 
 	if len(hookMatch) < 3 {
@@ -136,20 +137,28 @@ func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) *mode
 	}
 }
 
-// getNodeRenderData retrieves and prepares node data for rendering
+// getNodeRenderData retrieves and prepares node data for rendering - FIXED TO USE REAL DATA
 func (nr *NodeRendererImpl) getNodeRenderData(nodeID string) *models.NodeRenderData {
-	// For Stage 1, return minimal data to allow compilation
-	// This will be expanded in Stage 2 when we integrate with cache system
 	if nr.ctx.AllNodes == nil {
 		return nil
 	}
 
-	// Placeholder implementation - will be replaced with actual cache integration
-	return &models.NodeRenderData{
-		ID:       nodeID,
-		NodeType: "EmptyNode", // Default for Stage 1
-		Children: []string{},
+	// Use real data from context
+	nodeData := nr.ctx.AllNodes[nodeID]
+	if nodeData == nil {
+		return nil
 	}
+
+	// Populate children from parent-child map
+	if nr.ctx.ParentNodes != nil {
+		if children, exists := nr.ctx.ParentNodes[nodeID]; exists {
+			nodeData.Children = children
+		} else {
+			nodeData.Children = []string{}
+		}
+	}
+
+	return nodeData
 }
 
 // getChildNodeIDs returns child node IDs for a given parent
@@ -171,84 +180,94 @@ func (nr *NodeRendererImpl) GetChildNodeIDs(nodeID string) []string {
 	return nr.getChildNodeIDs(nodeID)
 }
 
-// Stage 1 placeholder implementations - will be expanded in later stages
+// Rendering implementations
 
 func (nr *NodeRendererImpl) renderEmptyNode() string {
 	return `<div></div>`
 }
 
 func (nr *NodeRendererImpl) renderPane(nodeID string) string {
-	// For Stage 2, create pane renderer on demand to avoid circular imports
 	paneRenderer := &PaneRenderer{
 		ctx:          nr.ctx,
-		cssProcessor: nr.cssProcessor, // CSSProcessor implements CSSProcessor interface
-		nodeRenderer: nr,              // NodeRenderer implements NodeRenderer interface
+		cssProcessor: nr.cssProcessor,
+		nodeRenderer: nr,
 	}
 	return paneRenderer.Render(nodeID)
 }
 
-func (nr *NodeRendererImpl) renderStoryFragment(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
-}
-
 func (nr *NodeRendererImpl) renderMarkdown(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
-}
-
-func (nr *NodeRendererImpl) renderBgPaneWrapper(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
+	markdownRenderer := templates.NewMarkdownRenderer(nr.ctx, nr)
+	return markdownRenderer.Render(nodeID, 0)
 }
 
 func (nr *NodeRendererImpl) renderTagElement(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
+	tagElementRenderer := templates.NewTagElementRenderer(nr.ctx, nr)
+	return tagElementRenderer.Render(nodeID)
 }
 
 func (nr *NodeRendererImpl) renderNodeBasicTag(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
+	nodeBasicTagRenderer := templates.NewNodeBasicTagRenderer(nr.ctx, nr)
+	return nodeBasicTagRenderer.Render(nodeID)
 }
 
 func (nr *NodeRendererImpl) renderNodeText(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
-}
-
-func (nr *NodeRendererImpl) renderNodeImg(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
-}
-
-func (nr *NodeRendererImpl) renderNodeButton(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
-}
-
-func (nr *NodeRendererImpl) renderNodeA(nodeID string) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
+	nodeTextRenderer := templates.NewNodeTextRenderer(nr.ctx)
+	return nodeTextRenderer.Render(nodeID)
 }
 
 func (nr *NodeRendererImpl) renderWidget(nodeID string, hook *models.CodeHook) string {
-	return nr.renderEmptyNode() // Stage 1 placeholder
+	widgetRenderer := templates.NewWidgetRenderer(nr.ctx)
+	return widgetRenderer.Render(nodeID, hook)
+}
+
+// NEW: Missing node type implementations
+func (nr *NodeRendererImpl) renderNodeImg(nodeID string) string {
+	nodeImgRenderer := templates.NewNodeImgRenderer(nr.ctx)
+	return nodeImgRenderer.Render(nodeID)
+}
+
+func (nr *NodeRendererImpl) renderNodeButton(nodeID string) string {
+	nodeButtonRenderer := templates.NewNodeButtonRenderer(nr.ctx, nr)
+	return nodeButtonRenderer.Render(nodeID)
+}
+
+func (nr *NodeRendererImpl) renderNodeA(nodeID string) string {
+	nodeARenderer := templates.NewNodeARenderer(nr.ctx, nr)
+	return nodeARenderer.Render(nodeID)
+}
+
+func (nr *NodeRendererImpl) renderBgPaneWrapper(nodeID string) string {
+	bgPaneWrapperRenderer := templates.NewBgPaneWrapperRenderer(nr.ctx)
+	return bgPaneWrapperRenderer.Render(nodeID)
+}
+
+// Placeholders - not yet implemented
+func (nr *NodeRendererImpl) renderStoryFragment(nodeID string) string {
+	return nr.renderEmptyNode()
 }
 
 // PaneRenderer handles Pane.astro rendering logic
 type PaneRenderer struct {
 	ctx          *models.RenderContext
-	cssProcessor CSSProcessor // Interface
-	nodeRenderer NodeRenderer // Interface
+	cssProcessor *CSSProcessorImpl
+	nodeRenderer NodeRenderer
 }
 
 // Render implements the Pane.astro rendering logic
 func (pr *PaneRenderer) Render(nodeID string) string {
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.PaneData == nil {
-		return `<div></div>` // EmptyNode fallback
+		return `<div></div>`
 	}
 
 	paneData := nodeData.PaneData
 	beliefs := pr.getPaneBeliefs(nodeID)
 	isDecorative := paneData.IsDecorative
 
-	// Build wrapper classes - matches Pane.astro: `grid ${getCtx().getNodeClasses(nodeId, 'auto')}`
+	// Build wrapper classes
 	wrapperClasses := fmt.Sprintf("grid %s", pr.cssProcessor.GetNodeClasses(nodeID, "auto"))
 
-	// Content classes and styles - matches Pane.astro
+	// Content classes and styles
 	contentClasses := "relative w-full h-auto justify-self-start"
 	contentStyles := pr.cssProcessor.GetNodeStringStyles(nodeID) + "; grid-area: 1/1/1/1; position: relative; z-index: 1"
 
@@ -260,14 +279,7 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 
 	// Opening div with pane ID
 	html.WriteString(fmt.Sprintf(`<div id="pane-%s" class="`, nodeID))
-
-	if isDecorative {
-		html.WriteString(wrapperClasses)
-	} else {
-		// Non-decorative panes get additional wrapper
-		html.WriteString(wrapperClasses)
-	}
-
+	html.WriteString(wrapperClasses)
 	html.WriteString(`"`)
 
 	// Add inline styles if any
@@ -283,7 +295,7 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	// Handle belief-based visibility
 	if !pr.checkBeliefVisibility(beliefs) {
 		html.WriteString(`</div>`)
-		return html.String() // Return empty pane if beliefs don't match
+		return html.String()
 	}
 
 	// Standard content wrapper
@@ -300,7 +312,7 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 		html.WriteString(`</div>`)
 	}
 
-	// Add Filter component for belief handling (placeholder for Stage 2)
+	// Add Filter component for belief handling (placeholder)
 	if len(beliefs) > 0 {
 		html.WriteString(`<!-- Filter component placeholder -->`)
 	}
@@ -333,26 +345,16 @@ func (pr *PaneRenderer) getPaneBeliefs(nodeID string) map[string]any {
 }
 
 func (pr *PaneRenderer) checkBeliefVisibility(beliefs map[string]any) bool {
-	// For Stage 2, always return true - implement belief checking in Stage 4
-	// This will check user state against held/withheld beliefs
+	// For now, always return true - implement belief checking later
 	return true
 }
 
+// getNodeData retrieves node data for the pane - FIXED TO USE REAL DATA
 func (pr *PaneRenderer) getNodeData(nodeID string) *models.NodeRenderData {
-	// For Stage 2, return basic structure - will connect to cache in Stage 4
 	if pr.ctx.AllNodes == nil {
 		return nil
 	}
 
-	// Placeholder implementation
-	return &models.NodeRenderData{
-		ID:       nodeID,
-		NodeType: "Pane",
-		PaneData: &models.PaneRenderData{
-			Title:        "Test Pane",
-			Slug:         "test-pane",
-			IsDecorative: false,
-		},
-		Children: []string{},
-	}
+	// Use real data from context
+	return pr.ctx.AllNodes[nodeID]
 }

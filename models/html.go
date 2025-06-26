@@ -1,108 +1,145 @@
-// Package models defines HTML rendering structures for nodes-compositor
+// Package models provides HTML rendering data structures for nodes-compositor
 package models
 
-import (
-	"time"
-)
-
-// RenderContext holds the rendering state and tenant information
-type RenderContext struct {
-	TenantID    string
-	PaneID      string
-	UserState   *UserState
-	AllNodes    map[string]any // Node storage - will be typed properly later
-	ParentNodes map[string][]string    // Parent->Children mapping
-}
-
-// PaneVariant represents different rendering variants for belief-based caching
+// PaneVariant represents different cache variants for belief-based rendering
 type PaneVariant string
 
 const (
-	VariantDefault PaneVariant = "default"
-	VariantHidden  PaneVariant = "hidden"
+	PaneVariantDefault PaneVariant = "default"
+	PaneVariantHidden  PaneVariant = "hidden"
 )
 
-// CodeHook represents parsed widget hook data from Node.astro parseCodeHook function
+// RenderContext provides the context for HTML rendering operations
+type RenderContext struct {
+	AllNodes    map[string]*NodeRenderData `json:"allNodes,omitempty"`
+	ParentNodes map[string][]string        `json:"parentNodes,omitempty"`
+	TenantID    string                     `json:"tenantId,omitempty"`
+	UserID      string                     `json:"userId,omitempty"`
+}
+
+// CodeHook represents parsed widget parameters from code nodes
 type CodeHook struct {
-	Hook   string  // identifyAs, youtube, bunny, toggle, resource, belief, signup
-	Value1 *string // First parameter
-	Value2 *string // Second parameter
-	Value3 string  // Third parameter (always string, may be empty)
+	Hook   string  `json:"hook"`
+	Value1 *string `json:"value1,omitempty"`
+	Value2 *string `json:"value2,omitempty"`
+	Value3 string  `json:"value3,omitempty"`
 }
 
-// NodeRenderData holds the minimal data needed to render any node
+// NodeRenderData represents the complete data needed to render a node
 type NodeRenderData struct {
-	ID           string
-	NodeType     string
-	TagName      *string           // For FlatNodes with tagName
-	Copy         *string           // Text content
-	ElementCSS   *string           // CSS classes
-	Children     []string          // Child node IDs
-	CodeHookData *CodeHook         // Parsed widget data for code nodes
-	ButtonData   *ButtonRenderData // Button-specific data
-	PaneData     *PaneRenderData   // Pane-specific data
-	Href         *string           // For links
-	Src          *string           // For images
-	Alt          *string           // For images
+	ID          string               `json:"id"`
+	NodeType    string               `json:"nodeType"`
+	TagName     *string              `json:"tagName,omitempty"`
+	Copy        *string              `json:"copy,omitempty"`
+	ElementCSS  *string              `json:"elementCss,omitempty"`
+	ParentCSS   []string             `json:"parentCss,omitempty"`
+	ParentID    string               `json:"parentId,omitempty"`
+	Children    []string             `json:"children,omitempty"`
+	PaneData    *PaneRenderData      `json:"paneData,omitempty"`
+	BgImageData *BackgroundImageData `json:"bgImageData,omitempty"`
+
+	// Fields for NodeImg template
+	ImageURL *string `json:"imageUrl,omitempty"`
+	SrcSet   *string `json:"srcSet,omitempty"`
+	AltText  *string `json:"altText,omitempty"`
+
+	// Fields for NodeA template
+	Href   *string `json:"href,omitempty"`
+	Target *string `json:"target,omitempty"`
+
+	// Fields for Markdown nodes
+	MarkdownBody *string `json:"markdownBody,omitempty"`
+
+	// Additional extensible data
+	CustomData map[string]any `json:"customData,omitempty"`
 }
 
-// ButtonRenderData holds button-specific rendering data
-type ButtonRenderData struct {
-	CallbackPayload any // Lisp payload
-	BunnyPayload    any // Video payload
-	IsVideo         bool
-}
-
-// PaneRenderData holds pane-specific rendering data
+// PaneRenderData represents pane-specific rendering data
 type PaneRenderData struct {
-	Title           string
-	Slug            string
-	IsContextPane   bool
-	IsDecorative    bool
-	BgColour        *string
-	CodeHookTarget  *string
-	CodeHookPayload map[string]string
-	HeldBeliefs     map[string]any
-	WithheldBeliefs map[string]any
-	OptionsPayload  map[string]any // CSS and styling data
+	Title           string                 `json:"title"`
+	Slug            string                 `json:"slug"`
+	IsDecorative    bool                   `json:"isDecorative"`
+	BgColour        *string                `json:"bgColour,omitempty"`
+	HeldBeliefs     map[string]BeliefValue `json:"heldBeliefs,omitempty"`
+	WithheldBeliefs map[string]BeliefValue `json:"withheldBeliefs,omitempty"`
+	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
+	CodeHookPayload map[string]string      `json:"codeHookPayload,omitempty"`
 }
 
-// UserState represents user's current belief and badge state for rendering decisions
+// BackgroundNode represents positioned background image data for Markdown layouts
+type BackgroundNode struct {
+	ID       string `json:"id"`
+	Position string `json:"position"` // "left" or "right"
+	Size     string `json:"size"`     // "narrow", "wide", or "equal"
+}
+
+// BackgroundImageData represents background image metadata for layout decisions
+type BackgroundImageData struct {
+	Type     string `json:"type"`     // "background-image" or "artpack-image"
+	Position string `json:"position"` // "background", "left", "right", "leftBleed", "rightBleed"
+	Size     string `json:"size"`     // "narrow", "wide", "equal"
+}
+
+// UserState represents user belief state for cache variant determination
 type UserState struct {
-	FingerprintID string
-	Beliefs       map[string]any
-	Badges        []string
-	ConsentGiven  bool
-	IsAnonymous   bool
-	LastActivity  time.Time
+	UserID   string                 `json:"userId"`
+	TenantID string                 `json:"tenantId"`
+	Beliefs  map[string]any `json:"beliefs"`
+	Badges   []string               `json:"badges"`
 }
 
 // HasBadges checks if user has all required badges
-func (us *UserState) HasBadges(required []string) bool {
-	if len(required) == 0 {
+func (us *UserState) HasBadges(requiredBadges []string) bool {
+	if len(requiredBadges) == 0 {
 		return true
 	}
 
-	userBadges := make(map[string]bool)
+	userBadgeSet := make(map[string]bool)
 	for _, badge := range us.Badges {
-		userBadges[badge] = true
+		userBadgeSet[badge] = true
 	}
 
-	for _, req := range required {
-		if !userBadges[req] {
+	for _, required := range requiredBadges {
+		if !userBadgeSet[required] {
 			return false
 		}
 	}
+
 	return true
 }
 
-// MeetsBeliefConditions checks if user meets belief-based visibility rules
-func (us *UserState) MeetsBeliefConditions(conditions map[string]any) bool {
+// MeetsBeliefConditions checks if user meets belief-based visibility conditions
+func (us *UserState) MeetsBeliefConditions(conditions map[string]BeliefValue) bool {
 	if len(conditions) == 0 {
 		return true
 	}
 
-	// Implementation will depend on specific belief condition format
-	// For now, return true to allow rendering
+	for beliefKey, condition := range conditions {
+		userBelief, exists := us.Beliefs[beliefKey]
+		if !exists {
+			return false
+		}
+
+		// Simple string comparison for now - expand based on belief types
+		userBeliefStr, ok := userBelief.(string)
+		if !ok {
+			return false
+		}
+
+		switch condition.Verb {
+		case "is":
+			if condition.Object == nil || userBeliefStr != *condition.Object {
+				return false
+			}
+		case "isNot":
+			if condition.Object != nil && userBeliefStr == *condition.Object {
+				return false
+			}
+		default:
+			// Unknown verb - fail safe
+			return false
+		}
+	}
+
 	return true
 }
