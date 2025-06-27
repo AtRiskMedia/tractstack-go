@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -87,8 +86,6 @@ func VisitHandler(c *gin.Context) {
 
 	// Log the raw request for debugging
 	body, _ := c.GetRawData()
-	log.Printf("Raw request body: %s", string(body))
-	log.Printf("Content-Type: %s", c.GetHeader("Content-Type"))
 
 	// Reset the body for binding
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
@@ -121,13 +118,10 @@ func VisitHandler(c *gin.Context) {
 	} else {
 		// Try JSON binding for other content types
 		if err := c.BindJSON(&req); err != nil {
-			log.Printf("JSON binding error: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "details": err.Error()})
 			return
 		}
 	}
-
-	log.Printf("Parsed request: %+v", req)
 
 	fpID, _ := c.Cookie("fp_id")
 	visitID, _ := c.Cookie("visit_id")
@@ -204,33 +198,14 @@ func VisitHandler(c *gin.Context) {
 		fpExpiry = 30 * 24 * time.Hour
 	}
 
-	// Extract domain from Origin header for cross-origin cookie setting
-	origin := c.GetHeader("Origin")
-	var cookieDomain string
-	if origin != "" {
-		if originURL, err := url.Parse(origin); err == nil {
-			hostname := originURL.Hostname()
-			// For localhost development, use empty domain to allow cross-origin cookies
-			if hostname == "localhost" || hostname == "127.0.0.1" {
-				cookieDomain = ""
-			} else {
-				cookieDomain = hostname
-			}
-		}
-	}
-
-	log.Printf("Origin: %s, Cookie domain: '%s'", origin, cookieDomain)
-
 	// Set cookies properly with multiple Set-Cookie headers (remove HttpOnly so JS can read them)
 	fpExpirySecs := int(fpExpiry.Seconds())
 	w := c.Writer
 	w.Header().Add("Set-Cookie", fmt.Sprintf("fp_id=%s; Path=/; Max-Age=%d; SameSite=Lax", finalFpID, fpExpirySecs))
 	w.Header().Add("Set-Cookie", fmt.Sprintf("visit_id=%s; Path=/; Max-Age=%d; SameSite=Lax", finalVisitID, 24*3600))
-	log.Printf("Set cookies: fp_id=%s, visit_id=%s", finalFpID, finalVisitID)
 
 	if hasProfile || consentValue == "1" {
 		w.Header().Add("Set-Cookie", "consent=1; Path=/; Max-Age=2592000; SameSite=Lax")
-		log.Printf("Set consent cookie: 1")
 	}
 
 	if hasProfile {
@@ -241,11 +216,7 @@ func VisitHandler(c *gin.Context) {
 		}
 		// Profile token stays HttpOnly for security
 		w.Header().Add("Set-Cookie", fmt.Sprintf("profile_token=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax", token))
-		log.Printf("Set profile_token cookie")
 	}
-
-	log.Printf("Tenant: %s, Fingerprint: %s, VisitID: %s, Consent: %s",
-		ctx.TenantID, finalFpID, finalVisitID, consentValue)
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
