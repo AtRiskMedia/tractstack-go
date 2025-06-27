@@ -99,6 +99,7 @@ func VisitHandler(c *gin.Context) {
 		encryptedEmail := c.PostForm("encryptedEmail")
 		encryptedCode := c.PostForm("encryptedCode")
 		consent := c.PostForm("consent")
+		sessionId := c.PostForm("sessionId")
 
 		if fingerprint != "" {
 			req.Fingerprint = &fingerprint
@@ -114,6 +115,9 @@ func VisitHandler(c *gin.Context) {
 		}
 		if consent != "" {
 			req.Consent = &consent
+		}
+		if sessionId != "" {
+			req.SessionID = &sessionId
 		}
 	} else {
 		// Try JSON binding for other content types
@@ -148,20 +152,20 @@ func VisitHandler(c *gin.Context) {
 		consentValue = *req.Consent
 	}
 
-	lockFpID := fpID
-	if lockFpID == "" {
-		if req.Fingerprint != nil && *req.Fingerprint != "" {
-			lockFpID = *req.Fingerprint
-		} else {
-			lockFpID = utils.GenerateULID()
-		}
+	// Session-based locking using SSR session ID
+	sessionID := ""
+	if req.SessionID != nil && *req.SessionID != "" {
+		sessionID = *req.SessionID
+	} else {
+		// Fallback for requests without session ID
+		sessionID = utils.GenerateULID()
 	}
 
-	if !cache.TryAcquireSessionLock(ctx.TenantID, lockFpID) {
+	if !cache.TryAcquireSessionLock(ctx.TenantID, sessionID) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "session lock busy"})
 		return
 	}
-	defer cache.ReleaseSessionLock(ctx.TenantID, lockFpID)
+	defer cache.ReleaseSessionLock(ctx.TenantID, sessionID)
 
 	visitService := NewVisitService(ctx, nil)
 
@@ -178,11 +182,20 @@ func VisitHandler(c *gin.Context) {
 		requestVisitID = &visitID
 	}
 
-	finalFpID, finalVisitID, err := visitService.HandleVisitSession(requestFpID, requestVisitID, hasProfile)
+	finalFpID, finalVisitID, leadID, err := visitService.HandleVisitSession(requestFpID, requestVisitID, hasProfile)
 	if err != nil {
 		log.Printf("Visit session error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "session handling failed"})
 		return
+	}
+
+	// Profile restoration from lead_id
+	if profile == nil && leadID != nil {
+		profile = getProfileFromLeadID(*leadID, ctx)
+		hasProfile = profile != nil
+		if hasProfile {
+			consentValue = "1"
+		}
 	}
 
 	fingerprintState := &models.FingerprintState{
@@ -321,6 +334,11 @@ func LoginHandler(c *gin.Context) {
 
 func validateEncryptedCredentials(email, code string, ctx *tenant.Context) *models.Profile {
 	// TODO: Implement database lookup with tenant context
+	return nil
+}
+
+func getProfileFromLeadID(leadID string, ctx *tenant.Context) *models.Profile {
+	// TODO: Implement database lookup for profile data from lead_id
 	return nil
 }
 
