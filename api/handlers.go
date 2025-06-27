@@ -127,25 +127,24 @@ func VisitHandler(c *gin.Context) {
 		}
 	}
 
-	fpID, _ := c.Cookie("fp_id")
-	visitID, _ := c.Cookie("visit_id")
-	consent, _ := c.Cookie("consent")
-	profileToken, _ := c.Cookie("profile_token")
-
+	// Check for existing JWT token instead of cookies
+	authHeader := c.GetHeader("Authorization")
 	var profile *models.Profile
-	if profileToken != "" {
-		claims, err := utils.ValidateJWT(profileToken, ctx.Config.JWTSecret)
+	if authHeader != "" && len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		token := authHeader[7:]
+		claims, err := utils.ValidateJWT(token, ctx.Config.JWTSecret)
 		if err == nil {
 			profile = utils.GetProfileFromClaims(claims)
 		}
 	}
 
+	// Try encrypted credentials if no JWT profile
 	if profile == nil && req.EncryptedEmail != nil && req.EncryptedCode != nil {
 		profile = validateEncryptedCredentials(*req.EncryptedEmail, *req.EncryptedCode, ctx)
 	}
 
 	hasProfile := profile != nil
-	consentValue := consent
+	consentValue := ""
 	if hasProfile {
 		consentValue = "1"
 	} else if req.Consent != nil {
@@ -172,14 +171,10 @@ func VisitHandler(c *gin.Context) {
 	var requestFpID, requestVisitID *string
 	if req.Fingerprint != nil && *req.Fingerprint != "" {
 		requestFpID = req.Fingerprint
-	} else if fpID != "" {
-		requestFpID = &fpID
 	}
 
 	if req.VisitID != nil && *req.VisitID != "" {
 		requestVisitID = req.VisitID
-	} else if visitID != "" {
-		requestVisitID = &visitID
 	}
 
 	finalFpID, finalVisitID, leadID, err := visitService.HandleVisitSession(requestFpID, requestVisitID, hasProfile)
@@ -206,19 +201,12 @@ func VisitHandler(c *gin.Context) {
 	}
 	cache.GetGlobalManager().SetFingerprintState(ctx.TenantID, fingerprintState)
 
-	fpExpiry := time.Hour
-	if hasProfile || consentValue == "1" {
-		fpExpiry = 30 * 24 * time.Hour
-	}
-
-	// Set cookies properly with multiple Set-Cookie headers (remove HttpOnly so JS can read them)
-	fpExpirySecs := int(fpExpiry.Seconds())
-	w := c.Writer
-	w.Header().Add("Set-Cookie", fmt.Sprintf("fp_id=%s; Path=/; Max-Age=%d; SameSite=Lax", finalFpID, fpExpirySecs))
-	w.Header().Add("Set-Cookie", fmt.Sprintf("visit_id=%s; Path=/; Max-Age=%d; SameSite=Lax", finalVisitID, 24*3600))
-
-	if hasProfile || consentValue == "1" {
-		w.Header().Add("Set-Cookie", "consent=1; Path=/; Max-Age=2592000; SameSite=Lax")
+	// Return JWT response instead of cookies
+	response := gin.H{
+		"fingerprint": finalFpID,
+		"visitId":     finalVisitID,
+		"hasProfile":  hasProfile,
+		"consent":     consentValue,
 	}
 
 	if hasProfile {
@@ -227,11 +215,11 @@ func VisitHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate profile token"})
 			return
 		}
-		// Profile token stays HttpOnly for security
-		w.Header().Add("Set-Cookie", fmt.Sprintf("profile_token=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax", token))
+		response["token"] = token
+		response["profile"] = profile
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, response)
 }
 
 func SseHandler(c *gin.Context) {
@@ -295,13 +283,15 @@ func DecodeProfileHandler(c *gin.Context) {
 		return
 	}
 
-	profileToken, err := c.Cookie("profile_token")
-	if err != nil || profileToken == "" {
+	// Check Authorization header for JWT instead of cookies
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" || len(authHeader) <= 7 || authHeader[:7] != "Bearer " {
 		c.JSON(http.StatusOK, gin.H{"profile": nil})
 		return
 	}
 
-	claims, err := utils.ValidateJWT(profileToken, ctx.Config.JWTSecret)
+	token := authHeader[7:]
+	claims, err := utils.ValidateJWT(token, ctx.Config.JWTSecret)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"profile": nil})
 		return
