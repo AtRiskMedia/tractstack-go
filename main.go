@@ -2,6 +2,8 @@ package main
 
 import (
 	"log"
+	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/api"
@@ -83,15 +85,40 @@ func main() {
 		}
 
 		// Get tenant context for domain validation
-		//if !exists {
-		//	c.JSON(http.StatusForbidden, gin.H{"error": "tenant context required"})
-		//	c.Abort()
-		//	return
-		//}
+		tenantCtx, exists := c.Get("tenant")
+		if !exists {
+			c.JSON(http.StatusForbidden, gin.H{"error": "tenant context required"})
+			c.Abort()
+			return
+		}
 
-		// TODO: Implement tenant-based domain whitelist check
-		// For now, allow all origins for tenants
-		// In production, check tenantCtx.AllowedDomains against origin
+		// Get tenant manager for domain validation
+		manager, managerExists := c.Get("tenantManager")
+		if !managerExists {
+			c.JSON(http.StatusForbidden, gin.H{"error": "tenant manager required"})
+			c.Abort()
+			return
+		}
+
+		// Extract domain from origin
+		var domain string
+		if origin != "" {
+			if originURL, err := url.Parse(origin); err == nil {
+				domain = originURL.Hostname()
+			}
+		} else {
+			domain = host
+		}
+
+		// Validate domain against tenant's allowed domains
+		tenantManager := manager.(*tenant.Manager)
+		ctx := tenantCtx.(*tenant.Context)
+
+		if !tenantManager.GetDetector().ValidateDomain(ctx.TenantID, domain) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "domain not allowed for tenant"})
+			c.Abort()
+			return
+		}
 
 		c.Next()
 	})

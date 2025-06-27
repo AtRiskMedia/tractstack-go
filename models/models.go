@@ -4,6 +4,7 @@ package models
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 type Profile struct {
@@ -70,3 +71,22 @@ func (b *SSEBroadcaster) Broadcast(eventType, data string) {
 }
 
 var Broadcaster = &SSEBroadcaster{}
+
+func (v *VisitState) IsVisitActive() bool {
+	if v == nil {
+		return false
+	}
+	return time.Since(v.StartTime) <= 2*time.Hour
+}
+
+func (v *VisitState) UpdateActivity() {
+	if v != nil {
+		v.LastActivity = time.Now()
+	}
+}
+
+func (f *FingerprintState) UpdateActivity() {
+	if f != nil {
+		f.LastActivity = time.Now()
+	}
+}

@@ -353,7 +353,7 @@ func (m *Manager) InvalidateAllFiles(tenantID string) {
 }
 
 // =============================================================================
-// HTML Chunk Cache Operations (Future)
+// HTML Chunk Cache Operations
 // =============================================================================
 
 func (m *Manager) GetHTMLChunk(tenantID, paneID string, variant models.PaneVariant) (string, bool) {
@@ -385,8 +385,52 @@ func (m *Manager) SetHTMLChunk(tenantID, paneID string, variant models.PaneVaria
 }
 
 // =============================================================================
-// User State Cache Operations (Future)
+// User State Cache Operations - Visit State (ADDED FOR PHASE 1)
 // =============================================================================
+
+func (m *Manager) GetVisitState(tenantID, visitID string) (*models.VisitState, bool) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	state, exists := cache.VisitStates[visitID]
+	return state, exists
+}
+
+func (m *Manager) SetVisitState(tenantID string, state *models.VisitState) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.VisitStates[state.VisitID] = state
+}
+
+func (m *Manager) IsKnownFingerprint(tenantID, fingerprintID string) bool {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	isKnown, exists := cache.KnownFingerprints[fingerprintID]
+	return exists && isKnown
+}
+
+func (m *Manager) SetKnownFingerprint(tenantID, fingerprintID string, isKnown bool) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.KnownFingerprints[fingerprintID] = isKnown
+}
+
+func (m *Manager) LoadKnownFingerprints(tenantID string, fingerprints map[string]bool) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	for fpID, isKnown := range fingerprints {
+		cache.KnownFingerprints[fpID] = isKnown
+	}
+}
 
 func (m *Manager) GetFingerprintState(tenantID, fingerprintID string) (*models.FingerprintState, bool) {
 	m.EnsureTenant(tenantID)
