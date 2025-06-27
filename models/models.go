@@ -22,6 +22,7 @@ type VisitRequest struct {
 	Fingerprint    *string `json:"fingerprint,omitempty"`
 	VisitID        *string `json:"visitId,omitempty"`
 	Consent        *string `json:"consent,omitempty"`
+	SessionID      *string `json:"sessionId,omitempty"`
 }
 
 type Event struct {

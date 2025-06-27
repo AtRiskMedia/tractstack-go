@@ -100,6 +100,22 @@ func (vs *VisitService) CreateFingerprint(fingerprintID string, leadID *string) 
 	return nil
 }
 
+func (vs *VisitService) GetFingerprintLeadID(fingerprintID string) (*string, error) {
+	query := `SELECT lead_id FROM fingerprints WHERE id = ? LIMIT 1`
+	var leadID sql.NullString
+	err := vs.ctx.Database.Conn.QueryRow(query, fingerprintID).Scan(&leadID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get fingerprint lead_id: %w", err)
+	}
+	if leadID.Valid {
+		return &leadID.String, nil
+	}
+	return nil, nil
+}
+
 func (vs *VisitService) IsVisitExpired(visit *VisitRowData) bool {
 	if visit == nil {
 		return true
@@ -107,7 +123,7 @@ func (vs *VisitService) IsVisitExpired(visit *VisitRowData) bool {
 	return time.Since(visit.CreatedAt) > 2*time.Hour
 }
 
-func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, hasProfile bool) (string, string, error) {
+func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, hasProfile bool) (string, string, *string, error) {
 	var fpID, visitID string
 
 	// Use provided fingerprint or generate new one
@@ -120,7 +136,7 @@ func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, 
 	// Check if fingerprint exists in database
 	fpExists, err := vs.FingerprintExists(fpID)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to check fingerprint: %w", err)
+		return "", "", nil, fmt.Errorf("failed to check fingerprint: %w", err)
 	}
 
 	// Create fingerprint if it doesn't exist
@@ -129,7 +145,7 @@ func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, 
 		// leadID would be set if this is a known user
 
 		if err := vs.CreateFingerprint(fpID, leadID); err != nil {
-			return "", "", fmt.Errorf("failed to create fingerprint: %w", err)
+			return "", "", nil, fmt.Errorf("failed to create fingerprint: %w", err)
 		}
 
 		// Update cache with known fingerprint status
@@ -142,7 +158,7 @@ func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, 
 	if requestVisitID != nil && *requestVisitID != "" {
 		latestVisit, err := vs.GetLatestVisitByFingerprint(fpID)
 		if err != nil {
-			return "", "", fmt.Errorf("failed to get latest visit: %w", err)
+			return "", "", nil, fmt.Errorf("failed to get latest visit: %w", err)
 		}
 
 		// Reuse visit if it matches requested visit ID and hasn't expired
@@ -156,7 +172,7 @@ func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, 
 	if shouldCreateNewVisit {
 		visitID = utils.GenerateULID()
 		if err := vs.CreateVisit(visitID, fpID, nil); err != nil {
-			return "", "", fmt.Errorf("failed to create visit: %w", err)
+			return "", "", nil, fmt.Errorf("failed to create visit: %w", err)
 		}
 
 		// Update cache with new visit state
@@ -170,5 +186,11 @@ func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, 
 		cache.GetGlobalManager().SetVisitState(vs.ctx.TenantID, visitState)
 	}
 
-	return fpID, visitID, nil
+	// Get lead_id for profile restoration
+	leadID, err := vs.GetFingerprintLeadID(fpID)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("failed to check fingerprint lead: %w", err)
+	}
+
+	return fpID, visitID, leadID, nil
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/html"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
@@ -40,7 +41,7 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	fmt.Printf("DEBUG: TenantID=%s, PaneID=%s\n", ctx.TenantID, paneID)
 
 	// Use cache-first pane service with global cache manager - SAME AS WORKING HANDLERS
-	paneService := content.NewPaneService(ctx, nil)
+	paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
 	paneNode, err := paneService.GetByID(paneID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
