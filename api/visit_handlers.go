@@ -110,47 +110,56 @@ func (vs *VisitService) IsVisitExpired(visit *VisitRowData) bool {
 func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, hasProfile bool) (string, string, error) {
 	var fpID, visitID string
 
+	// Use provided fingerprint or generate new one
 	if requestFpID != nil && *requestFpID != "" {
 		fpID = *requestFpID
 	} else {
 		fpID = utils.GenerateULID()
 	}
 
+	// Check if fingerprint exists in database
 	fpExists, err := vs.FingerprintExists(fpID)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to check fingerprint: %w", err)
 	}
 
+	// Create fingerprint if it doesn't exist
 	if !fpExists {
 		var leadID *string
+		// leadID would be set if this is a known user
 
 		if err := vs.CreateFingerprint(fpID, leadID); err != nil {
 			return "", "", fmt.Errorf("failed to create fingerprint: %w", err)
 		}
 
+		// Update cache with known fingerprint status
 		cache.GetGlobalManager().SetKnownFingerprint(vs.ctx.TenantID, fpID, leadID != nil)
 	}
 
 	shouldCreateNewVisit := true
 
+	// Check if we should reuse existing visit
 	if requestVisitID != nil && *requestVisitID != "" {
 		latestVisit, err := vs.GetLatestVisitByFingerprint(fpID)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to get latest visit: %w", err)
 		}
 
+		// Reuse visit if it matches requested visit ID and hasn't expired
 		if latestVisit != nil && latestVisit.ID == *requestVisitID && !vs.IsVisitExpired(latestVisit) {
 			visitID = *requestVisitID
 			shouldCreateNewVisit = false
 		}
 	}
 
+	// Create new visit if needed
 	if shouldCreateNewVisit {
 		visitID = utils.GenerateULID()
 		if err := vs.CreateVisit(visitID, fpID, nil); err != nil {
 			return "", "", fmt.Errorf("failed to create visit: %w", err)
 		}
 
+		// Update cache with new visit state
 		visitState := &models.VisitState{
 			VisitID:       visitID,
 			FingerprintID: fpID,
