@@ -357,3 +357,11 @@ func GetMemoryStats(manager *Manager) map[string]any {
 
 	return stats
 }
+
+func TryAcquireSessionLock(tenantID, fingerprintID string) bool {
+	return TryAcquireLock("session", tenantID, fingerprintID)
+}
+
+func ReleaseSessionLock(tenantID, fingerprintID string) {
+	ReleaseLock("session", tenantID, fingerprintID)
+}

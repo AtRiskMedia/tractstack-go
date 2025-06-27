@@ -4,9 +4,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
@@ -111,29 +113,58 @@ func VisitHandler(c *gin.Context) {
 		consentValue = *req.Consent
 	}
 
-	if fpID == "" || (hasProfile || consentValue == "1") {
+	lockFpID := fpID
+	if lockFpID == "" {
 		if req.Fingerprint != nil && *req.Fingerprint != "" {
-			fpID = *req.Fingerprint
+			lockFpID = *req.Fingerprint
 		} else {
-			fpID = utils.GenerateULID()
+			lockFpID = utils.GenerateULID()
 		}
 	}
+
+	if !cache.TryAcquireSessionLock(ctx.TenantID, lockFpID) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "session lock busy"})
+		return
+	}
+	defer cache.ReleaseSessionLock(ctx.TenantID, lockFpID)
+
+	visitService := NewVisitService(ctx, nil)
+
+	var requestFpID, requestVisitID *string
+	if req.Fingerprint != nil && *req.Fingerprint != "" {
+		requestFpID = req.Fingerprint
+	} else if fpID != "" {
+		requestFpID = &fpID
+	}
+
+	if req.VisitID != nil && *req.VisitID != "" {
+		requestVisitID = req.VisitID
+	} else if visitID != "" {
+		requestVisitID = &visitID
+	}
+
+	finalFpID, finalVisitID, err := visitService.HandleVisitSession(requestFpID, requestVisitID, hasProfile)
+	if err != nil {
+		log.Printf("Visit session error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "session handling failed"})
+		return
+	}
+
+	fingerprintState := &models.FingerprintState{
+		FingerprintID: finalFpID,
+		HeldBeliefs:   make(map[string]models.BeliefValue),
+		HeldBadges:    make(map[string]string),
+		LastActivity:  time.Now(),
+	}
+	cache.GetGlobalManager().SetFingerprintState(ctx.TenantID, fingerprintState)
 
 	fpExpiry := time.Hour
 	if hasProfile || consentValue == "1" {
 		fpExpiry = 30 * 24 * time.Hour
 	}
 
-	c.SetCookie("fp_id", fpID, int(fpExpiry.Seconds()), "/", "", false, true)
-
-	if visitID == "" {
-		if req.VisitID != nil && *req.VisitID != "" {
-			visitID = *req.VisitID
-		} else {
-			visitID = utils.GenerateULID()
-		}
-	}
-	c.SetCookie("visit_id", visitID, 24*3600, "/", "", false, true)
+	c.SetCookie("fp_id", finalFpID, int(fpExpiry.Seconds()), "/", "", false, true)
+	c.SetCookie("visit_id", finalVisitID, 24*3600, "/", "", false, true)
 
 	if hasProfile || consentValue == "1" {
 		c.SetCookie("consent", "1", 30*24*3600, "/", "", false, true)
@@ -147,6 +178,9 @@ func VisitHandler(c *gin.Context) {
 		}
 		c.SetCookie("profile_token", token, 30*24*3600, "/", "", false, true)
 	}
+
+	log.Printf("Tenant: %s, Fingerprint: %s, VisitID: %s, Consent: %s",
+		ctx.TenantID, finalFpID, finalVisitID, consentValue)
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
