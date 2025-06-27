@@ -2,10 +2,13 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -82,11 +85,49 @@ func VisitHandler(c *gin.Context) {
 		return
 	}
 
+	// Log the raw request for debugging
+	body, _ := c.GetRawData()
+	log.Printf("Raw request body: %s", string(body))
+	log.Printf("Content-Type: %s", c.GetHeader("Content-Type"))
+
+	// Reset the body for binding
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	// Parse form data instead of JSON
 	var req models.VisitRequest
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
+	if c.GetHeader("Content-Type") == "application/x-www-form-urlencoded" {
+		// Parse form data
+		fingerprint := c.PostForm("fingerprint")
+		visitId := c.PostForm("visitId")
+		encryptedEmail := c.PostForm("encryptedEmail")
+		encryptedCode := c.PostForm("encryptedCode")
+		consent := c.PostForm("consent")
+
+		if fingerprint != "" {
+			req.Fingerprint = &fingerprint
+		}
+		if visitId != "" {
+			req.VisitID = &visitId
+		}
+		if encryptedEmail != "" {
+			req.EncryptedEmail = &encryptedEmail
+		}
+		if encryptedCode != "" {
+			req.EncryptedCode = &encryptedCode
+		}
+		if consent != "" {
+			req.Consent = &consent
+		}
+	} else {
+		// Try JSON binding for other content types
+		if err := c.BindJSON(&req); err != nil {
+			log.Printf("JSON binding error: %v", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request", "details": err.Error()})
+			return
+		}
 	}
+
+	log.Printf("Parsed request: %+v", req)
 
 	fpID, _ := c.Cookie("fp_id")
 	visitID, _ := c.Cookie("visit_id")
@@ -163,11 +204,33 @@ func VisitHandler(c *gin.Context) {
 		fpExpiry = 30 * 24 * time.Hour
 	}
 
-	c.SetCookie("fp_id", finalFpID, int(fpExpiry.Seconds()), "/", "", false, true)
-	c.SetCookie("visit_id", finalVisitID, 24*3600, "/", "", false, true)
+	// Extract domain from Origin header for cross-origin cookie setting
+	origin := c.GetHeader("Origin")
+	var cookieDomain string
+	if origin != "" {
+		if originURL, err := url.Parse(origin); err == nil {
+			hostname := originURL.Hostname()
+			// For localhost development, use empty domain to allow cross-origin cookies
+			if hostname == "localhost" || hostname == "127.0.0.1" {
+				cookieDomain = ""
+			} else {
+				cookieDomain = hostname
+			}
+		}
+	}
+
+	log.Printf("Origin: %s, Cookie domain: '%s'", origin, cookieDomain)
+
+	// Set cookies properly with multiple Set-Cookie headers (remove HttpOnly so JS can read them)
+	fpExpirySecs := int(fpExpiry.Seconds())
+	w := c.Writer
+	w.Header().Add("Set-Cookie", fmt.Sprintf("fp_id=%s; Path=/; Max-Age=%d; SameSite=Lax", finalFpID, fpExpirySecs))
+	w.Header().Add("Set-Cookie", fmt.Sprintf("visit_id=%s; Path=/; Max-Age=%d; SameSite=Lax", finalVisitID, 24*3600))
+	log.Printf("Set cookies: fp_id=%s, visit_id=%s", finalFpID, finalVisitID)
 
 	if hasProfile || consentValue == "1" {
-		c.SetCookie("consent", "1", 30*24*3600, "/", "", false, true)
+		w.Header().Add("Set-Cookie", "consent=1; Path=/; Max-Age=2592000; SameSite=Lax")
+		log.Printf("Set consent cookie: 1")
 	}
 
 	if hasProfile {
@@ -176,7 +239,9 @@ func VisitHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate profile token"})
 			return
 		}
-		c.SetCookie("profile_token", token, 30*24*3600, "/", "", false, true)
+		// Profile token stays HttpOnly for security
+		w.Header().Add("Set-Cookie", fmt.Sprintf("profile_token=%s; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax", token))
+		log.Printf("Set profile_token cookie")
 	}
 
 	log.Printf("Tenant: %s, Fingerprint: %s, VisitID: %s, Consent: %s",
