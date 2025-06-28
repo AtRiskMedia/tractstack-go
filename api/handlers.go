@@ -103,7 +103,7 @@ func VisitHandler(c *gin.Context) {
 		encryptedEmail := c.PostForm("encryptedEmail")
 		encryptedCode := c.PostForm("encryptedCode")
 		consent := c.PostForm("consent")
-		sessionId := c.PostForm("sessionId")
+		sessionID := c.PostForm("sessionId")
 
 		if encryptedEmail != "" {
 			req.EncryptedEmail = &encryptedEmail
@@ -114,8 +114,8 @@ func VisitHandler(c *gin.Context) {
 		if consent != "" {
 			req.Consent = &consent
 		}
-		if sessionId != "" {
-			req.SessionID = &sessionId
+		if sessionID != "" {
+			req.SessionID = &sessionID
 		}
 	} else {
 		// Try JSON binding for other content types
@@ -194,7 +194,7 @@ func VisitHandler(c *gin.Context) {
 		// Create new session with backend-generated IDs
 		visitService := NewVisitService(ctx, nil)
 
-		if hasProfile && profile != nil {
+		if hasProfile {
 			// For authenticated users, try to find existing fingerprint
 			if existingFpID := visitService.FindFingerprintByLeadID(profile.LeadID); existingFpID != nil {
 				finalFpID = *existingFpID
@@ -232,7 +232,6 @@ func VisitHandler(c *gin.Context) {
 			FingerprintID: finalFpID,
 			VisitID:       finalVisitID,
 			LeadID:        leadID,
-			HasConsent:    consentValue == "1",
 			LastActivity:  time.Now(),
 			CreatedAt:     time.Now(),
 		}
@@ -381,13 +380,46 @@ func LoginHandler(c *gin.Context) {
 }
 
 func validateEncryptedCredentials(email, code string, ctx *tenant.Context) *models.Profile {
-	// TODO: Implement database lookup with tenant context
-	return nil
+	// Decrypt credentials
+	decryptedEmail, err := utils.Decrypt(email, ctx.Config.AESKey)
+	if err != nil {
+		return nil
+	}
+
+	decryptedCode, err := utils.Decrypt(code, ctx.Config.AESKey)
+	if err != nil {
+		return nil
+	}
+
+	// Validate against database
+	lead, err := ValidateLeadCredentials(decryptedEmail, decryptedCode, ctx)
+	if err != nil || lead == nil {
+		return nil
+	}
+
+	// Convert lead to profile
+	return &models.Profile{
+		LeadID:         lead.ID,
+		Firstname:      lead.FirstName,
+		Email:          lead.Email,
+		ContactPersona: lead.ContactPersona,
+		ShortBio:       lead.ShortBio,
+	}
 }
 
 func getProfileFromLeadID(leadID string, ctx *tenant.Context) *models.Profile {
-	// TODO: Implement database lookup for profile data from lead_id
-	return nil
+	lead, err := GetLeadByID(leadID, ctx)
+	if err != nil || lead == nil {
+		return nil
+	}
+
+	return &models.Profile{
+		LeadID:         lead.ID,
+		Firstname:      lead.FirstName,
+		Email:          lead.Email,
+		ContactPersona: lead.ContactPersona,
+		ShortBio:       lead.ShortBio,
+	}
 }
 
 func validateAdminLogin(tenantID, password string, ctx *tenant.Context) bool {

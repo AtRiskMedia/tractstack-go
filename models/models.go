@@ -28,18 +28,11 @@ type SessionData struct {
 	FingerprintID string    `json:"fingerprintId"`
 	VisitID       string    `json:"visitId"`
 	LeadID        *string   `json:"leadId,omitempty"`
-	HasConsent    bool      `json:"hasConsent"` // NEW: Track user consent for extended sessions
 	LastActivity  time.Time `json:"lastActivity"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
-// IsExpired checks if session has exceeded TTL based on consent level
 func (s *SessionData) IsExpired() bool {
-	if s.HasConsent {
-		// Extended TTL for users who have given consent (30 days)
-		return time.Since(s.LastActivity) > 30*24*time.Hour
-	}
-	// Standard TTL for non-consented users (2 hours)
 	return time.Since(s.LastActivity) > 2*time.Hour
 }
 
@@ -112,4 +105,18 @@ func (f *FingerprintState) UpdateActivity() {
 	if f != nil {
 		f.LastActivity = time.Now()
 	}
+}
+
+// Lead represents a user profile in the database
+type Lead struct {
+	ID             string    `json:"id"`
+	FirstName      string    `json:"firstName"`
+	Email          string    `json:"email"`
+	PasswordHash   string    `json:"-"` // Never serialize password hash
+	ContactPersona string    `json:"contactPersona"`
+	ShortBio       string    `json:"shortBio"`
+	EncryptedCode  string    `json:"-"` // Never serialize encrypted code
+	EncryptedEmail string    `json:"-"` // Never serialize encrypted email
+	CreatedAt      time.Time `json:"createdAt"`
+	Changed        time.Time `json:"changed"`
 }

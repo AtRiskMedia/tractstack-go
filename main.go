@@ -128,6 +128,7 @@ func main() {
 	r.GET("/api/v1/auth/sse", api.SseHandler)
 	r.POST("/api/v1/auth/state", api.StateHandler)
 	r.GET("/api/v1/auth/profile/decode", api.DecodeProfileHandler)
+	r.POST("/api/v1/auth/profile", api.ProfileHandler)
 	r.POST("/api/v1/auth/login", api.LoginHandler)
 	r.GET("/api/v1/db/status", api.DBStatusHandler)
 
