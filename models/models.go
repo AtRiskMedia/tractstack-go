@@ -36,8 +36,8 @@ type SessionData struct {
 // IsExpired checks if session has exceeded TTL based on consent level
 func (s *SessionData) IsExpired() bool {
 	if s.HasConsent {
-		// Extended TTL for users who have given consent (24 hours)
-		return time.Since(s.LastActivity) > 24*time.Hour
+		// Extended TTL for users who have given consent (30 days)
+		return time.Since(s.LastActivity) > 30*24*time.Hour
 	}
 	// Standard TTL for non-consented users (2 hours)
 	return time.Since(s.LastActivity) > 2*time.Hour
