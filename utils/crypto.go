@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"log"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -20,44 +21,79 @@ func GenerateULID() string {
 }
 
 func Encrypt(data, key string) (string, error) {
+	log.Printf("Encrypt called - data length: %d, key length: %d", len(data), len(key))
+	log.Printf("Key value: '%s'", key)
+
+	if len(key) == 0 {
+		log.Printf("ERROR: Empty key provided to Encrypt")
+		return "", errors.New("empty encryption key")
+	}
+
+	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
+		log.Printf("ERROR: Invalid key length %d. Must be 16, 24, or 32 bytes", len(key))
+		return "", errors.New("invalid key length")
+	}
+
 	block, err := aes.NewCipher([]byte(key))
 	if err != nil {
+		log.Printf("ERROR: aes.NewCipher failed: %v", err)
 		return "", err
 	}
+
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
+		log.Printf("ERROR: cipher.NewGCM failed: %v", err)
 		return "", err
 	}
+
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		log.Printf("ERROR: Failed to generate nonce: %v", err)
 		return "", err
 	}
+
 	ciphertext := gcm.Seal(nonce, nonce, []byte(data), nil)
-	return base64.StdEncoding.EncodeToString(ciphertext), nil
+	result := base64.StdEncoding.EncodeToString(ciphertext)
+
+	log.Printf("Encrypt SUCCESS - result length: %d", len(result))
+	return result, nil
 }
 
 func Decrypt(encrypted, key string) (string, error) {
+	log.Printf("Decrypt called - encrypted length: %d, key length: %d", len(encrypted), len(key))
+
 	data, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
+		log.Printf("ERROR: base64 decode failed: %v", err)
 		return "", err
 	}
+
 	block, err := aes.NewCipher([]byte(key))
 	if err != nil {
+		log.Printf("ERROR: aes.NewCipher failed in Decrypt: %v", err)
 		return "", err
 	}
+
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
+		log.Printf("ERROR: cipher.NewGCM failed in Decrypt: %v", err)
 		return "", err
 	}
+
 	nonceSize := gcm.NonceSize()
 	if len(data) < nonceSize {
+		log.Printf("ERROR: invalid ciphertext - too short")
 		return "", errors.New("invalid ciphertext")
 	}
+
 	nonce, ciphertext := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
+		log.Printf("ERROR: gcm.Open failed: %v", err)
 		return "", err
 	}
+
+	log.Printf("Decrypt SUCCESS")
 	return string(plaintext), nil
 }
 
@@ -76,11 +112,15 @@ func GetProfileFromClaims(claims jwt.MapClaims) *models.Profile {
 }
 
 func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (string, error) {
+	log.Printf("GenerateProfileToken called - jwtSecret length: %d, aesKey length: %d", len(jwtSecret), len(aesKey))
+
 	sharedULID := GenerateULID()
 	encryptedULID, err := Encrypt(sharedULID, aesKey)
 	if err != nil {
+		log.Printf("ERROR: Failed to encrypt ULID in GenerateProfileToken: %v", err)
 		return "", err
 	}
+
 	claims := jwt.MapClaims{
 		"fingerprint": profile.Fingerprint,
 		"leadId":      profile.LeadID,
@@ -95,8 +135,16 @@ func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (st
 		"iat":            time.Now().Unix(),
 		"exp":            time.Now().Add(30 * 24 * time.Hour).Unix(),
 	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(jwtSecret))
+	result, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		log.Printf("ERROR: Failed to sign JWT token: %v", err)
+		return "", err
+	}
+
+	log.Printf("GenerateProfileToken SUCCESS")
+	return result, nil
 }
 
 func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
@@ -113,13 +161,23 @@ func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
 }
 
 func EncryptEmail(email, aesKey string) string {
+	log.Printf("EncryptEmail called for email: %s", email)
 	sharedULID := GenerateULID()
-	encrypted, _ := Encrypt(sharedULID, aesKey)
+	encrypted, err := Encrypt(sharedULID, aesKey)
+	if err != nil {
+		log.Printf("ERROR: EncryptEmail failed: %v", err)
+		return ""
+	}
 	return encrypted
 }
 
 func GenerateEncryptedCode(aesKey string) string {
+	log.Printf("GenerateEncryptedCode called")
 	sharedULID := GenerateULID()
-	encrypted, _ := Encrypt(sharedULID, aesKey)
+	encrypted, err := Encrypt(sharedULID, aesKey)
+	if err != nil {
+		log.Printf("ERROR: GenerateEncryptedCode failed: %v", err)
+		return ""
+	}
 	return encrypted
 }
