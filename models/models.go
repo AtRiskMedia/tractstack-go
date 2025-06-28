@@ -28,11 +28,18 @@ type SessionData struct {
 	FingerprintID string    `json:"fingerprintId"`
 	VisitID       string    `json:"visitId"`
 	LeadID        *string   `json:"leadId,omitempty"`
+	HasConsent    bool      `json:"hasConsent"` // NEW: Track user consent for extended sessions
 	LastActivity  time.Time `json:"lastActivity"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
+// IsExpired checks if session has exceeded TTL based on consent level
 func (s *SessionData) IsExpired() bool {
+	if s.HasConsent {
+		// Extended TTL for users who have given consent (24 hours)
+		return time.Since(s.LastActivity) > 24*time.Hour
+	}
+	// Standard TTL for non-consented users (2 hours)
 	return time.Since(s.LastActivity) > 2*time.Hour
 }
 
