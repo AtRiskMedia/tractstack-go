@@ -232,6 +232,7 @@ func VisitHandler(c *gin.Context) {
 			FingerprintID: finalFpID,
 			VisitID:       finalVisitID,
 			LeadID:        leadID,
+			HasConsent:    consentValue == "1",
 			LastActivity:  time.Now(),
 			CreatedAt:     time.Now(),
 		}
