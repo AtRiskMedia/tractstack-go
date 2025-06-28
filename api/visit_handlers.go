@@ -116,6 +116,41 @@ func (vs *VisitService) GetFingerprintLeadID(fingerprintID string) (*string, err
 	return nil, nil
 }
 
+// FindFingerprintByLeadID finds existing fingerprint for a lead
+func (vs *VisitService) FindFingerprintByLeadID(leadID string) *string {
+	query := `SELECT id FROM fingerprints WHERE lead_id = ? LIMIT 1`
+
+	var fingerprintID string
+	err := vs.ctx.Database.Conn.QueryRow(query, leadID).Scan(&fingerprintID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return nil
+	}
+
+	return &fingerprintID
+}
+
+// HandleVisitCreation creates or reuses visits based on recency
+func (vs *VisitService) HandleVisitCreation(fingerprintID string, hasProfile bool) (string, error) {
+	// Check for recent visit (< 2 hours)
+	if latestVisit, err := vs.GetLatestVisitByFingerprint(fingerprintID); err == nil && latestVisit != nil {
+		if time.Since(latestVisit.CreatedAt) < 2*time.Hour {
+			// Reuse existing recent visit
+			return latestVisit.ID, nil
+		}
+	}
+
+	// Create new visit
+	visitID := utils.GenerateULID()
+	if err := vs.CreateVisit(visitID, fingerprintID, nil); err != nil {
+		return "", fmt.Errorf("failed to create visit: %w", err)
+	}
+
+	return visitID, nil
+}
+
 func (vs *VisitService) IsVisitExpired(visit *VisitRowData) bool {
 	if visit == nil {
 		return true

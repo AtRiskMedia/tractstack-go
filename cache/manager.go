@@ -52,6 +52,50 @@ func NewManager() *Manager {
 	}
 }
 
+// GetSession retrieves session data from cache
+func (m *Manager) GetSession(tenantID, sessionID string) (*models.SessionData, bool) {
+	m.Mu.RLock()
+	tenant, exists := m.UserStateCache[tenantID]
+	m.Mu.RUnlock()
+
+	if !exists {
+		return nil, false
+	}
+
+	tenant.Mu.RLock()
+	defer tenant.Mu.RUnlock()
+
+	if tenant.SessionStates == nil {
+		return nil, false
+	}
+
+	session, found := tenant.SessionStates[sessionID]
+	if !found || session.IsExpired() {
+		return nil, false
+	}
+
+	session.UpdateActivity()
+	return session, true
+}
+
+// SetSession stores session data in cache
+func (m *Manager) SetSession(tenantID string, session *models.SessionData) {
+	m.EnsureTenant(tenantID)
+
+	m.Mu.RLock()
+	tenant := m.UserStateCache[tenantID]
+	m.Mu.RUnlock()
+
+	tenant.Mu.Lock()
+	defer tenant.Mu.Unlock()
+
+	if tenant.SessionStates == nil {
+		tenant.SessionStates = make(map[string]*models.SessionData)
+	}
+
+	tenant.SessionStates[session.SessionID] = session
+}
+
 // EnsureTenant initializes cache structures for a tenant if they don't exist
 func (m *Manager) EnsureTenant(tenantID string) {
 	m.Mu.Lock()
@@ -78,6 +122,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 			FingerprintStates: make(map[string]*models.FingerprintState),
 			VisitStates:       make(map[string]*models.VisitState),
 			KnownFingerprints: make(map[string]bool),
+			SessionStates:     make(map[string]*models.SessionData),
 			LastLoaded:        time.Now(),
 		}
 	}
@@ -447,4 +492,8 @@ func (m *Manager) SetFingerprintState(tenantID string, state *models.Fingerprint
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 	cache.FingerprintStates[state.FingerprintID] = state
+}
+
+func init() {
+	GlobalInstance = NewManager()
 }
