@@ -95,7 +95,7 @@ func LoadTenantConfig(tenantID string) (*Config, error) {
 	}
 
 	if config.AESKey == "" {
-		config.AESKey = generateRandomKey(32) // 32 chars for AES-256
+		config.AESKey = generateRandomKey(64) // 64 chars (32 bytes) for AES-256
 		needsSave = true
 	}
 
