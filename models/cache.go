@@ -71,7 +71,7 @@ type PaneNode struct {
 	Slug            string                 `json:"slug"`
 	IsContextPane   bool                   `json:"isContextPane"`
 	IsDecorative    bool                   `json:"isDecorative"`
-	OptionsPayload  map[string]any `json:"optionsPayload,omitempty"`
+	OptionsPayload  map[string]any         `json:"optionsPayload,omitempty"`
 	BgColour        *string                `json:"bgColour,omitempty"`
 	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
 	CodeHookPayload map[string]string      `json:"codeHookPayload,omitempty"`
@@ -89,12 +89,12 @@ type MenuNode struct {
 }
 
 type ResourceNode struct {
-	ID             string                 `json:"id"`
-	Title          string                 `json:"title"`
-	Slug           string                 `json:"slug"`
-	CategorySlug   *string                `json:"categorySlug,omitempty"`
-	Oneliner       string                 `json:"oneliner"`
-	ActionLisp     *string                `json:"actionLisp,omitempty"`
+	ID             string         `json:"id"`
+	Title          string         `json:"title"`
+	Slug           string         `json:"slug"`
+	CategorySlug   *string        `json:"categorySlug,omitempty"`
+	Oneliner       string         `json:"oneliner"`
+	ActionLisp     *string        `json:"actionLisp,omitempty"`
 	OptionsPayload map[string]any `json:"optionsPayload"`
 }
 
@@ -139,6 +139,9 @@ type TenantUserStateCache struct {
 
 	// Known fingerprints (have lead_id)
 	KnownFingerprints map[string]bool // fingerprintId -> isKnown
+
+	// Session state cache (ephemeral)
+	SessionStates map[string]*SessionData // sessionId -> session data
 
 	// Cache metadata
 	LastLoaded time.Time
@@ -309,7 +312,7 @@ type LineDataSeries struct {
 
 type LineDataPoint struct {
 	X any `json:"x"` // string or number
-	Y int         `json:"y"`
+	Y int `json:"y"`
 }
 
 type HotItem struct {

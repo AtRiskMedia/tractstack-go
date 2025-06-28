@@ -15,6 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/oklog/ulid/v2"
 )
 
 // getTenantContext is a helper to extract tenant context from gin context
@@ -33,6 +34,11 @@ func getTenantManager(c *gin.Context) (*tenant.Manager, error) {
 		return nil, fmt.Errorf("no tenant manager")
 	}
 	return manager.(*tenant.Manager), nil
+}
+
+// generateULID creates a new ULID
+func generateULID() string {
+	return ulid.Make().String()
 }
 
 // DBStatusHandler checks tenant status and activates if needed
@@ -94,19 +100,11 @@ func VisitHandler(c *gin.Context) {
 	var req models.VisitRequest
 	if c.GetHeader("Content-Type") == "application/x-www-form-urlencoded" {
 		// Parse form data
-		fingerprint := c.PostForm("fingerprint")
-		visitId := c.PostForm("visitId")
 		encryptedEmail := c.PostForm("encryptedEmail")
 		encryptedCode := c.PostForm("encryptedCode")
 		consent := c.PostForm("consent")
 		sessionId := c.PostForm("sessionId")
 
-		if fingerprint != "" {
-			req.Fingerprint = &fingerprint
-		}
-		if visitId != "" {
-			req.VisitID = &visitId
-		}
 		if encryptedEmail != "" {
 			req.EncryptedEmail = &encryptedEmail
 		}
@@ -151,47 +149,106 @@ func VisitHandler(c *gin.Context) {
 		consentValue = *req.Consent
 	}
 
-	// Session-based locking using SSR session ID
-	sessionID := ""
-	if req.SessionID != nil && *req.SessionID != "" {
-		sessionID = *req.SessionID
-	} else {
-		// Fallback for requests without session ID
-		sessionID = utils.GenerateULID()
+	// Session ID is required for secure operation
+	if req.SessionID == nil || *req.SessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required"})
+		return
 	}
 
+	sessionID := *req.SessionID
+
+	// Session-based locking
 	if !cache.TryAcquireSessionLock(ctx.TenantID, sessionID) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"error": "session lock busy"})
 		return
 	}
 	defer cache.ReleaseSessionLock(ctx.TenantID, sessionID)
 
-	visitService := NewVisitService(ctx, nil)
+	// Check for existing session in cache
+	sessionData, sessionExists := cache.GetGlobalManager().GetSession(ctx.TenantID, sessionID)
 
-	var requestFpID, requestVisitID *string
-	if req.Fingerprint != nil && *req.Fingerprint != "" {
-		requestFpID = req.Fingerprint
-	}
+	var finalFpID, finalVisitID string
+	var leadID *string
 
-	if req.VisitID != nil && *req.VisitID != "" {
-		requestVisitID = req.VisitID
-	}
+	if sessionExists {
+		// Use existing session data
+		finalFpID = sessionData.FingerprintID
+		finalVisitID = sessionData.VisitID
+		leadID = sessionData.LeadID
 
-	finalFpID, finalVisitID, leadID, err := visitService.HandleVisitSession(requestFpID, requestVisitID, hasProfile)
-	if err != nil {
-		log.Printf("Visit session error: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "session handling failed"})
-		return
-	}
-
-	// Profile restoration from lead_id
-	if profile == nil && leadID != nil {
-		profile = getProfileFromLeadID(*leadID, ctx)
-		hasProfile = profile != nil
-		if hasProfile {
-			consentValue = "1"
+		// If session has lead_id but we don't have profile, restore it
+		if sessionData.LeadID != nil && profile == nil {
+			if restoredProfile := getProfileFromLeadID(*sessionData.LeadID, ctx); restoredProfile != nil {
+				profile = restoredProfile
+				hasProfile = true
+				consentValue = "1"
+				leadID = sessionData.LeadID
+			}
 		}
+
+		// Update session activity
+		sessionData.UpdateActivity()
+		cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
+
+	} else {
+		// Create new session with backend-generated IDs
+		visitService := NewVisitService(ctx, nil)
+
+		if hasProfile && profile != nil {
+			// For authenticated users, try to find existing fingerprint
+			if existingFpID := visitService.FindFingerprintByLeadID(profile.LeadID); existingFpID != nil {
+				finalFpID = *existingFpID
+			} else {
+				finalFpID = generateULID()
+			}
+			leadID = &profile.LeadID
+		} else {
+			// Generate new fingerprint for anonymous users
+			finalFpID = generateULID()
+		}
+
+		// Create fingerprint if it doesn't exist
+		if exists, err := visitService.FingerprintExists(finalFpID); err == nil && !exists {
+			if err := visitService.CreateFingerprint(finalFpID, leadID); err != nil {
+				log.Printf("Fingerprint creation error: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "fingerprint creation failed"})
+				return
+			}
+			cache.GetGlobalManager().SetKnownFingerprint(ctx.TenantID, finalFpID, leadID != nil)
+		}
+
+		// Handle visit creation/reuse
+		var err error
+		finalVisitID, err = visitService.HandleVisitCreation(finalFpID, hasProfile)
+		if err != nil {
+			log.Printf("Visit creation error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "session handling failed"})
+			return
+		}
+
+		// Create new session data
+		sessionData = &models.SessionData{
+			SessionID:     sessionID,
+			FingerprintID: finalFpID,
+			VisitID:       finalVisitID,
+			LeadID:        leadID,
+			LastActivity:  time.Now(),
+			CreatedAt:     time.Now(),
+		}
+
+		// Store session in cache (ephemeral)
+		cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
 	}
+
+	// Update visit state cache
+	visitState := &models.VisitState{
+		VisitID:       finalVisitID,
+		FingerprintID: finalFpID,
+		StartTime:     time.Now(),
+		LastActivity:  time.Now(),
+		CurrentPage:   c.Request.Header.Get("Referer"),
+	}
+	cache.GetGlobalManager().SetVisitState(ctx.TenantID, visitState)
 
 	fingerprintState := &models.FingerprintState{
 		FingerprintID: finalFpID,
@@ -209,7 +266,7 @@ func VisitHandler(c *gin.Context) {
 		"consent":     consentValue,
 	}
 
-	if hasProfile {
+	if hasProfile && profile != nil {
 		token, err := utils.GenerateProfileToken(profile, ctx.Config.JWTSecret, ctx.Config.AESKey)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate profile token"})

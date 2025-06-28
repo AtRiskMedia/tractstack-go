@@ -17,12 +17,27 @@ type Profile struct {
 }
 
 type VisitRequest struct {
+	SessionID      *string `json:"sessionId,omitempty"`
 	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
 	EncryptedCode  *string `json:"encryptedCode,omitempty"`
-	Fingerprint    *string `json:"fingerprint,omitempty"`
-	VisitID        *string `json:"visitId,omitempty"`
 	Consent        *string `json:"consent,omitempty"`
-	SessionID      *string `json:"sessionId,omitempty"`
+}
+
+type SessionData struct {
+	SessionID     string    `json:"sessionId"`
+	FingerprintID string    `json:"fingerprintId"`
+	VisitID       string    `json:"visitId"`
+	LeadID        *string   `json:"leadId,omitempty"`
+	LastActivity  time.Time `json:"lastActivity"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+func (s *SessionData) IsExpired() bool {
+	return time.Since(s.LastActivity) > 2*time.Hour
+}
+
+func (s *SessionData) UpdateActivity() {
+	s.LastActivity = time.Now()
 }
 
 type Event struct {
