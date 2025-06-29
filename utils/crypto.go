@@ -21,9 +21,6 @@ func GenerateULID() string {
 }
 
 func Encrypt(data, key string) (string, error) {
-	log.Printf("Encrypt called - data length: %d, key length: %d", len(data), len(key))
-	log.Printf("Key value: '%s'", key)
-
 	if len(key) == 0 {
 		log.Printf("ERROR: Empty key provided to Encrypt")
 		return "", errors.New("empty encryption key")
@@ -55,13 +52,10 @@ func Encrypt(data, key string) (string, error) {
 	ciphertext := gcm.Seal(nonce, nonce, []byte(data), nil)
 	result := base64.StdEncoding.EncodeToString(ciphertext)
 
-	log.Printf("Encrypt SUCCESS - result length: %d", len(result))
 	return result, nil
 }
 
 func Decrypt(encrypted, key string) (string, error) {
-	log.Printf("Decrypt called - encrypted length: %d, key length: %d", len(encrypted), len(key))
-
 	data, err := base64.StdEncoding.DecodeString(encrypted)
 	if err != nil {
 		log.Printf("ERROR: base64 decode failed: %v", err)
@@ -93,7 +87,6 @@ func Decrypt(encrypted, key string) (string, error) {
 		return "", err
 	}
 
-	log.Printf("Decrypt SUCCESS")
 	return string(plaintext), nil
 }
 
@@ -112,8 +105,6 @@ func GetProfileFromClaims(claims jwt.MapClaims) *models.Profile {
 }
 
 func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (string, error) {
-	log.Printf("GenerateProfileToken called - jwtSecret length: %d, aesKey length: %d", len(jwtSecret), len(aesKey))
-
 	sharedULID := GenerateULID()
 	encryptedULID, err := Encrypt(sharedULID, aesKey)
 	if err != nil {
@@ -143,7 +134,6 @@ func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (st
 		return "", err
 	}
 
-	log.Printf("GenerateProfileToken SUCCESS")
 	return result, nil
 }
 
@@ -161,7 +151,6 @@ func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
 }
 
 func EncryptEmail(email, aesKey string) string {
-	log.Printf("EncryptEmail called for email: %s", email)
 	sharedULID := GenerateULID()
 	encrypted, err := Encrypt(sharedULID, aesKey)
 	if err != nil {
@@ -172,7 +161,6 @@ func EncryptEmail(email, aesKey string) string {
 }
 
 func GenerateEncryptedCode(aesKey string) string {
-	log.Printf("GenerateEncryptedCode called")
 	sharedULID := GenerateULID()
 	encrypted, err := Encrypt(sharedULID, aesKey)
 	if err != nil {
