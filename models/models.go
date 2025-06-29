@@ -88,6 +88,14 @@ func (b *SSEBroadcaster) Broadcast(eventType, data string) {
 
 var Broadcaster = &SSEBroadcaster{}
 
+type VisitState struct {
+	VisitID       string    `json:"visitId"`
+	FingerprintID string    `json:"fingerprintId"`
+	StartTime     time.Time `json:"startTime"`
+	LastActivity  time.Time `json:"lastActivity"`
+	CurrentPage   string    `json:"currentPage"`
+}
+
 func (v *VisitState) IsVisitActive() bool {
 	if v == nil {
 		return false
@@ -101,10 +109,22 @@ func (v *VisitState) UpdateActivity() {
 	}
 }
 
+type FingerprintState struct {
+	FingerprintID string                 `json:"fingerprintId"`
+	HeldBeliefs   map[string]BeliefValue `json:"heldBeliefs"`
+	HeldBadges    map[string]string      `json:"heldBadges"`
+	LastActivity  time.Time              `json:"lastActivity"`
+}
+
 func (f *FingerprintState) UpdateActivity() {
 	if f != nil {
 		f.LastActivity = time.Now()
 	}
+}
+
+type BeliefValue struct {
+	Verb   string  `json:"verb"`   // BELIEVES_YES, BELIEVES_NO, IDENTIFY_AS
+	Object *string `json:"object"` // only used when verb=IDENTIFY_AS
 }
 
 // Lead represents a user profile in the database

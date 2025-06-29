@@ -12,12 +12,14 @@ import (
 
 // Config holds tenant-specific configuration
 type Config struct {
-	TenantID      string `json:"tenantId"`
-	TursoDatabase string `json:"TURSO_DATABASE_URL"`
-	TursoToken    string `json:"TURSO_AUTH_TOKEN"`
-	JWTSecret     string `json:"JWT_SECRET"`
-	AESKey        string `json:"AES_KEY"`
-	SQLitePath    string `json:"-"` // computed, not from JSON
+	TenantID       string `json:"tenantId"`
+	TursoDatabase  string `json:"TURSO_DATABASE_URL"`
+	TursoToken     string `json:"TURSO_AUTH_TOKEN"`
+	JWTSecret      string `json:"JWT_SECRET"`
+	AESKey         string `json:"AES_KEY"`
+	AdminPassword  string `json:"ADMIN_PASSWORD,omitempty"`
+	EditorPassword string `json:"EDITOR_PASSWORD,omitempty"`
+	SQLitePath     string `json:"-"` // computed, not from JSON
 }
 
 // TenantRegistry holds the global tenant configuration
@@ -141,6 +143,14 @@ func saveConfig(config *Config, configPath string) error {
 	}
 	if config.TursoToken != "" {
 		configData["TURSO_AUTH_TOKEN"] = config.TursoToken
+	}
+
+	// Include admin/editor passwords if present
+	if config.AdminPassword != "" {
+		configData["ADMIN_PASSWORD"] = config.AdminPassword
+	}
+	if config.EditorPassword != "" {
+		configData["EDITOR_PASSWORD"] = config.EditorPassword
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")

@@ -114,11 +114,6 @@ type ImageFileNode struct {
 	SrcSet         *string `json:"srcSet,omitempty"`
 }
 
-type BeliefValue struct {
-	Verb   string  `json:"verb"`   // BELIEVES_YES, BELIEVES_NO, IDENTIFY_AS
-	Object *string `json:"object"` // only used when verb=IDENTIFY_AS
-}
-
 type MenuLink struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -146,22 +141,6 @@ type TenantUserStateCache struct {
 	// Cache metadata
 	LastLoaded time.Time
 	Mu         sync.RWMutex // Exported for access
-}
-
-type FingerprintState struct {
-	FingerprintID string                 `json:"fingerprintId"`
-	HeldBeliefs   map[string]BeliefValue `json:"heldBeliefs"` // beliefSlug -> value
-	HeldBadges    map[string]string      `json:"heldBadges"`  // badgeSlug -> value
-	LastActivity  time.Time              `json:"lastActivity"`
-}
-
-type VisitState struct {
-	VisitID       string    `json:"visitId"`
-	FingerprintID string    `json:"fingerprintId"`
-	StartTime     time.Time `json:"startTime"`
-	LastActivity  time.Time `json:"lastActivity"`
-	CurrentPage   string    `json:"currentPage"`
-	Referrer      *Referrer `json:"referrer,omitempty"`
 }
 
 type Referrer struct {

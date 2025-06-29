@@ -174,17 +174,17 @@ func VisitHandler(c *gin.Context) {
 		// Use existing session data
 		finalFpID = sessionData.FingerprintID
 		finalVisitID = sessionData.VisitID
-		leadID = sessionData.LeadID
+		// leadID = sessionData.LeadID
 
-		// If session has lead_id but we don't have profile, restore it
-		if sessionData.LeadID != nil && profile == nil {
-			if restoredProfile := getProfileFromLeadID(*sessionData.LeadID, ctx); restoredProfile != nil {
-				profile = restoredProfile
-				hasProfile = true
-				consentValue = "1"
-				leadID = sessionData.LeadID
-			}
-		}
+		//// If session has lead_id but we don't have profile, restore it
+		//if sessionData.LeadID != nil && profile == nil {
+		//	if restoredProfile := getProfileFromLeadID(*sessionData.LeadID, ctx); restoredProfile != nil {
+		//		profile = restoredProfile
+		//		hasProfile = true
+		//		consentValue = "1"
+		//		leadID = sessionData.LeadID
+		//	}
+		//}
 
 		// Update session activity
 		sessionData.UpdateActivity()
@@ -266,7 +266,7 @@ func VisitHandler(c *gin.Context) {
 		"consent":     consentValue,
 	}
 
-	if hasProfile && profile != nil {
+	if hasProfile {
 		token, err := utils.GenerateProfileToken(profile, ctx.Config.JWTSecret, ctx.Config.AESKey)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate profile token"})
@@ -331,98 +331,4 @@ func StateHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "tenantId": ctx.TenantID})
-}
-
-func DecodeProfileHandler(c *gin.Context) {
-	ctx, err := getTenantContext(c)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Check Authorization header for JWT instead of cookies
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" || len(authHeader) <= 7 || authHeader[:7] != "Bearer " {
-		c.JSON(http.StatusOK, gin.H{"profile": nil})
-		return
-	}
-
-	token := authHeader[7:]
-	claims, err := utils.ValidateJWT(token, ctx.Config.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"profile": nil})
-		return
-	}
-
-	profile := claims["profile"]
-	c.JSON(http.StatusOK, gin.H{"profile": profile})
-}
-
-func LoginHandler(c *gin.Context) {
-	ctx, err := getTenantContext(c)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	var req models.LoginRequest
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	if validateAdminLogin(req.TenantID, req.Password, ctx) {
-		c.SetCookie("auth_token", "admin", 24*3600, "/", "", false, true)
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	} else {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-	}
-}
-
-func validateEncryptedCredentials(email, code string, ctx *tenant.Context) *models.Profile {
-	// Decrypt credentials
-	decryptedEmail, err := utils.Decrypt(email, ctx.Config.AESKey)
-	if err != nil {
-		return nil
-	}
-
-	decryptedCode, err := utils.Decrypt(code, ctx.Config.AESKey)
-	if err != nil {
-		return nil
-	}
-
-	// Validate against database
-	lead, err := ValidateLeadCredentials(decryptedEmail, decryptedCode, ctx)
-	if err != nil || lead == nil {
-		return nil
-	}
-
-	// Convert lead to profile
-	return &models.Profile{
-		LeadID:         lead.ID,
-		Firstname:      lead.FirstName,
-		Email:          lead.Email,
-		ContactPersona: lead.ContactPersona,
-		ShortBio:       lead.ShortBio,
-	}
-}
-
-func getProfileFromLeadID(leadID string, ctx *tenant.Context) *models.Profile {
-	lead, err := GetLeadByID(leadID, ctx)
-	if err != nil || lead == nil {
-		return nil
-	}
-
-	return &models.Profile{
-		LeadID:         lead.ID,
-		Firstname:      lead.FirstName,
-		Email:          lead.Email,
-		ContactPersona: lead.ContactPersona,
-		ShortBio:       lead.ShortBio,
-	}
-}
-
-func validateAdminLogin(tenantID, password string, ctx *tenant.Context) bool {
-	// TODO: Implement proper admin validation with tenant context
-	return password == "admin" && tenantID == ctx.TenantID
 }
