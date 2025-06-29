@@ -17,10 +17,12 @@ import (
 type ProfileRequest struct {
 	SessionID      *string `json:"sessionId,omitempty"`
 	Firstname      string  `json:"firstname"`
-	Email          string  `json:"email" binding:"required,email"`
-	Codeword       string  `json:"codeword" binding:"required"`
+	Email          string  `json:"email"`
+	Codeword       string  `json:"codeword"`
 	ContactPersona string  `json:"contactPersona"`
 	ShortBio       string  `json:"shortBio"`
+	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
+	EncryptedCode  *string `json:"encryptedCode,omitempty"`
 	IsUpdate       bool    `json:"isUpdate"` // true for update, false for create
 }
 
@@ -59,6 +61,21 @@ func ProfileHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ProfileResponse{
 			Success: false,
 			Error:   "Session ID required",
+		})
+		return
+	}
+
+	// Handle encrypted credentials for fast pass
+	if req.EncryptedEmail != nil && req.EncryptedCode != nil {
+		handleEncryptedCredentials(c, ctx, &req)
+		return
+	}
+
+	// Handle regular email/codeword authentication
+	if req.Email == "" || req.Codeword == "" {
+		c.JSON(http.StatusBadRequest, ProfileResponse{
+			Success: false,
+			Error:   "Email and codeword required",
 		})
 		return
 	}
@@ -508,6 +525,76 @@ func GetLeadByEmail(email string, ctx *tenant.Context) (*models.Lead, error) {
 	}
 
 	return &lead, nil
+}
+
+// HandleEncryptedCredentials handles fast pass authentication using encrypted credentials
+func handleEncryptedCredentials(c *gin.Context, ctx *tenant.Context, req *ProfileRequest) {
+	// Validate encrypted credentials
+	profile := ValidateEncryptedCredentials(*req.EncryptedEmail, *req.EncryptedCode, ctx)
+	if profile == nil {
+		c.JSON(http.StatusUnauthorized, ProfileResponse{
+			Success: false,
+			Error:   "Invalid encrypted credentials",
+		})
+		return
+	}
+
+	// Handle session and fingerprint
+	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID, *req.EncryptedEmail, *req.EncryptedCode)
+	if sessionResponse == nil {
+		return // Error already handled in function
+	}
+
+	// Generate JWT token
+	token, err := utils.GenerateProfileToken(profile, ctx.Config.JWTSecret, ctx.Config.AESKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ProfileResponse{
+			Success: false,
+			Error:   "Token generation failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, ProfileResponse{
+		Success:        true,
+		Profile:        profile,
+		Token:          token,
+		EncryptedEmail: *req.EncryptedEmail,
+		EncryptedCode:  *req.EncryptedCode,
+		Fingerprint:    sessionResponse.Fingerprint,
+		VisitID:        sessionResponse.VisitID,
+		HasProfile:     true,
+		Consent:        "1",
+	})
+}
+
+// ValidateEncryptedCredentials validates profile credentials using encrypted data
+func ValidateEncryptedCredentials(encryptedEmail, encryptedCode string, ctx *tenant.Context) *models.Profile {
+	// Decrypt credentials
+	decryptedEmail, err := utils.Decrypt(encryptedEmail, ctx.Config.AESKey)
+	if err != nil {
+		return nil
+	}
+
+	decryptedCode, err := utils.Decrypt(encryptedCode, ctx.Config.AESKey)
+	if err != nil {
+		return nil
+	}
+
+	// Validate against database
+	lead, err := ValidateLeadCredentials(decryptedEmail, decryptedCode, ctx)
+	if err != nil || lead == nil {
+		return nil
+	}
+
+	// Convert lead to profile
+	return &models.Profile{
+		LeadID:         lead.ID,
+		Firstname:      lead.FirstName,
+		Email:          lead.Email,
+		ContactPersona: lead.ContactPersona,
+		ShortBio:       lead.ShortBio,
+	}
 }
 
 func ValidateLeadCredentials(email, password string, ctx *tenant.Context) (*models.Lead, error) {
