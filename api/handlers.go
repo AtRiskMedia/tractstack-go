@@ -136,11 +136,6 @@ func VisitHandler(c *gin.Context) {
 		}
 	}
 
-	// Try encrypted credentials if no JWT profile
-	if profile == nil && req.EncryptedEmail != nil && req.EncryptedCode != nil {
-		profile = validateEncryptedCredentials(*req.EncryptedEmail, *req.EncryptedCode, ctx)
-	}
-
 	hasProfile := profile != nil
 	consentValue := ""
 	if hasProfile {
@@ -174,17 +169,6 @@ func VisitHandler(c *gin.Context) {
 		// Use existing session data
 		finalFpID = sessionData.FingerprintID
 		finalVisitID = sessionData.VisitID
-		// leadID = sessionData.LeadID
-
-		//// If session has lead_id but we don't have profile, restore it
-		//if sessionData.LeadID != nil && profile == nil {
-		//	if restoredProfile := getProfileFromLeadID(*sessionData.LeadID, ctx); restoredProfile != nil {
-		//		profile = restoredProfile
-		//		hasProfile = true
-		//		consentValue = "1"
-		//		leadID = sessionData.LeadID
-		//	}
-		//}
 
 		// Update session activity
 		sessionData.UpdateActivity()
@@ -218,8 +202,7 @@ func VisitHandler(c *gin.Context) {
 		}
 
 		// Handle visit creation/reuse
-		var err error
-		finalVisitID, err = visitService.HandleVisitCreation(finalFpID, hasProfile)
+		finalVisitID, err := visitService.HandleVisitCreation(finalFpID, hasProfile)
 		if err != nil {
 			log.Printf("Visit creation error: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "session handling failed"})
