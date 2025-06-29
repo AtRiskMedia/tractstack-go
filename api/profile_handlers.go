@@ -16,10 +16,10 @@ import (
 
 type ProfileRequest struct {
 	SessionID      *string `json:"sessionId,omitempty"`
-	Firstname      string  `json:"firstname" binding:"required"`
+	Firstname      string  `json:"firstname"`
 	Email          string  `json:"email" binding:"required,email"`
 	Codeword       string  `json:"codeword" binding:"required"`
-	ContactPersona string  `json:"contactPersona" binding:"required"`
+	ContactPersona string  `json:"contactPersona"`
 	ShortBio       string  `json:"shortBio"`
 	IsUpdate       bool    `json:"isUpdate"` // true for update, false for create
 }
@@ -64,8 +64,17 @@ func ProfileHandler(c *gin.Context) {
 	}
 
 	if req.IsUpdate {
+		// For unlock/update: only email, codeword, sessionId required
 		handleUpdateProfile(c, ctx, &req)
 	} else {
+		// For create: all fields required
+		if req.Firstname == "" || req.ContactPersona == "" {
+			c.JSON(http.StatusBadRequest, ProfileResponse{
+				Success: false,
+				Error:   "Firstname and ContactPersona required for profile creation",
+			})
+			return
+		}
 		handleCreateProfile(c, ctx, &req)
 	}
 }
@@ -198,6 +207,48 @@ func handleUpdateProfile(c *gin.Context, ctx *tenant.Context, req *ProfileReques
 		return
 	}
 
+	// For unlock operations (no firstname/contactPersona provided), just authenticate and return existing data
+	if req.Firstname == "" && req.ContactPersona == "" {
+		// This is an unlock operation - return existing profile data
+		profile := &models.Profile{
+			LeadID:         existingLead.ID,
+			Firstname:      existingLead.FirstName,
+			Email:          existingLead.Email,
+			ContactPersona: existingLead.ContactPersona,
+			ShortBio:       existingLead.ShortBio,
+		}
+
+		// Handle session and fingerprint
+		sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID, existingLead.EncryptedEmail, existingLead.EncryptedCode)
+		if sessionResponse == nil {
+			return // Error already handled in function
+		}
+
+		// Generate JWT token
+		token, err := utils.GenerateProfileToken(profile, ctx.Config.JWTSecret, ctx.Config.AESKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, ProfileResponse{
+				Success: false,
+				Error:   "Token generation failed",
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, ProfileResponse{
+			Success:        true,
+			Profile:        profile,
+			Token:          token,
+			EncryptedEmail: existingLead.EncryptedEmail,
+			EncryptedCode:  existingLead.EncryptedCode,
+			Fingerprint:    sessionResponse.Fingerprint,
+			VisitID:        sessionResponse.VisitID,
+			HasProfile:     true,
+			Consent:        "1",
+		})
+		return
+	}
+
+	// This is an actual profile update - proceed with updating data
 	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(existingLead.PasswordHash), []byte(req.Codeword)); err != nil {
 		c.JSON(http.StatusUnauthorized, ProfileResponse{
@@ -459,6 +510,22 @@ func GetLeadByEmail(email string, ctx *tenant.Context) (*models.Lead, error) {
 	return &lead, nil
 }
 
+func ValidateLeadCredentials(email, password string, ctx *tenant.Context) (*models.Lead, error) {
+	lead, err := GetLeadByEmail(email, ctx)
+	if err != nil {
+		return nil, err
+	}
+	if lead == nil {
+		return nil, nil
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(password)); err != nil {
+		return nil, nil // Invalid password
+	}
+
+	return lead, nil
+}
+
 func GetLeadByID(leadID string, ctx *tenant.Context) (*models.Lead, error) {
 	query := `
 		SELECT id, first_name, email, password_hash, contact_persona, short_bio, encrypted_code, encrypted_email, created_at, changed
@@ -505,20 +572,4 @@ func GetLeadByID(leadID string, ctx *tenant.Context) (*models.Lead, error) {
 	}
 
 	return &lead, nil
-}
-
-func ValidateLeadCredentials(email, password string, ctx *tenant.Context) (*models.Lead, error) {
-	lead, err := GetLeadByEmail(email, ctx)
-	if err != nil {
-		return nil, err
-	}
-	if lead == nil {
-		return nil, nil
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(password)); err != nil {
-		return nil, nil // Invalid password
-	}
-
-	return lead, nil
 }
