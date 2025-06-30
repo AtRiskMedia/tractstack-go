@@ -6,9 +6,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3"                      // SQLite driver
 	_ "github.com/tursodatabase/libsql-client-go/libsql" // Turso driver
+)
+
+// Connection pool for reusing database connections per tenant
+var (
+	connectionPools = make(map[string]*sql.DB)
+	poolMutex       = &sync.RWMutex{}
+	poolStats       = make(map[string]int)
 )
 
 // Database wraps database connection with tenant context
@@ -16,10 +26,37 @@ type Database struct {
 	Conn     *sql.DB
 	TenantID string
 	UseTurso bool
+	isPooled bool // tracks if this connection is from pool
 }
 
-// NewDatabase creates a database connection for the specified tenant
+// NewDatabase creates or reuses a database connection for the specified tenant
 func NewDatabase(config *Config) (*Database, error) {
+	// Check if we have a pooled connection for this tenant
+	poolKey := getPoolKey(config)
+
+	poolMutex.RLock()
+	if pooledConn, exists := connectionPools[poolKey]; exists {
+		poolMutex.RUnlock()
+
+		// Test the pooled connection
+		if err := pooledConn.Ping(); err == nil {
+			return &Database{
+				Conn:     pooledConn,
+				TenantID: config.TenantID,
+				UseTurso: config.TursoDatabase != "",
+				isPooled: true,
+			}, nil
+		} else {
+			// Remove bad connection from pool
+			poolMutex.Lock()
+			delete(connectionPools, poolKey)
+			poolMutex.Unlock()
+		}
+	} else {
+		poolMutex.RUnlock()
+	}
+
+	// Create new connection
 	var conn *sql.DB
 	var err error
 	var useTurso bool
@@ -58,15 +95,40 @@ func NewDatabase(config *Config) (*Database, error) {
 		useTurso = false
 	}
 
+	// Configure connection for production use with environment variables
+	conn.SetMaxOpenConns(getEnvInt("DB_MAX_OPEN_CONNS", 50))
+	conn.SetMaxIdleConns(getEnvInt("DB_MAX_IDLE_CONNS", 5))
+	conn.SetConnMaxLifetime(time.Duration(getEnvInt("DB_CONN_MAX_LIFETIME_MINUTES", 45)) * time.Minute)
+	conn.SetConnMaxIdleTime(time.Duration(getEnvInt("DB_CONN_MAX_IDLE_MINUTES", 5)) * time.Minute)
+
+	// Add to pool
+	poolMutex.Lock()
+	connectionPools[poolKey] = conn
+	poolMutex.Unlock()
+
 	return &Database{
 		Conn:     conn,
 		TenantID: config.TenantID,
 		UseTurso: useTurso,
+		isPooled: true,
 	}, nil
 }
 
-// Close closes the database connection
+// getPoolKey creates a unique key for the connection pool
+func getPoolKey(config *Config) string {
+	if config.TursoDatabase != "" {
+		return fmt.Sprintf("turso:%s", config.TenantID)
+	}
+	return fmt.Sprintf("sqlite:%s", config.SQLitePath)
+}
+
+// Close closes the database connection (only if not pooled)
 func (db *Database) Close() error {
+	// Don't close pooled connections
+	if db.isPooled {
+		return nil
+	}
+
 	if db.Conn != nil {
 		return db.Conn.Close()
 	}
@@ -75,8 +137,120 @@ func (db *Database) Close() error {
 
 // GetConnectionInfo returns a string describing the database connection
 func (db *Database) GetConnectionInfo() string {
-	if db.UseTurso {
-		return fmt.Sprintf("Turso (tenant: %s)", db.TenantID)
+	poolStatus := ""
+	if db.isPooled {
+		poolStatus = " (pooled)"
 	}
-	return fmt.Sprintf("SQLite (tenant: %s)", db.TenantID)
+
+	if db.UseTurso {
+		return fmt.Sprintf("Turso (tenant: %s)%s", db.TenantID, poolStatus)
+	}
+	return fmt.Sprintf("SQLite (tenant: %s)%s", db.TenantID, poolStatus)
+}
+
+// GetPoolStats returns current pool statistics
+func GetPoolStats() map[string]int {
+	poolMutex.RLock()
+	defer poolMutex.RUnlock()
+
+	stats := make(map[string]int)
+	stats["total"] = len(connectionPools)
+
+	active := 0
+	for _, conn := range connectionPools {
+		if conn.Ping() == nil {
+			active++
+		}
+	}
+	stats["active"] = active
+
+	return stats
+}
+
+// CleanupStaleConnections removes dead and aged connections from the pool
+// This function is called by the cache cleanup routine
+func CleanupStaleConnections() {
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
+
+	staleKeys := make([]string, 0)
+
+	for key, conn := range connectionPools {
+		shouldRemove := false
+		reason := ""
+
+		// Check if connection is dead (existing logic)
+		if err := conn.Ping(); err != nil {
+			shouldRemove = true
+			reason = "dead"
+		} else {
+			// Get connection stats to check age
+			stats := conn.Stats()
+
+			// Estimate connection age based on open connections
+			// If we have long-lived connections, they're likely old
+			if stats.OpenConnections > 0 {
+				// Close connections that have been in pool too long
+				// We use a heuristic: if connection has been idle and we can't track exact age,
+				// close it if it has many accumulated connections (indicates age)
+				if stats.Idle > 3 && stats.OpenConnections > 10 {
+					shouldRemove = true
+					reason = "aged"
+				}
+			}
+		}
+
+		if shouldRemove {
+			conn.Close()
+			staleKeys = append(staleKeys, key)
+			if reason == "dead" {
+				fmt.Printf("Database pool cleanup: removed dead connection %s\n", key)
+			} else {
+				fmt.Printf("Database pool cleanup: removed aged connection %s\n", key)
+			}
+		}
+	}
+
+	// Remove stale connections from pool
+	for _, key := range staleKeys {
+		delete(connectionPools, key)
+	}
+
+	if len(staleKeys) > 0 {
+		fmt.Printf("Database pool cleanup: removed %d total connections\n", len(staleKeys))
+	}
+}
+
+// GetConnectionPoolInfo returns detailed information about all pooled connections
+func GetConnectionPoolInfo() map[string]map[string]interface{} {
+	poolMutex.RLock()
+	defer poolMutex.RUnlock()
+
+	info := make(map[string]map[string]interface{})
+
+	for key, conn := range connectionPools {
+		stats := conn.Stats()
+		isHealthy := conn.Ping() == nil
+
+		info[key] = map[string]interface{}{
+			"healthy":      isHealthy,
+			"maxOpen":      stats.MaxOpenConnections,
+			"open":         stats.OpenConnections,
+			"inUse":        stats.InUse,
+			"idle":         stats.Idle,
+			"waitCount":    stats.WaitCount,
+			"waitDuration": stats.WaitDuration.String(),
+		}
+	}
+
+	return info
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if val := os.Getenv(key); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
 }

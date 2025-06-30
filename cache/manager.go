@@ -3,11 +3,45 @@ package cache
 
 import (
 	"fmt"
+	"log"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache/content"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+/*
+=============================================================================
+CRITICAL LOCKING HIERARCHY DOCUMENTATION
+=============================================================================
+
+To prevent deadlocks, ALL cache operations MUST follow this strict locking hierarchy:
+
+LOCK HIERARCHY (highest to lowest):
+1. Manager.Mu (highest priority - top level)
+2. Individual cache mutexes (ContentCache.Mu, UserStateCache.Mu, etc.)
+
+RULES TO PREVENT DEADLOCKS:
+- NEVER acquire a higher-level lock while holding a lower-level lock
+- Methods ending in "Unsafe" assume locks are already held by caller
+- Public methods acquire their own locks; internal "Unsafe" methods do NOT
+- Always use "defer unlock" pattern for safety
+- When multiple tenant caches need locking, acquire in consistent order
+
+INTERNAL vs PUBLIC METHOD PATTERN:
+- Public methods (GetTenantStats): acquire Manager.Mu, call unsafe version
+- Internal methods (getTenantStatsUnsafe): assume Manager.Mu already held
+- EnsureTenant calls unsafe versions since it holds Manager.Mu.Lock()
+
+VIOLATION EXAMPLES (DO NOT DO):
+- Calling GetTenantStats() from within EnsureTenant (deadlock)
+- Acquiring Manager.Mu while holding any cache.Mu (lock order violation)
+- Any method calling another public method while holding locks
+
+=============================================================================
+*/
 
 var GlobalInstance *Manager
 
@@ -38,6 +72,7 @@ func NewManager() *Manager {
 		HTMLChunkCache: make(map[string]*models.TenantHTMLChunkCache),
 		AnalyticsCache: make(map[string]*models.TenantAnalyticsCache),
 		LastAccessed:   make(map[string]time.Time),
+		Mu:             sync.RWMutex{},
 	}
 
 	return &Manager{
@@ -78,72 +113,163 @@ func (m *Manager) GetSession(tenantID, sessionID string) (*models.SessionData, b
 	return session, true
 }
 
-// SetSession stores session data in cache
 func (m *Manager) SetSession(tenantID string, session *models.SessionData) {
 	m.EnsureTenant(tenantID)
 
+	// Enforce session limits per tenant
 	m.Mu.RLock()
 	tenant := m.UserStateCache[tenantID]
 	m.Mu.RUnlock()
 
 	tenant.Mu.Lock()
-	defer tenant.Mu.Unlock()
-
-	if tenant.SessionStates == nil {
-		tenant.SessionStates = make(map[string]*models.SessionData)
+	if len(tenant.SessionStates) >= MaxSessionsPerTenant {
+		// Remove oldest sessions (keep newest 80%)
+		m.evictOldestSessions(tenantID, MaxSessionsPerTenant*8/10)
 	}
-
 	tenant.SessionStates[session.SessionID] = session
+	tenant.Mu.Unlock()
 }
 
 // EnsureTenant initializes cache structures for a tenant if they don't exist
+// CRITICAL: This method has been refactored to eliminate deadlocks by using lock-free internal methods
 func (m *Manager) EnsureTenant(tenantID string) {
+	// Check if we need write lock first (read-only check)
+	m.Mu.RLock()
+	contentExists := m.ContentCache[tenantID] != nil
+	userStateExists := m.UserStateCache[tenantID] != nil
+	htmlExists := m.HTMLChunkCache[tenantID] != nil
+	analyticsExists := m.AnalyticsCache[tenantID] != nil
+
+	// Check if tenant fully exists
+	if contentExists && userStateExists && htmlExists && analyticsExists {
+		m.LastAccessed[tenantID] = time.Now()
+		m.Mu.RUnlock()
+		return
+	}
+	m.Mu.RUnlock()
+
+	// Need to create or recreate - acquire write lock immediately
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	if _, exists := m.ContentCache[tenantID]; !exists {
-		m.ContentCache[tenantID] = &models.TenantContentCache{
-			TractStacks:    make(map[string]*models.TractStackNode),
-			StoryFragments: make(map[string]*models.StoryFragmentNode),
-			Panes:          make(map[string]*models.PaneNode),
-			Menus:          make(map[string]*models.MenuNode),
-			Resources:      make(map[string]*models.ResourceNode),
-			Beliefs:        make(map[string]*models.BeliefNode),
-			Files:          make(map[string]*models.ImageFileNode),
-			SlugToID:       make(map[string]string),
-			CategoryToIDs:  make(map[string][]string),
-			AllPaneIDs:     make([]string, 0),
-			LastUpdated:    time.Now(),
+	// Double-check after acquiring write lock (another goroutine might have created it)
+	contentExists = m.ContentCache[tenantID] != nil
+	userStateExists = m.UserStateCache[tenantID] != nil
+	htmlExists = m.HTMLChunkCache[tenantID] != nil
+	analyticsExists = m.AnalyticsCache[tenantID] != nil
+
+	if contentExists && userStateExists && htmlExists && analyticsExists {
+		m.LastAccessed[tenantID] = time.Now()
+		return
+	}
+
+	// If tenant partially exists, recreate completely
+	if contentExists || userStateExists || htmlExists || analyticsExists {
+		// Clean up partial state
+		delete(m.ContentCache, tenantID)
+		delete(m.UserStateCache, tenantID)
+		delete(m.HTMLChunkCache, tenantID)
+		delete(m.AnalyticsCache, tenantID)
+		delete(m.LastAccessed, tenantID)
+	}
+
+	// Check cache bounds before creating new tenant
+	totalTenants := len(m.ContentCache)
+	if totalTenants >= MaxTenants {
+		// Log warning and trigger immediate cleanup
+		fmt.Printf("WARNING: Maximum tenant limit reached (%d/%d). Triggering cleanup.\n", totalTenants, MaxTenants)
+		// FIXED: Use unsafe version since we already hold the write lock
+		m.cleanupOldestTenantsUnsafe()
+
+		// Check again after cleanup - if still at limit, force creation anyway
+		// to prevent cache corruption and nil pointer panics
+		if len(m.ContentCache) >= MaxTenants {
+			fmt.Printf("WARNING: Cache limit still exceeded after cleanup (%d/%d). Creating tenant anyway to prevent corruption.\n", len(m.ContentCache), MaxTenants)
+			// REMOVED: return - this was the bug that caused nil pointer panics
 		}
 	}
 
-	if _, exists := m.UserStateCache[tenantID]; !exists {
-		m.UserStateCache[tenantID] = &models.TenantUserStateCache{
-			FingerprintStates: make(map[string]*models.FingerprintState),
-			VisitStates:       make(map[string]*models.VisitState),
-			KnownFingerprints: make(map[string]bool),
-			SessionStates:     make(map[string]*models.SessionData),
-			LastLoaded:        time.Now(),
-		}
+	// Check memory bounds
+	stats := m.getTenantStatsUnsafe("")
+	estimatedMB := stats.Size / (1024 * 1024)
+	if estimatedMB > int64(MaxMemoryMB) {
+		fmt.Printf("WARNING: Memory limit approaching (%dMB/%dMB). Triggering cleanup.\n", estimatedMB, MaxMemoryMB)
+		// FIXED: Use unsafe version since we already hold the write lock
+		m.cleanupOldestTenantsUnsafe()
 	}
 
-	if _, exists := m.HTMLChunkCache[tenantID]; !exists {
-		m.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
-			Chunks: make(map[string]*models.HTMLChunk),
-			Deps:   make(map[string][]string),
-		}
+	// Create new tenant caches
+	m.ContentCache[tenantID] = &models.TenantContentCache{
+		TractStacks:    make(map[string]*models.TractStackNode),
+		StoryFragments: make(map[string]*models.StoryFragmentNode),
+		Panes:          make(map[string]*models.PaneNode),
+		Menus:          make(map[string]*models.MenuNode),
+		Resources:      make(map[string]*models.ResourceNode),
+		Beliefs:        make(map[string]*models.BeliefNode),
+		Files:          make(map[string]*models.ImageFileNode),
+		SlugToID:       make(map[string]string),
+		CategoryToIDs:  make(map[string][]string),
+		AllPaneIDs:     make([]string, 0),
+		LastUpdated:    time.Now(),
+		Mu:             sync.RWMutex{},
 	}
 
-	if _, exists := m.AnalyticsCache[tenantID]; !exists {
-		m.AnalyticsCache[tenantID] = &models.TenantAnalyticsCache{
-			EpinetBins:  make(map[string]*models.HourlyEpinetBin),
-			ContentBins: make(map[string]*models.HourlyContentBin),
-			SiteBins:    make(map[string]*models.HourlySiteBin),
-			LastUpdated: time.Now(),
-		}
+	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
+		FingerprintStates: make(map[string]*models.FingerprintState),
+		VisitStates:       make(map[string]*models.VisitState),
+		KnownFingerprints: make(map[string]bool),
+		SessionStates:     make(map[string]*models.SessionData),
+		LastLoaded:        time.Now(),
+		Mu:                sync.RWMutex{},
+	}
+
+	m.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
+		Chunks: make(map[string]*models.HTMLChunk),
+		Deps:   make(map[string][]string),
+		Mu:     sync.RWMutex{},
+	}
+
+	m.AnalyticsCache[tenantID] = &models.TenantAnalyticsCache{
+		EpinetBins:  make(map[string]*models.HourlyEpinetBin),
+		ContentBins: make(map[string]*models.HourlyContentBin),
+		SiteBins:    make(map[string]*models.HourlySiteBin),
+		LastUpdated: time.Now(),
+		Mu:          sync.RWMutex{},
 	}
 
 	m.LastAccessed[tenantID] = time.Now()
+}
+
+// cleanupOldestTenantsUnsafe removes the oldest accessed tenants to make room for new ones
+// INTERNAL USE ONLY: Assumes caller already holds m.Mu.Lock()
+func (m *Manager) cleanupOldestTenantsUnsafe() {
+	// Find the oldest tenant (caller already holding lock)
+	var oldestTenant string
+	oldestTime := time.Now()
+
+	for tenantID, lastAccessed := range m.LastAccessed {
+		if lastAccessed.Before(oldestTime) {
+			oldestTime = lastAccessed
+			oldestTenant = tenantID
+		}
+	}
+
+	if oldestTenant != "" {
+		delete(m.ContentCache, oldestTenant)
+		delete(m.UserStateCache, oldestTenant)
+		delete(m.HTMLChunkCache, oldestTenant)
+		delete(m.AnalyticsCache, oldestTenant)
+		delete(m.LastAccessed, oldestTenant)
+		fmt.Printf("Evicted oldest tenant: %s (last accessed: %v)\n", oldestTenant, oldestTime)
+	}
+}
+
+// cleanupOldestTenants removes the oldest accessed tenants to make room for new ones
+// PUBLIC METHOD: Acquires its own lock for external callers
+func (m *Manager) cleanupOldestTenants() {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	m.cleanupOldestTenantsUnsafe()
 }
 
 // InvalidateTenant removes all cached data for a tenant
@@ -158,11 +284,9 @@ func (m *Manager) InvalidateTenant(tenantID string) {
 	delete(m.LastAccessed, tenantID)
 }
 
-// GetTenantStats returns cache statistics for a tenant
-func (m *Manager) GetTenantStats(tenantID string) models.CacheStats {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
-
+// getTenantStatsUnsafe returns cache statistics for a tenant
+// INTERNAL USE ONLY: Assumes caller already holds m.Mu.RLock() or m.Mu.Lock()
+func (m *Manager) getTenantStatsUnsafe(tenantID string) models.CacheStats {
 	stats := models.CacheStats{}
 
 	if contentCache, exists := m.ContentCache[tenantID]; exists {
@@ -199,6 +323,14 @@ func (m *Manager) GetTenantStats(tenantID string) models.CacheStats {
 	}
 
 	return stats
+}
+
+// GetTenantStats returns cache statistics for a tenant
+// PUBLIC METHOD: Acquires its own lock for external callers
+func (m *Manager) GetTenantStats(tenantID string) models.CacheStats {
+	m.Mu.RLock()
+	defer m.Mu.RUnlock()
+	return m.getTenantStatsUnsafe(tenantID)
 }
 
 // =============================================================================
@@ -430,7 +562,7 @@ func (m *Manager) SetHTMLChunk(tenantID, paneID string, variant models.PaneVaria
 }
 
 // =============================================================================
-// User State Cache Operations - Visit State (ADDED FOR PHASE 1)
+// User State Cache Operations - Visit State (SINGLE ACTIVE VISIT PATTERN)
 // =============================================================================
 
 func (m *Manager) GetVisitState(tenantID, visitID string) (*models.VisitState, bool) {
@@ -445,8 +577,21 @@ func (m *Manager) GetVisitState(tenantID, visitID string) (*models.VisitState, b
 func (m *Manager) SetVisitState(tenantID string, state *models.VisitState) {
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
+	if cache == nil {
+		log.Printf("ERROR: UserStateCache[%s] is nil after EnsureTenant", tenantID)
+		return
+	}
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
+
+	// Enforce single active visit per fingerprint - remove old visits
+	for visitID, existingState := range cache.VisitStates {
+		if existingState.FingerprintID == state.FingerprintID && visitID != state.VisitID {
+			delete(cache.VisitStates, visitID)
+		}
+	}
+
+	// Set the new active visit
 	cache.VisitStates[state.VisitID] = state
 }
 
@@ -461,10 +606,20 @@ func (m *Manager) IsKnownFingerprint(tenantID, fingerprintID string) bool {
 
 func (m *Manager) SetKnownFingerprint(tenantID, fingerprintID string, isKnown bool) {
 	m.EnsureTenant(tenantID)
+	m.Mu.RLock()
 	cache := m.UserStateCache[tenantID]
+	m.Mu.RUnlock()
+
+	if cache == nil {
+		log.Printf("ERROR SetKnownFingerprint: Tenant was deleted between EnsureTenant and here")
+		return
+	}
+
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
+
 	cache.KnownFingerprints[fingerprintID] = isKnown
+	log.Printf("DEBUG: Completing tenant cache initialization (triggered by UserState request)")
 }
 
 func (m *Manager) LoadKnownFingerprints(tenantID string, fingerprints map[string]bool) {
@@ -489,11 +644,36 @@ func (m *Manager) GetFingerprintState(tenantID, fingerprintID string) (*models.F
 func (m *Manager) SetFingerprintState(tenantID string, state *models.FingerprintState) {
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
+	if cache == nil {
+		log.Printf("ERROR: UserStateCache[%s] is nil in SetFingerprintState", tenantID)
+		return
+	}
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 	cache.FingerprintStates[state.FingerprintID] = state
 }
 
-func init() {
-	GlobalInstance = NewManager()
+func (m *Manager) evictOldestSessions(tenantID string, keepCount int) {
+	cache := m.UserStateCache[tenantID]
+
+	type sessionAge struct {
+		id       string
+		lastUsed time.Time
+	}
+
+	var sessions []sessionAge
+	for id, session := range cache.SessionStates {
+		sessions = append(sessions, sessionAge{id: id, lastUsed: session.LastActivity})
+	}
+
+	// Sort by age (oldest first)
+	sort.Slice(sessions, func(i, j int) bool {
+		return sessions[i].lastUsed.Before(sessions[j].lastUsed)
+	})
+
+	// Remove oldest sessions
+	toRemove := len(sessions) - keepCount
+	for i := 0; i < toRemove && i < len(sessions); i++ {
+		delete(cache.SessionStates, sessions[i].id)
+	}
 }

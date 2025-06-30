@@ -3,12 +3,67 @@ package cache
 
 import (
 	"fmt"
-	"strings"
+	"log"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+/*
+=============================================================================
+CACHE UTILITIES LOCKING DOCUMENTATION
+=============================================================================
+
+This utilities file contains helper functions for cache management that MUST
+follow the locking hierarchy established in manager.go:
+
+LOCKING HIERARCHY:
+1. Manager.Mu (highest priority)
+2. Individual cache mutexes (lowest priority)
+
+UTILITY FUNCTION GUIDELINES:
+- Functions that accept *Manager parameter should NOT acquire Manager.Mu
+- They assume the caller has already acquired appropriate locks
+- Always document locking requirements in function comments
+- Utility functions should be "lock-neutral" - not acquiring manager-level locks
+
+SAFE PATTERNS:
+- cleanupTenantExpiredEntries: Only acquires individual cache locks
+- cleanupExpiredSessions: Only acquires individual cache locks
+- Time/TTL functions: No locking required (pure computation)
+
+UNSAFE PATTERNS (AVOIDED):
+- Utility functions calling manager.GetTenantStats() (would cause deadlock)
+- Utility functions acquiring Manager.Mu while caller holds it
+- Cross-tenant operations that could create lock ordering issues
+
+=============================================================================
+*/
+
+// Environment-configurable cache bounds
+var (
+	MaxTenants           = getEnvInt("MAX_TENANTS", 100)
+	MaxMemoryMB          = getEnvInt("MAX_MEMORY_MB", 512)
+	MaxSessionsPerTenant = getEnvInt("MAX_SESSIONS_PER_TENANT", 10000)
+)
+
+type DatabasePoolCleanupFunc func()
+
+// Global reference to database pool cleanup function
+var databasePoolCleanup DatabasePoolCleanupFunc
+
+// getEnvInt reads an environment variable as an integer with default fallback
+func getEnvInt(key string, defaultValue int) int {
+	if val := os.Getenv(key); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
 
 const (
 	// TTL constants for different cache types
@@ -21,97 +76,114 @@ const (
 	DashboardTTL    = 10 * time.Minute    // Dashboard data refreshed regularly
 
 	// Cleanup intervals
-	CleanupInterval = 30 * time.Minute // How often to run cleanup
-	TenantTimeout   = 4 * time.Hour    // Evict inactive tenants after this time
+	CleanupInterval       = 30 * time.Minute // How often to run cleanup
+	TenantTimeout         = 4 * time.Hour    // Evict inactive tenants after this time
+	SSECleanupInterval    = 5 * time.Minute  // How often to clean SSE connections
+	DBPoolCleanupInterval = 5 * time.Minute  // How often to clean database connection pools
 )
 
-// CacheLock provides cache management for cache refresh operations
+// CacheLock provides cache management for cache operations
 type CacheLock struct {
-	AcquiredAt time.Time
-	ExpiresAt  time.Time
-	TenantID   string
-	Key        string
+	mu        sync.Mutex
+	locks     map[string]*sync.Mutex
+	lockTimes map[string]time.Time
 }
 
-var (
-	cacheLocks = make(map[string]*CacheLock)
-	locksMutex = &sync.RWMutex{}
-	lockTTL    = 30 * time.Second
-)
-
-// TryAcquireLock attempts to acquire a lock for cache operations
-func TryAcquireLock(lockType, tenantID, key string) bool {
-	locksMutex.Lock()
-	defer locksMutex.Unlock()
-
-	// Clean expired locks first
-	cleanExpiredLocks()
-
-	lockKey := fmt.Sprintf("%s-%s-%s", lockType, tenantID, key)
-
-	// Check if lock already exists
-	if _, exists := cacheLocks[lockKey]; exists {
-		return false
+// NewCacheLock creates a new cache lock manager
+func NewCacheLock() *CacheLock {
+	return &CacheLock{
+		locks:     make(map[string]*sync.Mutex),
+		lockTimes: make(map[string]time.Time),
 	}
+}
 
-	// Acquire the lock
+// Lock acquires a lock for the given cache key
+func (cl *CacheLock) Lock(key string) {
+	cl.mu.Lock()
+	if _, exists := cl.locks[key]; !exists {
+		cl.locks[key] = &sync.Mutex{}
+	}
+	lock := cl.locks[key]
+	cl.lockTimes[key] = time.Now()
+	cl.mu.Unlock()
+
+	lock.Lock()
+}
+
+// Unlock releases a lock for the given cache key
+func (cl *CacheLock) Unlock(key string) {
+	cl.mu.Lock()
+	if lock, exists := cl.locks[key]; exists {
+		lock.Unlock()
+		delete(cl.lockTimes, key)
+	}
+	cl.mu.Unlock()
+}
+
+// GetLockInfo returns information about current locks
+func (cl *CacheLock) GetLockInfo() map[string]time.Duration {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+
+	info := make(map[string]time.Duration)
 	now := time.Now()
-	cacheLocks[lockKey] = &CacheLock{
-		AcquiredAt: now,
-		ExpiresAt:  now.Add(lockTTL),
-		TenantID:   tenantID,
-		Key:        key,
+	for key, lockTime := range cl.lockTimes {
+		info[key] = now.Sub(lockTime)
+	}
+	return info
+}
+
+// getMinutesBasedHourKey parses a time object to provide the minute-based cache key
+// LOCKING: None required (pure computation)
+//func getMinutesBasedHourKey(t time.Time) string {
+//	return fmt.Sprintf("%02d%02d%02d%02d%02d", t.Year()%100, t.Month(), t.Day(), t.Hour(), t.Minute())
+//}
+
+// FormatHourKey converts a time to an hour key for analytics
+// LOCKING: None required (pure computation)
+func FormatHourKey(t time.Time) string {
+	return fmt.Sprintf("%02d%02d%02d%02d", t.Year()%100, t.Month(), t.Day(), t.Hour())
+}
+
+// ParseHourKey converts an hour key back to a time
+// LOCKING: None required (pure computation)
+func ParseHourKey(key string) (time.Time, error) {
+	if len(key) != 8 {
+		return time.Time{}, fmt.Errorf("invalid hour key format: %s", key)
 	}
 
-	return true
-}
-
-// ReleaseLock releases a previously acquired lock
-func ReleaseLock(lockType, tenantID, key string) {
-	locksMutex.Lock()
-	defer locksMutex.Unlock()
-
-	lockKey := fmt.Sprintf("%s-%s-%s", lockType, tenantID, key)
-	delete(cacheLocks, lockKey)
-}
-
-// cleanExpiredLocks removes expired locks (internal function)
-func cleanExpiredLocks() {
-	now := time.Now()
-	for key, lock := range cacheLocks {
-		if lock.ExpiresAt.Before(now) {
-			delete(cacheLocks, key)
-		}
-	}
-}
-
-// FormatHourKey creates a consistent hour key for analytics
-func FormatHourKey(date time.Time) string {
-	// Use UTC to match database timestamps
-	year := date.UTC().Year()
-	month := int(date.UTC().Month())
-	day := date.UTC().Day()
-	hour := date.UTC().Hour()
-	return fmt.Sprintf("%04d-%02d-%02d-%02d", year, month, day, hour)
-}
-
-// ParseHourKey parses an hour key back to a time
-func ParseHourKey(hourKey string) (time.Time, error) {
-	var year, month, day, hour int
-	_, err := fmt.Sscanf(hourKey, "%d-%d-%d-%d", &year, &month, &day, &hour)
+	year, err := strconv.Atoi("20" + key[:2])
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid hour key format: %s", hourKey)
+		return time.Time{}, fmt.Errorf("invalid year in hour key: %s", key)
 	}
+
+	month, err := strconv.Atoi(key[2:4])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid month in hour key: %s", key)
+	}
+
+	day, err := strconv.Atoi(key[4:6])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid day in hour key: %s", key)
+	}
+
+	hour, err := strconv.Atoi(key[6:8])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid hour in hour key: %s", key)
+	}
+
 	return time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC), nil
 }
 
 // GetCurrentHourKey returns the current hour key
+// LOCKING: None required (pure computation)
 func GetCurrentHourKey() string {
 	now := time.Now().UTC()
 	return FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 }
 
 // GetHourKeysForRange returns hour keys for a time range
+// LOCKING: None required (pure computation)
 func GetHourKeysForRange(hours int) []string {
 	keys := make([]string, 0, hours)
 	now := time.Now().UTC()
@@ -126,11 +198,13 @@ func GetHourKeysForRange(hours int) []string {
 }
 
 // IsExpired checks if a cached item has exceeded its TTL
+// LOCKING: None required (pure computation)
 func IsExpired(cachedAt time.Time, ttl time.Duration) bool {
 	return time.Since(cachedAt) > ttl
 }
 
 // IsAnalyticsBinExpired checks if an analytics bin has expired
+// LOCKING: None required (pure computation)
 func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin) bool {
 	if bin == nil {
 		return true
@@ -145,6 +219,7 @@ func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin) bool {
 }
 
 // IsContentCacheExpired checks if content cache has expired
+// LOCKING: None required (pure computation)
 func IsContentCacheExpired(cache *models.TenantContentCache) bool {
 	if cache == nil {
 		return true
@@ -153,6 +228,7 @@ func IsContentCacheExpired(cache *models.TenantContentCache) bool {
 }
 
 // IsUserStateCacheExpired checks if user state cache has expired
+// LOCKING: None required (pure computation)
 func IsUserStateCacheExpired(cache *models.TenantUserStateCache) bool {
 	if cache == nil {
 		return true
@@ -160,20 +236,57 @@ func IsUserStateCacheExpired(cache *models.TenantUserStateCache) bool {
 	return IsExpired(cache.LastLoaded, UserStateTTL)
 }
 
+// SetDatabasePoolCleanup sets the database pool cleanup function
+// This allows the cache package to trigger database pool cleanup without import cycles
+func SetDatabasePoolCleanup(cleanup DatabasePoolCleanupFunc) {
+	databasePoolCleanup = cleanup
+}
+
+// cleanupDatabasePools performs database connection pool cleanup
+// This function calls the database package's cleanup function if available
+func cleanupDatabasePools() {
+	if databasePoolCleanup != nil {
+		databasePoolCleanup()
+	}
+}
+
 // StartCleanupRoutine starts a background goroutine for cache cleanup
+// LOCKING: Creates independent goroutine that acquires manager locks safely
 func StartCleanupRoutine(manager *Manager) {
 	go func() {
 		ticker := time.NewTicker(CleanupInterval)
 		defer ticker.Stop()
 
-		for tenantID := range manager.ContentCache {
-			cleanupTenantExpiredEntries(manager, tenantID)
+		for range ticker.C {
+			cleanupExpiredEntries(manager)
+		}
+	}()
+
+	// Start SSE cleanup routine
+	go func() {
+		sseTicker := time.NewTicker(SSECleanupInterval)
+		defer sseTicker.Stop()
+
+		for range sseTicker.C {
+			cleanupSSEConnections()
+		}
+	}()
+
+	// Start separate database pool cleanup routine
+	go func() {
+		dbTicker := time.NewTicker(DBPoolCleanupInterval)
+		defer dbTicker.Stop()
+
+		for range dbTicker.C {
+			cleanupDatabasePools()
 		}
 	}()
 }
 
 // cleanupExpiredEntries removes expired cache entries
+// LOCKING: Acquires manager.Mu.RLock() to get tenant list, then releases before processing
 func cleanupExpiredEntries(manager *Manager) {
+	// Get snapshot of tenant IDs while holding read lock
 	manager.Mu.RLock()
 	tenantIDs := make([]string, 0, len(manager.ContentCache))
 	for tenantID := range manager.ContentCache {
@@ -181,15 +294,47 @@ func cleanupExpiredEntries(manager *Manager) {
 	}
 	manager.Mu.RUnlock()
 
+	// Process each tenant without holding manager lock
 	for _, tenantID := range tenantIDs {
 		cleanupTenantExpiredEntries(manager, tenantID)
 	}
 }
 
+// cleanupExpiredSessions removes expired sessions from user state cache
+// LOCKING: Only acquires individual cache mutex (userCache.Mu)
+// ASSUMES: Manager locks NOT held by caller
+func cleanupExpiredSessions(manager *Manager, tenantID string) {
+	// Get cache reference safely
+	manager.Mu.RLock()
+	userCache, exists := manager.UserStateCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if !exists || userCache == nil {
+		return
+	}
+
+	// Only acquire the individual cache lock
+	userCache.Mu.Lock()
+	defer userCache.Mu.Unlock()
+
+	now := time.Now()
+	for sessionID, session := range userCache.SessionStates {
+		if session.IsExpired() || now.Sub(session.LastActivity) > UserStateTTL {
+			delete(userCache.SessionStates, sessionID)
+		}
+	}
+}
+
 // cleanupTenantExpiredEntries cleans up expired entries for a specific tenant
+// LOCKING: Only acquires individual cache mutexes (NOT manager.Mu)
+// ASSUMES: Manager locks NOT held by caller
 func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 	// Clean up HTML chunks
-	if htmlCache, exists := manager.HTMLChunkCache[tenantID]; exists {
+	manager.Mu.RLock()
+	htmlCache, htmlExists := manager.HTMLChunkCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if htmlExists && htmlCache != nil {
 		htmlCache.Mu.Lock()
 		for key, chunk := range htmlCache.Chunks {
 			if IsExpired(chunk.CachedAt, HTMLChunkTTL) {
@@ -199,8 +344,15 @@ func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 		htmlCache.Mu.Unlock()
 	}
 
+	// Clean up expired sessions
+	cleanupExpiredSessions(manager, tenantID)
+
 	// Clean up analytics bins
-	if analyticsCache, exists := manager.AnalyticsCache[tenantID]; exists {
+	manager.Mu.RLock()
+	analyticsCache, analyticsExists := manager.AnalyticsCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if analyticsExists && analyticsCache != nil {
 		analyticsCache.Mu.Lock()
 
 		// Clean up epinet bins
@@ -237,131 +389,13 @@ func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 	}
 }
 
-// cleanupInactiveTenants removes cache data for tenants that haven't been accessed recently
-func cleanupInactiveTenants(manager *Manager) {
-	manager.Mu.Lock()
-	defer manager.Mu.Unlock()
+// cleanupSSEConnections performs periodic cleanup of dead SSE connections
+// LOCKING: Uses SSEBroadcaster's internal mutex only
+func cleanupSSEConnections() {
+	cleanedCount := models.Broadcaster.CleanupDeadChannels()
+	activeCount := models.Broadcaster.GetActiveConnectionCount()
 
-	now := time.Now()
-	for tenantID, lastAccessed := range manager.LastAccessed {
-		if now.Sub(lastAccessed) > TenantTimeout {
-			// Remove tenant caches
-			delete(manager.ContentCache, tenantID)
-			delete(manager.UserStateCache, tenantID)
-			delete(manager.HTMLChunkCache, tenantID)
-			delete(manager.AnalyticsCache, tenantID)
-			delete(manager.LastAccessed, tenantID)
-		}
+	if cleanedCount > 0 {
+		log.Printf("SSE cleanup: removed %d dead connections, %d active remaining", cleanedCount, activeCount)
 	}
-}
-
-// CreateEmptyHourlyEpinetData creates an empty epinet data structure
-func CreateEmptyHourlyEpinetData() *models.HourlyEpinetData {
-	return &models.HourlyEpinetData{
-		Steps:       make(map[string]*models.HourlyEpinetStepData),
-		Transitions: make(map[string]map[string]*models.HourlyEpinetTransitionData),
-	}
-}
-
-// CreateEmptyHourlyContentData creates an empty content data structure
-func CreateEmptyHourlyContentData() *models.HourlyContentData {
-	return &models.HourlyContentData{
-		UniqueVisitors:    make(map[string]bool),
-		KnownVisitors:     make(map[string]bool),
-		AnonymousVisitors: make(map[string]bool),
-		Actions:           0,
-		EventCounts:       make(map[string]int),
-	}
-}
-
-// CreateEmptyHourlySiteData creates an empty site data structure
-func CreateEmptyHourlySiteData() *models.HourlySiteData {
-	return &models.HourlySiteData{
-		TotalVisits:       0,
-		KnownVisitors:     make(map[string]bool),
-		AnonymousVisitors: make(map[string]bool),
-		EventCounts:       make(map[string]int),
-	}
-}
-
-// GetCacheKey creates a consistent cache key
-func GetCacheKey(parts ...string) string {
-	return strings.Join(parts, ":")
-}
-
-// ValidateTenantID checks if a tenant ID is valid
-func ValidateTenantID(tenantID string) error {
-	if tenantID == "" {
-		return fmt.Errorf("tenant ID cannot be empty")
-	}
-	if len(tenantID) > 64 {
-		return fmt.Errorf("tenant ID too long: %d characters (max 64)", len(tenantID))
-	}
-	return nil
-}
-
-// GetMemoryStats returns memory usage statistics for the cache
-func GetMemoryStats(manager *Manager) map[string]any {
-	manager.Mu.RLock()
-	defer manager.Mu.RUnlock()
-
-	stats := make(map[string]any)
-
-	totalTenants := len(manager.ContentCache)
-	totalContent := 0
-	totalUserStates := 0
-	totalHTMLChunks := 0
-	totalAnalyticsBins := 0
-
-	for tenantID := range manager.ContentCache {
-		if contentCache := manager.ContentCache[tenantID]; contentCache != nil {
-			contentCache.Mu.RLock()
-			totalContent += len(contentCache.TractStacks)
-			totalContent += len(contentCache.StoryFragments)
-			totalContent += len(contentCache.Panes)
-			totalContent += len(contentCache.Menus)
-			totalContent += len(contentCache.Resources)
-			totalContent += len(contentCache.Beliefs)
-			totalContent += len(contentCache.Files)
-			contentCache.Mu.RUnlock()
-		}
-
-		if userCache := manager.UserStateCache[tenantID]; userCache != nil {
-			userCache.Mu.RLock()
-			totalUserStates += len(userCache.FingerprintStates)
-			totalUserStates += len(userCache.VisitStates)
-			userCache.Mu.RUnlock()
-		}
-
-		if htmlCache := manager.HTMLChunkCache[tenantID]; htmlCache != nil {
-			htmlCache.Mu.RLock()
-			totalHTMLChunks += len(htmlCache.Chunks)
-			htmlCache.Mu.RUnlock()
-		}
-
-		if analyticsCache := manager.AnalyticsCache[tenantID]; analyticsCache != nil {
-			analyticsCache.Mu.RLock()
-			totalAnalyticsBins += len(analyticsCache.EpinetBins)
-			totalAnalyticsBins += len(analyticsCache.ContentBins)
-			totalAnalyticsBins += len(analyticsCache.SiteBins)
-			analyticsCache.Mu.RUnlock()
-		}
-	}
-
-	stats["totalTenants"] = totalTenants
-	stats["totalContentNodes"] = totalContent
-	stats["totalUserStates"] = totalUserStates
-	stats["totalHTMLChunks"] = totalHTMLChunks
-	stats["totalAnalyticsBins"] = totalAnalyticsBins
-	stats["activeLocks"] = len(cacheLocks)
-
-	return stats
-}
-
-func TryAcquireSessionLock(tenantID, fingerprintID string) bool {
-	return TryAcquireLock("session", tenantID, fingerprintID)
-}
-
-func ReleaseSessionLock(tenantID, fingerprintID string) {
-	ReleaseLock("session", tenantID, fingerprintID)
 }

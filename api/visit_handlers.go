@@ -1,14 +1,23 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
+	"github.com/gin-gonic/gin"
 )
 
 type VisitRowData struct {
@@ -28,9 +37,363 @@ type VisitService struct {
 	ctx *tenant.Context
 }
 
+// getEnvInt reads environment variable with fallback
+func getEnvInt(key string, defaultValue int) int {
+	if val := os.Getenv(key); val != "" {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			return parsed
+		}
+	}
+	return defaultValue
+}
+
+// Global SSE connection tracking
+var (
+	activeSSEConnections int64
+	maxSSEConnections    = int64(getEnvInt("MAX_SESSIONS_PER_CLIENT", 10000))
+)
+
 func NewVisitService(ctx *tenant.Context, _ any) *VisitService {
 	return &VisitService{
 		ctx: ctx,
+	}
+}
+
+func VisitHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Activate tenant if needed
+	if ctx.Status == "inactive" {
+		if err := tenant.ActivateTenant(ctx); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
+			return
+		}
+	}
+
+	// Log the raw request for debugging
+	body, _ := c.GetRawData()
+
+	// Reset the body for binding
+	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
+
+	// Parse form data
+	var req models.VisitRequest
+	if err := c.ShouldBind(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
+		return
+	}
+
+	// Initialize response variables
+	var finalFpID, finalVisitID string
+	var leadID *string
+	var hasProfile bool
+	var profile *models.Profile
+	consentValue := "0"
+
+	// Process consent
+	if req.Consent != nil && *req.Consent == "1" {
+		consentValue = "1"
+	}
+
+	// Check for encrypted credentials (profile restoration)
+	if req.EncryptedEmail != nil && req.EncryptedCode != nil &&
+		*req.EncryptedEmail != "" && *req.EncryptedCode != "" {
+		// Use the existing validation function from profile_handlers.go
+		profile = ValidateEncryptedCredentials(*req.EncryptedEmail, *req.EncryptedCode, ctx)
+		if profile != nil {
+			hasProfile = true
+			leadID = &profile.LeadID
+		}
+	}
+
+	// Extract session ID for session handling
+	sessionID := generateULID()
+	if req.SessionID != nil && *req.SessionID != "" {
+		sessionID = *req.SessionID
+	}
+
+	// Check for existing session in cache
+	sessionData, sessionExists := cache.GetGlobalManager().GetSession(ctx.TenantID, sessionID)
+
+	if sessionExists {
+		// Use existing session data
+		finalFpID = sessionData.FingerprintID
+		finalVisitID = sessionData.VisitID
+
+		// Update session activity
+		sessionData.UpdateActivity()
+		cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
+
+	} else {
+		// Create new session with backend-generated IDs
+		visitService := NewVisitService(ctx, nil)
+
+		if hasProfile {
+			// For authenticated users, try to find existing fingerprint
+			if existingFpID := visitService.FindFingerprintByLeadID(profile.LeadID); existingFpID != nil {
+				finalFpID = *existingFpID
+			} else {
+				finalFpID = generateULID()
+			}
+			leadID = &profile.LeadID
+		} else {
+			// Generate new fingerprint for anonymous users
+			finalFpID = generateULID()
+		}
+
+		// Create fingerprint if it doesn't exist
+		if exists, err := visitService.FingerprintExists(finalFpID); err == nil && !exists {
+			if err := visitService.CreateFingerprint(finalFpID, leadID); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "fingerprint creation failed"})
+				return
+			}
+
+			globalCache := cache.GetGlobalManager()
+			if globalCache != nil {
+				globalCache.SetKnownFingerprint(ctx.TenantID, finalFpID, leadID != nil)
+			} else {
+				log.Printf("ERROR: Global cache manager is nil")
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "cache initialization failed"})
+				return
+			}
+
+		}
+
+		// Handle visit creation/reuse
+		finalVisitID, err = visitService.HandleVisitCreation(finalFpID, hasProfile)
+		if err != nil {
+			log.Printf("ERROR: Visit creation error: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "session handling failed"})
+			return
+		}
+
+		// Create new session data
+		sessionData = &models.SessionData{
+			SessionID:     sessionID,
+			FingerprintID: finalFpID,
+			VisitID:       finalVisitID,
+			LeadID:        leadID,
+			LastActivity:  time.Now(),
+			CreatedAt:     time.Now(),
+		}
+
+		// Store session in cache
+		cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
+	}
+
+	// Update visit state cache
+	visitState := &models.VisitState{
+		VisitID:       finalVisitID,
+		FingerprintID: finalFpID,
+		StartTime:     time.Now(),
+		LastActivity:  time.Now(),
+		CurrentPage:   c.Request.Header.Get("Referer"),
+	}
+	globalCache := cache.GetGlobalManager()
+	if globalCache != nil {
+		if globalCache.CacheManager != nil {
+			globalCache.SetVisitState(ctx.TenantID, visitState)
+		} else {
+			log.Printf("ERROR: CacheManager is nil")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "cache manager internal error"})
+			return
+		}
+	} else {
+		log.Printf("ERROR: Global cache manager is nil at crash point")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "cache not available"})
+		return
+	}
+
+	// Update fingerprint state cache
+	fingerprintState := &models.FingerprintState{
+		FingerprintID: finalFpID,
+		HeldBeliefs:   make(map[string]models.BeliefValue),
+		HeldBadges:    make(map[string]string),
+		LastActivity:  time.Now(),
+	}
+	cache.GetGlobalManager().SetFingerprintState(ctx.TenantID, fingerprintState)
+	// Build response
+	response := gin.H{
+		"fingerprint": finalFpID,
+		"visitId":     finalVisitID,
+		"hasProfile":  hasProfile,
+		"consent":     consentValue,
+	}
+
+	if hasProfile && profile != nil {
+		token, err := utils.GenerateProfileToken(profile, ctx.Config.JWTSecret, ctx.Config.AESKey)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate profile token"})
+			return
+		}
+		response["token"] = token
+		response["profile"] = profile
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// SseHandler provides Production-ready SSE handler with proper resource management
+// and per-session connection limits
+func SseHandler(c *gin.Context) {
+	// Get session ID from header or extract from tenant context
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	if sessionID == "" {
+		// Try to extract from Authorization or other headers if needed
+		sessionID = c.GetHeader("Authorization") // Adjust based on your auth flow
+	}
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required for SSE connection"})
+		return
+	}
+
+	// Check global connection limit first
+	currentConnections := atomic.LoadInt64(&activeSSEConnections)
+	if currentConnections >= maxSSEConnections {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "SSE connection limit reached. Please try again later.",
+		})
+		return
+	}
+
+	// Check per-session connection limit
+	const maxSessionConnections = 3 // Allow up to 3 tabs per session
+	sessionConnectionCount := models.Broadcaster.GetSessionConnectionCount(sessionID)
+	if sessionConnectionCount >= maxSessionConnections {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error":              fmt.Sprintf("Too many SSE connections for session (max %d). Close some tabs and try again.", maxSessionConnections),
+			"sessionId":          sessionID,
+			"currentConnections": sessionConnectionCount,
+		})
+		return
+	}
+
+	// Increment global connection counter
+	atomic.AddInt64(&activeSSEConnections, 1)
+
+	// Create timeout context (30 minutes max - after this the connection is force-closed)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
+
+	// Register client with broadcaster (now tracks session ID)
+	ch := models.Broadcaster.AddClientWithSession(sessionID)
+
+	// FIXED: Comprehensive cleanup with proper order
+	defer func() {
+		// 1. Decrement connection counter first
+		atomic.AddInt64(&activeSSEConnections, -1)
+
+		// 2. Cancel context to stop any ongoing operations
+		cancel()
+
+		// 3. Remove from broadcaster before closing channel
+		models.Broadcaster.RemoveClientWithSession(ch, sessionID)
+
+		// 4. Safely close the channel (non-blocking)
+		select {
+		case <-ch:
+			// Channel already closed or has data
+		default:
+			// Channel is empty, safe to close
+			close(ch)
+		}
+
+		// 5. Recover from any panics during cleanup
+		if r := recover(); r != nil {
+			log.Printf("SSE cleanup panic recovered for session %s: %v", sessionID, r)
+		}
+	}()
+
+	// Set SSE headers
+	w := c.Writer
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Headers", "Cache-Control")
+
+	// Verify flusher support
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming unsupported"})
+		return
+	}
+
+	// Send initial connection confirmation with session info
+	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"connectionCount\":%d}\n\n",
+		sessionID, models.Broadcaster.GetSessionConnectionCount(sessionID))
+	flusher.Flush()
+
+	// Heartbeat ticker to detect dead connections
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+
+	// Connection timeout for inactive clients
+	inactivityTimeout := time.NewTimer(5 * time.Minute)
+	defer inactivityTimeout.Stop()
+
+	log.Printf("SSE connection established for session %s. Active connections: %d (session: %d)",
+		sessionID, atomic.LoadInt64(&activeSSEConnections), models.Broadcaster.GetSessionConnectionCount(sessionID))
+
+	for {
+		select {
+		case msg := <-ch:
+			// Reset inactivity timer on message
+			if !inactivityTimeout.Stop() {
+				select {
+				case <-inactivityTimeout.C:
+				default:
+				}
+			}
+			inactivityTimeout.Reset(5 * time.Minute)
+
+			// Send message to client
+			_, err := fmt.Fprint(w, msg)
+			if err != nil {
+				log.Printf("SSE write error for session %s: %v", sessionID, err)
+				return
+			}
+			flusher.Flush()
+
+		case <-heartbeat.C:
+			// Send heartbeat to detect broken connections
+			_, err := fmt.Fprint(w, "event: heartbeat\ndata: {\"timestamp\":")
+			if err != nil {
+				log.Printf("SSE heartbeat failed for session %s: %v", sessionID, err)
+				return
+			}
+			_, err = fmt.Fprintf(w, "%d,\"sessionId\":\"%s\"}\n\n", time.Now().Unix(), sessionID)
+			if err != nil {
+				log.Printf("SSE heartbeat failed for session %s: %v", sessionID, err)
+				return
+			}
+			flusher.Flush()
+
+		case <-inactivityTimeout.C:
+			// Close inactive connections after 5 minutes of no activity
+			log.Printf("SSE connection closed due to inactivity for session %s", sessionID)
+			fmt.Fprintf(w, "event: timeout\ndata: {\"reason\":\"inactivity\",\"sessionId\":\"%s\"}\n\n", sessionID)
+			flusher.Flush()
+			return
+
+		case <-ctx.Done():
+			// Handle context cancellation (client disconnect, timeout, server shutdown)
+			switch ctx.Err() {
+			case context.DeadlineExceeded:
+				// After 30 minutes, force close and tell client to reconnect
+				log.Printf("SSE connection closed due to 30-minute timeout for session %s - client should reconnect", sessionID)
+				fmt.Fprintf(w, "event: timeout\ndata: {\"reason\":\"max_duration\",\"action\":\"reconnect\",\"sessionId\":\"%s\"}\n\n", sessionID)
+			case context.Canceled:
+				log.Printf("SSE connection closed by client for session %s", sessionID)
+			default:
+				log.Printf("SSE connection closed for session %s: %v", sessionID, ctx.Err())
+			}
+			flusher.Flush()
+			return
+		}
 	}
 }
 
@@ -142,7 +505,7 @@ func (vs *VisitService) HandleVisitCreation(fingerprintID string, hasProfile boo
 		}
 	}
 
-	// Create new visit
+	// Create new visit (this will automatically invalidate previous ones)
 	visitID := utils.GenerateULID()
 	if err := vs.CreateVisit(visitID, fingerprintID, nil); err != nil {
 		return "", fmt.Errorf("failed to create visit: %w", err)
@@ -203,7 +566,7 @@ func (vs *VisitService) HandleVisitSession(requestFpID, requestVisitID *string, 
 		}
 	}
 
-	// Create new visit if needed
+	// Create new visit if needed (this will invalidate previous ones)
 	if shouldCreateNewVisit {
 		visitID = utils.GenerateULID()
 		if err := vs.CreateVisit(visitID, fpID, nil); err != nil {
