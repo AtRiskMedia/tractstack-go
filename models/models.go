@@ -53,40 +53,14 @@ type LoginRequest struct {
 }
 
 type SSEBroadcaster struct {
-	clients []chan string
-	mu      sync.Mutex
+	clients        []chan string
+	sessionClients map[string][]chan string // sessionId -> []channels
+	mu             sync.Mutex
 }
 
-func (b *SSEBroadcaster) AddClient() chan string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	ch := make(chan string)
-	b.clients = append(b.clients, ch)
-	return ch
+var Broadcaster = &SSEBroadcaster{
+	sessionClients: make(map[string][]chan string),
 }
-
-func (b *SSEBroadcaster) RemoveClient(ch chan string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for i, client := range b.clients {
-		if client == ch {
-			b.clients = append(b.clients[:i], b.clients[i+1:]...)
-			close(ch)
-			break
-		}
-	}
-}
-
-func (b *SSEBroadcaster) Broadcast(eventType, data string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	message := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)
-	for _, ch := range b.clients {
-		ch <- message
-	}
-}
-
-var Broadcaster = &SSEBroadcaster{}
 
 type VisitState struct {
 	VisitID       string    `json:"visitId"`
@@ -139,4 +113,154 @@ type Lead struct {
 	EncryptedEmail string    `json:"-"` // Never serialize encrypted email
 	CreatedAt      time.Time `json:"createdAt"`
 	Changed        time.Time `json:"changed"`
+}
+
+func (b *SSEBroadcaster) AddClient() chan string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := make(chan string, 10)
+	b.clients = append(b.clients, ch)
+	return ch
+}
+
+func (b *SSEBroadcaster) RemoveClient(ch chan string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i, client := range b.clients {
+		if client == ch {
+			b.clients = append(b.clients[:i], b.clients[i+1:]...)
+			close(ch)
+			break
+		}
+	}
+}
+
+func (b *SSEBroadcaster) Broadcast(eventType, data string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	message := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, data)
+
+	// Defensive broadcasting - collect dead channels to remove
+	var deadChannels []int
+	for i, ch := range b.clients {
+		select {
+		case ch <- message:
+			// Success - channel is alive
+		default:
+			// Channel is blocked/closed - mark for removal
+			deadChannels = append(deadChannels, i)
+		}
+	}
+
+	// Remove dead channels (in reverse order to maintain indices)
+	for i := len(deadChannels) - 1; i >= 0; i-- {
+		idx := deadChannels[i]
+		// Only close if channel is not already closed
+		select {
+		case <-b.clients[idx]:
+		default:
+			close(b.clients[idx])
+		}
+		b.clients = append(b.clients[:idx], b.clients[idx+1:]...)
+	}
+}
+
+func (b *SSEBroadcaster) AddClientWithSession(sessionID string) chan string {
+	ch := make(chan string, 10)
+	b.mu.Lock()
+	b.clients = append(b.clients, ch)
+
+	// Track by session
+	if b.sessionClients[sessionID] == nil {
+		b.sessionClients[sessionID] = make([]chan string, 0)
+	}
+	b.sessionClients[sessionID] = append(b.sessionClients[sessionID], ch)
+	b.mu.Unlock()
+	return ch
+}
+
+func (b *SSEBroadcaster) RemoveClientWithSession(ch chan string, sessionID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Remove from main clients list
+	for i, client := range b.clients {
+		if client == ch {
+			b.clients = append(b.clients[:i], b.clients[i+1:]...)
+			break
+		}
+	}
+
+	// Remove from session clients list
+	if sessionClients, exists := b.sessionClients[sessionID]; exists {
+		for i, client := range sessionClients {
+			if client == ch {
+				b.sessionClients[sessionID] = append(sessionClients[:i], sessionClients[i+1:]...)
+				break
+			}
+		}
+		// Clean up empty session entries
+		if len(b.sessionClients[sessionID]) == 0 {
+			delete(b.sessionClients, sessionID)
+		}
+	}
+}
+
+func (b *SSEBroadcaster) GetSessionConnectionCount(sessionID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if sessionClients, exists := b.sessionClients[sessionID]; exists {
+		return len(sessionClients)
+	}
+	return 0
+}
+
+func (b *SSEBroadcaster) GetActiveConnectionCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.clients)
+}
+
+func (b *SSEBroadcaster) CleanupDeadChannels() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	cleanedCount := 0
+
+	// Clean up main clients list
+	activeClients := make([]chan string, 0, len(b.clients))
+	for _, client := range b.clients {
+		select {
+		case <-client:
+			// Channel is closed, don't keep it
+			cleanedCount++
+		default:
+			// Channel is still active
+			activeClients = append(activeClients, client)
+		}
+	}
+	b.clients = activeClients
+
+	// Clean up session clients
+	for sessionID, sessionClients := range b.sessionClients {
+		activeSessionClients := make([]chan string, 0, len(sessionClients))
+		for _, client := range sessionClients {
+			select {
+			case <-client:
+				// Channel is closed, don't keep it
+			default:
+				// Channel is still active
+				activeSessionClients = append(activeSessionClients, client)
+			}
+		}
+
+		if len(activeSessionClients) == 0 {
+			delete(b.sessionClients, sessionID)
+		} else {
+			b.sessionClients[sessionID] = activeSessionClients
+		}
+	}
+
+	return cleanedCount
 }

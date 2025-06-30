@@ -17,14 +17,36 @@ import (
 var GlobalCacheManager *cache.Manager
 
 func main() {
+	log.Println("MAIN FUNCTION STARTED - THIS SHOULD ALWAYS PRINT")
+
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found")
 	}
 
+	log.Println("=== CACHE INITIALIZATION DEBUG ===")
+
 	// Initialize global cache manager
+	log.Println("Step 1: About to call cache.NewManager()")
 	GlobalCacheManager = cache.NewManager()
-	cache.GlobalInstance = GlobalCacheManager // Set the global instance
+	log.Printf("Step 2: NewManager returned: %p", GlobalCacheManager)
+
+	if GlobalCacheManager == nil {
+		log.Fatal("Failed to create cache manager")
+	}
+
+	log.Println("Step 3: About to set cache.GlobalInstance")
+	cache.GlobalInstance = GlobalCacheManager
+	log.Printf("Step 4: GlobalInstance set to: %p", cache.GlobalInstance)
+
+	if cache.GlobalInstance == nil {
+		log.Fatal("Failed to set global cache instance")
+	}
 	log.Println("Global cache manager initialized")
+
+	// Start cleanup routine
+	log.Println("Step 5: About to start cleanup routine")
+	cache.StartCleanupRoutine(GlobalCacheManager)
+	log.Println("Cache cleanup routine started")
 
 	// Initialize tenant manager
 	tenantManager, err := tenant.NewManager()

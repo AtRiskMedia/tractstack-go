@@ -3,6 +3,7 @@ package cache
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -126,19 +127,10 @@ func (hco *HTMLCacheOperations) InvalidatePattern(tenantID, pattern string) {
 
 	// Clean up dependency mappings
 	for depID, keys := range tenantCache.Deps {
-		filteredKeys := []string{}
-		for _, key := range keys {
-			found := false
-			for _, deletedKey := range keysToDelete {
-				if key == deletedKey {
-					found = true
-					break
-				}
-			}
-			if !found {
-				filteredKeys = append(filteredKeys, key)
-			}
-		}
+		filteredKeys := slices.DeleteFunc(keys, func(key string) bool {
+			return slices.Contains(keysToDelete, key)
+		})
+
 		if len(filteredKeys) == 0 {
 			delete(tenantCache.Deps, depID)
 		} else {

@@ -55,8 +55,8 @@ func (m *Manager) GetContext(c *gin.Context) (*Context, error) {
 		return nil, err
 	}
 
-	log.Printf("Tenant context created: %s (%s) - %s",
-		tenantID, database.GetConnectionInfo(), status)
+	log.Printf("Tenant context created: (%s) - %s",
+		database.GetConnectionInfo(), status)
 
 	return &Context{
 		TenantID: tenantID,
