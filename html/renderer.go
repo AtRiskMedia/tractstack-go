@@ -200,7 +200,7 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	}
 
 	paneData := nodeData.PaneData
-	beliefs := pr.getPaneBeliefs(nodeID)
+	heldBeliefs, withheldBeliefs := pr.getPaneBeliefs(nodeID)
 	isDecorative := paneData.IsDecorative
 
 	// Get slug for inner div - matches Pane.astro: const slug = getCtx().getPaneSlug(nodeId)
@@ -234,7 +234,8 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	html.WriteString(` style="position: relative;">`)
 
 	// Add Filter component for beliefs (placeholder for now)
-	if len(beliefs) > 0 {
+	// Add Filter component for beliefs (placeholder for now)
+	if len(heldBeliefs) > 0 || len(withheldBeliefs) > 0 {
 		html.WriteString(`<!-- Filter component placeholder -->`)
 	}
 
@@ -388,27 +389,31 @@ func (pr *PaneRenderer) getCodeHookPayload(nodeID string) map[string]interface{}
 	return nil
 }
 
-func (pr *PaneRenderer) getPaneBeliefs(nodeID string) map[string]any {
+// getPaneBeliefs returns separated held and withheld beliefs preserving distinction
+func (pr *PaneRenderer) getPaneBeliefs(nodeID string) (map[string][]string, map[string][]string) {
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.PaneData == nil {
-		return make(map[string]any)
+		return make(map[string][]string), make(map[string][]string)
 	}
 
-	beliefs := make(map[string]any)
+	heldBeliefs := make(map[string][]string)
+	withheldBeliefs := make(map[string][]string)
 
-	// Combine held and withheld beliefs
+	// Copy held beliefs
 	if nodeData.PaneData.HeldBeliefs != nil {
 		for k, v := range nodeData.PaneData.HeldBeliefs {
-			beliefs[k] = v
-		}
-	}
-	if nodeData.PaneData.WithheldBeliefs != nil {
-		for k, v := range nodeData.PaneData.WithheldBeliefs {
-			beliefs[k] = v
+			heldBeliefs[k] = v
 		}
 	}
 
-	return beliefs
+	// Copy withheld beliefs
+	if nodeData.PaneData.WithheldBeliefs != nil {
+		for k, v := range nodeData.PaneData.WithheldBeliefs {
+			withheldBeliefs[k] = v
+		}
+	}
+
+	return heldBeliefs, withheldBeliefs
 }
 
 func (pr *PaneRenderer) getNodeData(nodeID string) *models.NodeRenderData {

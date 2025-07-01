@@ -215,12 +215,13 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	}
 
 	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
-		FingerprintStates: make(map[string]*models.FingerprintState),
-		VisitStates:       make(map[string]*models.VisitState),
-		KnownFingerprints: make(map[string]bool),
-		SessionStates:     make(map[string]*models.SessionData),
-		LastLoaded:        time.Now(),
-		Mu:                sync.RWMutex{},
+		FingerprintStates:     make(map[string]*models.FingerprintState),
+		VisitStates:           make(map[string]*models.VisitState),
+		KnownFingerprints:     make(map[string]bool),
+		SessionStates:         make(map[string]*models.SessionData),
+		LastLoaded:            time.Now(),
+		SessionBeliefContexts: make(map[string]*models.SessionBeliefContext),
+		Mu:                    sync.RWMutex{},
 	}
 
 	m.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
@@ -238,6 +239,14 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	}
 
 	m.LastAccessed[tenantID] = time.Now()
+
+	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
+		FingerprintStates:             make(map[string]*models.FingerprintState),
+		VisitStates:                   make(map[string]*models.VisitState),
+		SessionStates:                 make(map[string]*models.SessionData),
+		KnownFingerprints:             make(map[string]bool),
+		StoryfragmentBeliefRegistries: make(map[string]*models.StoryfragmentBeliefRegistry),
+	}
 }
 
 // cleanupOldestTenantsUnsafe removes the oldest accessed tenants to make room for new ones
@@ -676,4 +685,147 @@ func (m *Manager) evictOldestSessions(tenantID string, keepCount int) {
 	for i := 0; i < toRemove && i < len(sessions); i++ {
 		delete(cache.SessionStates, sessions[i].id)
 	}
+}
+
+// =============================================================================
+// Belief Registry Cache Operations
+// =============================================================================
+
+// GetStoryfragmentBeliefRegistry retrieves belief registry from cache
+func (m *Manager) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*models.StoryfragmentBeliefRegistry, bool) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	registry, exists := cache.StoryfragmentBeliefRegistries[storyfragmentID]
+	if !exists {
+		return nil, false
+	}
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+
+	return registry, true
+}
+
+// SetStoryfragmentBeliefRegistry stores belief registry in cache
+func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *models.StoryfragmentBeliefRegistry) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	if cache == nil {
+		log.Printf("ERROR: UserStateCache[%s] is nil after EnsureTenant", tenantID)
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	// Set the registry
+	cache.StoryfragmentBeliefRegistries[registry.StoryfragmentID] = registry
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+}
+
+// InvalidateStoryfragmentBeliefRegistry removes belief registry from cache
+func (m *Manager) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	delete(cache.StoryfragmentBeliefRegistries, storyfragmentID)
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+}
+
+// GetSessionBeliefContext provides Cache Operations
+func (m *Manager) GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*models.SessionBeliefContext, bool) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	key := fmt.Sprintf("%s:%s", sessionID, storyfragmentID)
+	context, exists := cache.SessionBeliefContexts[key]
+	if !exists {
+		return nil, false
+	}
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+
+	return context, true
+}
+
+func (m *Manager) SetSessionBeliefContext(tenantID string, context *models.SessionBeliefContext) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	if cache == nil {
+		log.Printf("ERROR: UserStateCache[%s] is nil after EnsureTenant", tenantID)
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	// Initialize map if needed
+	if cache.SessionBeliefContexts == nil {
+		cache.SessionBeliefContexts = make(map[string]*models.SessionBeliefContext)
+	}
+
+	// Set the context
+	key := fmt.Sprintf("%s:%s", context.SessionID, context.StoryfragmentID)
+	cache.SessionBeliefContexts[key] = context
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+
+	log.Printf("DEBUG: Cached session belief context for session %s on storyfragment %s",
+		context.SessionID, context.StoryfragmentID)
+}
+
+func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string) {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	key := fmt.Sprintf("%s:%s", sessionID, storyfragmentID)
+	delete(cache.SessionBeliefContexts, key)
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+}
+
+// GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries
+func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string {
+	m.EnsureTenant(tenantID)
+	cache := m.UserStateCache[tenantID]
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	var storyfragmentIDs []string
+	for storyfragmentID := range cache.StoryfragmentBeliefRegistries {
+		storyfragmentIDs = append(storyfragmentIDs, storyfragmentID)
+	}
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now()
+	m.Mu.Unlock()
+
+	return storyfragmentIDs
 }

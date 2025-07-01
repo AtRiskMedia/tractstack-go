@@ -390,12 +390,28 @@ func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 }
 
 // cleanupSSEConnections performs periodic cleanup of dead SSE connections
-// LOCKING: Uses SSEBroadcaster's internal mutex only
 func cleanupSSEConnections() {
-	cleanedCount := models.Broadcaster.CleanupDeadChannels()
-	activeCount := models.Broadcaster.GetActiveConnectionCount()
+	// Get all tenant IDs that have active SSE connections
+	// We'll need to expose this from the SSEBroadcaster
+	tenantIDs := models.Broadcaster.GetActiveTenantIDs()
 
-	if cleanedCount > 0 {
-		log.Printf("SSE cleanup: removed %d dead connections, %d active remaining", cleanedCount, activeCount)
+	totalCleaned := 0
+	totalActive := 0
+
+	for _, tenantID := range tenantIDs {
+		// Get dead channels for this tenant (need new method)
+		deadChannels := models.Broadcaster.GetDeadChannelsForTenant(tenantID)
+
+		if len(deadChannels) > 0 {
+			models.Broadcaster.CleanupDeadChannels(tenantID, deadChannels)
+			totalCleaned += len(deadChannels)
+		}
+
+		totalActive += models.Broadcaster.GetActiveConnectionCount(tenantID)
+	}
+
+	if totalCleaned > 0 {
+		log.Printf("SSE cleanup: removed %d dead connections across all tenants, %d active remaining",
+			totalCleaned, totalActive)
 	}
 }

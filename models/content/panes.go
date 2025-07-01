@@ -32,12 +32,6 @@ type MarkdownRowData struct {
 	MarkdownBody string `json:"markdown_body"`
 }
 
-// BeliefValue represents belief state
-type BeliefValue struct {
-	Verb   string  `json:"verb"`   // BELIEVES_YES, BELIEVES_NO, IDENTIFY_AS
-	Object *string `json:"object"` // only used when verb=IDENTIFY_AS
-}
-
 // PaneService handles cache-first pane operations
 type PaneService struct {
 	ctx *tenant.Context
@@ -439,8 +433,8 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 	}
 
 	// Extract structured data from options payload
-	heldBeliefs := ps.extractBeliefs(optionsPayload, "heldBeliefs")
-	withheldBeliefs := ps.extractBeliefs(optionsPayload, "withheldBeliefs")
+	heldBeliefs := ps.extractBeliefsAsArrays(optionsPayload, "heldBeliefs")
+	withheldBeliefs := ps.extractBeliefsAsArrays(optionsPayload, "withheldBeliefs")
 
 	// Extract other fields
 	var bgColour *string
@@ -501,21 +495,21 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 }
 
 // extractBeliefs helper to parse belief structures from options payload
-func (ps *PaneService) extractBeliefs(optionsPayload map[string]any, key string) map[string]models.BeliefValue {
-	beliefs := make(map[string]models.BeliefValue)
+func (ps *PaneService) extractBeliefsAsArrays(optionsPayload map[string]any, key string) map[string][]string {
+	beliefs := make(map[string][]string)
 
 	if beliefsData, ok := optionsPayload[key]; ok {
 		if beliefsMap, ok := beliefsData.(map[string]any); ok {
 			for beliefKey, value := range beliefsMap {
-				if beliefData, ok := value.(map[string]any); ok {
-					beliefValue := models.BeliefValue{}
-					if verb, ok := beliefData["verb"].(string); ok {
-						beliefValue.Verb = verb
+				if valueArray, ok := value.([]any); ok {
+					// Convert []any to []string
+					stringArray := make([]string, len(valueArray))
+					for i, v := range valueArray {
+						if str, ok := v.(string); ok {
+							stringArray[i] = str
+						}
 					}
-					if obj, ok := beliefData["object"].(string); ok {
-						beliefValue.Object = &obj
-					}
-					beliefs[beliefKey] = beliefValue
+					beliefs[beliefKey] = stringArray
 				}
 			}
 		}

@@ -2,12 +2,10 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
-	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,14 +20,6 @@ func GetAllBeliefIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Use cache-first belief service with global cache manager
@@ -52,14 +42,6 @@ func GetBeliefsByIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Parse request body
@@ -96,14 +78,6 @@ func GetBeliefByIDHandler(c *gin.Context) {
 		return
 	}
 
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
-	}
-
 	beliefID := c.Param("id")
 	if beliefID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "belief ID is required"})
@@ -132,14 +106,6 @@ func GetBeliefBySlugHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	slug := c.Param("slug")

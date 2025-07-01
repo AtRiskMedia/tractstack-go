@@ -2,12 +2,10 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
-	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,14 +20,6 @@ func GetAllMenuIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Use cache-first menu service with global cache manager
@@ -52,14 +42,6 @@ func GetMenusByIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Parse request body
@@ -94,14 +76,6 @@ func GetMenuByIDHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	menuID := c.Param("id")

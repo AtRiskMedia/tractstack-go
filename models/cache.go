@@ -66,19 +66,19 @@ type StoryFragmentNode struct {
 }
 
 type PaneNode struct {
-	ID              string                 `json:"id"`
-	Title           string                 `json:"title"`
-	Slug            string                 `json:"slug"`
-	IsContextPane   bool                   `json:"isContextPane"`
-	IsDecorative    bool                   `json:"isDecorative"`
-	OptionsPayload  map[string]any         `json:"optionsPayload,omitempty"`
-	BgColour        *string                `json:"bgColour,omitempty"`
-	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
-	CodeHookPayload map[string]string      `json:"codeHookPayload,omitempty"`
-	HeldBeliefs     map[string]BeliefValue `json:"heldBeliefs,omitempty"`
-	WithheldBeliefs map[string]BeliefValue `json:"withheldBeliefs,omitempty"`
-	Created         time.Time              `json:"created"`
-	Changed         *time.Time             `json:"changed,omitempty"`
+	ID              string              `json:"id"`
+	Title           string              `json:"title"`
+	Slug            string              `json:"slug"`
+	IsContextPane   bool                `json:"isContextPane"`
+	IsDecorative    bool                `json:"isDecorative"`
+	OptionsPayload  map[string]any      `json:"optionsPayload,omitempty"`
+	BgColour        *string             `json:"bgColour,omitempty"`
+	CodeHookTarget  *string             `json:"codeHookTarget,omitempty"`
+	CodeHookPayload map[string]string   `json:"codeHookPayload,omitempty"`
+	HeldBeliefs     map[string][]string `json:"heldBeliefs,omitempty"`     // CHANGED FROM BeliefValue
+	WithheldBeliefs map[string][]string `json:"withheldBeliefs,omitempty"` // CHANGED FROM BeliefValue
+	Created         time.Time           `json:"created"`
+	Changed         *time.Time          `json:"changed,omitempty"`
 }
 
 type MenuNode struct {
@@ -136,7 +136,9 @@ type TenantUserStateCache struct {
 	KnownFingerprints map[string]bool // fingerprintId -> isKnown
 
 	// Session state cache (ephemeral)
-	SessionStates map[string]*SessionData // sessionId -> session data
+	SessionStates                 map[string]*SessionData                 // sessionId -> session data
+	StoryfragmentBeliefRegistries map[string]*StoryfragmentBeliefRegistry // storyfragmentId -> belief registry
+	SessionBeliefContexts         map[string]*SessionBeliefContext        // "sessionId:storyfragmentId" -> context
 
 	// Cache metadata
 	LastLoaded time.Time
@@ -345,4 +347,35 @@ func (ttl CacheTTL) Duration() time.Duration {
 // String returns a human-readable representation of the TTL
 func (ttl CacheTTL) String() string {
 	return time.Duration(ttl).String()
+}
+
+// StoryfragmentBeliefRegistry stores extracted belief requirements per storyfragment
+type StoryfragmentBeliefRegistry struct {
+	StoryfragmentID    string                    `json:"storyfragmentId"`
+	PaneBeliefPayloads map[string]PaneBeliefData `json:"paneBeliefPayloads"` // paneId -> belief data
+	RequiredBeliefs    map[string]bool           `json:"requiredBeliefs"`    // flat list for lookup
+	RequiredBadges     []string                  `json:"requiredBadges"`     // badge requirements
+	LastUpdated        time.Time                 `json:"lastUpdated"`
+}
+
+// PaneBeliefData represents extracted belief data from a single pane
+type PaneBeliefData struct {
+	HeldBeliefs     map[string][]string `json:"heldBeliefs"`     // standard belief matching
+	WithheldBeliefs map[string][]string `json:"withheldBeliefs"` // standard belief matching
+	MatchAcross     []string            `json:"matchAcross"`     // OR logic - separate processing
+	LinkedBeliefs   []string            `json:"linkedBeliefs"`   // cascade unset - separate processing
+	HeldBadges      []string            `json:"heldBadges"`      // if implemented
+}
+
+// =========================================================================
+// SESSION BELIEF CONTEXT MODEL
+// =========================================================================
+
+// SessionBeliefContext tracks session-specific belief state for personalization
+type SessionBeliefContext struct {
+	TenantID        string              `json:"tenantId"`
+	SessionID       string              `json:"sessionId"`
+	StoryfragmentID string              `json:"storyfragmentId"`
+	UserBeliefs     map[string][]string `json:"userBeliefs"`
+	LastEvaluation  time.Time           `json:"lastEvaluation"`
 }
