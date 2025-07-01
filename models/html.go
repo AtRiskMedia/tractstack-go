@@ -56,14 +56,14 @@ type NodeRenderData struct {
 
 // PaneRenderData represents pane-specific rendering data
 type PaneRenderData struct {
-	Title           string                 `json:"title"`
-	Slug            string                 `json:"slug"`
-	IsDecorative    bool                   `json:"isDecorative"`
-	BgColour        *string                `json:"bgColour,omitempty"`
-	HeldBeliefs     map[string]BeliefValue `json:"heldBeliefs,omitempty"`
-	WithheldBeliefs map[string]BeliefValue `json:"withheldBeliefs,omitempty"`
-	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
-	CodeHookPayload map[string]string      `json:"codeHookPayload,omitempty"`
+	Title           string              `json:"title"`
+	Slug            string              `json:"slug"`
+	IsDecorative    bool                `json:"isDecorative"`
+	BgColour        *string             `json:"bgColour,omitempty"`
+	HeldBeliefs     map[string][]string `json:"heldBeliefs,omitempty"`
+	WithheldBeliefs map[string][]string `json:"withheldBeliefs,omitempty"`
+	CodeHookTarget  *string             `json:"codeHookTarget,omitempty"`
+	CodeHookPayload map[string]string   `json:"codeHookPayload,omitempty"`
 }
 
 // BackgroundNode represents positioned background image data for Markdown layouts
@@ -82,10 +82,10 @@ type BackgroundImageData struct {
 
 // UserState represents user belief state for cache variant determination
 type UserState struct {
-	UserID   string                 `json:"userId"`
-	TenantID string                 `json:"tenantId"`
-	Beliefs  map[string]any `json:"beliefs"`
-	Badges   []string               `json:"badges"`
+	UserID   string              `json:"userId"`
+	TenantID string              `json:"tenantId"`
+	Beliefs  map[string][]string `json:"beliefs"`
+	Badges   []string            `json:"badges"`
 }
 
 // HasBadges checks if user has all required badges
@@ -109,34 +109,32 @@ func (us *UserState) HasBadges(requiredBadges []string) bool {
 }
 
 // MeetsBeliefConditions checks if user meets belief-based visibility conditions
-func (us *UserState) MeetsBeliefConditions(conditions map[string]BeliefValue) bool {
+func (us *UserState) MeetsBeliefConditions(conditions map[string][]string) bool {
 	if len(conditions) == 0 {
 		return true
 	}
 
-	for beliefKey, condition := range conditions {
+	for beliefKey, requiredValues := range conditions {
 		userBelief, exists := us.Beliefs[beliefKey]
 		if !exists {
 			return false
 		}
 
-		// Simple string comparison for now - expand based on belief types
-		userBeliefStr, ok := userBelief.(string)
-		if !ok {
-			return false
+		// Check if user's belief values intersect with any of the required values
+		matched := false
+		for _, userValue := range userBelief {
+			for _, requiredValue := range requiredValues {
+				if userValue == requiredValue {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				break
+			}
 		}
 
-		switch condition.Verb {
-		case "is":
-			if condition.Object == nil || userBeliefStr != *condition.Object {
-				return false
-			}
-		case "isNot":
-			if condition.Object != nil && userBeliefStr == *condition.Object {
-				return false
-			}
-		default:
-			// Unknown verb - fail safe
+		if !matched {
 			return false
 		}
 	}

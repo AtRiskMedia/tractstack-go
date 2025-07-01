@@ -2,12 +2,10 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
-	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,15 +22,6 @@ func GetAllTractStackIDsHandler(c *gin.Context) {
 		return
 	}
 
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
-	}
-
-	// Use cache-first tractstack service with global cache manager
 	tractStackService := content.NewTractStackService(ctx, cache.GetGlobalManager())
 	tractStackIDs, err := tractStackService.GetAllIDs()
 	if err != nil {
@@ -52,14 +41,6 @@ func GetTractStacksByIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Parse request body
@@ -96,14 +77,6 @@ func GetTractStackByIDHandler(c *gin.Context) {
 		return
 	}
 
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
-	}
-
 	tractStackID := c.Param("id")
 	if tractStackID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "tractstack ID is required"})
@@ -132,14 +105,6 @@ func GetTractStackBySlugHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	slug := c.Param("slug")

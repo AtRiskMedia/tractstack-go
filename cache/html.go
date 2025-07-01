@@ -47,8 +47,6 @@ func (hco *HTMLCacheOperations) GetHTMLChunk(tenantID, paneID string, variant mo
 
 // SetHTMLChunk stores HTML chunk with dependencies and variant
 func (hco *HTMLCacheOperations) SetHTMLChunk(tenantID, paneID string, variant models.PaneVariant, html string, dependsOn []string) {
-	hco.ensureTenantCache(tenantID)
-
 	hco.manager.Mu.RLock()
 	tenantCache := hco.manager.HTMLChunkCache[tenantID]
 	hco.manager.Mu.RUnlock()
@@ -162,9 +160,12 @@ func (hco *HTMLCacheOperations) GetCacheStats(tenantID string) map[string]any {
 }
 
 // DetermineVariant determines the appropriate cache variant based on user state and pane beliefs
-func (hco *HTMLCacheOperations) DetermineVariant(userState *models.FingerprintState, paneBeliefs map[string]any) models.PaneVariant {
+func (hco *HTMLCacheOperations) DetermineVariant(userState *models.FingerprintState, nodeID string) models.PaneVariant {
+	// Get separated belief data from renderer
+	heldBeliefs, withheldBeliefs := hco.getPaneBeliefs(nodeID)
+
 	// If no beliefs are set on the pane, use default variant
-	if len(paneBeliefs) == 0 {
+	if len(heldBeliefs) == 0 && len(withheldBeliefs) == 0 {
 		return models.PaneVariantDefault
 	}
 
@@ -173,41 +174,48 @@ func (hco *HTMLCacheOperations) DetermineVariant(userState *models.FingerprintSt
 		return models.PaneVariantDefault
 	}
 
-	// Check if user's beliefs match pane's belief requirements
-	// This is a simplified implementation - extend based on actual belief logic
-	for beliefSlug, requirement := range paneBeliefs {
+	// Check held beliefs - user must have all required held beliefs
+	for beliefSlug, requirement := range heldBeliefs {
 		if userBelief, exists := userState.HeldBeliefs[beliefSlug]; exists {
-			// If user has conflicting belief, use hidden variant
 			if !hco.beliefsMatch(userBelief, requirement) {
 				return models.PaneVariantHidden
 			}
 		} else {
-			// If user doesn't have required belief, use hidden variant
+			// User doesn't have required held belief
 			return models.PaneVariantHidden
+		}
+	}
+
+	// Check withheld beliefs - user must NOT have any of the withheld beliefs
+	for beliefSlug, requirement := range withheldBeliefs {
+		if userBelief, exists := userState.HeldBeliefs[beliefSlug]; exists {
+			if hco.beliefsMatch(userBelief, requirement) {
+				// User has a belief they should not have
+				return models.PaneVariantHidden
+			}
 		}
 	}
 
 	return models.PaneVariantDefault
 }
 
-// beliefsMatch checks if user belief matches pane requirement
-func (hco *HTMLCacheOperations) beliefsMatch(userBelief models.BeliefValue, requirement any) bool {
-	// Simplified belief matching logic - extend based on actual requirements
-	// This would need to be expanded based on the actual belief system
-	return true // For Stage 4, always return true - implement actual logic later
-}
-
-// ensureTenantCache creates tenant HTML cache if it doesn't exist
-func (hco *HTMLCacheOperations) ensureTenantCache(tenantID string) {
-	hco.manager.Mu.Lock()
-	defer hco.manager.Mu.Unlock()
-
-	if _, exists := hco.manager.HTMLChunkCache[tenantID]; !exists {
-		hco.manager.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
-			Chunks: make(map[string]*models.HTMLChunk),
-			Deps:   make(map[string][]string),
+// beliefsMatch checks if user belief intersects with pane requirement
+func (hco *HTMLCacheOperations) beliefsMatch(userBelief []string, requirement []string) bool {
+	// Check if any user belief values match any required values
+	for _, userVal := range userBelief {
+		for _, reqVal := range requirement {
+			if userVal == reqVal {
+				return true
+			}
 		}
 	}
+	return false
+}
 
-	hco.manager.LastAccessed[tenantID] = time.Now()
+// getPaneBeliefs gets separated belief data from renderer context
+func (hco *HTMLCacheOperations) getPaneBeliefs(nodeID string) (map[string][]string, map[string][]string) {
+	// This assumes HTMLCacheOperations has access to render context
+	// If not, this method needs to be moved or context needs to be passed
+	// For now, return empty maps - this will be refined when integrating with actual renderer context
+	return make(map[string][]string), make(map[string][]string)
 }

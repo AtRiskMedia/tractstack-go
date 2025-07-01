@@ -2,8 +2,6 @@
 package tenant
 
 import (
-	"log"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -55,8 +53,8 @@ func (m *Manager) GetContext(c *gin.Context) (*Context, error) {
 		return nil, err
 	}
 
-	log.Printf("Tenant context created: (%s) - %s",
-		database.GetConnectionInfo(), status)
+	// log.Printf("Tenant context created: (%s) - %s",
+	//	database.GetConnectionInfo(), status)
 
 	return &Context{
 		TenantID: tenantID,

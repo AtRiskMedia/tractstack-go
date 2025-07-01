@@ -2,12 +2,10 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
-	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,14 +20,6 @@ func GetAllPaneIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Use cache-first pane service with global cache manager
@@ -52,14 +42,6 @@ func GetPanesByIDsHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Parse request body
@@ -96,14 +78,6 @@ func GetPaneByIDHandler(c *gin.Context) {
 		return
 	}
 
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
-	}
-
 	paneID := c.Param("id")
 	if paneID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pane ID is required"})
@@ -134,14 +108,6 @@ func GetPaneBySlugHandler(c *gin.Context) {
 		return
 	}
 
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
-	}
-
 	slug := c.Param("slug")
 	if slug == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pane slug is required"})
@@ -170,14 +136,6 @@ func GetContextPanesHandler(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
 	}
 
 	// Use cache-first pane service with global cache manager

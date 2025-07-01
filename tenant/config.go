@@ -12,14 +12,16 @@ import (
 
 // Config holds tenant-specific configuration
 type Config struct {
-	TenantID       string `json:"tenantId"`
-	TursoDatabase  string `json:"TURSO_DATABASE_URL"`
-	TursoToken     string `json:"TURSO_AUTH_TOKEN"`
-	JWTSecret      string `json:"JWT_SECRET"`
-	AESKey         string `json:"AES_KEY"`
-	AdminPassword  string `json:"ADMIN_PASSWORD,omitempty"`
-	EditorPassword string `json:"EDITOR_PASSWORD,omitempty"`
-	SQLitePath     string `json:"-"` // computed, not from JSON
+	TenantID           string `json:"tenantId"`
+	TursoDatabase      string `json:"TURSO_DATABASE_URL"`
+	TursoToken         string `json:"TURSO_AUTH_TOKEN"`
+	JWTSecret          string `json:"JWT_SECRET"`
+	AESKey             string `json:"AES_KEY"`
+	AdminPassword      string `json:"ADMIN_PASSWORD,omitempty"`
+	EditorPassword     string `json:"EDITOR_PASSWORD,omitempty"`
+	HomeSlug           string `json:"HOME_SLUG,omitempty"`
+	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG,omitempty"`
+	SQLitePath         string `json:"-"` // computed, not from JSON
 }
 
 // TenantRegistry holds the global tenant configuration
@@ -101,7 +103,18 @@ func LoadTenantConfig(tenantID string) (*Config, error) {
 		needsSave = true
 	}
 
-	// Save config if we generated new keys
+	// Set default values for HOME_SLUG and TRACTSTACK_HOME_SLUG if not present
+	if config.HomeSlug == "" {
+		config.HomeSlug = "hello"
+		needsSave = true
+	}
+
+	if config.TractStackHomeSlug == "" {
+		config.TractStackHomeSlug = "HELLO"
+		needsSave = true
+	}
+
+	// Save config if we generated new keys or set defaults
 	if needsSave {
 		if err := saveConfig(config, configPath); err != nil {
 			return nil, fmt.Errorf("failed to save generated config: %w", err)
@@ -151,6 +164,14 @@ func saveConfig(config *Config, configPath string) error {
 	}
 	if config.EditorPassword != "" {
 		configData["EDITOR_PASSWORD"] = config.EditorPassword
+	}
+
+	// Include HOME_SLUG and TRACTSTACK_HOME_SLUG
+	if config.HomeSlug != "" {
+		configData["HOME_SLUG"] = config.HomeSlug
+	}
+	if config.TractStackHomeSlug != "" {
+		configData["TRACTSTACK_HOME_SLUG"] = config.TractStackHomeSlug
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")

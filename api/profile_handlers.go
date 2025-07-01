@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -373,58 +374,6 @@ type SessionResponse struct {
 	VisitID     string
 }
 
-func handleProfileSession(c *gin.Context, ctx *tenant.Context, profile *models.Profile, sessionID, encryptedEmail, encryptedCode string) *SessionResponse {
-	// Create visit service to handle fingerprint and visit creation
-	visitService := NewVisitService(ctx, nil)
-
-	// Try to find existing fingerprint for this lead
-	var fingerprintID string
-	if existingFpID := visitService.FindFingerprintByLeadID(profile.LeadID); existingFpID != nil {
-		fingerprintID = *existingFpID
-	} else {
-		fingerprintID = utils.GenerateULID()
-	}
-
-	// Create fingerprint if it doesn't exist
-	if exists, err := visitService.FingerprintExists(fingerprintID); err == nil && !exists {
-		if err := visitService.CreateFingerprint(fingerprintID, &profile.LeadID); err != nil {
-			c.JSON(http.StatusInternalServerError, ProfileResponse{
-				Success: false,
-				Error:   "Fingerprint creation failed",
-			})
-			return nil
-		}
-	}
-
-	// Handle visit creation/reuse
-	visitID, err := visitService.HandleVisitCreation(fingerprintID, true)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, ProfileResponse{
-			Success: false,
-			Error:   "Visit creation failed",
-		})
-		return nil
-	}
-
-	// Update session data
-	sessionData := &models.SessionData{
-		SessionID:     sessionID,
-		FingerprintID: fingerprintID,
-		VisitID:       visitID,
-		LeadID:        &profile.LeadID,
-		LastActivity:  time.Now(),
-		CreatedAt:     time.Now(),
-	}
-
-	// Store session in cache
-	cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
-
-	return &SessionResponse{
-		Fingerprint: fingerprintID,
-		VisitID:     visitID,
-	}
-}
-
 // Database operations
 
 func CreateLead(lead *models.Lead, ctx *tenant.Context) error {
@@ -659,4 +608,98 @@ func GetLeadByID(leadID string, ctx *tenant.Context) (*models.Lead, error) {
 	}
 
 	return &lead, nil
+}
+
+func handleProfileSession(c *gin.Context, ctx *tenant.Context, profile *models.Profile, sessionID, encryptedEmail, encryptedCode string) *SessionResponse {
+	log.Printf("DEBUG: handleProfileSession - Starting for lead %s, session %s", profile.LeadID, sessionID)
+
+	// Create visit service to handle fingerprint and visit creation
+	visitService := NewVisitService(ctx, nil)
+
+	var fingerprintID string
+
+	// PRIORITY 1: Always check if this lead already has a fingerprint (for profile unlocks)
+	if existingFpID := visitService.FindFingerprintByLeadID(profile.LeadID); existingFpID != nil {
+		fingerprintID = *existingFpID
+		log.Printf("DEBUG: handleProfileSession - PRIORITY 1: Found existing lead fingerprint %s for lead %s", fingerprintID, profile.LeadID)
+	} else {
+		log.Printf("DEBUG: handleProfileSession - PRIORITY 1: No existing fingerprint found for lead %s", profile.LeadID)
+
+		// PRIORITY 2: No existing lead fingerprint, check if session has one (for new profile creation)
+		if existingSession, exists := cache.GetGlobalManager().GetSession(ctx.TenantID, sessionID); exists {
+			fingerprintID = existingSession.FingerprintID
+			log.Printf("DEBUG: handleProfileSession - PRIORITY 2: Found session fingerprint %s, assigning to lead %s", fingerprintID, profile.LeadID)
+
+			// Link this fingerprint to the new lead
+			if err := visitService.UpdateFingerprintLeadID(fingerprintID, &profile.LeadID); err != nil {
+				log.Printf("ERROR: handleProfileSession - Failed to link fingerprint %s to lead %s: %v", fingerprintID, profile.LeadID, err)
+				c.JSON(http.StatusInternalServerError, ProfileResponse{
+					Success: false,
+					Error:   "Failed to link session to profile",
+				})
+				return nil
+			} else {
+				log.Printf("DEBUG: handleProfileSession - Successfully linked fingerprint %s to lead %s", fingerprintID, profile.LeadID)
+			}
+		} else {
+			// PRIORITY 3: No existing fingerprint anywhere, generate new one
+			fingerprintID = utils.GenerateULID()
+			log.Printf("DEBUG: handleProfileSession - PRIORITY 3: Generated new fingerprint %s for lead %s", fingerprintID, profile.LeadID)
+		}
+	}
+
+	log.Printf("DEBUG: handleProfileSession - Final fingerprint decision: %s", fingerprintID)
+
+	// Ensure fingerprint exists in database
+	if exists, err := visitService.FingerprintExists(fingerprintID); err == nil && !exists {
+		log.Printf("DEBUG: handleProfileSession - Fingerprint %s doesn't exist, creating...", fingerprintID)
+		if err := visitService.CreateFingerprint(fingerprintID, &profile.LeadID); err != nil {
+			log.Printf("ERROR: handleProfileSession - Failed to create fingerprint %s: %v", fingerprintID, err)
+			c.JSON(http.StatusInternalServerError, ProfileResponse{
+				Success: false,
+				Error:   "Fingerprint creation failed",
+			})
+			return nil
+		}
+		log.Printf("DEBUG: handleProfileSession - Successfully created fingerprint %s", fingerprintID)
+	} else if err != nil {
+		log.Printf("ERROR: handleProfileSession - Error checking fingerprint existence: %v", err)
+	} else {
+		log.Printf("DEBUG: handleProfileSession - Fingerprint %s already exists", fingerprintID)
+	}
+
+	// Handle visit creation/reuse
+	log.Printf("DEBUG: handleProfileSession - Creating visit for fingerprint %s", fingerprintID)
+	visitID, err := visitService.HandleVisitCreation(fingerprintID, true)
+	if err != nil {
+		log.Printf("ERROR: handleProfileSession - Failed to create visit: %v", err)
+		c.JSON(http.StatusInternalServerError, ProfileResponse{
+			Success: false,
+			Error:   "Visit creation failed",
+		})
+		return nil
+	}
+	log.Printf("DEBUG: handleProfileSession - Created visit %s", visitID)
+
+	// Update session data with lead information
+	sessionData := &models.SessionData{
+		SessionID:     sessionID,
+		FingerprintID: fingerprintID,
+		VisitID:       visitID,
+		LeadID:        &profile.LeadID,
+		LastActivity:  time.Now(),
+		CreatedAt:     time.Now(),
+	}
+
+	log.Printf("DEBUG: handleProfileSession - Storing session data: session=%s, fingerprint=%s, visit=%s, lead=%s",
+		sessionID, fingerprintID, visitID, profile.LeadID)
+
+	// Store session in cache
+	cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
+
+	log.Printf("DEBUG: handleProfileSession - Returning fingerprint %s, visit %s", fingerprintID, visitID)
+	return &SessionResponse{
+		Fingerprint: fingerprintID,
+		VisitID:     visitID,
+	}
 }

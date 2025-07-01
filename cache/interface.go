@@ -17,6 +17,11 @@ type ContentCache interface {
 	SetStoryFragment(tenantID string, node *models.StoryFragmentNode)
 	GetStoryFragmentBySlug(tenantID, slug string) (*models.StoryFragmentNode, bool)
 
+	// Session belief context operations
+	GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*models.SessionBeliefContext, bool)
+	SetSessionBeliefContext(tenantID string, context *models.SessionBeliefContext)
+	InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string)
+
 	// Menu operations
 	GetMenu(tenantID, id string) (*models.MenuNode, bool)
 	SetMenu(tenantID string, node *models.MenuNode)
@@ -62,6 +67,14 @@ type UserStateCache interface {
 
 	// Batch operations
 	LoadKnownFingerprints(tenantID string, fingerprints map[string]bool)
+
+	// Belief registry operations
+	GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*models.StoryfragmentBeliefRegistry, bool)
+	SetStoryfragmentBeliefRegistry(tenantID string, registry *models.StoryfragmentBeliefRegistry)
+	InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string)
+
+	// GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries
+	GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
 }
 
 // HTMLChunkCache defines operations for HTML chunk caching

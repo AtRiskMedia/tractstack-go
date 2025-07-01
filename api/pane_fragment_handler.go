@@ -10,37 +10,32 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/html"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
-	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
-// GetPaneFragmentHandler handles GET /api/v1/fragments/panes/{id}
-// Returns rendered HTML for a specific pane using cache-first architecture
+// GetPaneFragmentHandler returns HTML fragments for individual panes with personalization
 func GetPaneFragmentHandler(c *gin.Context) {
-	paneID := c.Param("id")
-	if paneID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "pane ID is required"})
-		return
-	}
-
-	// Extract tenant context from request using existing pattern
 	ctx, err := getTenantContext(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Activate tenant if needed
-	if ctx.Status == "inactive" {
-		if err := tenant.ActivateTenant(ctx); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("tenant activation failed: %v", err)})
-			return
-		}
+	paneID := c.Param("id")
+	if paneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pane ID is required"})
+		return
 	}
 
-	fmt.Printf("DEBUG: TenantID=%s, PaneID=%s\n", ctx.TenantID, paneID)
+	// Extract session ID from header (sent by frontend)
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
 
-	// Use cache-first pane service with global cache manager - SAME AS WORKING HANDLERS
+	// Extract storyfragment ID from header (sent by HTMX)
+	storyfragmentID := c.GetHeader("X-StoryFragment-ID")
+
+	// ===== END SESSION CONTEXT EXTRACTION =====
+
+	// Use cache-first pane service
 	paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
 	paneNode, err := paneService.GetByID(paneID)
 	if err != nil {
@@ -52,8 +47,6 @@ func GetPaneFragmentHandler(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "pane not found"})
 		return
 	}
-
-	fmt.Printf("DEBUG: Found pane: %s\n", paneNode.Title)
 
 	// Extract and parse nodes from optionsPayload
 	nodesData, parentChildMap, err := extractNodesFromPane(paneNode)
@@ -67,16 +60,19 @@ func GetPaneFragmentHandler(c *gin.Context) {
 		ID:       paneID,
 		NodeType: "Pane",
 		PaneData: &models.PaneRenderData{
-			Title:        paneNode.Title,
-			Slug:         paneNode.Slug,
-			IsDecorative: paneNode.IsDecorative,
-			BgColour:     extractBgColour(paneNode),
+			Title:           paneNode.Title,
+			Slug:            paneNode.Slug,
+			IsDecorative:    paneNode.IsDecorative,
+			BgColour:        extractBgColour(paneNode),
+			HeldBeliefs:     paneNode.HeldBeliefs,     // Now matches []string type
+			WithheldBeliefs: paneNode.WithheldBeliefs, // Now matches []string type
+			CodeHookTarget:  paneNode.CodeHookTarget,
+			CodeHookPayload: paneNode.CodeHookPayload,
 		},
 	}
 	nodesData[paneID] = paneNodeData
 
-	// TODO: Extract user state from cookies/headers for belief-based variants
-	// For now, use default variant
+	// Extract user ID for general context (not belief-related)
 	userID := extractUserIDFromRequest(c)
 
 	// Create render context with real data
@@ -90,13 +86,73 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	// Create HTML generator
 	generator := html.NewGenerator(renderCtx)
 
+	// ===== GENERATE BASE HTML (CACHE-FIRST) =====
 	// Use our PaneRenderer to render the complete pane structure
 	// This will call our PaneRenderer.Render() which implements the complete Pane.astro logic
-	paneHTML := generator.Render(paneID)
+	var htmlContent string
+	// Check cache first for non-personalized content
+	variant := models.PaneVariantDefault
+	if cachedHTML, exists := cache.GetGlobalManager().GetHTMLChunk(ctx.TenantID, paneID, variant); exists {
+		htmlContent = cachedHTML
+		// fmt.Printf("DEBUG: Cache HIT for pane %s\n", paneID)
+	} else {
+		htmlContent = generator.Render(paneID)
+		// Cache the generated HTML
+		cache.GetGlobalManager().SetHTMLChunk(ctx.TenantID, paneID, variant, htmlContent, []string{paneID})
+		// fmt.Printf("DEBUG: Cache MISS for pane %s - generated and cached\n", paneID)
+	}
+	// fmt.Printf("DEBUG: Generated base HTML for pane %s (%d chars)\n", paneID, len(htmlContent))
+	// ===== END BASE HTML GENERATION =====
+
+	// Check for session belief context and apply personalization if available
+	if sessionID != "" && storyfragmentID != "" {
+		fmt.Printf("DEBUG: Attempting personalization for session %s, storyfragment %s, pane %s\n",
+			sessionID, storyfragmentID, paneID)
+
+		// Get cached session belief context
+		if sessionContext, exists := cache.GetGlobalManager().GetSessionBeliefContext(ctx.TenantID, sessionID, storyfragmentID); exists {
+			fmt.Printf("DEBUG: Found session belief context with %d beliefs\n", len(sessionContext.UserBeliefs))
+
+			// Get pane belief requirements from registry
+			if beliefRegistry, exists := cache.GetGlobalManager().GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID); exists {
+				fmt.Printf("DEBUG: Found belief registry with %d panes\n", len(beliefRegistry.PaneBeliefPayloads))
+
+				if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
+					fmt.Printf("DEBUG: Found pane beliefs - held: %d, withheld: %d, matchAcross: %d\n",
+						len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs), len(paneBeliefs.MatchAcross))
+
+					// Create belief evaluation engine
+					beliefEngine := content.NewBeliefEvaluationEngine()
+
+					// Evaluate visibility for this pane based on user beliefs
+					visibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
+
+					// Apply visibility wrapper to HTML content
+					htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
+
+					fmt.Printf("DEBUG: Applied personalization - pane %s visibility: %s\n", paneID, visibility)
+				} else {
+					fmt.Printf("DEBUG: No belief requirements found for pane %s\n", paneID)
+				}
+			} else {
+				fmt.Printf("DEBUG: No belief registry found for storyfragment %s\n", storyfragmentID)
+			}
+		} else {
+			fmt.Printf("DEBUG: No session belief context found for session %s, storyfragment %s\n", sessionID, storyfragmentID)
+		}
+	} else {
+		if sessionID == "" {
+			fmt.Printf("DEBUG: No session ID provided - skipping personalization\n")
+		}
+		if storyfragmentID == "" {
+			fmt.Printf("DEBUG: No storyfragment ID provided - skipping personalization\n")
+		}
+	}
+	// ===== END PERSONALIZATION INTEGRATION =====
 
 	// Return HTML response
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, paneHTML)
+	c.String(http.StatusOK, htmlContent)
 }
 
 // extractUserIDFromRequest extracts user ID from request context, cookies, or headers
@@ -141,17 +197,17 @@ func extractBgColour(paneNode *models.PaneNode) *string {
 }
 
 // findRootNodes finds nodes that are direct children of the pane
-func findRootNodes(paneID string, nodesData map[string]*models.NodeRenderData) []string {
-	var rootNodes []string
-
-	for nodeID, nodeData := range nodesData {
-		if nodeData.ParentID == paneID {
-			rootNodes = append(rootNodes, nodeID)
-		}
-	}
-
-	return rootNodes
-}
+//func findRootNodes(paneID string, nodesData map[string]*models.NodeRenderData) []string {
+//	var rootNodes []string
+//
+//	for nodeID, nodeData := range nodesData {
+//		if nodeData.ParentID == paneID {
+//			rootNodes = append(rootNodes, nodeID)
+//		}
+//	}
+//
+//	return rootNodes
+//}
 
 // extractNodesFromPane parses the optionsPayload.nodes array and builds data structures
 func extractNodesFromPane(paneNode *models.PaneNode) (map[string]*models.NodeRenderData, map[string][]string, error) {
@@ -238,7 +294,7 @@ func parseNodeFromMap(nodeMap map[string]any) (*models.NodeRenderData, error) {
 	}
 
 	// Handle ParentCSS array
-	if parentCSS, ok := nodeMap["parentCss"].([]interface{}); ok {
+	if parentCSS, ok := nodeMap["parentCss"].([]any); ok {
 		cssStrings := make([]string, 0, len(parentCSS))
 		for _, css := range parentCSS {
 			if cssStr, ok := css.(string); ok {
@@ -287,25 +343,178 @@ func parseNodeFromMap(nodeMap map[string]any) (*models.NodeRenderData, error) {
 		}
 
 		nodeData.BgImageData = bgImageData
-
-		// Store additional fields in CustomData for viewport visibility
-		nodeData.CustomData = make(map[string]any)
-		if collection, ok := nodeMap["collection"]; ok {
-			nodeData.CustomData["collection"] = collection
-		}
-		if image, ok := nodeMap["image"]; ok {
-			nodeData.CustomData["image"] = image
-		}
-		if objectFit, ok := nodeMap["objectFit"]; ok {
-			nodeData.CustomData["objectFit"] = objectFit
-		}
-		// Copy other fields that might be needed
-		for key, value := range nodeMap {
-			if key != "id" && key != "nodeType" && key != "type" && key != "position" && key != "size" {
-				nodeData.CustomData[key] = value
-			}
-		}
 	}
 
 	return nodeData, nil
+}
+
+type PaneFragmentsBatchRequest struct {
+	PaneIds []string `json:"paneIds" binding:"required"`
+}
+
+type PaneFragmentsBatchResponse struct {
+	Fragments map[string]string `json:"fragments"`
+	Errors    map[string]string `json:"errors,omitempty"`
+}
+
+// GetPaneFragmentsBatchHandler handles batch requests for multiple pane fragments
+// OPTIMIZED VERSION: Uses bulk database loading to eliminate N+1 query problem
+func GetPaneFragmentsBatchHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	var req PaneFragmentsBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	if len(req.PaneIds) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No pane IDs provided"})
+		return
+	}
+
+	// Extract session context once for all panes (same as single handler)
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	storyfragmentID := c.GetHeader("X-StoryFragment-ID")
+
+	response := PaneFragmentsBatchResponse{
+		Fragments: make(map[string]string),
+		Errors:    make(map[string]string),
+	}
+
+	// Use cache-first pane service (same as single handler)
+	paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
+
+	// Extract user ID for general context (same as single handler)
+	userID := extractUserIDFromRequest(c)
+
+	// ===== OPTIMIZATION: BULK LOAD ALL PANES AT ONCE =====
+	// Replace individual GetByID calls with single bulk call
+	paneNodes, err := paneService.GetByIDs(req.PaneIds)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to load panes: %v", err)})
+		return
+	}
+
+	// Convert slice to map for easy lookup during processing
+	paneNodesMap := make(map[string]*models.PaneNode)
+	for _, paneNode := range paneNodes {
+		if paneNode != nil {
+			paneNodesMap[paneNode.ID] = paneNode
+		}
+	}
+
+	// Process each pane ID using the same logic as the single handler
+	for _, paneID := range req.PaneIds {
+		if paneID == "" {
+			response.Errors[paneID] = "Empty pane ID"
+			continue
+		}
+
+		// Get pane from our pre-loaded map instead of individual service call
+		paneNode, exists := paneNodesMap[paneID]
+		if !exists {
+			response.Errors[paneID] = "Pane not found"
+			continue
+		}
+
+		if paneNode == nil {
+			response.Errors[paneID] = "Pane not found"
+			continue
+		}
+
+		// Extract and parse nodes from optionsPayload (same as single handler)
+		nodesData, parentChildMap, err := extractNodesFromPane(paneNode)
+		if err != nil {
+			response.Errors[paneID] = fmt.Sprintf("Failed to parse pane nodes: %v", err)
+			continue
+		}
+
+		// Add the pane itself to the nodes data structure (same as single handler)
+		paneNodeData := &models.NodeRenderData{
+			ID:       paneID,
+			NodeType: "Pane",
+			PaneData: &models.PaneRenderData{
+				Title:           paneNode.Title,
+				Slug:            paneNode.Slug,
+				IsDecorative:    paneNode.IsDecorative,
+				BgColour:        extractBgColour(paneNode),
+				HeldBeliefs:     paneNode.HeldBeliefs,
+				WithheldBeliefs: paneNode.WithheldBeliefs,
+				CodeHookTarget:  paneNode.CodeHookTarget,
+				CodeHookPayload: paneNode.CodeHookPayload,
+			},
+		}
+		nodesData[paneID] = paneNodeData
+
+		// Create render context with real data (same as single handler)
+		renderCtx := &models.RenderContext{
+			AllNodes:    nodesData,
+			ParentNodes: parentChildMap,
+			TenantID:    ctx.TenantID,
+			UserID:      userID,
+		}
+
+		// Create HTML generator (same as single handler)
+		generator := html.NewGenerator(renderCtx)
+
+		// Generate base HTML (same as single handler)
+		var htmlContent string
+		// Check cache first for non-personalized content
+		variant := models.PaneVariantDefault
+		if cachedHTML, exists := cache.GetGlobalManager().GetHTMLChunk(ctx.TenantID, paneID, variant); exists {
+			htmlContent = cachedHTML
+		} else {
+			htmlContent = generator.Render(paneID)
+			// Cache the generated HTML
+			cache.GetGlobalManager().SetHTMLChunk(ctx.TenantID, paneID, variant, htmlContent, []string{paneID})
+		}
+
+		// Apply personalization if available (same logic as single handler)
+		if sessionID != "" && storyfragmentID != "" {
+			fmt.Printf("DEBUG: Attempting personalization for session %s, storyfragment %s, pane %s\n",
+				sessionID, storyfragmentID, paneID)
+
+			// Get cached session belief context
+			if sessionContext, exists := cache.GetGlobalManager().GetSessionBeliefContext(ctx.TenantID, sessionID, storyfragmentID); exists {
+				fmt.Printf("DEBUG: Found session belief context with %d beliefs\n", len(sessionContext.UserBeliefs))
+
+				// Get pane belief requirements from registry
+				if beliefRegistry, exists := cache.GetGlobalManager().GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID); exists {
+					fmt.Printf("DEBUG: Found belief registry with %d panes\n", len(beliefRegistry.PaneBeliefPayloads))
+
+					if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
+						fmt.Printf("DEBUG: Found pane beliefs - held: %d, withheld: %d, matchAcross: %d\n",
+							len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs), len(paneBeliefs.MatchAcross))
+
+						// Create belief evaluation engine
+						beliefEngine := content.NewBeliefEvaluationEngine()
+
+						// Evaluate visibility for this pane based on user beliefs
+						visibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
+
+						// Apply visibility wrapper to HTML content
+						htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
+
+						fmt.Printf("DEBUG: Applied personalization - pane %s visibility: %s\n", paneID, visibility)
+					} else {
+						fmt.Printf("DEBUG: No belief requirements found for pane %s\n", paneID)
+					}
+				} else {
+					fmt.Printf("DEBUG: No belief registry found for storyfragment %s\n", storyfragmentID)
+				}
+			} else {
+				fmt.Printf("DEBUG: No session belief context found for session %s, storyfragment %s\n", sessionID, storyfragmentID)
+			}
+		}
+
+		// Store the final HTML content
+		response.Fragments[paneID] = htmlContent
+	}
+
+	c.JSON(http.StatusOK, response)
 }
