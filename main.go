@@ -5,10 +5,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/api"
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	defaults "github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -20,6 +22,11 @@ var GlobalCacheManager *cache.Manager
 func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found -- config defaults will be used")
+	}
+
+	// Set Gin mode based on environment
+	if os.Getenv("ENV") == "production" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 
 	// Initialize global cache manager
@@ -89,7 +96,7 @@ func main() {
 		tenantCtx, err := tenantManager.GetContext(c)
 		if err != nil {
 			log.Printf("Tenant context error for %s from %s: %v", c.Request.URL.Path, c.ClientIP(), err)
-			c.JSON(500, gin.H{"error": "tenant context failed: " + err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context failed: " + err.Error()})
 			c.Abort()
 			return
 		}
@@ -131,9 +138,9 @@ func main() {
 			strings.HasPrefix(host, "localhost:") ||
 			strings.HasPrefix(host, "127.0.0.1:") ||
 			strings.HasPrefix(host, "[::1]:") || // IPv6 localhost
-			host == "localhost:8080" || // Direct host access
-			host == "127.0.0.1:8080" ||
-			host == "[::1]:8080" { // IPv6 direct access
+			host == "localhost:"+defaults.Port || // Direct host access
+			host == "127.0.0.1:"+defaults.Port ||
+			host == "[::1]:"+defaults.Port { // IPv6 direct access
 			c.Next()
 			return
 		}
@@ -245,8 +252,9 @@ func main() {
 		}
 	}
 
-	log.Println("Starting server on :8080")
-	if err := r.Run(":8080"); err != nil {
+	serverAddress := ":" + defaults.Port
+	log.Printf("Starting server on %s", serverAddress)
+	if err := r.Run(serverAddress); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

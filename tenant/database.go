@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"time"
 
+	defaults "github.com/AtRiskMedia/tractstack-go/config"
 	_ "github.com/mattn/go-sqlite3"                      // SQLite driver
 	_ "github.com/tursodatabase/libsql-client-go/libsql" // Turso driver
 )
@@ -96,10 +96,11 @@ func NewDatabase(config *Config) (*Database, error) {
 	}
 
 	// Configure connection for production use with environment variables
-	conn.SetMaxOpenConns(getEnvInt("DB_MAX_OPEN_CONNS", 50))
-	conn.SetMaxIdleConns(getEnvInt("DB_MAX_IDLE_CONNS", 5))
-	conn.SetConnMaxLifetime(time.Duration(getEnvInt("DB_CONN_MAX_LIFETIME_MINUTES", 45)) * time.Minute)
-	conn.SetConnMaxIdleTime(time.Duration(getEnvInt("DB_CONN_MAX_IDLE_MINUTES", 5)) * time.Minute)
+	// Configure connection for production use with environment variables
+	conn.SetMaxOpenConns(defaults.DBMaxOpenConns)
+	conn.SetMaxIdleConns(defaults.DBMaxIdleConns)
+	conn.SetConnMaxLifetime(time.Duration(defaults.DBConnMaxLifetimeMinutes) * time.Minute)
+	conn.SetConnMaxIdleTime(time.Duration(defaults.DBConnMaxIdleMinutes) * time.Minute)
 
 	// Add to pool
 	poolMutex.Lock()
@@ -244,13 +245,4 @@ func GetConnectionPoolInfo() map[string]map[string]interface{} {
 	}
 
 	return info
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	if val := os.Getenv(key); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			return parsed
-		}
-	}
-	return defaultValue
 }

@@ -8,13 +8,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	defaults "github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
@@ -38,20 +37,10 @@ type VisitService struct {
 	ctx *tenant.Context
 }
 
-// getEnvInt reads environment variable with fallback
-func getEnvInt(key string, defaultValue int) int {
-	if val := os.Getenv(key); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			return parsed
-		}
-	}
-	return defaultValue
-}
-
 // Global SSE connection tracking
 var (
 	activeSSEConnections int64
-	maxSSEConnections    = int64(getEnvInt("MAX_SESSIONS_PER_CLIENT", 10000))
+	maxSSEConnections    = int64(defaults.MaxSessionsPerClient)
 )
 
 func NewVisitService(ctx *tenant.Context, _ any) *VisitService {
@@ -316,7 +305,7 @@ func SseHandler(c *gin.Context) {
 		return
 	}
 
-	const maxSessionConnections = 3
+	maxSessionConnections := defaults.MaxSessionConnections
 	sessionConnectionCount := models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID)
 	if sessionConnectionCount >= maxSessionConnections {
 		c.JSON(http.StatusTooManyRequests, gin.H{
@@ -328,7 +317,8 @@ func SseHandler(c *gin.Context) {
 	}
 
 	atomic.AddInt64(&activeSSEConnections, 1)
-	sseCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
+	sseCtx, cancel := context.WithTimeout(c.Request.Context(),
+		time.Duration(defaults.SSEConnectionTimeoutMinutes)*time.Minute)
 	ch := models.Broadcaster.AddClientWithSession(ctx.TenantID, sessionID)
 
 	if storyfragmentID != "" {
@@ -371,10 +361,10 @@ func SseHandler(c *gin.Context) {
 		sessionID, ctx.TenantID, storyfragmentID, models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID))
 	flusher.Flush()
 
-	heartbeat := time.NewTicker(30 * time.Second)
+	heartbeat := time.NewTicker(time.Duration(defaults.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer heartbeat.Stop()
 
-	inactivityTimeout := time.NewTimer(5 * time.Minute)
+	inactivityTimeout := time.NewTimer(time.Duration(defaults.SSEInactivityTimeoutMinutes) * time.Minute)
 	defer inactivityTimeout.Stop()
 
 	// log.Printf("SSE connection established for session %s in tenant %s (storyfragment: %s). Active connections: %d (session: %d)",
@@ -390,7 +380,7 @@ func SseHandler(c *gin.Context) {
 				default:
 				}
 			}
-			inactivityTimeout.Reset(5 * time.Minute)
+			inactivityTimeout.Reset(time.Duration(defaults.SSEInactivityTimeoutMinutes) * time.Minute)
 
 			_, err := fmt.Fprint(w, msg)
 			if err != nil {
