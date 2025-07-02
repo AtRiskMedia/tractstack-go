@@ -4,11 +4,11 @@ package cache
 import (
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"sync"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -45,9 +45,9 @@ UNSAFE PATTERNS (AVOIDED):
 
 // Environment-configurable cache bounds
 var (
-	MaxTenants           = getEnvInt("MAX_TENANTS", 100)
-	MaxMemoryMB          = getEnvInt("MAX_MEMORY_MB", 512)
-	MaxSessionsPerTenant = getEnvInt("MAX_SESSIONS_PER_TENANT", 10000)
+	MaxTenants           = config.MaxTenants
+	MaxMemoryMB          = config.MaxMemoryMB
+	MaxSessionsPerTenant = config.MaxSessionsPerTenant
 )
 
 type DatabasePoolCleanupFunc func()
@@ -55,31 +55,19 @@ type DatabasePoolCleanupFunc func()
 // Global reference to database pool cleanup function
 var databasePoolCleanup DatabasePoolCleanupFunc
 
-// getEnvInt reads an environment variable as an integer with default fallback
-func getEnvInt(key string, defaultValue int) int {
-	if val := os.Getenv(key); val != "" {
-		if parsed, err := strconv.Atoi(val); err == nil {
-			return parsed
-		}
-	}
-	return defaultValue
-}
-
-const (
-	// TTL constants for different cache types
-	ContentCacheTTL = 24 * time.Hour      // Content changes infrequently
-	UserStateTTL    = 2 * time.Hour       // User state changes more frequently
-	HTMLChunkTTL    = 1 * time.Hour       // HTML chunks can be regenerated quickly
-	AnalyticsBinTTL = 28 * 24 * time.Hour // Analytics bins are kept for 28 days
-	CurrentHourTTL  = 15 * time.Minute    // Current hour bins refresh more frequently
-	LeadMetricsTTL  = 5 * time.Minute     // Lead metrics computed frequently
-	DashboardTTL    = 10 * time.Minute    // Dashboard data refreshed regularly
-
-	// Cleanup intervals
-	CleanupInterval       = 30 * time.Minute // How often to run cleanup
-	TenantTimeout         = 4 * time.Hour    // Evict inactive tenants after this time
-	SSECleanupInterval    = 5 * time.Minute  // How often to clean SSE connections
-	DBPoolCleanupInterval = 5 * time.Minute  // How often to clean database connection pools
+// TTL constants for different cache types
+var (
+	ContentCacheTTL       = config.ContentCacheTTL
+	UserStateTTL          = config.UserStateTTL
+	HTMLChunkTTL          = config.HTMLChunkTTL
+	AnalyticsBinTTL       = config.AnalyticsBinTTL
+	CurrentHourTTL        = config.CurrentHourTTL
+	LeadMetricsTTL        = config.LeadMetricsTTL
+	DashboardTTL          = config.DashboardTTL
+	CleanupInterval       = config.CleanupInterval
+	TenantTimeout         = config.TenantTimeout
+	SSECleanupInterval    = config.SSECleanupInterval
+	DBPoolCleanupInterval = config.DBPoolCleanupInterval
 )
 
 // CacheLock provides cache management for cache operations
