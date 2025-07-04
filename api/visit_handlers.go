@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -365,7 +366,7 @@ func SseHandler(c *gin.Context) {
 	flusher.Flush()
 
 	log.Printf("SSE test")
-	triggerTemporarySSETest(ctx, storyfragmentID) // TEMPORARY: Remove after testing
+	triggerTemporarySSETest(ctx, storyfragmentID, sessionID) // TEMPORARY: Remove after testing
 
 	heartbeat := time.NewTicker(time.Duration(defaults.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer heartbeat.Stop()
@@ -615,11 +616,116 @@ func checkImmediateStateUpdate(ctx *tenant.Context, sessionID, storyfragmentID s
 	}
 }
 
-func triggerTemporarySSETest(ctx *tenant.Context, storyfragmentID string) {
+func triggerTemporarySSETest(ctx *tenant.Context, storyfragmentID, sessionID string) {
 	storyFragmentService := content.NewStoryFragmentService(ctx, cache.GetGlobalManager())
 	if storyFragmentNode, err := storyFragmentService.GetByID(storyfragmentID); err == nil && storyFragmentNode != nil {
+		injectRandomTestBeliefs(ctx, sessionID)
 		log.Printf("TEMPORARY SSE TEST: Broadcasting refresh for all %d panes in storyfragment %s",
 			len(storyFragmentNode.PaneIDs), storyfragmentID)
 		models.Broadcaster.BroadcastToAffectedPanes(ctx.TenantID, storyfragmentID, storyFragmentNode.PaneIDs)
 	}
+}
+
+func injectRandomTestBeliefs(ctx *tenant.Context, sessionID string) {
+	log.Printf("🧪 Injecting random test beliefs into session %s", sessionID)
+
+	// Get session data to find fingerprint
+	cacheManager := cache.GetGlobalManager()
+	sessionData, exists := cacheManager.GetSession(ctx.TenantID, sessionID)
+	if !exists {
+		log.Printf("❌ Session not found for belief injection: %s", sessionID)
+		return
+	}
+
+	// Get or create fingerprint state
+	fingerprintState, exists := cacheManager.GetFingerprintState(ctx.TenantID, sessionData.FingerprintID)
+	if !exists {
+		fingerprintState = &models.FingerprintState{
+			FingerprintID: sessionData.FingerprintID,
+			HeldBeliefs:   make(map[string][]string),
+			HeldBadges:    make(map[string]string),
+			LastActivity:  time.Now(),
+		}
+	}
+
+	// Define the belief hierarchy
+	buildingCommunityOptions := []string{
+		"IMPART knowledge",
+		"SELL a product or offer",
+		"DELIVER professional services",
+		"EVANGELIZE the lost",
+	}
+
+	secondaryBeliefs := map[string]struct {
+		slug   string
+		values []string
+	}{
+		"IMPART knowledge": {
+			slug: "IMPARTknowledge",
+			values: []string{
+				"Create content that grows with your audience",
+				"See exactly which content resonates most",
+				"Turn passive readers into active participants",
+				"Build lasting connections through shared learning",
+			},
+		},
+		"SELL a product or offer": {
+			slug: "SELLoffer",
+			values: []string{
+				"Tailor product information to visitor interests",
+				"Understand which content drives real results",
+				"Convert browsers into qualified buyers",
+				"Simplify creating personalized buying journeys",
+			},
+		},
+		"DELIVER professional services": {
+			slug: "DELIVERservices",
+			values: []string{
+				"Match services to client's expressed needs",
+				"Track which service offerings generate interest",
+				"Transform site visitors into consultation requests",
+				"Create client relationships that last",
+			},
+		},
+		"EVANGELIZE the lost": {
+			slug: "EVANGELIZElost",
+			values: []string{
+				"Share the right message at the right time",
+				"Discover which teachings touch hearts most",
+				"Guide seekers to their next spiritual step",
+				"Nurture genuine connections with seekers",
+			},
+		},
+	}
+
+	// Random selection logic
+	scenarios := []string{"none", "primary_only", "full_path"}
+	scenario := scenarios[rand.Intn(len(scenarios))]
+
+	switch scenario {
+	case "none":
+		log.Printf("🎲 Random scenario: No beliefs injected")
+
+	case "primary_only":
+		// Pick random primary choice only
+		primaryChoice := buildingCommunityOptions[rand.Intn(len(buildingCommunityOptions))]
+		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice}
+		log.Printf("🎲 Random scenario: Primary only - BuildingCommunity = %s", primaryChoice)
+
+	case "full_path":
+		// Pick random primary AND random secondary
+		primaryChoice := buildingCommunityOptions[rand.Intn(len(buildingCommunityOptions))]
+		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice}
+
+		secondary := secondaryBeliefs[primaryChoice]
+		secondaryChoice := secondary.values[rand.Intn(len(secondary.values))]
+		fingerprintState.HeldBeliefs[secondary.slug] = []string{secondaryChoice}
+
+		log.Printf("🎲 Random scenario: Full path - BuildingCommunity = %s, %s = %s",
+			primaryChoice, secondary.slug, secondaryChoice)
+	}
+
+	fingerprintState.UpdateActivity()
+	cacheManager.SetFingerprintState(ctx.TenantID, fingerprintState)
+	log.Printf("🧪 Random belief injection complete for fingerprint %s", sessionData.FingerprintID)
 }

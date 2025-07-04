@@ -142,9 +142,8 @@ func (m *Manager) EnsureTenant(tenantID string) {
 
 	// Check if tenant fully exists
 	if contentExists && userStateExists && htmlExists && analyticsExists {
-		m.LastAccessed[tenantID] = time.Now()
 		m.Mu.RUnlock()
-		return
+		return // FIXED: Don't update LastAccessed in the fast path - only update when we actually do work
 	}
 	m.Mu.RUnlock()
 
@@ -215,13 +214,14 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	}
 
 	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
-		FingerprintStates:     make(map[string]*models.FingerprintState),
-		VisitStates:           make(map[string]*models.VisitState),
-		KnownFingerprints:     make(map[string]bool),
-		SessionStates:         make(map[string]*models.SessionData),
-		LastLoaded:            time.Now(),
-		SessionBeliefContexts: make(map[string]*models.SessionBeliefContext),
-		Mu:                    sync.RWMutex{},
+		FingerprintStates:             make(map[string]*models.FingerprintState),
+		VisitStates:                   make(map[string]*models.VisitState),
+		KnownFingerprints:             make(map[string]bool),
+		SessionStates:                 make(map[string]*models.SessionData),
+		StoryfragmentBeliefRegistries: make(map[string]*models.StoryfragmentBeliefRegistry),
+		SessionBeliefContexts:         make(map[string]*models.SessionBeliefContext),
+		LastLoaded:                    time.Now(),
+		Mu:                            sync.RWMutex{},
 	}
 
 	m.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
@@ -240,13 +240,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 
 	m.LastAccessed[tenantID] = time.Now()
 
-	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
-		FingerprintStates:             make(map[string]*models.FingerprintState),
-		VisitStates:                   make(map[string]*models.VisitState),
-		SessionStates:                 make(map[string]*models.SessionData),
-		KnownFingerprints:             make(map[string]bool),
-		StoryfragmentBeliefRegistries: make(map[string]*models.StoryfragmentBeliefRegistry),
-	}
+	log.Printf("Cache: Initialized tenant %s with all cache structures", tenantID)
 }
 
 // cleanupOldestTenantsUnsafe removes the oldest accessed tenants to make room for new ones
@@ -703,11 +697,6 @@ func (m *Manager) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID strin
 		return nil, false
 	}
 
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
-
 	return registry, true
 }
 
@@ -724,11 +713,6 @@ func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *mode
 
 	// Set the registry
 	cache.StoryfragmentBeliefRegistries[registry.StoryfragmentID] = registry
-
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
 }
 
 // InvalidateStoryfragmentBeliefRegistry removes belief registry from cache
@@ -739,11 +723,6 @@ func (m *Manager) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentI
 	defer cache.Mu.Unlock()
 
 	delete(cache.StoryfragmentBeliefRegistries, storyfragmentID)
-
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
 }
 
 // GetSessionBeliefContext provides Cache Operations
@@ -758,11 +737,6 @@ func (m *Manager) GetSessionBeliefContext(tenantID, sessionID, storyfragmentID s
 	if !exists {
 		return nil, false
 	}
-
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
 
 	return context, true
 }
@@ -786,11 +760,6 @@ func (m *Manager) SetSessionBeliefContext(tenantID string, context *models.Sessi
 	key := fmt.Sprintf("%s:%s", context.SessionID, context.StoryfragmentID)
 	cache.SessionBeliefContexts[key] = context
 
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
-
 	log.Printf("DEBUG: Cached session belief context for session %s on storyfragment %s",
 		context.SessionID, context.StoryfragmentID)
 }
@@ -803,11 +772,6 @@ func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragm
 
 	key := fmt.Sprintf("%s:%s", sessionID, storyfragmentID)
 	delete(cache.SessionBeliefContexts, key)
-
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
 }
 
 // GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries
@@ -821,11 +785,6 @@ func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
 	for storyfragmentID := range cache.StoryfragmentBeliefRegistries {
 		storyfragmentIDs = append(storyfragmentIDs, storyfragmentID)
 	}
-
-	// Update last accessed
-	m.Mu.Lock()
-	m.LastAccessed[tenantID] = time.Now()
-	m.Mu.Unlock()
 
 	return storyfragmentIDs
 }
