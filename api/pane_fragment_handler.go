@@ -3,6 +3,7 @@ package api
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/html"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
+	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -49,7 +51,7 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	}
 
 	// Extract and parse nodes from optionsPayload
-	nodesData, parentChildMap, err := extractNodesFromPane(paneNode)
+	nodesData, parentChildMap, err := html.ExtractNodesFromPane(paneNode)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to parse pane nodes: %v", err)})
 		return
@@ -86,20 +88,24 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	// Create HTML generator
 	generator := html.NewGenerator(renderCtx)
 
-	// ===== GENERATE BASE HTML (CACHE-FIRST) =====
-	// Use our PaneRenderer to render the complete pane structure
-	// This will call our PaneRenderer.Render() which implements the complete Pane.astro logic
+	// ===== GENERATE BASE HTML (CACHE-FIRST WITH WIDGET BYPASS) =====
+	// Check if we should bypass cache due to widgets
 	var htmlContent string
-	// Check cache first for non-personalized content
-	variant := models.PaneVariantDefault
-	if cachedHTML, exists := cache.GetGlobalManager().GetHTMLChunk(ctx.TenantID, paneID, variant); exists {
-		htmlContent = cachedHTML
-		// fmt.Printf("DEBUG: Cache HIT for pane %s\n", paneID)
-	} else {
+	if shouldBypassCacheForWidgets(ctx, paneID, sessionID, storyfragmentID) {
+		// Generate fresh HTML with sessionID for widget state
 		htmlContent = generator.Render(paneID)
-		// Cache the generated HTML
-		cache.GetGlobalManager().SetHTMLChunk(ctx.TenantID, paneID, variant, htmlContent, []string{paneID})
-		// fmt.Printf("DEBUG: Cache MISS for pane %s - generated and cached\n", paneID)
+	} else {
+		// Check cache first for non-personalized content
+		variant := models.PaneVariantDefault
+		if cachedHTML, exists := cache.GetGlobalManager().GetHTMLChunk(ctx.TenantID, paneID, variant); exists {
+			htmlContent = cachedHTML
+			// fmt.Printf("DEBUG: Cache HIT for pane %s\n", paneID)
+		} else {
+			htmlContent = generator.Render(paneID)
+			// Cache the generated HTML
+			cache.GetGlobalManager().SetHTMLChunk(ctx.TenantID, paneID, variant, htmlContent, []string{paneID})
+			// fmt.Printf("DEBUG: Cache MISS for pane %s - generated and cached\n", paneID)
+		}
 	}
 	// fmt.Printf("DEBUG: Generated base HTML for pane %s (%d chars)\n", paneID, len(htmlContent))
 	// ===== END BASE HTML GENERATION =====
@@ -209,145 +215,6 @@ func extractBgColour(paneNode *models.PaneNode) *string {
 //	return rootNodes
 //}
 
-// extractNodesFromPane parses the optionsPayload.nodes array and builds data structures
-func extractNodesFromPane(paneNode *models.PaneNode) (map[string]*models.NodeRenderData, map[string][]string, error) {
-	nodesData := make(map[string]*models.NodeRenderData)
-	parentChildMap := make(map[string][]string)
-
-	// Check if optionsPayload exists and has nodes
-	if paneNode.OptionsPayload == nil {
-		return nodesData, parentChildMap, nil
-	}
-
-	// Extract nodes array from optionsPayload
-	nodesInterface, exists := paneNode.OptionsPayload["nodes"]
-	if !exists {
-		return nodesData, parentChildMap, nil
-	}
-
-	// Convert to array of maps
-	nodesArray, ok := nodesInterface.([]any)
-	if !ok {
-		return nodesData, parentChildMap, fmt.Errorf("nodes is not an array")
-	}
-
-	// Parse each node
-	for _, nodeInterface := range nodesArray {
-		nodeMap, ok := nodeInterface.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		nodeData, err := parseNodeFromMap(nodeMap)
-		if err != nil {
-			continue // Skip invalid nodes rather than failing entirely
-		}
-
-		if nodeData.ID != "" {
-			nodesData[nodeData.ID] = nodeData
-
-			// Build parent-child relationships
-			if nodeData.ParentID != "" {
-				if parentChildMap[nodeData.ParentID] == nil {
-					parentChildMap[nodeData.ParentID] = make([]string, 0)
-				}
-				parentChildMap[nodeData.ParentID] = append(parentChildMap[nodeData.ParentID], nodeData.ID)
-			}
-		}
-	}
-
-	return nodesData, parentChildMap, nil
-}
-
-// parseNodeFromMap converts a map[string]any to NodeRenderData
-func parseNodeFromMap(nodeMap map[string]any) (*models.NodeRenderData, error) {
-	nodeData := &models.NodeRenderData{}
-
-	// Extract required fields
-	if id, ok := nodeMap["id"].(string); ok {
-		nodeData.ID = id
-	} else {
-		return nil, fmt.Errorf("missing or invalid node id")
-	}
-
-	if nodeType, ok := nodeMap["nodeType"].(string); ok {
-		nodeData.NodeType = nodeType
-	} else {
-		return nil, fmt.Errorf("missing or invalid nodeType")
-	}
-
-	// Extract optional fields
-	if tagName, ok := nodeMap["tagName"].(string); ok {
-		nodeData.TagName = &tagName
-	}
-
-	if copy, ok := nodeMap["copy"].(string); ok {
-		nodeData.Copy = &copy
-	}
-
-	if elementCSS, ok := nodeMap["elementCss"].(string); ok {
-		nodeData.ElementCSS = &elementCSS
-	}
-
-	if parentID, ok := nodeMap["parentId"].(string); ok {
-		nodeData.ParentID = parentID
-	}
-
-	// Handle ParentCSS array
-	if parentCSS, ok := nodeMap["parentCss"].([]any); ok {
-		cssStrings := make([]string, 0, len(parentCSS))
-		for _, css := range parentCSS {
-			if cssStr, ok := css.(string); ok {
-				cssStrings = append(cssStrings, cssStr)
-			}
-		}
-		nodeData.ParentCSS = cssStrings
-	}
-
-	// Handle image-related fields
-	if src, ok := nodeMap["src"].(string); ok {
-		nodeData.ImageURL = &src
-	}
-
-	if srcSet, ok := nodeMap["srcSet"].(string); ok {
-		nodeData.SrcSet = &srcSet
-	}
-
-	if alt, ok := nodeMap["alt"].(string); ok {
-		nodeData.AltText = &alt
-	}
-
-	// Handle link fields
-	if href, ok := nodeMap["href"].(string); ok {
-		nodeData.Href = &href
-	}
-
-	if target, ok := nodeMap["target"].(string); ok {
-		nodeData.Target = &target
-	}
-
-	// Handle BgPane specific fields
-	if nodeData.NodeType == "BgPane" {
-		bgImageData := &models.BackgroundImageData{}
-
-		if nodeType, ok := nodeMap["type"].(string); ok {
-			bgImageData.Type = nodeType
-		}
-
-		if position, ok := nodeMap["position"].(string); ok {
-			bgImageData.Position = position
-		}
-
-		if size, ok := nodeMap["size"].(string); ok {
-			bgImageData.Size = size
-		}
-
-		nodeData.BgImageData = bgImageData
-	}
-
-	return nodeData, nil
-}
-
 type PaneFragmentsBatchRequest struct {
 	PaneIds []string `json:"paneIds" binding:"required"`
 }
@@ -358,7 +225,6 @@ type PaneFragmentsBatchResponse struct {
 }
 
 // GetPaneFragmentsBatchHandler handles batch requests for multiple pane fragments
-// OPTIMIZED VERSION: Uses bulk database loading to eliminate N+1 query problem
 func GetPaneFragmentsBatchHandler(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -408,6 +274,17 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 		}
 	}
 
+	// ===== BUILD BELIEF REGISTRY FROM LOADED PANES =====
+	// Now that we have all panes loaded, build the belief registry efficiently
+	if storyfragmentID != "" {
+		beliefRegistryService := content.NewBeliefRegistryService(ctx)
+		_, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyfragmentID, paneNodes)
+		if err != nil {
+			// Log the error but don't fail the request - belief registry is optional
+			log.Printf("Failed to build belief registry for storyfragment %s: %v", storyfragmentID, err)
+		}
+	}
+
 	// Process each pane ID using the same logic as the single handler
 	for _, paneID := range req.PaneIds {
 		if paneID == "" {
@@ -428,7 +305,7 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 		}
 
 		// Extract and parse nodes from optionsPayload (same as single handler)
-		nodesData, parentChildMap, err := extractNodesFromPane(paneNode)
+		nodesData, parentChildMap, err := html.ExtractNodesFromPane(paneNode)
 		if err != nil {
 			response.Errors[paneID] = fmt.Sprintf("Failed to parse pane nodes: %v", err)
 			continue
@@ -462,16 +339,21 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 		// Create HTML generator (same as single handler)
 		generator := html.NewGenerator(renderCtx)
 
-		// Generate base HTML (same as single handler)
+		// Generate base HTML with widget-aware cache bypass
 		var htmlContent string
-		// Check cache first for non-personalized content
-		variant := models.PaneVariantDefault
-		if cachedHTML, exists := cache.GetGlobalManager().GetHTMLChunk(ctx.TenantID, paneID, variant); exists {
-			htmlContent = cachedHTML
-		} else {
+		if shouldBypassCacheForWidgets(ctx, paneID, sessionID, storyfragmentID) {
+			// Generate fresh HTML with sessionID for widget state
 			htmlContent = generator.Render(paneID)
-			// Cache the generated HTML
-			cache.GetGlobalManager().SetHTMLChunk(ctx.TenantID, paneID, variant, htmlContent, []string{paneID})
+		} else {
+			// Check cache first for non-personalized content
+			variant := models.PaneVariantDefault
+			if cachedHTML, exists := cache.GetGlobalManager().GetHTMLChunk(ctx.TenantID, paneID, variant); exists {
+				htmlContent = cachedHTML
+			} else {
+				htmlContent = generator.Render(paneID)
+				// Cache the generated HTML
+				cache.GetGlobalManager().SetHTMLChunk(ctx.TenantID, paneID, variant, htmlContent, []string{paneID})
+			}
 		}
 
 		// Apply personalization if available (same logic as single handler)
@@ -517,4 +399,64 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// shouldBypassCacheForWidgets checks if cache should be bypassed due to widgets
+// Returns true if pane has widgets AND user has matching beliefs
+func shouldBypassCacheForWidgets(ctx *tenant.Context, paneID, sessionID, storyfragmentID string) bool {
+	// Must have sessionID to check user beliefs
+	if sessionID == "" || storyfragmentID == "" {
+		return false
+	}
+
+	// Get belief registry to check for widget beliefs in this pane
+	cacheManager := cache.GetGlobalManager()
+	registry, found := cacheManager.GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID)
+	if !found {
+		return false // No registry = no widgets
+	}
+
+	// Check if this pane has any widget beliefs
+	widgetBeliefs, hasWidgets := registry.PaneWidgetBeliefs[paneID]
+	if !hasWidgets || len(widgetBeliefs) == 0 {
+		return false // No widgets in this pane
+	}
+
+	// Get user's current beliefs
+	userBeliefs := getUserBeliefsFromContext(ctx, sessionID)
+	if userBeliefs == nil {
+		return false // No user beliefs = no need to bypass
+	}
+
+	// Check if user has any beliefs that match this pane's widgets
+	for _, widgetBelief := range widgetBeliefs {
+		if _, hasUserBelief := userBeliefs[widgetBelief]; hasUserBelief {
+			return true // User has belief matching widget = bypass cache
+		}
+	}
+
+	return false // No matching beliefs = use cache
+}
+
+// getUserBeliefsFromContext extracts user beliefs from session data
+// Returns nil if session or beliefs not found
+func getUserBeliefsFromContext(ctx *tenant.Context, sessionID string) map[string][]string {
+	if sessionID == "" {
+		return nil
+	}
+
+	// Get session data to find fingerprint ID
+	cacheManager := cache.GetGlobalManager()
+	sessionData, sessionExists := cacheManager.GetSession(ctx.TenantID, sessionID)
+	if !sessionExists {
+		return nil
+	}
+
+	// Get fingerprint state to access user beliefs
+	fingerprintState, fpExists := cacheManager.GetFingerprintState(ctx.TenantID, sessionData.FingerprintID)
+	if !fpExists || fingerprintState.HeldBeliefs == nil {
+		return nil
+	}
+
+	return fingerprintState.HeldBeliefs
 }

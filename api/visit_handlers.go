@@ -15,6 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	defaults "github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
+	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 	"github.com/gin-gonic/gin"
@@ -323,6 +324,8 @@ func SseHandler(c *gin.Context) {
 
 	if storyfragmentID != "" {
 		models.Broadcaster.RegisterStoryfragmentSubscription(ctx.TenantID, sessionID, storyfragmentID)
+		log.Printf("SSE connected for %s+%s+%s - ready for immediate state check", ctx.TenantID, storyfragmentID, sessionID)
+		checkImmediateStateUpdate(ctx, sessionID, storyfragmentID)
 		// log.Printf("SSE: Registered session %s with storyfragment %s in tenant %s",
 		//	sessionID, storyfragmentID, ctx.TenantID)
 	}
@@ -360,6 +363,9 @@ func SseHandler(c *gin.Context) {
 	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"tenantId\":\"%s\",\"storyfragmentId\":\"%s\",\"connectionCount\":%d}\n\n",
 		sessionID, ctx.TenantID, storyfragmentID, models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID))
 	flusher.Flush()
+
+	log.Printf("SSE test")
+	triggerTemporarySSETest(ctx, storyfragmentID) // TEMPORARY: Remove after testing
 
 	heartbeat := time.NewTicker(time.Duration(defaults.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer heartbeat.Stop()
@@ -561,4 +567,59 @@ func (vs *VisitService) UpdateFingerprintLeadID(fingerprintID string, leadID *st
 	}
 
 	return nil
+}
+
+// checkImmediateStateUpdate checks if user has beliefs that match widgets and broadcasts updates
+func checkImmediateStateUpdate(ctx *tenant.Context, sessionID, storyfragmentID string) {
+	// We need the pane IDs for this storyfragment to build/get the registry
+	// For now, we'll try to get an existing registry from cache
+	cacheManager := cache.GetGlobalManager()
+	registry, found := cacheManager.GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID)
+
+	if !found {
+		// No registry cached yet - this is expected during initial load
+		// The registry will be built when the storyfragment is first requested
+		log.Printf("No registry found for storyfragment %s - registry will be built on storyfragment request", storyfragmentID)
+		return
+	}
+
+	// Get user's current beliefs from session data
+	sessionData, sessionExists := cacheManager.GetSession(ctx.TenantID, sessionID)
+	if !sessionExists {
+		log.Printf("No session data found for immediate state check: %s", sessionID)
+		return
+	}
+
+	// Get fingerprint state to access user beliefs
+	fingerprintState, fpExists := cacheManager.GetFingerprintState(ctx.TenantID, sessionData.FingerprintID)
+	if !fpExists || fingerprintState.HeldBeliefs == nil {
+		log.Printf("No fingerprint state or beliefs found for immediate state check: %s", sessionData.FingerprintID)
+		return
+	}
+
+	// Check if user has any beliefs that match widget beliefs in this storyfragment
+	var matchingBeliefs []string
+	for beliefSlug := range fingerprintState.HeldBeliefs {
+		if registry.AllWidgetBeliefs[beliefSlug] {
+			matchingBeliefs = append(matchingBeliefs, beliefSlug)
+		}
+	}
+
+	// If user has matching beliefs, trigger immediate broadcast
+	if len(matchingBeliefs) > 0 {
+		log.Printf("SSE: Found user beliefs matching widgets, triggering immediate update for session %s", sessionID)
+
+		// Use existing broadcast service to find and broadcast affected panes
+		broadcastService := NewBeliefBroadcastService(cacheManager)
+		broadcastService.BroadcastBeliefChange(ctx.TenantID, sessionID, matchingBeliefs)
+	}
+}
+
+func triggerTemporarySSETest(ctx *tenant.Context, storyfragmentID string) {
+	storyFragmentService := content.NewStoryFragmentService(ctx, cache.GetGlobalManager())
+	if storyFragmentNode, err := storyFragmentService.GetByID(storyfragmentID); err == nil && storyFragmentNode != nil {
+		log.Printf("TEMPORARY SSE TEST: Broadcasting refresh for all %d panes in storyfragment %s",
+			len(storyFragmentNode.PaneIDs), storyfragmentID)
+		models.Broadcaster.BroadcastToAffectedPanes(ctx.TenantID, storyfragmentID, storyFragmentNode.PaneIDs)
+	}
 }

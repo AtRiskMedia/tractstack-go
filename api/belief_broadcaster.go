@@ -85,6 +85,9 @@ func (bbs *BeliefBroadcastService) findAffectedPanesInRegistry(registry *models.
 		}
 	}
 
+	widgetAffectedPanes := bbs.checkWidgetBeliefs(registry, changedBeliefs)
+	affectedPanes = append(affectedPanes, widgetAffectedPanes...)
+
 	return affectedPanes
 }
 
@@ -119,4 +122,26 @@ func (bbs *BeliefBroadcastService) paneUsesChangedBeliefs(paneData models.PaneBe
 	}
 
 	return false
+}
+
+// checkWidgetBeliefs checks if any changed beliefs affect widget beliefs in the registry
+func (bbs *BeliefBroadcastService) checkWidgetBeliefs(registry *models.StoryfragmentBeliefRegistry, changedBeliefs map[string]bool) []string {
+	var affectedPanes []string
+
+	// Check if any changed beliefs are widget beliefs
+	for beliefSlug := range changedBeliefs {
+		if registry.AllWidgetBeliefs[beliefSlug] {
+			// Find all panes that have widgets using this belief
+			for paneID, widgetBeliefs := range registry.PaneWidgetBeliefs {
+				for _, widgetBelief := range widgetBeliefs {
+					if widgetBelief == beliefSlug {
+						affectedPanes = append(affectedPanes, paneID)
+						break // Found this pane, move to next
+					}
+				}
+			}
+		}
+	}
+
+	return affectedPanes
 }
