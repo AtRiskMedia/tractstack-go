@@ -648,81 +648,188 @@ func injectRandomTestBeliefs(ctx *tenant.Context, sessionID string) {
 		}
 	}
 
-	// Define the belief hierarchy
-	buildingCommunityOptions := []string{
-		"IMPART knowledge",
-		"SELL a product or offer",
-		"DELIVER professional services",
-		"EVANGELIZE the lost",
+	// Define the widget belief slugs and their possible values (as JSON objects)
+	buildingCommunityOptions := []struct {
+		value string
+		json  string
+	}{
+		{
+			value: "IMPART knowledge",
+			json:  `{"id":"BuildingCommunity","verb":"IDENTIFY_AS","slug":"BuildingCommunity","object":"IMPART knowledge"}`,
+		},
+		{
+			value: "SELL a product or offer",
+			json:  `{"id":"BuildingCommunity","verb":"IDENTIFY_AS","slug":"BuildingCommunity","object":"SELL a product or offer"}`,
+		},
+		{
+			value: "DELIVER professional services",
+			json:  `{"id":"BuildingCommunity","verb":"IDENTIFY_AS","slug":"BuildingCommunity","object":"DELIVER professional services"}`,
+		},
+		{
+			value: "EVANGELIZE the lost",
+			json:  `{"id":"BuildingCommunity","verb":"IDENTIFY_AS","slug":"BuildingCommunity","object":"EVANGELIZE the lost"}`,
+		},
 	}
 
+	// Define secondary beliefs for each primary choice
 	secondaryBeliefs := map[string]struct {
-		slug   string
-		values []string
+		slug    string
+		options []struct {
+			value string
+			json  string
+		}
 	}{
 		"IMPART knowledge": {
 			slug: "IMPARTknowledge",
-			values: []string{
-				"Create content that grows with your audience",
-				"See exactly which content resonates most",
-				"Turn passive readers into active participants",
-				"Build lasting connections through shared learning",
+			options: []struct {
+				value string
+				json  string
+			}{
+				{
+					value: "Create content that grows with your audience",
+					json:  `{"id":"IMPARTknowledge","verb":"IDENTIFY_AS","slug":"IMPARTknowledge","object":"Create content that grows with your audience"}`,
+				},
+				{
+					value: "See exactly which content resonates most",
+					json:  `{"id":"IMPARTknowledge","verb":"IDENTIFY_AS","slug":"IMPARTknowledge","object":"See exactly which content resonates most"}`,
+				},
+				{
+					value: "Turn passive readers into active participants",
+					json:  `{"id":"IMPARTknowledge","verb":"IDENTIFY_AS","slug":"IMPARTknowledge","object":"Turn passive readers into active participants"}`,
+				},
+				{
+					value: "Build lasting connections through shared learning",
+					json:  `{"id":"IMPARTknowledge","verb":"IDENTIFY_AS","slug":"IMPARTknowledge","object":"Build lasting connections through shared learning"}`,
+				},
 			},
 		},
 		"SELL a product or offer": {
 			slug: "SELLoffer",
-			values: []string{
-				"Tailor product information to visitor interests",
-				"Understand which content drives real results",
-				"Convert browsers into qualified buyers",
-				"Simplify creating personalized buying journeys",
+			options: []struct {
+				value string
+				json  string
+			}{
+				{
+					value: "Tailor product information to visitor interests",
+					json:  `{"id":"SELLoffer","verb":"IDENTIFY_AS","slug":"SELLoffer","object":"Tailor product information to visitor interests"}`,
+				},
+				{
+					value: "Understand which content drives real results",
+					json:  `{"id":"SELLoffer","verb":"IDENTIFY_AS","slug":"SELLoffer","object":"Understand which content drives real results"}`,
+				},
+				{
+					value: "Convert browsers into qualified buyers",
+					json:  `{"id":"SELLoffer","verb":"IDENTIFY_AS","slug":"SELLoffer","object":"Convert browsers into qualified buyers"}`,
+				},
+				{
+					value: "Simplify creating personalized buying journeys",
+					json:  `{"id":"SELLoffer","verb":"IDENTIFY_AS","slug":"SELLoffer","object":"Simplify creating personalized buying journeys"}`,
+				},
 			},
 		},
 		"DELIVER professional services": {
 			slug: "DELIVERservices",
-			values: []string{
-				"Match services to client's expressed needs",
-				"Track which service offerings generate interest",
-				"Transform site visitors into consultation requests",
-				"Create client relationships that last",
+			options: []struct {
+				value string
+				json  string
+			}{
+				{
+					value: "Match services to client's expressed needs",
+					json:  `{"id":"DELIVERservices","verb":"IDENTIFY_AS","slug":"DELIVERservices","object":"Match services to client's expressed needs"}`,
+				},
+				{
+					value: "Track which service offerings generate interest",
+					json:  `{"id":"DELIVERservices","verb":"IDENTIFY_AS","slug":"DELIVERservices","object":"Track which service offerings generate interest"}`,
+				},
+				{
+					value: "Transform site visitors into consultation requests",
+					json:  `{"id":"DELIVERservices","verb":"IDENTIFY_AS","slug":"DELIVERservices","object":"Transform site visitors into consultation requests"}`,
+				},
+				{
+					value: "Create client relationships that last",
+					json:  `{"id":"DELIVERservices","verb":"IDENTIFY_AS","slug":"DELIVERservices","object":"Create client relationships that last"}`,
+				},
 			},
 		},
 		"EVANGELIZE the lost": {
 			slug: "EVANGELIZElost",
-			values: []string{
-				"Share the right message at the right time",
-				"Discover which teachings touch hearts most",
-				"Guide seekers to their next spiritual step",
-				"Nurture genuine connections with seekers",
+			options: []struct {
+				value string
+				json  string
+			}{
+				{
+					value: "Share the right message at the right time",
+					json:  `{"id":"EVANGELIZElost","verb":"IDENTIFY_AS","slug":"EVANGELIZElost","object":"Share the right message at the right time"}`,
+				},
+				{
+					value: "Discover which teachings touch hearts most",
+					json:  `{"id":"EVANGELIZElost","verb":"IDENTIFY_AS","slug":"EVANGELIZElost","object":"Discover which teachings touch hearts most"}`,
+				},
+				{
+					value: "Guide seekers to their next spiritual step",
+					json:  `{"id":"EVANGELIZElost","verb":"IDENTIFY_AS","slug":"EVANGELIZElost","object":"Guide seekers to their next spiritual step"}`,
+				},
+				{
+					value: "Nurture genuine connections with seekers",
+					json:  `{"id":"EVANGELIZElost","verb":"IDENTIFY_AS","slug":"EVANGELIZElost","object":"Nurture genuine connections with seekers"}`,
+				},
 			},
 		},
 	}
 
-	// Random selection logic
-	scenarios := []string{"none", "primary_only", "full_path"}
+	// Also add WarmLead as a standalone belief option
+	warmLeadBelief := `{"id":"WarmLead","verb":"BELIEVES_YES","slug":"WarmLead"}`
+
+	// Random selection logic - expanded scenarios
+	scenarios := []string{"none", "warm_lead_only", "primary_only", "full_path", "warm_lead_plus_primary", "warm_lead_plus_full"}
 	scenario := scenarios[rand.Intn(len(scenarios))]
 
 	switch scenario {
 	case "none":
 		log.Printf("🎲 Random scenario: No beliefs injected")
 
+	case "warm_lead_only":
+		// Just WarmLead
+		fingerprintState.HeldBeliefs["WarmLead"] = []string{warmLeadBelief}
+		log.Printf("🎲 Random scenario: WarmLead only")
+
 	case "primary_only":
 		// Pick random primary choice only
 		primaryChoice := buildingCommunityOptions[rand.Intn(len(buildingCommunityOptions))]
-		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice}
-		log.Printf("🎲 Random scenario: Primary only - BuildingCommunity = %s", primaryChoice)
+		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice.json}
+		log.Printf("🎲 Random scenario: Primary only - BuildingCommunity = %s", primaryChoice.value)
 
 	case "full_path":
 		// Pick random primary AND random secondary
 		primaryChoice := buildingCommunityOptions[rand.Intn(len(buildingCommunityOptions))]
-		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice}
+		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice.json}
 
-		secondary := secondaryBeliefs[primaryChoice]
-		secondaryChoice := secondary.values[rand.Intn(len(secondary.values))]
-		fingerprintState.HeldBeliefs[secondary.slug] = []string{secondaryChoice}
+		secondary := secondaryBeliefs[primaryChoice.value]
+		secondaryChoice := secondary.options[rand.Intn(len(secondary.options))]
+		fingerprintState.HeldBeliefs[secondary.slug] = []string{secondaryChoice.json}
 
 		log.Printf("🎲 Random scenario: Full path - BuildingCommunity = %s, %s = %s",
-			primaryChoice, secondary.slug, secondaryChoice)
+			primaryChoice.value, secondary.slug, secondaryChoice.value)
+
+	case "warm_lead_plus_primary":
+		// WarmLead + primary choice
+		fingerprintState.HeldBeliefs["WarmLead"] = []string{warmLeadBelief}
+		primaryChoice := buildingCommunityOptions[rand.Intn(len(buildingCommunityOptions))]
+		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice.json}
+		log.Printf("🎲 Random scenario: WarmLead + Primary - BuildingCommunity = %s", primaryChoice.value)
+
+	case "warm_lead_plus_full":
+		// WarmLead + full path
+		fingerprintState.HeldBeliefs["WarmLead"] = []string{warmLeadBelief}
+		primaryChoice := buildingCommunityOptions[rand.Intn(len(buildingCommunityOptions))]
+		fingerprintState.HeldBeliefs["BuildingCommunity"] = []string{primaryChoice.json}
+
+		secondary := secondaryBeliefs[primaryChoice.value]
+		secondaryChoice := secondary.options[rand.Intn(len(secondary.options))]
+		fingerprintState.HeldBeliefs[secondary.slug] = []string{secondaryChoice.json}
+
+		log.Printf("🎲 Random scenario: WarmLead + Full path - BuildingCommunity = %s, %s = %s",
+			primaryChoice.value, secondary.slug, secondaryChoice.value)
 	}
 
 	fingerprintState.UpdateActivity()
