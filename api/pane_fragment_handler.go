@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/html"
@@ -145,6 +146,34 @@ func GetPaneFragmentHandler(c *gin.Context) {
 			}
 		} else {
 			fmt.Printf("DEBUG: No session belief context found for session %s, storyfragment %s\n", sessionID, storyfragmentID)
+
+			// NEW: Instead of giving up, try to create session context if user has relevant beliefs
+			if shouldCreateSessionContext(ctx, sessionID, storyfragmentID) {
+				fmt.Printf("DEBUG: User has relevant beliefs, creating session context\n")
+				newContext := createSessionBeliefContext(ctx, sessionID, storyfragmentID)
+				cache.GetGlobalManager().SetSessionBeliefContext(ctx.TenantID, newContext)
+
+				// Now try personalization with the new context
+				if beliefRegistry, exists := cache.GetGlobalManager().GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID); exists {
+					if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
+						fmt.Printf("DEBUG: Found pane beliefs for new context - held: %d, withheld: %d\n",
+							len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs))
+
+						// Create belief evaluation engine
+						beliefEngine := content.NewBeliefEvaluationEngine()
+
+						// Evaluate visibility for this pane based on user beliefs
+						visibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, newContext.UserBeliefs)
+
+						// Apply visibility wrapper to HTML content
+						htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
+
+						fmt.Printf("DEBUG: Applied personalization with new context - pane %s visibility: %s\n", paneID, visibility)
+					}
+				}
+			} else {
+				fmt.Printf("DEBUG: User has no relevant beliefs, using cached rendering\n")
+			}
 		}
 	} else {
 		if sessionID == "" {
@@ -459,4 +488,54 @@ func getUserBeliefsFromContext(ctx *tenant.Context, sessionID string) map[string
 	}
 
 	return fingerprintState.HeldBeliefs
+}
+
+// shouldCreateSessionContext checks if user has beliefs that would require personalization
+func shouldCreateSessionContext(ctx *tenant.Context, sessionID, storyfragmentID string) bool {
+	if sessionID == "" || storyfragmentID == "" {
+		return false
+	}
+
+	// Get user's current beliefs
+	userBeliefs := getUserBeliefsFromContext(ctx, sessionID)
+	if len(userBeliefs) == 0 {
+		return false // No beliefs = no need for context
+	}
+
+	// Get belief registry to check for widget beliefs or pane requirements
+	cacheManager := cache.GetGlobalManager()
+	registry, found := cacheManager.GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID)
+	if !found {
+		return false // No registry = no requirements
+	}
+
+	// Check if user has any beliefs that match widget beliefs OR pane requirements
+	for beliefSlug := range userBeliefs {
+		// Check widget beliefs
+		if registry.AllWidgetBeliefs[beliefSlug] {
+			return true
+		}
+		// Check traditional pane belief requirements
+		if registry.RequiredBeliefs[beliefSlug] {
+			return true
+		}
+	}
+
+	return false // No matching beliefs
+}
+
+// createSessionBeliefContext creates a new session belief context
+func createSessionBeliefContext(ctx *tenant.Context, sessionID, storyfragmentID string) *models.SessionBeliefContext {
+	userBeliefs := getUserBeliefsFromContext(ctx, sessionID)
+	if userBeliefs == nil {
+		userBeliefs = make(map[string][]string)
+	}
+
+	return &models.SessionBeliefContext{
+		TenantID:        ctx.TenantID,
+		SessionID:       sessionID,
+		StoryfragmentID: storyfragmentID,
+		UserBeliefs:     userBeliefs,
+		LastEvaluation:  time.Now(),
+	}
 }
