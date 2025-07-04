@@ -355,6 +355,8 @@ type StoryfragmentBeliefRegistry struct {
 	PaneBeliefPayloads map[string]PaneBeliefData `json:"paneBeliefPayloads"` // paneId -> belief data
 	RequiredBeliefs    map[string]bool           `json:"requiredBeliefs"`    // flat list for lookup
 	RequiredBadges     []string                  `json:"requiredBadges"`     // badge requirements
+	PaneWidgetBeliefs  map[string][]string       `json:"paneWidgetBeliefs"`  // paneId -> belief slugs used by widgets
+	AllWidgetBeliefs   map[string]bool           `json:"allWidgetBeliefs"`   // flat lookup for all widget beliefs
 	LastUpdated        time.Time                 `json:"lastUpdated"`
 }
 

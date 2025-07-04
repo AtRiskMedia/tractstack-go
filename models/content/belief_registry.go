@@ -1,9 +1,12 @@
 package content
 
 import (
+	"log"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/html"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
@@ -22,8 +25,11 @@ func NewBeliefRegistryService(ctx *tenant.Context) *BeliefRegistryService {
 func (brs *BeliefRegistryService) ExtractAndCacheBeliefRegistry(storyfragmentID string, paneIDs []string) (*models.StoryfragmentBeliefRegistry, error) {
 	// Check if registry already exists in cache
 	if registry, found := brs.getFromCache(storyfragmentID); found {
+		log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
 		return registry, nil
 	}
+
+	log.Printf("CACHE MISS: Building registry for storyfragment %s with %d panes", storyfragmentID, len(paneIDs))
 
 	// Extract beliefs from all panes
 	registry, err := brs.buildRegistryFromPanes(storyfragmentID, paneIDs)
@@ -33,6 +39,7 @@ func (brs *BeliefRegistryService) ExtractAndCacheBeliefRegistry(storyfragmentID 
 
 	// Cache the registry
 	brs.setInCache(storyfragmentID, registry)
+	log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
 
 	return registry, nil
 }
@@ -46,6 +53,8 @@ func (brs *BeliefRegistryService) buildRegistryFromPanes(storyfragmentID string,
 		PaneBeliefPayloads: make(map[string]models.PaneBeliefData),
 		RequiredBeliefs:    make(map[string]bool),
 		RequiredBadges:     []string{},
+		PaneWidgetBeliefs:  make(map[string][]string),
+		AllWidgetBeliefs:   make(map[string]bool),
 		LastUpdated:        time.Now(),
 	}
 
@@ -67,6 +76,22 @@ func (brs *BeliefRegistryService) buildRegistryFromPanes(storyfragmentID string,
 
 			// Add to flat required beliefs list
 			brs.addToRequiredBeliefs(registry.RequiredBeliefs, paneBeliefData)
+		}
+
+		// Always scan for widget beliefs (even if pane has no traditional belief requirements)
+		widgetBeliefs, err := brs.scanPaneForWidgetBeliefs(paneID, paneNode)
+		if err != nil {
+			log.Printf("Error scanning pane %s for widgets: %v", paneID, err)
+		} else if len(widgetBeliefs) > 0 {
+			// Store widget beliefs for this pane
+			registry.PaneWidgetBeliefs[paneID] = widgetBeliefs
+
+			// Add to flat widget beliefs lookup
+			for _, beliefSlug := range widgetBeliefs {
+				registry.AllWidgetBeliefs[beliefSlug] = true
+			}
+
+			log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
 		}
 	}
 
@@ -145,4 +170,129 @@ func (brs *BeliefRegistryService) getFromCache(storyfragmentID string) (*models.
 
 func (brs *BeliefRegistryService) setInCache(storyfragmentID string, registry *models.StoryfragmentBeliefRegistry) {
 	cache.GetGlobalManager().SetStoryfragmentBeliefRegistry(brs.ctx.TenantID, registry)
+}
+
+func (brs *BeliefRegistryService) scanPaneForWidgetBeliefs(paneID string, paneNode *models.PaneNode) ([]string, error) {
+	// Use html package to extract nodes from pane
+	nodesData, _, err := html.ExtractNodesFromPane(paneNode)
+	if err != nil {
+		return nil, err
+	}
+
+	var widgetBeliefs []string
+
+	// Scan all nodes for code widgets
+	for _, nodeData := range nodesData {
+		// Look for TagElement nodes with code tag
+		if nodeData.NodeType == "TagElement" && nodeData.TagName != nil && *nodeData.TagName == "code" {
+			// Check if node has codeHookParams AND copy field
+			if nodeData.CustomData != nil {
+				if params, exists := nodeData.CustomData["codeHookParams"]; exists {
+					if paramsSlice, ok := params.([]string); ok && len(paramsSlice) > 0 {
+						// Extract widget type from copy field (before the parentheses)
+						copyText := getNodeCopy(nodeData)
+						widgetType := extractWidgetTypeFromCopy(copyText)
+
+						// Check if it's a belief widget type
+						if widgetType == "belief" || widgetType == "toggle" || widgetType == "identifyAs" {
+							// Belief slug is the first parameter
+							beliefSlug := paramsSlice[0]
+							if beliefSlug != "" {
+								widgetBeliefs = append(widgetBeliefs, beliefSlug)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return widgetBeliefs, nil
+}
+
+// Helper to get copy from nodeData
+func getNodeCopy(nodeData *models.NodeRenderData) string {
+	if nodeData.Copy != nil {
+		return *nodeData.Copy
+	}
+	return ""
+}
+
+// Extract widget type from copy field (e.g., "belief(..." -> "belief")
+func extractWidgetTypeFromCopy(copyText string) string {
+	if copyText == "" {
+		return ""
+	}
+
+	// Find the first opening parenthesis
+	parenIndex := strings.Index(copyText, "(")
+	if parenIndex == -1 {
+		return ""
+	}
+
+	// Return everything before the parenthesis
+	return copyText[:parenIndex]
+}
+
+// BuildRegistryFromLoadedPanes constructs belief registry using already-loaded pane nodes
+// This optimizes the process by avoiding duplicate database calls and JSON parsing
+func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID string, loadedPanes []*models.PaneNode) (*models.StoryfragmentBeliefRegistry, error) {
+	// Check if registry already exists in cache
+	if registry, found := brs.getFromCache(storyfragmentID); found {
+		log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
+		return registry, nil
+	}
+
+	log.Printf("CACHE MISS: Building registry for storyfragment %s with %d loaded panes", storyfragmentID, len(loadedPanes))
+
+	registry := &models.StoryfragmentBeliefRegistry{
+		StoryfragmentID:    storyfragmentID,
+		PaneBeliefPayloads: make(map[string]models.PaneBeliefData),
+		RequiredBeliefs:    make(map[string]bool),
+		RequiredBadges:     []string{},
+		PaneWidgetBeliefs:  make(map[string][]string),
+		AllWidgetBeliefs:   make(map[string]bool),
+		LastUpdated:        time.Now(),
+	}
+
+	for _, paneNode := range loadedPanes {
+		if paneNode == nil {
+			continue // Skip nil panes
+		}
+
+		paneID := paneNode.ID
+
+		// Extract belief data from this pane
+		paneBeliefData := brs.extractPaneBeliefData(paneNode)
+
+		// Only store if pane has belief requirements
+		if brs.hasBeliefRequirements(paneBeliefData) {
+			registry.PaneBeliefPayloads[paneID] = paneBeliefData
+
+			// Add to flat required beliefs list
+			brs.addToRequiredBeliefs(registry.RequiredBeliefs, paneBeliefData)
+		}
+
+		// Always scan for widget beliefs (even if pane has no traditional belief requirements)
+		widgetBeliefs, err := brs.scanPaneForWidgetBeliefs(paneID, paneNode)
+		if err != nil {
+			log.Printf("Error scanning pane %s for widgets: %v", paneID, err)
+		} else if len(widgetBeliefs) > 0 {
+			// Store widget beliefs for this pane
+			registry.PaneWidgetBeliefs[paneID] = widgetBeliefs
+
+			// Add to flat widget beliefs lookup
+			for _, beliefSlug := range widgetBeliefs {
+				registry.AllWidgetBeliefs[beliefSlug] = true
+			}
+
+			log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
+		}
+	}
+
+	// Cache the registry
+	brs.setInCache(storyfragmentID, registry)
+	log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
+
+	return registry, nil
 }

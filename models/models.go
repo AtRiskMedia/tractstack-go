@@ -2,7 +2,10 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,6 +17,12 @@ type Profile struct {
 	Email          string
 	ContactPersona string
 	ShortBio       string
+}
+
+type SSEBroadcaster struct {
+	tenantSessions map[string]map[string][]chan string // tenantId -> sessionId -> []channels
+	tenantRegistry map[string]*SubscriptionRegistry    // tenantId -> registry (NOW POINTER)
+	mu             sync.Mutex
 }
 
 type VisitRequest struct {
@@ -64,23 +73,16 @@ type SubscriptionRegistry struct {
 }
 
 // NewSubscriptionRegistry creates a new subscription registry
-func NewSubscriptionRegistry() SubscriptionRegistry {
-	return SubscriptionRegistry{
+func NewSubscriptionRegistry() *SubscriptionRegistry {
+	return &SubscriptionRegistry{
 		SessionToStoryfragment:  make(map[string]string),
 		StoryfragmentToSessions: make(map[string][]string),
 	}
 }
 
-// SSEBroadcaster provides tenant-isolated, storyfragment-scoped broadcasting
-type SSEBroadcaster struct {
-	tenantSessions map[string]map[string][]chan string // tenantId -> sessionId -> []channels
-	tenantRegistry map[string]SubscriptionRegistry     // tenantId -> registry
-	mu             sync.Mutex
-}
-
 var Broadcaster = &SSEBroadcaster{
 	tenantSessions: make(map[string]map[string][]chan string),
-	tenantRegistry: make(map[string]SubscriptionRegistry),
+	tenantRegistry: make(map[string]*SubscriptionRegistry), // NOW POINTER MAP
 }
 
 // AddClientWithSession registers a new SSE client with tenant and session isolation
@@ -165,29 +167,28 @@ func (b *SSEBroadcaster) GetActiveConnectionCount(tenantID string) int {
 	return count
 }
 
-// RegisterStoryfragmentSubscription registers session's interest in a storyfragment within tenant
 func (b *SSEBroadcaster) RegisterStoryfragmentSubscription(tenantID, sessionID, storyfragmentID string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	// No b.mu.Lock() here - this was the deadlock cause
 
-	// Ensure tenant registry exists
+	// Get/create registry with minimal locking
+	b.mu.Lock()
 	if _, exists := b.tenantRegistry[tenantID]; !exists {
 		b.tenantRegistry[tenantID] = NewSubscriptionRegistry()
 	}
-
 	registry := b.tenantRegistry[tenantID]
+	b.mu.Unlock()
+
+	// Work with registry under its own lock only
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
 
-	// Update session -> storyfragment mapping
+	// Update mappings
 	registry.SessionToStoryfragment[sessionID] = storyfragmentID
-
-	// Update storyfragment -> sessions mapping
 	if registry.StoryfragmentToSessions[storyfragmentID] == nil {
 		registry.StoryfragmentToSessions[storyfragmentID] = make([]string, 0)
 	}
 
-	// Add session if not already present
+	// Add session if not present
 	sessions := registry.StoryfragmentToSessions[storyfragmentID]
 	found := false
 	for _, existingSession := range sessions {
@@ -196,13 +197,14 @@ func (b *SSEBroadcaster) RegisterStoryfragmentSubscription(tenantID, sessionID, 
 			break
 		}
 	}
-
 	if !found {
 		registry.StoryfragmentToSessions[storyfragmentID] = append(sessions, sessionID)
 	}
 
-	// Update registry back to map
+	// Save back with minimal locking
+	b.mu.Lock()
 	b.tenantRegistry[tenantID] = registry
+	b.mu.Unlock()
 }
 
 // UnregisterStoryfragmentSubscription removes session's storyfragment interest within tenant
@@ -242,48 +244,128 @@ func (b *SSEBroadcaster) UnregisterStoryfragmentSubscription(tenantID, sessionID
 
 // BroadcastToAffectedPanes sends targeted updates to sessions viewing specific storyfragment within tenant
 func (b *SSEBroadcaster) BroadcastToAffectedPanes(tenantID, storyfragmentID string, paneIDs []string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	// Get sessions viewing this storyfragment within tenant
-	var targetSessions []string
-	if registry, exists := b.tenantRegistry[tenantID]; exists {
-		registry.mu.RLock()
-		if sessions, exists := registry.StoryfragmentToSessions[storyfragmentID]; exists {
-			targetSessions = append(targetSessions, sessions...)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🔊 BROADCAST PANIC: %v", r)
 		}
-		registry.mu.RUnlock()
+	}()
+
+	log.Printf("🔊 BROADCAST: Starting broadcast to tenant %s, storyfragment %s, panes: %v", tenantID, storyfragmentID, paneIDs)
+
+	// Get sessions viewing this storyfragment within tenant - FIX COPYLOCKS + ADD ERROR HANDLING
+	var targetSessions []string
+
+	log.Printf("🔊 BROADCAST: Checking tenant registry for tenant %s", tenantID)
+
+	if registryPtr, exists := b.tenantRegistry[tenantID]; exists {
+		log.Printf("🔊 BROADCAST: Found tenant registry, attempting to lock")
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("🔊 BROADCAST: Panic in registry access: %v", r)
+				}
+			}()
+
+			registryPtr.mu.RLock()
+			defer registryPtr.mu.RUnlock()
+
+			log.Printf("🔊 BROADCAST: Registry locked, checking storyfragment %s", storyfragmentID)
+
+			if sessions, exists := registryPtr.StoryfragmentToSessions[storyfragmentID]; exists {
+				targetSessions = append(targetSessions, sessions...)
+				log.Printf("🔊 BROADCAST: Found %d sessions viewing storyfragment %s: %v", len(sessions), storyfragmentID, sessions)
+			} else {
+				log.Printf("🔊 BROADCAST: No sessions found for storyfragment %s", storyfragmentID)
+				log.Printf("🔊 BROADCAST: Available storyfragments: %v", func() []string {
+					var keys []string
+					for k := range registryPtr.StoryfragmentToSessions {
+						keys = append(keys, k)
+					}
+					return keys
+				}())
+			}
+		}()
+	} else {
+		log.Printf("🔊 BROADCAST: No tenant registry found for tenant %s", tenantID)
+		log.Printf("🔊 BROADCAST: Available tenants: %v", func() []string {
+			var keys []string
+			for k := range b.tenantRegistry {
+				keys = append(keys, k)
+			}
+			return keys
+		}())
 	}
 
 	if len(targetSessions) == 0 {
+		log.Printf("🔊 BROADCAST: No target sessions found - aborting broadcast")
 		return // No sessions viewing this storyfragment
 	}
 
 	// Prepare broadcast message
-	message := fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%v}\n\n",
-		storyfragmentID, paneIDs)
+	paneIDsJSON, _ := json.Marshal(paneIDs)
+	message := fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s}\n\n", storyfragmentID, paneIDsJSON)
+
+	log.Printf("🔊 BROADCAST: Prepared message: %s", strings.ReplaceAll(message, "\n", "\\n"))
 
 	// Send to all sessions viewing this storyfragment within tenant
 	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
+		log.Printf("🔊 BROADCAST: Found tenant sessions for %s", tenantID)
+
 		var deadChannels []chan string
+		sentCount := 0
+		failedCount := 0
 
 		for _, sessionID := range targetSessions {
+			log.Printf("🔊 BROADCAST: Processing session %s", sessionID)
+
 			if sessionClients, exists := tenantSessions[sessionID]; exists {
-				for _, ch := range sessionClients {
+				log.Printf("🔊 BROADCAST: Found %d clients for session %s", len(sessionClients), sessionID)
+
+				for i, ch := range sessionClients {
+					log.Printf("🔊 BROADCAST: Sending to client %d for session %s", i, sessionID)
+
 					select {
 					case ch <- message:
 						// Success - channel is alive
+						sentCount++
+						log.Printf("🔊 BROADCAST: ✅ Successfully sent to client %d for session %s", i, sessionID)
 					default:
 						// Channel is blocked/closed - mark for removal
 						deadChannels = append(deadChannels, ch)
+						failedCount++
+						log.Printf("🔊 BROADCAST: ❌ Failed to send to client %d for session %s (dead channel)", i, sessionID)
+					}
+				}
+			} else {
+				log.Printf("🔊 BROADCAST: ❌ No clients found for session %s", sessionID)
+			}
+		}
+
+		log.Printf("🔊 BROADCAST: Broadcast complete - sent: %d, failed: %d, dead channels: %d", sentCount, failedCount, len(deadChannels))
+
+		// Clean up dead channels
+		if len(deadChannels) > 0 {
+			log.Printf("🔊 BROADCAST: Cleaning up %d dead channels", len(deadChannels))
+			for _, deadCh := range deadChannels {
+				for sessionID, sessionClients := range tenantSessions {
+					for i, ch := range sessionClients {
+						if ch == deadCh {
+							// Remove this channel from the session
+							tenantSessions[sessionID] = append(sessionClients[:i], sessionClients[i+1:]...)
+							close(ch)
+							log.Printf("🔊 BROADCAST: Removed dead channel from session %s", sessionID)
+							break
+						}
 					}
 				}
 			}
 		}
-
-		// Clean up dead channels
-		b.cleanupDeadChannels(tenantID, deadChannels)
+	} else {
+		log.Printf("🔊 BROADCAST: ❌ No tenant sessions found for tenant %s", tenantID)
 	}
+
+	log.Printf("🔊 BROADCAST: Broadcast operation completed")
 }
 
 // CleanupDeadChannels removes and closes dead channels within tenant context

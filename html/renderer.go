@@ -3,6 +3,7 @@ package html
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/html/templates"
@@ -163,19 +164,8 @@ func (nr *NodeRendererImpl) renderStoryFragment(nodeID string) string {
 	return nr.renderEmptyNode()
 }
 
-func (nr *NodeRendererImpl) renderWidget(nodeID string, hookData map[string]interface{}) string {
-	// Placeholder for widget rendering
-	return `<!-- Widget placeholder -->`
-}
-
 func (nr *NodeRendererImpl) renderEmptyNode() string {
 	return `<div></div>`
-}
-
-// Helper methods
-func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) map[string]interface{} {
-	// Placeholder for code hook parsing - matches Node.astro parseCodeHook
-	return nil
 }
 
 func (nr *NodeRendererImpl) getNodeRenderData(nodeID string) *models.NodeRenderData {
@@ -421,4 +411,84 @@ func (pr *PaneRenderer) getNodeData(nodeID string) *models.NodeRenderData {
 		return nil
 	}
 	return pr.ctx.AllNodes[nodeID]
+}
+
+func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) *models.CodeHook {
+	if nodeData == nil {
+		return nil
+	}
+
+	// Get copy field to extract widget type
+	copyText := ""
+	if nodeData.Copy != nil {
+		copyText = *nodeData.Copy
+	}
+
+	// Extract widget type from copy field (e.g., "belief(...)" → "belief")
+	hook := extractWidgetTypeFromCopy(copyText)
+	if hook == "" {
+		return nil
+	}
+
+	// Get codeHookParams from CustomData
+	var params []string
+	if nodeData.CustomData != nil {
+		if codeHookParams, exists := nodeData.CustomData["codeHookParams"]; exists {
+			if paramsSlice, ok := codeHookParams.([]string); ok {
+				params = paramsSlice
+			}
+		}
+	}
+
+	// Create CodeHook with parsed data
+	codeHook := &models.CodeHook{
+		Hook: hook,
+	}
+
+	// Assign parameters to Value1, Value2, Value3 based on availability
+	if len(params) > 0 && params[0] != "" {
+		codeHook.Value1 = &params[0]
+	}
+
+	if len(params) > 1 && params[1] != "" {
+		codeHook.Value2 = &params[1]
+	}
+
+	if len(params) > 2 {
+		codeHook.Value3 = params[2] // Value3 is string, not *string
+	}
+
+	return codeHook
+}
+
+func (nr *NodeRendererImpl) renderWidget(nodeID string, hook *models.CodeHook) string {
+	// Validate hook data
+	if hook == nil {
+		return `<!-- Widget error: no hook data -->`
+	}
+
+	// Log parameters for debugging (as requested)
+	log.Printf("Widget found - NodeID: %s, Hook: %s, Value1: %v, Value2: %v, Value3: %s",
+		nodeID, hook.Hook, hook.Value1, hook.Value2, hook.Value3)
+
+	// Create widget renderer and dispatch
+	widgetRenderer := templates.NewWidgetRenderer(nr.ctx)
+	return widgetRenderer.Render(nodeID, hook)
+}
+
+// 4. ADD NEW HELPER FUNCTION:
+// Add this new function to html/renderer.go
+func extractWidgetTypeFromCopy(copyText string) string {
+	if copyText == "" {
+		return ""
+	}
+
+	// Find the first opening parenthesis
+	parenIndex := strings.Index(copyText, "(")
+	if parenIndex == -1 {
+		return ""
+	}
+
+	// Return everything before the parenthesis
+	return copyText[:parenIndex]
 }
