@@ -21,9 +21,6 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 	// Generate unique ID for this widget instance
 	selectID := fmt.Sprintf("belief-select-%s", slug)
 
-	// Determine session handling strategy
-	sessionStrategy := getSessionStrategy(ctx)
-
 	// Build the Shoelace select component HTML
 	html := fmt.Sprintf(`<div class="%s" data-belief="%s">`, classNames, slug)
 
@@ -34,12 +31,11 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 
 	// Build sl-select component
 	html += fmt.Sprintf(`
-        <sl-select data-shoelace="select" id="%s" name="belief" class="block mt-3 w-fit %s" value="%s" hx-post="' + window.TRACTSTACK_CONFIG.backendUrl + '/api/v1/state" hx-vals='{"event": {"id": "%s", "type": "Belief", "verb": "{{this.value}}"}}' %s style="--option-border-color: %s;">`,
+        <sl-select data-shoelace="select" id="%s" name="beliefValue" class="block mt-3 w-fit %s" value="%s" hx-post="/api/v1/state" hx-include="this" hx-vals='{"beliefId": "%s", "beliefType": "Belief"}' style="--option-border-color: %s;">`,
 		selectID,
 		getBorderColorClass(selectedOption),
 		selectedOption.Slug,
 		slug,
-		sessionStrategy,
 		getBorderColorStyle(selectedOption),
 	)
 

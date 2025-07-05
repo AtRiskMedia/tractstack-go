@@ -3,7 +3,6 @@ package templates
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -61,11 +60,4 @@ func getCurrentBeliefState(userBeliefs map[string][]string, beliefSlug string) *
 	}
 
 	return &belief
-}
-
-func getSessionStrategy(ctx *models.RenderContext) string {
-	if ctx.SessionID != "" {
-		return fmt.Sprintf(`hx-headers='{"X-TractStack-Session-ID": "%s"}'`, ctx.SessionID)
-	}
-	return `hx-headers='{"X-TractStack-Session-ID": localStorage.getItem("tractstack_session_id")}'`
 }

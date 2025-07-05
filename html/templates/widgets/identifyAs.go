@@ -54,9 +54,6 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 	// Generate unique ID for this button
 	buttonID := fmt.Sprintf("identifyas-%s-%s", beliefSlug, sanitizeID(target))
 
-	// Determine session handling strategy
-	sessionStrategy := getSessionStrategy(ctx)
-
 	// Determine button classes and indicator color
 	buttonClasses := getIdentifyAsButtonClasses(isSelected, isOtherSelected)
 	indicatorColor := getIdentifyAsIndicatorColor(isSelected, isOtherSelected)
@@ -67,9 +64,8 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				type="button"
 				id="%s"
 				class="%s rounded-md px-3 py-2 text-lg text-black shadow-sm ring-1 ring-inset"
-      hx-post="' + window.TRACTSTACK_CONFIG.backendUrl + '/api/v1/state"
-				hx-vals='{"event": {"id": "%s", "type": "Belief", "verb": "%s", "object": "%s"}}'
-				%s
+				hx-post="/api/v1/state"
+				hx-vals='{"beliefId": "%s", "beliefType": "Belief", "beliefObject": "%s"}'
 			>
 				<div class="flex items-center">
 					<span
@@ -80,15 +76,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				</div>
 			</button>
 		</div>`,
-		buttonID,
-		buttonClasses,
-		beliefSlug,
-		getIdentifyAsVerb(isSelected),
-		target,
-		sessionStrategy,
-		indicatorColor,
-		buttonTitle,
-	)
+		buttonID, buttonClasses, beliefSlug, target, indicatorColor, buttonTitle)
 }
 
 func parseTargets(targetsString string) []string {

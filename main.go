@@ -51,7 +51,6 @@ func main() {
 		log.Fatalf("Failed to initialize tenant manager: %v", err)
 	}
 
-	// *** NEW: PRE-ACTIVATE ALL TENANTS ***
 	log.Println("Starting tenant pre-activation...")
 	if err := tenant.PreActivateAllTenants(tenantManager); err != nil {
 		log.Fatalf("Tenant pre-activation failed: %v", err)
@@ -83,7 +82,11 @@ func main() {
 			"Origin", "Content-Type", "Accept", "Authorization",
 			"X-Tenant-ID", "X-Requested-With", "X-TractStack-Session-ID", "X-StoryFragment-ID",
 			"hx-current-url", "hx-request", "hx-target", "hx-trigger", "hx-boosted",
-			"Cache-Control", // Add for SSE
+			"Cache-Control",
+			"hx-trigger-name",
+			"hx-active-element",
+			"hx-active-element-name",
+			"hx-active-element-value",
 		},
 		AllowCredentials: true,
 		ExposeHeaders: []string{
@@ -187,18 +190,26 @@ func main() {
 		c.Next()
 	})
 
-	// Authentication and system routes
-	r.POST("/api/v1/auth/visit", api.VisitHandler)
-	r.GET("/api/v1/auth/sse", api.SseHandler)
-	r.POST("/api/v1/auth/state", api.StateHandler)
-	r.GET("/api/v1/auth/profile/decode", api.DecodeProfileHandler)
-	r.POST("/api/v1/auth/profile", api.ProfileHandler)
-	r.POST("/api/v1/auth/login", api.LoginHandler)
-	r.GET("/api/v1/db/status", api.DBStatusHandler)
-
-	// Content API routes
+	// API routes
 	v1 := r.Group("/api/v1")
 	{
+		// Authentication and system routes
+		auth := v1.Group("/auth")
+		{
+			auth.POST("/visit", api.VisitHandler)
+			auth.GET("/sse", api.SseHandler)
+			auth.GET("/profile/decode", api.DecodeProfileHandler)
+			auth.POST("/profile", api.ProfileHandler)
+			auth.POST("/login", api.LoginHandler)
+		}
+
+		// State management (separate from auth)
+		v1.POST("/state", api.StateHandler)
+
+		// Database status
+		v1.GET("/db/status", api.DBStatusHandler)
+
+		// Content nodes
 		nodes := v1.Group("/nodes")
 		{
 			// Pane endpoints
