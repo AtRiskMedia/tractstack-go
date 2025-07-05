@@ -30,31 +30,31 @@ func (bee *BeliefEvaluationEngine) EvaluatePaneVisibility(
 }
 
 // processHeldBeliefs handles belief requirements for showing content
-// Implements MATCH-ACROSS OR logic and regular AND logic
-// Returns true if user satisfies held belief requirements
 func (bee *BeliefEvaluationEngine) processHeldBeliefs(
 	paneBeliefs models.PaneBeliefData,
 	userBeliefs map[string][]string,
 ) bool {
 	// If no held beliefs required, allow visibility
-	if len(paneBeliefs.HeldBeliefs) == 0 && len(paneBeliefs.MatchAcross) == 0 {
+	if len(paneBeliefs.HeldBeliefs) == 0 {
 		return true
 	}
 
-	// Extract match-across beliefs (OR logic)
+	// Extract match-across keys from MatchAcross array (equivalent to V1's filter["MATCH-ACROSS"])
+	matchAcrossKeys := paneBeliefs.MatchAcross // This is []string
+
 	matchAcrossFilter := make(map[string][]string)
 	regularFilter := make(map[string][]string)
 
-	// Categorize beliefs into match-across and regular filters
+	// Categorize keys into match-across and regular filters, skip LINKED-BELIEFS
 	for key, values := range paneBeliefs.HeldBeliefs {
-		// Skip empty values
+		// Skip null/empty values
 		if len(values) == 0 {
 			continue
 		}
 
-		// Check if this key is in MATCH-ACROSS list
+		// Check if this key is in match-across list
 		isMatchAcross := false
-		for _, matchKey := range paneBeliefs.MatchAcross {
+		for _, matchKey := range matchAcrossKeys {
 			if key == matchKey {
 				isMatchAcross = true
 				break
@@ -68,30 +68,35 @@ func (bee *BeliefEvaluationEngine) processHeldBeliefs(
 		}
 	}
 
-	// Evaluate match-across beliefs (OR logic - any one match is sufficient)
-	matchAcrossResult := true
-	if len(matchAcrossFilter) > 0 {
+	// Evaluate match-across filter (OR logic - some() in V1)
+	var matchAcrossResult bool
+	if len(matchAcrossFilter) == 0 {
+		matchAcrossResult = true
+	} else {
 		matchAcrossResult = false
-		for key, requiredValues := range matchAcrossFilter {
-			if bee.hasMatchingBelief(userBeliefs, key, requiredValues) {
+		for key, valueOrValues := range matchAcrossFilter {
+			if bee.hasMatchingBelief(userBeliefs, key, valueOrValues) {
 				matchAcrossResult = true
 				break // OR logic - one match is enough
 			}
 		}
 	}
 
-	// Evaluate regular beliefs (AND logic - all must match)
-	regularResult := true
-	if len(regularFilter) > 0 {
-		for key, requiredValues := range regularFilter {
-			if !bee.hasMatchingBelief(userBeliefs, key, requiredValues) {
+	// Evaluate regular filter (AND logic - every() in V1)
+	var regularResult bool
+	if len(regularFilter) == 0 {
+		regularResult = true
+	} else {
+		regularResult = true
+		for key, valueOrValues := range regularFilter {
+			if !bee.hasMatchingBelief(userBeliefs, key, valueOrValues) {
 				regularResult = false
 				break // AND logic - one failure fails all
 			}
 		}
 	}
 
-	// Both match-across and regular filters must pass
+	// Both filters must pass (V1: return matchAcrossResult && regularResult)
 	return matchAcrossResult && regularResult
 }
 

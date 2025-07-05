@@ -10,6 +10,28 @@ import (
 	"time"
 )
 
+type VisitState struct {
+	VisitID       string    `json:"visitId"`
+	FingerprintID string    `json:"fingerprintId"`
+	StartTime     time.Time `json:"startTime"`
+	LastActivity  time.Time `json:"lastActivity"`
+	CurrentPage   string    `json:"currentPage"`
+}
+
+// Lead represents a user profile in the database
+type Lead struct {
+	ID             string    `json:"id"`
+	FirstName      string    `json:"firstName"`
+	Email          string    `json:"email"`
+	PasswordHash   string    `json:"-"` // Never serialize password hash
+	ContactPersona string    `json:"contactPersona"`
+	ShortBio       string    `json:"shortBio"`
+	EncryptedCode  string    `json:"-"` // Never serialize encrypted code
+	EncryptedEmail string    `json:"-"` // Never serialize encrypted email
+	CreatedAt      time.Time `json:"createdAt"`
+	Changed        time.Time `json:"changed"`
+}
+
 type Profile struct {
 	Fingerprint    string
 	LeadID         string
@@ -467,18 +489,6 @@ func (b *SSEBroadcaster) GetDeadChannelsForTenant(tenantID string) []chan string
 	return deadChannels
 }
 
-// =============================================================================
-// END STAGE 3 SSE Architecture
-// =============================================================================
-
-type VisitState struct {
-	VisitID       string    `json:"visitId"`
-	FingerprintID string    `json:"fingerprintId"`
-	StartTime     time.Time `json:"startTime"`
-	LastActivity  time.Time `json:"lastActivity"`
-	CurrentPage   string    `json:"currentPage"`
-}
-
 func (v *VisitState) IsVisitActive() bool {
 	if v == nil {
 		return false
@@ -505,16 +515,98 @@ func (f *FingerprintState) UpdateActivity() {
 	}
 }
 
-// Lead represents a user profile in the database
-type Lead struct {
-	ID             string    `json:"id"`
-	FirstName      string    `json:"firstName"`
-	Email          string    `json:"email"`
-	PasswordHash   string    `json:"-"` // Never serialize password hash
-	ContactPersona string    `json:"contactPersona"`
-	ShortBio       string    `json:"shortBio"`
-	EncryptedCode  string    `json:"-"` // Never serialize encrypted code
-	EncryptedEmail string    `json:"-"` // Never serialize encrypted email
-	CreatedAt      time.Time `json:"createdAt"`
-	Changed        time.Time `json:"changed"`
+// BroadcastToSpecificSession sends updates to a specific session within tenant
+func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("🔊 SESSION BROADCAST PANIC: %v", r)
+		}
+	}()
+
+	log.Printf("🔊 SESSION BROADCAST: Starting broadcast to tenant %s, session %s, storyfragment %s, panes: %v",
+		tenantID, sessionID, storyfragmentID, paneIDs)
+
+	// Prepare broadcast message
+	paneIDsJSON, _ := json.Marshal(paneIDs)
+	message := fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s}\n\n", storyfragmentID, paneIDsJSON)
+
+	log.Printf("🔊 SESSION BROADCAST: Prepared message: %s", strings.ReplaceAll(message, "\n", "\\n"))
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Send to specific session only
+	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
+		log.Printf("🔊 SESSION BROADCAST: Found tenant sessions for %s", tenantID)
+
+		if sessionClients, exists := tenantSessions[sessionID]; exists {
+			log.Printf("🔊 SESSION BROADCAST: Found %d clients for session %s", len(sessionClients), sessionID)
+
+			var deadChannels []chan string
+			sentCount := 0
+			failedCount := 0
+
+			for i, ch := range sessionClients {
+				log.Printf("🔊 SESSION BROADCAST: Sending to client %d for session %s", i, sessionID)
+
+				select {
+				case ch <- message:
+					// Success - channel is alive
+					sentCount++
+					log.Printf("🔊 SESSION BROADCAST: ✅ Successfully sent to client %d for session %s", i, sessionID)
+				default:
+					// Channel is blocked/closed - mark for removal
+					deadChannels = append(deadChannels, ch)
+					failedCount++
+					log.Printf("🔊 SESSION BROADCAST: ❌ Failed to send to client %d for session %s (dead channel)", i, sessionID)
+				}
+			}
+
+			log.Printf("🔊 SESSION BROADCAST: Broadcast complete - sent: %d, failed: %d, dead channels: %d", sentCount, failedCount, len(deadChannels))
+
+			// Clean up dead channels for this session
+			if len(deadChannels) > 0 {
+				log.Printf("🔊 SESSION BROADCAST: Cleaning up %d dead channels for session %s", len(deadChannels), sessionID)
+				filteredClients := make([]chan string, 0, len(sessionClients))
+
+				for _, ch := range sessionClients {
+					isDead := false
+					for _, deadCh := range deadChannels {
+						if ch == deadCh {
+							isDead = true
+							// Close dead channel safely
+							select {
+							case <-ch:
+							default:
+								close(ch)
+							}
+							break
+						}
+					}
+
+					if !isDead {
+						filteredClients = append(filteredClients, ch)
+					}
+				}
+
+				tenantSessions[sessionID] = filteredClients
+
+				// Clean up empty session
+				if len(filteredClients) == 0 {
+					delete(tenantSessions, sessionID)
+				}
+			}
+		} else {
+			log.Printf("🔊 SESSION BROADCAST: ❌ No clients found for session %s", sessionID)
+		}
+
+		// Clean up empty tenant
+		if len(tenantSessions) == 0 {
+			delete(b.tenantSessions, tenantID)
+		}
+	} else {
+		log.Printf("🔊 SESSION BROADCAST: ❌ No tenant sessions found for tenant %s", tenantID)
+	}
+
+	log.Printf("🔊 SESSION BROADCAST: Session broadcast operation completed")
 }
