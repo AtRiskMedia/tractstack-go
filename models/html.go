@@ -11,10 +11,11 @@ const (
 
 // RenderContext provides the context for HTML rendering operations
 type RenderContext struct {
-	AllNodes    map[string]*NodeRenderData `json:"allNodes,omitempty"`
-	ParentNodes map[string][]string        `json:"parentNodes,omitempty"`
-	TenantID    string                     `json:"tenantId,omitempty"`
-	UserID      string                     `json:"userId,omitempty"`
+	AllNodes        map[string]*NodeRenderData `json:"allNodes,omitempty"`
+	ParentNodes     map[string][]string        `json:"parentNodes,omitempty"`
+	TenantID        string                     `json:"tenantId,omitempty"`
+	SessionID       string                     `json:"sessionId,omitempty"`       // ADD
+	StoryfragmentID string                     `json:"storyfragmentId,omitempty"` // ADD
 }
 
 // CodeHook represents parsed widget parameters from code nodes
@@ -78,66 +79,4 @@ type BackgroundImageData struct {
 	Type     string `json:"type"`     // "background-image" or "artpack-image"
 	Position string `json:"position"` // "background", "left", "right", "leftBleed", "rightBleed"
 	Size     string `json:"size"`     // "narrow", "wide", "equal"
-}
-
-// UserState represents user belief state for cache variant determination
-type UserState struct {
-	UserID   string              `json:"userId"`
-	TenantID string              `json:"tenantId"`
-	Beliefs  map[string][]string `json:"beliefs"`
-	Badges   []string            `json:"badges"`
-}
-
-// HasBadges checks if user has all required badges
-func (us *UserState) HasBadges(requiredBadges []string) bool {
-	if len(requiredBadges) == 0 {
-		return true
-	}
-
-	userBadgeSet := make(map[string]bool)
-	for _, badge := range us.Badges {
-		userBadgeSet[badge] = true
-	}
-
-	for _, required := range requiredBadges {
-		if !userBadgeSet[required] {
-			return false
-		}
-	}
-
-	return true
-}
-
-// MeetsBeliefConditions checks if user meets belief-based visibility conditions
-func (us *UserState) MeetsBeliefConditions(conditions map[string][]string) bool {
-	if len(conditions) == 0 {
-		return true
-	}
-
-	for beliefKey, requiredValues := range conditions {
-		userBelief, exists := us.Beliefs[beliefKey]
-		if !exists {
-			return false
-		}
-
-		// Check if user's belief values intersect with any of the required values
-		matched := false
-		for _, userValue := range userBelief {
-			for _, requiredValue := range requiredValues {
-				if userValue == requiredValue {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				break
-			}
-		}
-
-		if !matched {
-			return false
-		}
-	}
-
-	return true
 }

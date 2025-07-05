@@ -4,6 +4,7 @@ package templates
 import (
 	"fmt"
 
+	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -132,4 +133,21 @@ func (wr *WidgetRenderer) renderResource(nodeID, classNames string, hook *models
 func (wr *WidgetRenderer) getNodeClasses(nodeID string) string {
 	// For Stage 3, return default "auto" - will connect to actual CSS processor in Stage 4
 	return "auto"
+}
+
+func (wr *WidgetRenderer) getUserBeliefs() map[string][]string {
+	if wr.ctx.SessionID == "" || wr.ctx.StoryfragmentID == "" {
+		return nil
+	}
+
+	sessionContext, exists := cache.GetGlobalManager().GetSessionBeliefContext(
+		wr.ctx.TenantID,
+		wr.ctx.SessionID,
+		wr.ctx.StoryfragmentID,
+	)
+	if !exists {
+		return nil
+	}
+
+	return sessionContext.UserBeliefs
 }
