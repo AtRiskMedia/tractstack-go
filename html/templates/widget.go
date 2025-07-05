@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	templates "github.com/AtRiskMedia/tractstack-go/html/templates/widgets"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -36,11 +37,11 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *models.CodeHook) string {
 	case "signup":
 		return wr.renderSignUp(nodeID, classNames, hook)
 	case "belief":
-		return wr.renderBelief(nodeID, classNames, hook)
+		return templates.RenderBelief(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
 	case "identifyAs":
-		return wr.renderIdentifyAs(nodeID, classNames, hook)
+		return templates.RenderIdentifyAs(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
 	case "toggle":
-		return wr.renderToggle(nodeID, classNames, hook)
+		return templates.RenderToggle(wr.ctx, classNames, *hook.Value1, *hook.Value2)
 	case "resource":
 		return wr.renderResource(nodeID, classNames, hook)
 	default:
@@ -81,36 +82,6 @@ func (wr *WidgetRenderer) renderSignUp(nodeID, classNames string, hook *models.C
 
 		return fmt.Sprintf(`<div class="%s"><div>SignUp Widget: %s - %s (consent: %t)</div></div>`,
 			classNames, persona, prompt, clarifyConsent)
-	}
-	return ""
-}
-
-// renderBelief matches Widget.astro belief condition exactly
-func (wr *WidgetRenderer) renderBelief(nodeID, classNames string, hook *models.CodeHook) string {
-	// Matches: hook === "belief" && value1 && value2
-	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
-		return fmt.Sprintf(`<div class="%s" data-belief="%s"><div>Belief Widget: %s - %s - %s</div></div>`,
-			classNames, *hook.Value1, *hook.Value1, *hook.Value2, hook.Value3)
-	}
-	return ""
-}
-
-// renderIdentifyAs matches Widget.astro identifyAs condition exactly
-func (wr *WidgetRenderer) renderIdentifyAs(nodeID, classNames string, hook *models.CodeHook) string {
-	// Matches: hook === "identifyAs" && value1 && value2
-	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
-		return fmt.Sprintf(`<div class="%s" data-belief="%s"><div>IdentifyAs Widget: %s - %s - %s</div></div>`,
-			classNames, *hook.Value1, *hook.Value1, *hook.Value2, hook.Value3)
-	}
-	return ""
-}
-
-// renderToggle matches Widget.astro toggle condition exactly
-func (wr *WidgetRenderer) renderToggle(nodeID, classNames string, hook *models.CodeHook) string {
-	// Matches: hook === "toggle" && value1 && value2
-	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
-		return fmt.Sprintf(`<div class="%s" data-belief="%s"><div>Toggle Widget: %s - %s</div></div>`,
-			classNames, *hook.Value1, *hook.Value1, *hook.Value2)
 	}
 	return ""
 }
