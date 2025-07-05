@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -75,15 +74,13 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	}
 	nodesData[paneID] = paneNodeData
 
-	// Extract user ID for general context (not belief-related)
-	userID := extractUserIDFromRequest(c)
-
 	// Create render context with real data
 	renderCtx := &models.RenderContext{
-		AllNodes:    nodesData,
-		ParentNodes: parentChildMap,
-		TenantID:    ctx.TenantID,
-		UserID:      userID,
+		AllNodes:        nodesData,
+		ParentNodes:     parentChildMap,
+		TenantID:        ctx.TenantID,
+		SessionID:       sessionID,
+		StoryfragmentID: storyfragmentID,
 	}
 
 	// Create HTML generator
@@ -190,32 +187,6 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	c.String(http.StatusOK, htmlContent)
 }
 
-// extractUserIDFromRequest extracts user ID from request context, cookies, or headers
-func extractUserIDFromRequest(c *gin.Context) string {
-	// Try to get user ID from context first
-	if userID, exists := c.Get("userID"); exists {
-		if uid, ok := userID.(string); ok {
-			return uid
-		}
-	}
-
-	// Try to extract from cookies
-	if cookie, err := c.Cookie("user_id"); err == nil && cookie != "" {
-		return cookie
-	}
-
-	// Try to extract from headers
-	if authHeader := c.GetHeader("Authorization"); authHeader != "" {
-		// Simple bearer token extraction - adjust based on your auth system
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			return strings.TrimPrefix(authHeader, "Bearer ")
-		}
-	}
-
-	// Return empty string if no user ID found
-	return ""
-}
-
 // Helper function to extract background color from pane options
 func extractBgColour(paneNode *models.PaneNode) *string {
 	if paneNode.OptionsPayload == nil {
@@ -285,9 +256,6 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 
 	// Use cache-first pane service (same as single handler)
 	paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
-
-	// Extract user ID for general context (same as single handler)
-	userID := extractUserIDFromRequest(c)
 
 	// ===== OPTIMIZATION: BULK LOAD ALL PANES AT ONCE =====
 	// Replace individual GetByID calls with single bulk call
@@ -361,10 +329,11 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 
 		// Create render context with real data (same as single handler)
 		renderCtx := &models.RenderContext{
-			AllNodes:    nodesData,
-			ParentNodes: parentChildMap,
-			TenantID:    ctx.TenantID,
-			UserID:      userID,
+			AllNodes:        nodesData,
+			ParentNodes:     parentChildMap,
+			TenantID:        ctx.TenantID,
+			SessionID:       sessionID,
+			StoryfragmentID: storyfragmentID,
 		}
 
 		// Create HTML generator (same as single handler)
