@@ -8,7 +8,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
-// RenderBelief renders a Zag.js select component for belief scales
+// RenderBelief renders a Shoelace select component for belief scales
 func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra string) string {
 	// Get user's current beliefs
 	userBeliefs := getUserBeliefs(ctx)
@@ -18,15 +18,13 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 	scaleOptions := getScaleOptions(scale)
 	selectedOption := findSelectedOption(currentBelief, scaleOptions)
 
-	// Generate unique IDs for this widget instance
+	// Generate unique ID for this widget instance
 	selectID := fmt.Sprintf("belief-select-%s", slug)
-	triggerID := fmt.Sprintf("belief-trigger-%s", slug)
-	contentID := fmt.Sprintf("belief-content-%s", slug)
 
 	// Determine session handling strategy
 	sessionStrategy := getSessionStrategy(ctx)
 
-	// Build the Zag.js select component HTML
+	// Build the Shoelace select component HTML
 	html := fmt.Sprintf(`<div class="%s" data-belief="%s">`, classNames, slug)
 
 	// Add extra text if provided
@@ -34,84 +32,35 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 		html += fmt.Sprintf(`<span class="mr-2">%s</span>`, extra)
 	}
 
-	// Build select component with Zag.js attributes
+	// Build sl-select component
 	html += fmt.Sprintf(`
-	<div class="block mt-3 w-fit">
-		<div data-scope="select" data-part="root" id="%s">
-			<button 
-				data-part="trigger" 
-				id="%s"
-				class="relative w-full cursor-default rounded-md border %s bg-white text-black py-2 pl-3 pr-10 text-left shadow-sm focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
-				aria-expanded="false"
-				aria-haspopup="listbox"
-			>
-				<span class="flex items-center">
-					<span 
-						aria-label="Color swatch for belief"
-						class="motion-safe:animate-pulse %s inline-block h-2 w-2 flex-shrink-0 rounded-full"
-					></span>
-					<span class="ml-3 block truncate" data-part="value-text">%s</span>
-				</span>
-				<span class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-					<svg class="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"></path>
-					</svg>
-				</span>
-			</button>
-			
-			<div 
-				data-part="positioner"
-				style="position: absolute; z-index: 50;"
-			>
-				<div 
-					data-part="content" 
-					id="%s"
-					class="absolute mt-1 max-h-60 overflow-auto rounded-md bg-white py-1 text-sm shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50"
-					style="display: none;"
-				>`,
+        <sl-select data-shoelace="select" id="%s" name="belief" class="block mt-3 w-fit %s" value="%s" hx-post="' + window.TRACTSTACK_CONFIG.backendUrl + '/api/v1/state" hx-vals='{"event": {"id": "%s", "type": "Belief", "verb": "{{this.value}}"}}' %s style="--option-border-color: %s;">`,
 		selectID,
-		triggerID,
 		getBorderColorClass(selectedOption),
-		getColorClass(selectedOption),
-		getDisplayText(selectedOption),
-		contentID,
+		selectedOption.Slug,
+		slug,
+		sessionStrategy,
+		getBorderColorStyle(selectedOption),
 	)
 
 	// Add scale options
 	for _, option := range scaleOptions {
 		isSelected := option.Slug == selectedOption.Slug
 		html += fmt.Sprintf(`
-					<div 
-						data-part="item" 
-						data-value="%s"
-						class="belief-item relative cursor-default select-none py-2 pl-3 pr-9 text-black %s"
-      hx-post="' + window.TRACTSTACK_CONFIG.backendUrl + '/api/v1/state"
-						hx-vals='{"event": {"id": "%s", "type": "Belief", "verb": "%s"}}'
-						%s
-					>
-						<div class="flex items-center">
-							<span class="%s inline-block h-2 w-2 flex-shrink-0 rounded-full" aria-hidden="true"></span>
-							<span class="ml-3 block truncate">%s</span>
-						</div>
-						%s
-					</div>`,
+            <sl-option value="%s" class="%s">
+                <span class="%s inline-block h-2 w-2 flex-shrink-0 rounded-full mr-2" aria-hidden="true"></span>
+                %s
+            </sl-option>`,
 			option.Slug,
 			getItemClasses(isSelected),
-			slug,
-			getVerbForOption(option),
-			sessionStrategy,
 			option.Color,
 			option.Name,
-			getCheckIcon(isSelected),
 		)
 	}
 
 	html += `
-				</div>
-			</div>
-		</div>
-	</div>
-</div>`
+        </sl-select>
+    </div>`
 
 	return html
 }
@@ -185,12 +134,26 @@ func getBorderColorClass(option ScaleOption) string {
 	return "border-" + colorPart
 }
 
-func getColorClass(option ScaleOption) string {
-	return option.Color
-}
-
-func getDisplayText(option ScaleOption) string {
-	return option.Name
+func getBorderColorStyle(option ScaleOption) string {
+	if option.ID == 0 {
+		return "#e5e7eb" // Matches border-slate-200
+	}
+	switch option.Color {
+	case "bg-orange-500":
+		return "#f97316"
+	case "bg-teal-400":
+		return "#2dd4bf"
+	case "bg-lime-400":
+		return "#a3e635"
+	case "bg-slate-200":
+		return "#e5e7eb"
+	case "bg-amber-400":
+		return "#f59e0b"
+	case "bg-red-400":
+		return "#f87171"
+	default:
+		return "#f97316" // Fallback to orange-500
+	}
 }
 
 func getItemClasses(isSelected bool) string {
@@ -198,22 +161,4 @@ func getItemClasses(isSelected bool) string {
 		return "bg-slate-100 text-cyan-600"
 	}
 	return "hover:bg-slate-50"
-}
-
-func getVerbForOption(option ScaleOption) string {
-	if option.ID == 0 {
-		return "UNSET"
-	}
-	return option.Slug
-}
-
-func getCheckIcon(isSelected bool) string {
-	if isSelected {
-		return `<span class="absolute inset-y-0 right-0 flex items-center px-2 text-cyan-600">
-					<svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-						<path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-					</svg>
-				</span>`
-	}
-	return ""
 }
