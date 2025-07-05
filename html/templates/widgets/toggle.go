@@ -23,10 +23,9 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
 	html := fmt.Sprintf(`<div class="%s flex items-center mt-6" data-belief="%s">`, classNames, slug)
 
 	html += fmt.Sprintf(`
-        <sl-switch data-shoelace="switch" id="%s" name="beliefValue" %s class="focus:ring-2 focus:ring-cyan-600 focus:ring-offset-2" hx-post="/api/v1/state" hx-include="this" hx-vals='{"beliefId": "%s", "beliefType": "Belief"}'>
-            <span>%s</span>
-        </sl-switch>
-    </div>`,
+    <sl-switch data-shoelace="switch" id="%s" name="beliefValue" %s class="focus:ring-2 focus:ring-cyan-600 focus:ring-offset-2" data-belief-id="%s" data-belief-type="Belief">
+        <span>%s</span>
+    </sl-switch>`,
 		switchID,
 		getCheckedAttribute(isEnabled),
 		slug,

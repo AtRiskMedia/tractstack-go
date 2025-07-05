@@ -66,7 +66,7 @@ func DBStatusHandler(c *gin.Context) {
 	})
 }
 
-// StateHandler - Stage 3 Complete: Event-Driven Broadcasting with Belief Change Detection
+// StateHandler - Phase 1: Accept form data from widgets and convert to events
 func StateHandler(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -74,61 +74,71 @@ func StateHandler(c *gin.Context) {
 		return
 	}
 
-	var req struct {
-		Events []models.Event `json:"events"`
-	}
-	if err := c.BindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+	// Extract form data from widgets
+	beliefID := c.PostForm("beliefId")
+	beliefType := c.PostForm("beliefType")
+	beliefValue := c.PostForm("beliefValue")
+	beliefObject := c.PostForm("beliefObject")
+
+	// Validate required fields
+	if beliefID == "" || beliefType == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "beliefId and beliefType required"})
 		return
 	}
 
-	// Extract session context for belief updates
+	// Extract session context
 	sessionID := c.GetHeader("X-TractStack-Session-ID")
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required"})
 		return
 	}
 
-	// Create belief broadcaster for this tenant
-	beliefBroadcaster := NewBeliefBroadcastService(cache.GetGlobalManager())
-
-	// Process events within tenant context
-	for _, event := range req.Events {
-		switch event.Type {
-		case "Belief":
-			// Extract changed belief from event
-			changedBelief := event.Object // belief slug or identifier
-
-			log.Printf("Processing belief event in tenant %s: %s = %s",
-				ctx.TenantID, changedBelief, event.Verb)
-
-			// Update fingerprint state with new belief
-			if err := updateFingerprintBelief(ctx.TenantID, sessionID, event); err != nil {
-				log.Printf("Failed to update belief for tenant %s session %s: %v",
-					ctx.TenantID, sessionID, err)
-				continue
-			}
-
-			// Trigger targeted broadcasting within tenant
-			beliefBroadcaster.BroadcastBeliefChange(ctx.TenantID, sessionID, []string{changedBelief})
-
-		case "Pane":
-			// Handle pane interactions (clicks, etc.)
-			// These may affect beliefs indirectly
-			log.Printf("Pane %s event in tenant %s: %s", event.Object, ctx.TenantID, event.Verb)
-
-			// TEMPORARY: Minimal broadcast for pane clicks to test infrastructure
-			if event.Verb == "CLICKED" {
-				paneIDs := []string{event.Object}
-				models.Broadcaster.BroadcastToAffectedPanes(ctx.TenantID, "temp-storyfragment-id", paneIDs)
-			}
-
-		default:
-			log.Printf("Unknown event type in tenant %s: %s", ctx.TenantID, event.Type)
+	// Convert form data to event structure following the plan's conversion logic
+	var event models.Event
+	if beliefObject != "" {
+		// IdentifyAs event - detected by presence of beliefObject
+		event = models.Event{
+			ID:     beliefID,
+			Type:   beliefType,
+			Verb:   "IDENTIFY_AS",
+			Object: beliefObject,
+		}
+	} else if beliefValue != "" && beliefValue != "0" {
+		// Scale or Toggle event with actual selection - beliefValue contains the verb
+		// Exclude "0" which is the default prompt option in belief scales
+		event = models.Event{
+			ID:     beliefID,
+			Type:   beliefType,
+			Verb:   beliefValue,
+			Object: beliefID, // Use slug as object for belief events
+		}
+	} else {
+		// Belief scale with no selection (default "0" state) or toggle unchecked
+		// For belief scales, missing/default beliefValue indicates no selection yet
+		// This creates an UNSET event following V1 pattern
+		event = models.Event{
+			ID:     beliefID,
+			Type:   beliefType,
+			Verb:   "UNSET",
+			Object: beliefID,
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "tenantId": ctx.TenantID})
+	// Log the converted event (Phase 1: log everything, process nothing)
+	log.Printf("StateHandler: Processing %s event in tenant %s: %+v",
+		event.Type, ctx.TenantID, event)
+
+	// TODO Phase 2: Add belief slug→ID cache lookup
+	// TODO Phase 3: Create EventProcessor factory
+	// TODO Phase 4: Add database persistence
+	// TODO Phase 5: Implement full event type handlers
+
+	// Phase 1 success response - widgets should now work without 400 errors
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "ok",
+		"tenantId": ctx.TenantID,
+		"event":    event,
+	})
 }
 
 // updateFingerprintBelief updates user beliefs in fingerprint state

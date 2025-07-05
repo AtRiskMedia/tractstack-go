@@ -3,45 +3,46 @@ package templates
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
 // RenderBelief renders a Shoelace select component for belief scales
 func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra string) string {
-	// Get user's current beliefs
 	userBeliefs := getUserBeliefs(ctx)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
 
-	// Determine scale options based on scale type
-	scaleOptions := getScaleOptions(scale)
-	selectedOption := findSelectedOption(currentBelief, scaleOptions)
+	placeholder := getPlaceholderText(scale)
+	actualOptions := filterPlaceholderOptions(getScaleOptions(scale))
 
-	// Generate unique ID for this widget instance
+	selectedValue := ""
+	if currentBelief != nil {
+		for _, option := range actualOptions {
+			if option.Slug == currentBelief.Verb {
+				selectedValue = option.Slug
+				break
+			}
+		}
+	}
+
 	selectID := fmt.Sprintf("belief-select-%s", slug)
 
-	// Build the Shoelace select component HTML
 	html := fmt.Sprintf(`<div class="%s" data-belief="%s">`, classNames, slug)
 
-	// Add extra text if provided
 	if extra != "" {
 		html += fmt.Sprintf(`<span class="mr-2">%s</span>`, extra)
 	}
 
-	// Build sl-select component
 	html += fmt.Sprintf(`
-        <sl-select data-shoelace="select" id="%s" name="beliefValue" class="block mt-3 w-fit %s" value="%s" hx-post="/api/v1/state" hx-include="this" hx-vals='{"beliefId": "%s", "beliefType": "Belief"}' style="--option-border-color: %s;">`,
+    <sl-select data-shoelace="select" id="%s" name="beliefValue" class="block mt-3 w-fit" value="%s" placeholder="%s" data-belief-id="%s" data-belief-type="Belief">`,
 		selectID,
-		getBorderColorClass(selectedOption),
-		selectedOption.Slug,
+		selectedValue,
+		placeholder,
 		slug,
-		getBorderColorStyle(selectedOption),
 	)
 
-	// Add scale options
-	for _, option := range scaleOptions {
-		isSelected := option.Slug == selectedOption.Slug
+	for _, option := range actualOptions {
+		isSelected := option.Slug == selectedValue
 		html += fmt.Sprintf(`
             <sl-option value="%s" class="%s">
                 <span class="%s inline-block h-2 w-2 flex-shrink-0 rounded-full mr-2" aria-hidden="true"></span>
@@ -103,53 +104,22 @@ func getScaleOptions(scale string) []ScaleOption {
 	}
 }
 
-func findSelectedOption(currentBelief *BeliefState, scaleOptions []ScaleOption) ScaleOption {
-	// Default to first option (the prompt)
-	defaultOption := scaleOptions[0]
-
-	if currentBelief == nil {
-		return defaultOption
+func getPlaceholderText(scale string) string {
+	scaleOptions := getScaleOptions(scale)
+	if len(scaleOptions) > 0 {
+		return scaleOptions[0].Name
 	}
+	return "Choose an option"
+}
 
-	// Find matching option based on verb
+func filterPlaceholderOptions(scaleOptions []ScaleOption) []ScaleOption {
+	var actualOptions []ScaleOption
 	for _, option := range scaleOptions {
-		if option.Slug == currentBelief.Verb {
-			return option
+		if option.ID != 0 {
+			actualOptions = append(actualOptions, option)
 		}
 	}
-
-	return defaultOption
-}
-
-func getBorderColorClass(option ScaleOption) string {
-	if option.ID == 0 {
-		return "border-slate-200"
-	}
-	// Extract color from bg-color-shade format and convert to border
-	colorPart := strings.TrimPrefix(option.Color, "bg-")
-	return "border-" + colorPart
-}
-
-func getBorderColorStyle(option ScaleOption) string {
-	if option.ID == 0 {
-		return "#e5e7eb" // Matches border-slate-200
-	}
-	switch option.Color {
-	case "bg-orange-500":
-		return "#f97316"
-	case "bg-teal-400":
-		return "#2dd4bf"
-	case "bg-lime-400":
-		return "#a3e635"
-	case "bg-slate-200":
-		return "#e5e7eb"
-	case "bg-amber-400":
-		return "#f59e0b"
-	case "bg-red-400":
-		return "#f87171"
-	default:
-		return "#f97316" // Fallback to orange-500
-	}
+	return actualOptions
 }
 
 func getItemClasses(isSelected bool) string {

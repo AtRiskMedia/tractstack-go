@@ -72,10 +72,11 @@ func (s *SessionData) UpdateActivity() {
 }
 
 type Event struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Verb   string `json:"verb"`
-	Object string `json:"object"`
+	ID       string   `json:"id"`
+	Type     string   `json:"type"`
+	Verb     string   `json:"verb"`
+	Object   string   `json:"object"`
+	Duration *float64 `json:"duration,omitempty"`
 }
 
 type LoginRequest struct {
