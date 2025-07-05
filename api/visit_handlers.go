@@ -620,9 +620,9 @@ func triggerTemporarySSETest(ctx *tenant.Context, storyfragmentID, sessionID str
 	storyFragmentService := content.NewStoryFragmentService(ctx, cache.GetGlobalManager())
 	if storyFragmentNode, err := storyFragmentService.GetByID(storyfragmentID); err == nil && storyFragmentNode != nil {
 		injectRandomTestBeliefs(ctx, sessionID)
-		log.Printf("TEMPORARY SSE TEST: Broadcasting refresh for all %d panes in storyfragment %s",
-			len(storyFragmentNode.PaneIDs), storyfragmentID)
-		models.Broadcaster.BroadcastToAffectedPanes(ctx.TenantID, storyfragmentID, storyFragmentNode.PaneIDs)
+		log.Printf("TEMPORARY SSE TEST: Broadcasting refresh for %d panes in storyfragment %s to session %s",
+			len(storyFragmentNode.PaneIDs), storyfragmentID, sessionID)
+		models.Broadcaster.BroadcastToSpecificSession(ctx.TenantID, sessionID, storyfragmentID, storyFragmentNode.PaneIDs)
 	}
 }
 

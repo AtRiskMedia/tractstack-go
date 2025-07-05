@@ -276,6 +276,8 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 	sessionID := c.GetHeader("X-TractStack-Session-ID")
 	storyfragmentID := c.GetHeader("X-StoryFragment-ID")
 
+	log.Printf("storyfragmentID:%s, sessionID:%s", storyfragmentID, sessionID)
+
 	response := PaneFragmentsBatchResponse{
 		Fragments: make(map[string]string),
 		Errors:    make(map[string]string),
