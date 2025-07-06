@@ -278,11 +278,7 @@ func (b *SSEBroadcaster) BroadcastToAffectedPanes(tenantID, storyfragmentID stri
 	// Get sessions viewing this storyfragment within tenant - FIX COPYLOCKS + ADD ERROR HANDLING
 	var targetSessions []string
 
-	log.Printf("🔊 BROADCAST: Checking tenant registry for tenant %s", tenantID)
-
 	if registryPtr, exists := b.tenantRegistry[tenantID]; exists {
-		log.Printf("🔊 BROADCAST: Found tenant registry, attempting to lock")
-
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -292,8 +288,6 @@ func (b *SSEBroadcaster) BroadcastToAffectedPanes(tenantID, storyfragmentID stri
 
 			registryPtr.mu.RLock()
 			defer registryPtr.mu.RUnlock()
-
-			log.Printf("🔊 BROADCAST: Registry locked, checking storyfragment %s", storyfragmentID)
 
 			if sessions, exists := registryPtr.StoryfragmentToSessions[storyfragmentID]; exists {
 				targetSessions = append(targetSessions, sessions...)
@@ -538,23 +532,16 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 
 	// Send to specific session only
 	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
-		log.Printf("🔊 SESSION BROADCAST: Found tenant sessions for %s", tenantID)
-
 		if sessionClients, exists := tenantSessions[sessionID]; exists {
-			log.Printf("🔊 SESSION BROADCAST: Found %d clients for session %s", len(sessionClients), sessionID)
-
 			var deadChannels []chan string
 			sentCount := 0
 			failedCount := 0
 
 			for i, ch := range sessionClients {
-				log.Printf("🔊 SESSION BROADCAST: Sending to client %d for session %s", i, sessionID)
-
 				select {
 				case ch <- message:
 					// Success - channel is alive
 					sentCount++
-					log.Printf("🔊 SESSION BROADCAST: ✅ Successfully sent to client %d for session %s", i, sessionID)
 				default:
 					// Channel is blocked/closed - mark for removal
 					deadChannels = append(deadChannels, ch)
@@ -597,17 +584,15 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 					delete(tenantSessions, sessionID)
 				}
 			}
-		} else {
-			log.Printf("🔊 SESSION BROADCAST: ❌ No clients found for session %s", sessionID)
+			//} else {
+			//	log.Printf("🔊 SESSION BROADCAST: ❌ No clients found for session %s", sessionID)
 		}
 
 		// Clean up empty tenant
 		if len(tenantSessions) == 0 {
 			delete(b.tenantSessions, tenantID)
 		}
-	} else {
-		log.Printf("🔊 SESSION BROADCAST: ❌ No tenant sessions found for tenant %s", tenantID)
+		//} else {
+		//	log.Printf("🔊 SESSION BROADCAST: ❌ No tenant sessions found for tenant %s", tenantID)
 	}
-
-	log.Printf("🔊 SESSION BROADCAST: Session broadcast operation completed")
 }

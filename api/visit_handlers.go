@@ -607,7 +607,7 @@ func checkImmediateStateUpdate(ctx *tenant.Context, sessionID, storyfragmentID s
 
 	// If user has matching beliefs, trigger immediate broadcast
 	if len(matchingBeliefs) > 0 {
-		log.Printf("SSE: Found user beliefs matching widgets, triggering immediate update for session %s", sessionID)
+		// log.Printf("SSE: Found user beliefs matching widgets, triggering immediate update for session %s", sessionID)
 
 		// Use existing broadcast service to find and broadcast affected panes
 		broadcastService := services.NewBeliefBroadcastService(cacheManager)
