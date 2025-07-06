@@ -20,8 +20,8 @@ func NewBeliefBroadcastService(cacheManager *cache.Manager) *BeliefBroadcastServ
 
 // BroadcastBeliefChange identifies affected storyfragments and broadcasts updates within tenant
 func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID string, changedBeliefs []string) {
-	log.Printf("Processing belief change for tenant %s session %s: changed beliefs %v",
-		tenantID, sessionID, changedBeliefs)
+	// log.Printf("Processing belief change for tenant %s session %s: changed beliefs %v",
+	//	tenantID, sessionID, changedBeliefs)
 
 	// Find storyfragments using any of the changed beliefs within this tenant
 	affectedStoryfragments := bbs.findAffectedStoryfragments(tenantID, changedBeliefs)
