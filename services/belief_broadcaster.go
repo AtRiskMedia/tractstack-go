@@ -1,5 +1,5 @@
-// Package api provides belief broadcasting service for Stage 3 SSE integration
-package api
+// Package services provides belief broadcasting service for Stage 3 SSE integration
+package services
 
 import (
 	"log"

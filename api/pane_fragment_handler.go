@@ -127,7 +127,7 @@ func GetPaneFragmentHandler(c *gin.Context) {
 						len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs), len(paneBeliefs.MatchAcross))
 
 					// Create belief evaluation engine
-					beliefEngine := content.NewBeliefEvaluationEngine()
+					beliefEngine := services.NewBeliefEvaluationEngine()
 
 					// Evaluate visibility for this pane based on user beliefs
 					visibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
@@ -158,7 +158,7 @@ func GetPaneFragmentHandler(c *gin.Context) {
 							len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs))
 
 						// Create belief evaluation engine
-						beliefEngine := content.NewBeliefEvaluationEngine()
+						beliefEngine := services.NewBeliefEvaluationEngine()
 
 						// Evaluate visibility for this pane based on user beliefs
 						visibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, newContext.UserBeliefs)
@@ -227,6 +227,7 @@ type PaneFragmentsBatchResponse struct {
 
 // GetPaneFragmentsBatchHandler handles batch requests for multiple pane fragments
 func GetPaneFragmentsBatchHandler(c *gin.Context) {
+	log.Printf("*** GetPaneFragmentsBatchHandler")
 	ctx, err := getTenantContext(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -248,7 +249,11 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 	sessionID := c.GetHeader("X-TractStack-Session-ID")
 	storyfragmentID := c.GetHeader("X-StoryFragment-ID")
 
-	log.Printf("storyfragmentID:%s, sessionID:%s", storyfragmentID, sessionID)
+	if sessionID == "" {
+		log.Printf("storyfragmentID:%s, no sessionID", storyfragmentID)
+	} else {
+		log.Printf("storyfragmentID:%s, sessionID:%s", storyfragmentID, sessionID)
+	}
 
 	response := PaneFragmentsBatchResponse{
 		Fragments: make(map[string]string),
@@ -359,23 +364,23 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 
 		// Apply personalization if available (same logic as single handler)
 		if sessionID != "" && storyfragmentID != "" {
-			fmt.Printf("DEBUG: Attempting personalization for session %s, storyfragment %s, pane %s\n",
+			fmt.Printf("*** DEBUG: Attempting personalization for session %s, storyfragment %s, pane %s\n",
 				sessionID, storyfragmentID, paneID)
 
 			// Get cached session belief context
 			if sessionContext, exists := cache.GetGlobalManager().GetSessionBeliefContext(ctx.TenantID, sessionID, storyfragmentID); exists {
-				fmt.Printf("DEBUG: Found session belief context with %d beliefs\n", len(sessionContext.UserBeliefs))
+				fmt.Printf("*** DEBUG: Found session belief context with %d beliefs\n", len(sessionContext.UserBeliefs))
 
 				// Get pane belief requirements from registry
 				if beliefRegistry, exists := cache.GetGlobalManager().GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID); exists {
-					fmt.Printf("DEBUG: Found belief registry with %d panes\n", len(beliefRegistry.PaneBeliefPayloads))
+					fmt.Printf("*** DEBUG: Found belief registry with %d panes\n", len(beliefRegistry.PaneBeliefPayloads))
 
 					if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
-						fmt.Printf("DEBUG: Found pane beliefs - held: %d, withheld: %d, matchAcross: %d\n",
+						fmt.Printf("*** DEBUG: Found pane beliefs - held: %d, withheld: %d, matchAcross: %d\n",
 							len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs), len(paneBeliefs.MatchAcross))
 
 						// Create belief evaluation engine
-						beliefEngine := content.NewBeliefEvaluationEngine()
+						beliefEngine := services.NewBeliefEvaluationEngine()
 
 						// Evaluate visibility for this pane based on user beliefs
 						visibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
@@ -383,15 +388,15 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 						// Apply visibility wrapper to HTML content
 						htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
 
-						fmt.Printf("DEBUG: Applied personalization - pane %s visibility: %s\n", paneID, visibility)
+						fmt.Printf("*** DEBUG: Applied personalization - pane %s visibility: %s\n", paneID, visibility)
 					} else {
-						fmt.Printf("DEBUG: No belief requirements found for pane %s\n", paneID)
+						fmt.Printf("*** DEBUG: No belief requirements found for pane %s\n", paneID)
 					}
 				} else {
-					fmt.Printf("DEBUG: No belief registry found for storyfragment %s\n", storyfragmentID)
+					fmt.Printf("*** DEBUG: No belief registry found for storyfragment %s\n", storyfragmentID)
 				}
 			} else {
-				fmt.Printf("DEBUG: No session belief context found for session %s, storyfragment %s\n", sessionID, storyfragmentID)
+				fmt.Printf("*** DEBUG: No session belief context found for session %s, storyfragment %s\n", sessionID, storyfragmentID)
 			}
 		}
 

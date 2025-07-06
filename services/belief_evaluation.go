@@ -1,7 +1,9 @@
-// Package content provides belief evaluation logic ported from V1 UseFilterPane.ts
-package content
+// Package services provides belief evaluation logic ported from V1 UseFilterPane.ts
+package services
 
 import (
+	"fmt"
+
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -19,14 +21,28 @@ func (bee *BeliefEvaluationEngine) EvaluatePaneVisibility(
 	paneBeliefs models.PaneBeliefData,
 	userBeliefs map[string][]string,
 ) string {
-	// Process held beliefs (requirements for visibility)
-	heldResult := bee.processHeldBeliefs(paneBeliefs, userBeliefs)
+	fmt.Printf("🔍 EVAL DEBUG: Pane has %d held beliefs, %d withheld beliefs\n",
+		len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs))
 
-	// Process withheld beliefs (requirements for hiding)
+	for key, values := range paneBeliefs.HeldBeliefs {
+		fmt.Printf("🔍 EVAL DEBUG: Held belief requirement: %s = %v\n", key, values)
+	}
+
+	for key, values := range paneBeliefs.WithheldBeliefs {
+		fmt.Printf("🔍 EVAL DEBUG: Withheld belief requirement: %s = %v\n", key, values)
+	}
+
+	fmt.Printf("🔍 EVAL DEBUG: User has beliefs: %v\n", userBeliefs)
+
+	heldResult := bee.processHeldBeliefs(paneBeliefs, userBeliefs)
 	withheldResult := bee.processWithheldBeliefs(paneBeliefs, userBeliefs)
 
-	// Calculate final visibility
-	return bee.calculateVisibility(paneBeliefs, heldResult, withheldResult)
+	fmt.Printf("🔍 EVAL DEBUG: Held result: %t, Withheld result: %t\n", heldResult, withheldResult)
+
+	visibility := bee.calculateVisibility(paneBeliefs, heldResult, withheldResult)
+	fmt.Printf("🔍 EVAL DEBUG: Final visibility: %s\n", visibility)
+
+	return visibility
 }
 
 // processHeldBeliefs handles belief requirements for showing content
@@ -196,17 +212,21 @@ func (bee *BeliefEvaluationEngine) matchesBelief(userValue, requiredValue string
 
 // ApplyVisibilityWrapper wraps HTML content based on visibility state
 func (bee *BeliefEvaluationEngine) ApplyVisibilityWrapper(htmlContent, visibility string) string {
+	fmt.Printf("🔧 WRAPPER DEBUG: visibility=%s, content length=%d\n", visibility, len(htmlContent))
+
 	switch visibility {
 	case "visible":
+		fmt.Printf("🔧 WRAPPER DEBUG: Returning visible content unchanged\n")
 		return htmlContent
 	case "hidden":
-		// Apply CSS hiding wrapper - matches V1 hiddenStyles
-		return `<div class="invisible" style="opacity:0;height:0;overflow:hidden;clip-path:inset(50%);margin:0;">` + htmlContent + `</div>`
+		result := `<div style="display:none !important;">` + htmlContent + `</div>`
+		fmt.Printf("🔧 WRAPPER DEBUG: Applied hidden wrapper, new length=%d\n", len(result))
+		return result
 	case "empty":
-		// Return empty div for completely hidden content
-		return `<div></div>`
+		fmt.Printf("🔧 WRAPPER DEBUG: Returning empty div\n")
+		return `<div style="display:none !important;"></div>`
 	default:
-		// Default to visible if unknown state
+		fmt.Printf("🔧 WRAPPER DEBUG: Unknown visibility '%s', returning unchanged\n", visibility)
 		return htmlContent
 	}
 }

@@ -8,6 +8,7 @@ import (
 )
 
 // RenderBelief renders a Shoelace select component for belief scales
+// RenderBelief renders a Shoelace select component for belief scales
 func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra string) string {
 	userBeliefs := getUserBeliefs(ctx)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
@@ -27,19 +28,15 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 
 	selectID := fmt.Sprintf("belief-select-%s", slug)
 
-	html := fmt.Sprintf(`<div class="%s" data-belief="%s">`, classNames, slug)
+	html := fmt.Sprintf(`<div id="belief-container-%s" class="%s" data-belief="%s" hx-preserve="true" hx-sync="closest .pane-fragment-container:queue">`, slug, classNames, slug)
 
 	if extra != "" {
 		html += fmt.Sprintf(`<span class="mr-2">%s</span>`, extra)
 	}
 
 	html += fmt.Sprintf(`
-    <sl-select data-shoelace="select" id="%s" name="beliefValue" class="block mt-3 w-fit" value="%s" placeholder="%s" data-belief-id="%s" data-belief-type="Belief">`,
-		selectID,
-		selectedValue,
-		placeholder,
-		slug,
-	)
+  <sl-select data-shoelace="select" id="%s" name="beliefValue" class="block mt-3 w-fit" value="%s" placeholder="%s" data-belief-id="%s" data-belief-type="Belief" no-autofocus>`,
+		selectID, selectedValue, placeholder, slug)
 
 	for _, option := range actualOptions {
 		isSelected := option.Slug == selectedValue
