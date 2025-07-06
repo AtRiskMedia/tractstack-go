@@ -22,9 +22,9 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
 	helpID := fmt.Sprintf("toggle-help-%s", slug)
 
 	// Build the accessible HTML toggle
-	html := fmt.Sprintf(`<div class="%s mt-6" data-belief="%s">`, classNames, slug)
+	html := fmt.Sprintf(`<div class="%s mt-6" data-belief="%s" data-pane-id="%s">`, classNames, slug, ctx.ContainingPaneID)
 
-	// Accessible toggle with proper ARIA attributes
+	// Accessible toggle with proper ARIA attributes and HTMX integration
 	html += fmt.Sprintf(`
     <div class="flex items-center">
         <input type="checkbox" 
@@ -34,11 +34,16 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
                class="sr-only peer" 
                data-belief-id="%s" 
                data-belief-type="Belief"
-      data-pane-id="%s"
+               data-pane-id="%s"
                role="switch"
                aria-checked="%s"
                aria-labelledby="%s"
-               aria-describedby="%s">
+               aria-describedby="%s"
+               hx-post="/api/v1/state"
+               hx-trigger="change"
+               hx-swap="none"
+               hx-vals='{"beliefId": "%s", "beliefType": "Belief", "paneId": "%s"}'
+               hx-include="[name='beliefValue']">
         
         <!-- Visual toggle switch -->
         <label for="%s" 
@@ -59,6 +64,8 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
 		getBooleanString(isEnabled),
 		labelID,
 		helpID,
+		slug,
+		ctx.ContainingPaneID,
 		checkboxID,
 		labelID,
 		prompt,
@@ -68,60 +75,49 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
 	html += fmt.Sprintf(`
     <div id="%s" class="sr-only">
         Toggle switch. Currently %s. Press space to toggle.
-    </div>`, helpID, getStateDescription(isEnabled))
+    </div>`,
+		helpID,
+		getToggleStateText(isEnabled),
+	)
 
-	html += `
-    </div>
-
-    <style>
-    /* Enhanced focus styles for accessibility */
-    .peer:focus + label > div {
-        box-shadow: 0 0 0 2px #ffffff, 0 0 0 4px #0891b2;
-    }
-    
-    /* High contrast mode support */
-    @media (prefers-contrast: high) {
-        .peer:checked + label > div {
-            background-color: #000000;
-        }
-        .peer + label > div::after {
-            border-color: #000000;
-        }
-    }
-    
-    /* Reduced motion support */
-    @media (prefers-reduced-motion: reduce) {
-        .peer + label > div::after {
-            transition: none;
-        }
-    }
-    </style>`
+	html += `</div>`
 
 	return html
 }
 
+// getToggleState determines if the toggle should be checked based on current belief
 func getToggleState(currentBelief *BeliefState) bool {
 	if currentBelief == nil {
 		return false
 	}
-	return currentBelief.Verb == "BELIEVES_YES"
+
+	// Check for positive belief verbs that indicate "enabled"
+	switch currentBelief.Verb {
+	case "BELIEVES_YES", "ENABLE", "ACTIVATE", "TOGGLE_ON":
+		return true
+	default:
+		return false
+	}
 }
 
+// getCheckedAttribute returns the checked attribute string if enabled
 func getCheckedAttribute(isEnabled bool) string {
 	if isEnabled {
-		return `checked`
+		return "checked"
 	}
 	return ""
 }
 
-func getBooleanString(isEnabled bool) string {
-	if isEnabled {
+// getBooleanString converts boolean to string for ARIA attributes
+func getBooleanString(value bool) string {
+	if value {
 		return "true"
 	}
 	return "false"
 }
 
-func getStateDescription(isEnabled bool) string {
+// getToggleStateText returns human-readable state for screen readers
+func getToggleStateText(isEnabled bool) string {
 	if isEnabled {
 		return "enabled"
 	}
