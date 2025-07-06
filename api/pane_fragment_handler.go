@@ -77,11 +77,12 @@ func GetPaneFragmentHandler(c *gin.Context) {
 
 	// Create render context with real data
 	renderCtx := &models.RenderContext{
-		AllNodes:        nodesData,
-		ParentNodes:     parentChildMap,
-		TenantID:        ctx.TenantID,
-		SessionID:       sessionID,
-		StoryfragmentID: storyfragmentID,
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         ctx.TenantID,
+		SessionID:        sessionID,
+		StoryfragmentID:  storyfragmentID,
+		ContainingPaneID: paneID,
 	}
 
 	// Create HTML generator
@@ -325,11 +326,12 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 
 		// Create render context with real data
 		renderCtx := &models.RenderContext{
-			AllNodes:        nodesData,
-			ParentNodes:     parentChildMap,
-			TenantID:        ctx.TenantID,
-			SessionID:       sessionID,
-			StoryfragmentID: storyfragmentID,
+			AllNodes:         nodesData,
+			ParentNodes:      parentChildMap,
+			TenantID:         ctx.TenantID,
+			SessionID:        sessionID,
+			StoryfragmentID:  storyfragmentID,
+			ContainingPaneID: paneID,
 		}
 
 		// Create HTML generator

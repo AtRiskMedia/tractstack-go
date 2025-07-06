@@ -610,8 +610,8 @@ func checkImmediateStateUpdate(ctx *tenant.Context, sessionID, storyfragmentID s
 		// log.Printf("SSE: Found user beliefs matching widgets, triggering immediate update for session %s", sessionID)
 
 		// Use existing broadcast service to find and broadcast affected panes
-		broadcastService := services.NewBeliefBroadcastService(cacheManager)
-		broadcastService.BroadcastBeliefChange(ctx.TenantID, sessionID, matchingBeliefs)
+		broadcastService := services.NewBeliefBroadcastService(cacheManager, sessionID)
+		broadcastService.BroadcastBeliefChange(ctx.TenantID, sessionID, matchingBeliefs, nil, "")
 	}
 }
 

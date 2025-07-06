@@ -3,6 +3,7 @@ package services
 
 import (
 	"log"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -11,20 +12,18 @@ import (
 // BeliefBroadcastService handles tenant-scoped targeted broadcasting when beliefs change
 type BeliefBroadcastService struct {
 	cacheManager *cache.Manager
+	sessionID    string
 }
 
 // NewBeliefBroadcastService creates a new belief broadcast service
-func NewBeliefBroadcastService(cacheManager *cache.Manager) *BeliefBroadcastService {
-	return &BeliefBroadcastService{cacheManager: cacheManager}
+func NewBeliefBroadcastService(cacheManager *cache.Manager, sessionID string) *BeliefBroadcastService {
+	return &BeliefBroadcastService{cacheManager: cacheManager, sessionID: sessionID}
 }
 
 // BroadcastBeliefChange identifies affected storyfragments and broadcasts updates within tenant
-func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID string, changedBeliefs []string) {
-	// log.Printf("Processing belief change for tenant %s session %s: changed beliefs %v",
-	//	tenantID, sessionID, changedBeliefs)
-
+func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID string) {
 	// Find storyfragments using any of the changed beliefs within this tenant
-	affectedStoryfragments := bbs.findAffectedStoryfragments(tenantID, changedBeliefs)
+	affectedStoryfragments := bbs.FindAffectedStoryfragments(tenantID, changedBeliefs)
 
 	if len(affectedStoryfragments) == 0 {
 		log.Printf("No affected storyfragments found for belief changes: %v", changedBeliefs)
@@ -37,15 +36,27 @@ func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID str
 			log.Printf("Broadcasting belief change to tenant %s storyfragment %s, affected panes: %v",
 				tenantID, storyfragmentID, affectedPanes)
 
-			models.Broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes)
+			// NEW: Compute scroll target if we have visibility snapshot
+			var scrollTarget *string
+			if visibilitySnapshot != nil && currentPaneID != "" {
+				log.Printf("DEBUG: Computing scroll target for pane %s with snapshot: %v", currentPaneID, visibilitySnapshot[storyfragmentID])
+				scrollTarget = bbs.computeScrollTarget(tenantID, storyfragmentID, currentPaneID, visibilitySnapshot[storyfragmentID], affectedPanes)
+				if scrollTarget != nil {
+					log.Printf("DEBUG: Scroll target computed: %s", *scrollTarget)
+				} else {
+					log.Printf("DEBUG: No scroll target found")
+				}
+			}
+
+			models.Broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes, scrollTarget)
 		} else {
-			log.Printf("No viewing sessions for storyfragment %s, skipping broadcast", storyfragmentID)
+			log.Printf("No sessions viewing storyfragment %s - skipping broadcast", storyfragmentID)
 		}
 	}
 }
 
-// findAffectedStoryfragments scans belief registries for panes using changed beliefs within tenant
-func (bbs *BeliefBroadcastService) findAffectedStoryfragments(tenantID string, changedBeliefs []string) map[string][]string {
+// FindAffectedStoryfragments scans belief registries for panes using changed beliefs within tenant
+func (bbs *BeliefBroadcastService) FindAffectedStoryfragments(tenantID string, changedBeliefs []string) map[string][]string {
 	result := make(map[string][]string)
 
 	// Create a set of changed beliefs for faster lookup
@@ -144,4 +155,85 @@ func (bbs *BeliefBroadcastService) checkWidgetBeliefs(registry *models.Storyfrag
 	}
 
 	return affectedPanes
+}
+
+// computeScrollTarget determines which pane to scroll to
+// Simplified version: returns first newly revealed pane
+func (bbs *BeliefBroadcastService) computeScrollTarget(tenantID, storyfragmentID, currentPaneID string, beforeSnapshot map[string]bool, affectedPanes []string) *string {
+	log.Printf("DEBUG computeScrollTarget: tenantID=%s, storyfragmentID=%s, currentPaneID=%s", tenantID, storyfragmentID, currentPaneID)
+	log.Printf("DEBUG computeScrollTarget: beforeSnapshot=%v", beforeSnapshot)
+	log.Printf("DEBUG computeScrollTarget: affectedPanes=%v", affectedPanes)
+
+	// Get current session belief context to evaluate new visibility
+	sessionData, exists := bbs.cacheManager.GetSession(tenantID, bbs.sessionID)
+	if !exists {
+		log.Printf("DEBUG computeScrollTarget: No session data found for %s", bbs.sessionID)
+		return nil
+	}
+
+	// Force session belief context creation if it doesn't exist
+	sessionContext, exists := bbs.cacheManager.GetSessionBeliefContext(tenantID, bbs.sessionID, storyfragmentID)
+	if !exists {
+		log.Printf("DEBUG computeScrollTarget: No session belief context found, attempting to create it")
+
+		// Try to get the fingerprint data to build session context
+		fingerprintData, fingerprintExists := bbs.cacheManager.GetFingerprintState(tenantID, sessionData.FingerprintID)
+		if !fingerprintExists {
+			log.Printf("DEBUG computeScrollTarget: No fingerprint data found for %s", sessionData.FingerprintID)
+			return nil
+		}
+
+		// Create a temporary session belief context using current fingerprint beliefs
+		sessionContext = &models.SessionBeliefContext{
+			TenantID:        tenantID,
+			SessionID:       bbs.sessionID,
+			StoryfragmentID: storyfragmentID,
+			UserBeliefs:     fingerprintData.HeldBeliefs,
+			LastEvaluation:  time.Now(),
+		}
+
+		log.Printf("DEBUG computeScrollTarget: Created temporary session context with beliefs: %v", sessionContext.UserBeliefs)
+	} else {
+		log.Printf("DEBUG computeScrollTarget: Found existing session context with beliefs: %v", sessionContext.UserBeliefs)
+	}
+
+	// Get belief registry to evaluate new visibility
+	registry, exists := bbs.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+	if !exists {
+		log.Printf("DEBUG computeScrollTarget: No belief registry found")
+		return nil
+	}
+
+	// Find newly revealed panes
+	var newlyRevealed []string
+	beliefEngine := NewBeliefEvaluationEngine()
+
+	for _, paneID := range affectedPanes {
+		wasVisible := beforeSnapshot[paneID] // defaults to false if missing
+		log.Printf("DEBUG computeScrollTarget: Checking pane %s, wasVisible=%v", paneID, wasVisible)
+
+		// Evaluate current visibility
+		if paneBeliefs, exists := registry.PaneBeliefPayloads[paneID]; exists {
+			visibilityResult := beliefEngine.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
+			isVisible := (visibilityResult == "visible" || visibilityResult == "true")
+			log.Printf("DEBUG computeScrollTarget: Pane %s current visibility: %v (result: %s)", paneID, isVisible, visibilityResult)
+
+			if !wasVisible && isVisible {
+				newlyRevealed = append(newlyRevealed, paneID)
+				log.Printf("DEBUG computeScrollTarget: Pane %s is newly revealed!", paneID)
+			}
+		}
+	}
+
+	if len(newlyRevealed) == 0 {
+		log.Printf("DEBUG computeScrollTarget: No newly revealed panes found")
+		return nil
+	}
+
+	log.Printf("DEBUG computeScrollTarget: Newly revealed panes: %v", newlyRevealed)
+
+	// Simplified: Just return the first newly revealed pane
+	firstRevealed := newlyRevealed[0]
+	log.Printf("DEBUG computeScrollTarget: Returning first newly revealed pane: %s", firstRevealed)
+	return &firstRevealed
 }
