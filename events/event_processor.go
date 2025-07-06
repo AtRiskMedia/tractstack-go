@@ -7,6 +7,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
+	"github.com/AtRiskMedia/tractstack-go/services"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
 
@@ -82,11 +83,8 @@ func (ep *EventProcessor) getSessionData() (*models.SessionData, error) {
 
 // triggerSSE triggers real-time UI updates via Server-Sent Events
 func (ep *EventProcessor) triggerSSE(changedBeliefs []string) {
-	// TODO Phase 3: Replace with real SSE broadcast service integration
-	// For now, log the changes that would trigger SSE
 	log.Printf("SSE Trigger: beliefs changed for session %s: %v", ep.sessionID, changedBeliefs)
 
-	// When implemented, this will call:
-	// broadcastService := NewBeliefBroadcastService(ep.cacheManager)
-	// broadcastService.BroadcastBeliefChange(ep.tenantID, ep.sessionID, changedBeliefs)
+	broadcastService := services.NewBeliefBroadcastService(ep.cacheManager)
+	broadcastService.BroadcastBeliefChange(ep.tenantID, ep.sessionID, changedBeliefs)
 }
