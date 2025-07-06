@@ -3,7 +3,6 @@ package html
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/html/templates"
@@ -468,8 +467,8 @@ func (nr *NodeRendererImpl) renderWidget(nodeID string, hook *models.CodeHook) s
 	}
 
 	// Log parameters for debugging (as requested)
-	log.Printf("Widget found - NodeID: %s, Hook: %s, Value1: %v, Value2: %v, Value3: %s",
-		nodeID, hook.Hook, hook.Value1, hook.Value2, hook.Value3)
+	// log.Printf("Widget found - NodeID: %s, Hook: %s, Value1: %v, Value2: %v, Value3: %s",
+	//	nodeID, hook.Hook, hook.Value1, hook.Value2, hook.Value3)
 
 	// Create widget renderer and dispatch
 	widgetRenderer := templates.NewWidgetRenderer(nr.ctx)

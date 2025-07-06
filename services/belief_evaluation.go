@@ -2,8 +2,6 @@
 package services
 
 import (
-	"fmt"
-
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -21,26 +19,23 @@ func (bee *BeliefEvaluationEngine) EvaluatePaneVisibility(
 	paneBeliefs models.PaneBeliefData,
 	userBeliefs map[string][]string,
 ) string {
-	fmt.Printf("🔍 EVAL DEBUG: Pane has %d held beliefs, %d withheld beliefs\n",
-		len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs))
-
-	for key, values := range paneBeliefs.HeldBeliefs {
-		fmt.Printf("🔍 EVAL DEBUG: Held belief requirement: %s = %v\n", key, values)
-	}
-
-	for key, values := range paneBeliefs.WithheldBeliefs {
-		fmt.Printf("🔍 EVAL DEBUG: Withheld belief requirement: %s = %v\n", key, values)
-	}
-
-	fmt.Printf("🔍 EVAL DEBUG: User has beliefs: %v\n", userBeliefs)
+	//fmt.Printf("🔍 EVAL DEBUG: Pane has %d held beliefs, %d withheld beliefs\n",
+	//	len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs))
+	//for key, values := range paneBeliefs.HeldBeliefs {
+	//	fmt.Printf("🔍 EVAL DEBUG: Held belief requirement: %s = %v\n", key, values)
+	//}
+	//for key, values := range paneBeliefs.WithheldBeliefs {
+	//	fmt.Printf("🔍 EVAL DEBUG: Withheld belief requirement: %s = %v\n", key, values)
+	//}
+	//fmt.Printf("🔍 EVAL DEBUG: User has beliefs: %v\n", userBeliefs)
 
 	heldResult := bee.processHeldBeliefs(paneBeliefs, userBeliefs)
 	withheldResult := bee.processWithheldBeliefs(paneBeliefs, userBeliefs)
 
-	fmt.Printf("🔍 EVAL DEBUG: Held result: %t, Withheld result: %t\n", heldResult, withheldResult)
+	// fmt.Printf("🔍 EVAL DEBUG: Held result: %t, Withheld result: %t\n", heldResult, withheldResult)
 
 	visibility := bee.calculateVisibility(paneBeliefs, heldResult, withheldResult)
-	fmt.Printf("🔍 EVAL DEBUG: Final visibility: %s\n", visibility)
+	// fmt.Printf("🔍 EVAL DEBUG: Final visibility: %s\n", visibility)
 
 	return visibility
 }
@@ -151,17 +146,25 @@ func (bee *BeliefEvaluationEngine) calculateVisibility(
 	hasHeldRequirements := len(paneBeliefs.HeldBeliefs) > 0 || len(paneBeliefs.MatchAcross) > 0
 	hasWithheldRequirements := len(paneBeliefs.WithheldBeliefs) > 0
 
-	// If pane has held belief requirements and user doesn't satisfy them, hide
-	if hasHeldRequirements && !heldResult {
-		return "hidden"
+	// FIXED LOGIC: Matches V1 UseFilterPane.ts exactly
+
+	// If pane has held belief requirements, user must satisfy them to be visible
+	if hasHeldRequirements {
+		if !heldResult {
+			return "hidden" // User doesn't satisfy held requirements = hidden
+		}
 	}
 
-	// If pane has withheld belief requirements and user has prohibited beliefs, hide
-	if hasWithheldRequirements && !withheldResult {
-		return "hidden"
+	// If pane has withheld belief requirements, user must NOT have prohibited beliefs
+	if hasWithheldRequirements {
+		if !withheldResult {
+			return "hidden" // User has prohibited beliefs = hidden
+		}
 	}
 
-	// All requirements satisfied, show content
+	// If we reach here, either:
+	// 1. Pane has no belief requirements (always visible)
+	// 2. Pane has requirements and user satisfies all of them
 	return "visible"
 }
 
@@ -212,21 +215,21 @@ func (bee *BeliefEvaluationEngine) matchesBelief(userValue, requiredValue string
 
 // ApplyVisibilityWrapper wraps HTML content based on visibility state
 func (bee *BeliefEvaluationEngine) ApplyVisibilityWrapper(htmlContent, visibility string) string {
-	fmt.Printf("🔧 WRAPPER DEBUG: visibility=%s, content length=%d\n", visibility, len(htmlContent))
+	// fmt.Printf("🔧 WRAPPER DEBUG: visibility=%s, content length=%d\n", visibility, len(htmlContent))
 
 	switch visibility {
 	case "visible":
-		fmt.Printf("🔧 WRAPPER DEBUG: Returning visible content unchanged\n")
+		// fmt.Printf("🔧 WRAPPER DEBUG: Returning visible content unchanged\n")
 		return htmlContent
 	case "hidden":
 		result := `<div style="display:none !important;">` + htmlContent + `</div>`
-		fmt.Printf("🔧 WRAPPER DEBUG: Applied hidden wrapper, new length=%d\n", len(result))
+		// fmt.Printf("🔧 WRAPPER DEBUG: Applied hidden wrapper, new length=%d\n", len(result))
 		return result
 	case "empty":
-		fmt.Printf("🔧 WRAPPER DEBUG: Returning empty div\n")
+		// fmt.Printf("🔧 WRAPPER DEBUG: Returning empty div\n")
 		return `<div style="display:none !important;"></div>`
 	default:
-		fmt.Printf("🔧 WRAPPER DEBUG: Unknown visibility '%s', returning unchanged\n", visibility)
+		// fmt.Printf("🔧 WRAPPER DEBUG: Unknown visibility '%s', returning unchanged\n", visibility)
 		return htmlContent
 	}
 }

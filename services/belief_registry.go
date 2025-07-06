@@ -27,11 +27,11 @@ func NewBeliefRegistryService(ctx *tenant.Context) *BeliefRegistryService {
 func (brs *BeliefRegistryService) ExtractAndCacheBeliefRegistry(storyfragmentID string, paneIDs []string) (*models.StoryfragmentBeliefRegistry, error) {
 	// Check if registry already exists in cache
 	if registry, found := brs.getFromCache(storyfragmentID); found {
-		log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
+		// log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
 		return registry, nil
 	}
 
-	log.Printf("CACHE MISS: Building registry for storyfragment %s with %d panes", storyfragmentID, len(paneIDs))
+	// log.Printf("CACHE MISS: Building registry for storyfragment %s with %d panes", storyfragmentID, len(paneIDs))
 
 	// Extract beliefs from all panes
 	registry, err := brs.buildRegistryFromPanes(storyfragmentID, paneIDs)
@@ -41,7 +41,7 @@ func (brs *BeliefRegistryService) ExtractAndCacheBeliefRegistry(storyfragmentID 
 
 	// Cache the registry
 	brs.setInCache(storyfragmentID, registry)
-	log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
+	// log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
 
 	return registry, nil
 }
@@ -93,7 +93,7 @@ func (brs *BeliefRegistryService) buildRegistryFromPanes(storyfragmentID string,
 				registry.AllWidgetBeliefs[beliefSlug] = true
 			}
 
-			log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
+			// log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
 		}
 	}
 
@@ -241,11 +241,11 @@ func extractWidgetTypeFromCopy(copyText string) string {
 func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID string, loadedPanes []*models.PaneNode) (*models.StoryfragmentBeliefRegistry, error) {
 	// Check if registry already exists in cache
 	if registry, found := brs.getFromCache(storyfragmentID); found {
-		log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
+		// log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
 		return registry, nil
 	}
 
-	log.Printf("CACHE MISS: Building registry for storyfragment %s with %d loaded panes", storyfragmentID, len(loadedPanes))
+	// log.Printf("CACHE MISS: Building registry for storyfragment %s with %d loaded panes", storyfragmentID, len(loadedPanes))
 
 	registry := &models.StoryfragmentBeliefRegistry{
 		StoryfragmentID:    storyfragmentID,
@@ -288,7 +288,7 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID s
 				registry.AllWidgetBeliefs[beliefSlug] = true
 			}
 
-			log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
+			// log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
 
 			// Load widget beliefs into cache
 			for _, beliefSlug := range widgetBeliefs {
@@ -296,8 +296,8 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID s
 				_, err := beliefService.GetBySlug(beliefSlug)
 				if err != nil {
 					log.Printf("Failed to load widget belief into cache: %s - %v", beliefSlug, err)
-				} else {
-					log.Printf("Loaded widget belief into cache: %s", beliefSlug)
+					//} else {
+					//	log.Printf("Loaded widget belief into cache: %s", beliefSlug)
 				}
 			}
 		}
@@ -305,7 +305,7 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID s
 
 	// Cache the registry
 	brs.setInCache(storyfragmentID, registry)
-	log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
+	// log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
 
 	return registry, nil
 }
