@@ -37,7 +37,7 @@ func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID str
 			log.Printf("Broadcasting belief change to tenant %s storyfragment %s, affected panes: %v",
 				tenantID, storyfragmentID, affectedPanes)
 
-			models.Broadcaster.BroadcastToAffectedPanes(tenantID, storyfragmentID, affectedPanes)
+			models.Broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes)
 		} else {
 			log.Printf("No viewing sessions for storyfragment %s, skipping broadcast", storyfragmentID)
 		}
