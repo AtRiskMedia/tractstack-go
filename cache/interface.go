@@ -36,6 +36,7 @@ type ContentCache interface {
 	GetBelief(tenantID, id string) (*models.BeliefNode, bool)
 	SetBelief(tenantID string, node *models.BeliefNode)
 	GetBeliefBySlug(tenantID, slug string) (*models.BeliefNode, bool)
+	GetBeliefIDBySlug(tenantID, slug string) (string, bool)
 
 	// File operations
 	GetFile(tenantID, id string) (*models.ImageFileNode, bool)

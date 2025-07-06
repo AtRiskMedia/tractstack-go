@@ -11,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/html"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
+	"github.com/AtRiskMedia/tractstack-go/services"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
@@ -276,7 +277,7 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 	// ===== BUILD BELIEF REGISTRY FROM LOADED PANES =====
 	// Now that we have all panes loaded, build the belief registry efficiently
 	if storyfragmentID != "" {
-		beliefRegistryService := content.NewBeliefRegistryService(ctx)
+		beliefRegistryService := services.NewBeliefRegistryService(ctx)
 		_, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyfragmentID, paneNodes)
 		if err != nil {
 			// Log the error but don't fail the request - belief registry is optional

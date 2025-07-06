@@ -3,7 +3,6 @@ package content
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -300,10 +299,12 @@ func (bs *BeliefService) deserializeRowData(beliefRow *BeliefRowData) (*models.B
 	}
 
 	// Parse custom values if present
-	if beliefRow.CustomValues != nil {
-		var customValues []string
-		if err := json.Unmarshal([]byte(*beliefRow.CustomValues), &customValues); err != nil {
-			return nil, fmt.Errorf("failed to parse custom values: %w", err)
+	if beliefRow.CustomValues != nil && *beliefRow.CustomValues != "" {
+		// Split comma-separated values and trim whitespace
+		values := strings.Split(*beliefRow.CustomValues, ",")
+		customValues := make([]string, len(values))
+		for i, value := range values {
+			customValues[i] = strings.TrimSpace(value)
 		}
 		beliefNode.CustomValues = customValues
 	}

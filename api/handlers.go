@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/events"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
@@ -128,12 +129,18 @@ func StateHandler(c *gin.Context) {
 	log.Printf("StateHandler: Processing %s event in tenant %s: %+v",
 		event.Type, ctx.TenantID, event)
 
-	// TODO Phase 2: Add belief slug→ID cache lookup
-	// TODO Phase 3: Create EventProcessor factory
-	// TODO Phase 4: Add database persistence
-	// TODO Phase 5: Implement full event type handlers
+	// Create event processor
+	processor := events.NewEventProcessor(ctx.TenantID, sessionID, ctx)
 
-	// Phase 1 success response - widgets should now work without 400 errors
+	// Process events array
+	eventArray := []models.Event{event} // Support for future array processing
+	err = processor.ProcessEvents(eventArray)
+	if err != nil {
+		log.Printf("Error processing events: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":   "ok",
 		"tenantId": ctx.TenantID,
