@@ -352,7 +352,7 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 			}
 		}
 
-		// FIXED: ALWAYS evaluate belief requirements, even for initial load
+		// ALWAYS evaluate belief requirements, even for initial load
 		if storyfragmentID != "" {
 			// fmt.Printf("*** DEBUG: Attempting belief evaluation for pane %s\n", paneID)
 
