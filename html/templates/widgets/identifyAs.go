@@ -25,7 +25,8 @@ func RenderIdentifyAs(ctx *models.RenderContext, classNames, slug, targets, extr
 	isOtherSelected := isOtherTargetSelected(currentBelief, targetsList)
 
 	// Build the widget HTML
-	html := fmt.Sprintf(`<div class="%s" data-belief="%s">`, classNames, slug)
+	html := fmt.Sprintf(`<div class="%s" data-belief="%s" data-pane-id="%s">`,
+		classNames, slug, ctx.ContainingPaneID)
 
 	// Add extra text if provided (unless it's empty which means noprompt)
 	if extra != "" {

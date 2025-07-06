@@ -67,7 +67,7 @@ func DBStatusHandler(c *gin.Context) {
 	})
 }
 
-// StateHandler - Phase 1: Accept form data from widgets and convert to events
+// StateHandler - Accept form data from widgets and convert to events
 func StateHandler(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -80,6 +80,7 @@ func StateHandler(c *gin.Context) {
 	beliefType := c.PostForm("beliefType")
 	beliefValue := c.PostForm("beliefValue")
 	beliefObject := c.PostForm("beliefObject")
+	paneID := c.PostForm("paneId") // NEW
 
 	// Validate required fields
 	if beliefID == "" || beliefType == "" {
@@ -92,6 +93,13 @@ func StateHandler(c *gin.Context) {
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required"})
 		return
+	}
+
+	// Log pane ID for debugging (optional warning if missing)
+	if paneID == "" {
+		log.Printf("WARNING: No paneId provided for belief %s in session %s", beliefID, sessionID)
+	} else {
+		log.Printf("Processing belief %s from pane %s in session %s", beliefID, paneID, sessionID)
 	}
 
 	// Convert form data to event structure following the plan's conversion logic
@@ -132,9 +140,9 @@ func StateHandler(c *gin.Context) {
 	// Create event processor
 	processor := events.NewEventProcessor(ctx.TenantID, sessionID, ctx)
 
-	// Process events array
-	eventArray := []models.Event{event} // Support for future array processing
-	err = processor.ProcessEvents(eventArray)
+	// Process events array with current pane ID
+	eventArray := []models.Event{event}
+	err = processor.ProcessEvents(eventArray, paneID)
 	if err != nil {
 		log.Printf("Error processing events: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})

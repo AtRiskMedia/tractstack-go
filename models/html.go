@@ -11,11 +11,12 @@ const (
 
 // RenderContext provides the context for HTML rendering operations
 type RenderContext struct {
-	AllNodes        map[string]*NodeRenderData `json:"allNodes,omitempty"`
-	ParentNodes     map[string][]string        `json:"parentNodes,omitempty"`
-	TenantID        string                     `json:"tenantId,omitempty"`
-	SessionID       string                     `json:"sessionId,omitempty"`       // ADD
-	StoryfragmentID string                     `json:"storyfragmentId,omitempty"` // ADD
+	AllNodes         map[string]*NodeRenderData `json:"allNodes,omitempty"`
+	ParentNodes      map[string][]string        `json:"parentNodes,omitempty"`
+	TenantID         string                     `json:"tenantId,omitempty"`
+	SessionID        string                     `json:"sessionId,omitempty"`
+	StoryfragmentID  string                     `json:"storyfragmentId,omitempty"`
+	ContainingPaneID string                     `json:"containingPaneId,omitempty"`
 }
 
 // CodeHook represents parsed widget parameters from code nodes

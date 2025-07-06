@@ -34,6 +34,7 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
                class="sr-only peer" 
                data-belief-id="%s" 
                data-belief-type="Belief"
+      data-pane-id="%s"
                role="switch"
                aria-checked="%s"
                aria-labelledby="%s"
@@ -54,6 +55,7 @@ func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) st
 		checkboxID,
 		getCheckedAttribute(isEnabled),
 		slug,
+		ctx.ContainingPaneID,
 		getBooleanString(isEnabled),
 		labelID,
 		helpID,

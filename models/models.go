@@ -511,7 +511,7 @@ func (f *FingerprintState) UpdateActivity() {
 }
 
 // BroadcastToSpecificSession sends updates to a specific session within tenant
-func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string) {
+func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("🔊 SESSION BROADCAST PANIC: %v", r)
@@ -523,7 +523,14 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 
 	// Prepare broadcast message
 	paneIDsJSON, _ := json.Marshal(paneIDs)
-	message := fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s}\n\n", storyfragmentID, paneIDsJSON)
+	var message string
+	if scrollTarget != nil {
+		message = fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s,\"gotoPaneId\":\"%s\"}\n\n",
+			storyfragmentID, paneIDsJSON, *scrollTarget)
+	} else {
+		message = fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s}\n\n",
+			storyfragmentID, paneIDsJSON)
+	}
 
 	log.Printf("🔊 SESSION BROADCAST: Prepared message: %s", strings.ReplaceAll(message, "\n", "\\n"))
 

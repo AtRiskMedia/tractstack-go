@@ -1,17 +1,16 @@
-// Package templates provides Belief widget implementation
 package templates
 
 import (
 	"fmt"
-
+	// Add log package for debugging
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
 // RenderBelief renders an accessible native HTML select component for belief scales
 func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra string) string {
+	// Retrieve user beliefs
 	userBeliefs := getUserBeliefs(ctx)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
-
 	placeholder := getPlaceholderText(scale)
 	actualOptions := filterPlaceholderOptions(getScaleOptions(scale))
 
@@ -48,10 +47,8 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
             class="block w-fit min-w-48 max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 disabled:bg-gray-50 disabled:text-gray-500" 
             data-belief-id="%s" 
             data-belief-type="Belief"
-            aria-labelledby="%s"
-            aria-describedby="%s"
-            aria-required="false">`,
-		selectID, slug, labelID, helpID)
+            data-pane-id="%s"
+            aria-labelledby="%s">`, selectID, slug, ctx.ContainingPaneID, labelID)
 
 	// Add default option that's properly accessible
 	if selectedValue == "" {
@@ -77,8 +74,7 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 			option.Slug,
 			selectedAttr,
 			option.Name,
-			option.Name,
-		)
+			option.Name)
 	}
 
 	html += `
