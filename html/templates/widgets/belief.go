@@ -7,8 +7,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
-// RenderBelief renders a Shoelace select component for belief scales
-// RenderBelief renders a Shoelace select component for belief scales
+// RenderBelief renders an accessible native HTML select component for belief scales
 func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra string) string {
 	userBeliefs := getUserBeliefs(ctx)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
@@ -27,33 +26,71 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 	}
 
 	selectID := fmt.Sprintf("belief-select-%s", slug)
+	labelID := fmt.Sprintf("belief-label-%s", slug)
+	helpID := fmt.Sprintf("belief-help-%s", slug)
 
-	html := fmt.Sprintf(`<div id="belief-container-%s" class="%s" data-belief="%s" hx-preserve="true" hx-sync="closest .pane-fragment-container:queue">`, slug, classNames, slug)
+	html := fmt.Sprintf(`<div id="belief-container-%s" class="%s" data-belief="%s">`, slug, classNames, slug)
 
-	if extra != "" {
-		html += fmt.Sprintf(`<span class="mr-2">%s</span>`, extra)
+	// Add label for accessibility
+	labelText := extra
+	if labelText == "" {
+		labelText = placeholder
+	}
+	html += fmt.Sprintf(`
+    <label id="%s" for="%s" class="block text-sm font-medium text-gray-900 mb-2">
+        %s
+    </label>`, labelID, selectID, labelText)
+
+	// Add accessible select with proper ARIA attributes
+	html += fmt.Sprintf(`
+    <select id="%s" 
+            name="beliefValue" 
+            class="block w-fit min-w-48 max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 disabled:bg-gray-50 disabled:text-gray-500" 
+            data-belief-id="%s" 
+            data-belief-type="Belief"
+            aria-labelledby="%s"
+            aria-describedby="%s"
+            aria-required="false">`,
+		selectID, slug, labelID, helpID)
+
+	// Add default option that's properly accessible
+	if selectedValue == "" {
+		html += fmt.Sprintf(`
+        <option value="" selected aria-label="No selection made">%s</option>`, placeholder)
+	} else {
+		html += fmt.Sprintf(`
+        <option value="" aria-label="Reset to no selection">%s</option>`, placeholder)
 	}
 
-	html += fmt.Sprintf(`
-  <sl-select data-shoelace="select" id="%s" name="beliefValue" class="block mt-3 w-fit" value="%s" placeholder="%s" data-belief-id="%s" data-belief-type="Belief" no-autofocus>`,
-		selectID, selectedValue, placeholder, slug)
-
+	// Add actual options with proper accessibility
 	for _, option := range actualOptions {
 		isSelected := option.Slug == selectedValue
+		selectedAttr := ""
+		if isSelected {
+			selectedAttr = " selected"
+		}
+
 		html += fmt.Sprintf(`
-            <sl-option value="%s" class="%s">
-                <span class="%s inline-block h-2 w-2 flex-shrink-0 rounded-full mr-2" aria-hidden="true"></span>
-                %s
-            </sl-option>`,
+        <option value="%s"%s aria-label="%s">
+            %s
+        </option>`,
 			option.Slug,
-			getItemClasses(isSelected),
-			option.Color,
+			selectedAttr,
+			option.Name,
 			option.Name,
 		)
 	}
 
 	html += `
-        </sl-select>
+    </select>`
+
+	// Add help text for screen readers
+	html += fmt.Sprintf(`
+    <div id="%s" class="sr-only">
+        Select your belief level. This choice affects the content you see and helps personalize your experience.
+    </div>`, helpID)
+
+	html += `
     </div>`
 
 	return html
@@ -63,7 +100,7 @@ func getScaleOptions(scale string) []ScaleOption {
 	switch scale {
 	case "likert":
 		return []ScaleOption{
-			{ID: 0, Slug: "0", Name: "Agree or Disagree?", Color: "bg-orange-500"},
+			{ID: 0, Slug: "0", Name: "Choose your agreement level", Color: "bg-orange-500"},
 			{ID: 1, Slug: "STRONGLY_AGREES", Name: "Strongly agree", Color: "bg-teal-400"},
 			{ID: 2, Slug: "AGREES", Name: "Agree", Color: "bg-lime-400"},
 			{ID: 3, Slug: "NEITHER_AGREES_NOR_DISAGREES", Name: "Neither agree nor disagree", Color: "bg-slate-200"},
@@ -72,25 +109,25 @@ func getScaleOptions(scale string) []ScaleOption {
 		}
 	case "agreement":
 		return []ScaleOption{
-			{ID: 0, Slug: "0", Name: "Agree or Disagree?", Color: "bg-orange-500"},
+			{ID: 0, Slug: "0", Name: "Choose: Agree or Disagree?", Color: "bg-orange-500"},
 			{ID: 1, Slug: "AGREES", Name: "Agree", Color: "bg-lime-400"},
 			{ID: 2, Slug: "DISAGREES", Name: "Disagree", Color: "bg-amber-400"},
 		}
 	case "interest":
 		return []ScaleOption{
-			{ID: 0, Slug: "0", Name: "Are you Interested?", Color: "bg-orange-500"},
+			{ID: 0, Slug: "0", Name: "Are you interested?", Color: "bg-orange-500"},
 			{ID: 1, Slug: "INTERESTED", Name: "Interested", Color: "bg-lime-400"},
 			{ID: 2, Slug: "NOT_INTERESTED", Name: "Not Interested", Color: "bg-amber-400"},
 		}
 	case "yn":
 		return []ScaleOption{
-			{ID: 0, Slug: "0", Name: "Yes or No?", Color: "bg-orange-500"},
+			{ID: 0, Slug: "0", Name: "Choose: Yes or No?", Color: "bg-orange-500"},
 			{ID: 1, Slug: "BELIEVES_YES", Name: "Yes", Color: "bg-lime-400"},
 			{ID: 2, Slug: "BELIEVES_NO", Name: "No", Color: "bg-amber-400"},
 		}
 	case "tf":
 		return []ScaleOption{
-			{ID: 0, Slug: "0", Name: "True or False?", Color: "bg-orange-500"},
+			{ID: 0, Slug: "0", Name: "Choose: True or False?", Color: "bg-orange-500"},
 			{ID: 1, Slug: "BELIEVES_TRUE", Name: "True", Color: "bg-lime-400"},
 			{ID: 2, Slug: "BELIEVES_FALSE", Name: "False", Color: "bg-amber-400"},
 		}
@@ -117,11 +154,4 @@ func filterPlaceholderOptions(scaleOptions []ScaleOption) []ScaleOption {
 		}
 	}
 	return actualOptions
-}
-
-func getItemClasses(isSelected bool) string {
-	if isSelected {
-		return "bg-slate-100 text-cyan-600"
-	}
-	return "hover:bg-slate-50"
 }
