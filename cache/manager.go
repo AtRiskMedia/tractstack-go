@@ -496,6 +496,10 @@ func (m *Manager) GetBeliefBySlug(tenantID, slug string) (*models.BeliefNode, bo
 	return m.BeliefOps.GetBeliefBySlug(tenantID, slug)
 }
 
+func (m *Manager) GetBeliefIDBySlug(tenantID, slug string) (string, bool) {
+	return m.BeliefOps.GetBeliefIDBySlug(tenantID, slug)
+}
+
 func (m *Manager) GetAllBeliefIDs(tenantID string) ([]string, bool) {
 	return m.BeliefOps.GetAllBeliefIDs(tenantID)
 }

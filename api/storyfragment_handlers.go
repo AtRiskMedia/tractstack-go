@@ -10,6 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
+	"github.com/AtRiskMedia/tractstack-go/services"
 	"github.com/gin-gonic/gin"
 )
 
@@ -103,7 +104,7 @@ func GetStoryFragmentByIDHandler(c *gin.Context) {
 	}
 
 	// Extract and cache belief registry for this storyfragment
-	beliefRegistryService := content.NewBeliefRegistryService(ctx)
+	beliefRegistryService := services.NewBeliefRegistryService(ctx)
 	registry, err := beliefRegistryService.ExtractAndCacheBeliefRegistry(storyFragmentID, storyFragmentNode.PaneIDs)
 	if err != nil {
 		// Log the error but don't fail the request - belief registry is optional

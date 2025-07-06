@@ -68,6 +68,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				hx-trigger="click"
 				hx-swap="none"
 				hx-vals='{"beliefId": "%s", "beliefType": "Belief", "beliefObject": "%s"}'
+    hx-preserve="true"
 			>
 				<div class="flex items-center">
 					<span

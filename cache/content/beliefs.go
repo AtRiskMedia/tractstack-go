@@ -221,3 +221,33 @@ func (bco *BeliefCacheOperations) ensureTenantCache(tenantID string) {
 
 	bco.manager.LastAccessed[tenantID] = time.Now()
 }
+
+// GetBeliefIDBySlug retrieves only the belief ID by slug from cache
+func (bco *BeliefCacheOperations) GetBeliefIDBySlug(tenantID, slug string) (string, bool) {
+	bco.manager.Mu.RLock()
+	tenantCache, exists := bco.manager.ContentCache[tenantID]
+	bco.manager.Mu.RUnlock()
+
+	if !exists {
+		return "", false
+	}
+
+	tenantCache.Mu.RLock()
+	defer tenantCache.Mu.RUnlock()
+
+	// Check if cache is expired
+	if time.Since(tenantCache.LastUpdated) > models.TTL24Hours.Duration() {
+		return "", false
+	}
+
+	// Get ID directly from slug lookup (prefixed to avoid conflicts)
+	id, exists := tenantCache.SlugToID["belief:"+slug]
+	if exists {
+		// Update last accessed
+		bco.manager.Mu.Lock()
+		bco.manager.LastAccessed[tenantID] = time.Now()
+		bco.manager.Mu.Unlock()
+	}
+
+	return id, exists
+}

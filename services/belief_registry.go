@@ -1,4 +1,5 @@
-package content
+// Package services
+package services
 
 import (
 	"log"
@@ -8,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/html"
 	"github.com/AtRiskMedia/tractstack-go/models"
+	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
 
@@ -46,7 +48,7 @@ func (brs *BeliefRegistryService) ExtractAndCacheBeliefRegistry(storyfragmentID 
 
 // buildRegistryFromPanes constructs belief registry by examining all panes
 func (brs *BeliefRegistryService) buildRegistryFromPanes(storyfragmentID string, paneIDs []string) (*models.StoryfragmentBeliefRegistry, error) {
-	paneService := NewPaneService(brs.ctx, nil)
+	paneService := content.NewPaneService(brs.ctx, nil)
 
 	registry := &models.StoryfragmentBeliefRegistry{
 		StoryfragmentID:    storyfragmentID,
@@ -287,6 +289,17 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID s
 			}
 
 			log.Printf("Found %d belief widgets in pane %s: %v", len(widgetBeliefs), paneID, widgetBeliefs)
+
+			// Load widget beliefs into cache
+			for _, beliefSlug := range widgetBeliefs {
+				beliefService := content.NewBeliefService(brs.ctx, nil)
+				_, err := beliefService.GetBySlug(beliefSlug)
+				if err != nil {
+					log.Printf("Failed to load widget belief into cache: %s - %v", beliefSlug, err)
+				} else {
+					log.Printf("Loaded widget belief into cache: %s", beliefSlug)
+				}
+			}
 		}
 	}
 
