@@ -65,11 +65,11 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				type="button"
 				id="%s"
 				class="%s rounded-md px-3 py-2 text-lg text-black shadow-sm ring-1 ring-inset"
-    hx-post="/api/v1/state"
+				hx-post="/api/v1/state"
 				hx-trigger="click"
 				hx-swap="none"
-				hx-vals='{"beliefId": "%s", "beliefType": "Belief", "beliefObject": "%s"}'
-    hx-preserve="true"
+				hx-vals='{"beliefId": "%s", "beliefType": "Belief", "beliefObject": "%s", "paneId": "%s"}'
+				hx-preserve="true"
 			>
 				<div class="flex items-center">
 					<span
@@ -80,7 +80,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				</div>
 			</button>
 		</div>`,
-		buttonID, buttonClasses, beliefSlug, target, indicatorColor, buttonTitle)
+		buttonID, buttonClasses, beliefSlug, target, ctx.ContainingPaneID, indicatorColor, buttonTitle)
 }
 
 func parseTargets(targetsString string) []string {
