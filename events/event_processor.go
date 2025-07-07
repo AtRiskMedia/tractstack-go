@@ -45,7 +45,7 @@ func (ep *EventProcessor) getSessionData() (*models.SessionData, error) {
 }
 
 // ProcessEvents processes an array of events, handling each type appropriately
-func (ep *EventProcessor) ProcessEvents(events []models.Event, currentPaneID string) error {
+func (ep *EventProcessor) ProcessEvents(events []models.Event, currentPaneID string, gotoPaneID string) error {
 	var changedBeliefs []string
 
 	// NEW: Capture visibility snapshot before processing belief events
@@ -82,7 +82,7 @@ func (ep *EventProcessor) ProcessEvents(events []models.Event, currentPaneID str
 
 	// Trigger SSE notifications after all events processed
 	if len(changedBeliefs) > 0 {
-		ep.triggerSSE(changedBeliefs, visibilitySnapshot, currentPaneID)
+		ep.triggerSSE(changedBeliefs, visibilitySnapshot, currentPaneID, gotoPaneID)
 	}
 
 	return nil
@@ -142,9 +142,9 @@ func (ep *EventProcessor) captureVisibilitySnapshot(events []models.Event) map[s
 }
 
 // triggerSSE now includes visibility snapshot and current pane
-func (ep *EventProcessor) triggerSSE(changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID string) {
+func (ep *EventProcessor) triggerSSE(changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID string, gotoPaneID string) {
 	log.Printf("SSE Trigger: beliefs changed for session %s: %v", ep.sessionID, changedBeliefs)
 
 	broadcastService := services.NewBeliefBroadcastService(ep.cacheManager, ep.sessionID)
-	broadcastService.BroadcastBeliefChange(ep.tenantID, ep.sessionID, changedBeliefs, visibilitySnapshot, currentPaneID)
+	broadcastService.BroadcastBeliefChange(ep.tenantID, ep.sessionID, changedBeliefs, visibilitySnapshot, currentPaneID, gotoPaneID)
 }

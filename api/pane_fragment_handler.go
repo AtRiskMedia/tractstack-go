@@ -136,6 +136,9 @@ func GetPaneFragmentHandler(c *gin.Context) {
 					// Apply visibility wrapper to HTML content
 					htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
 
+					// Add Filter button if needed
+					htmlContent = addFilterButtonIfNeeded(htmlContent, paneID, visibility, paneBeliefs, sessionContext.UserBeliefs, beliefRegistry)
+
 					//fmt.Printf("DEBUG: Applied personalization - pane %s visibility: %s\n", paneID, visibility)
 					//} else {
 					//	fmt.Printf("DEBUG: No belief requirements found for pane %s\n", paneID)
@@ -165,6 +168,9 @@ func GetPaneFragmentHandler(c *gin.Context) {
 
 						// Apply visibility wrapper to HTML content
 						htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
+
+						// Add Filter button if needed
+						htmlContent = addFilterButtonIfNeeded(htmlContent, paneID, visibility, paneBeliefs, newContext.UserBeliefs, beliefRegistry)
 
 						// fmt.Printf("DEBUG: Applied personalization with new context - pane %s visibility: %s\n", paneID, visibility)
 					}
@@ -389,6 +395,9 @@ func GetPaneFragmentsBatchHandler(c *gin.Context) {
 					// Apply visibility wrapper to HTML content
 					htmlContent = beliefEngine.ApplyVisibilityWrapper(htmlContent, visibility)
 
+					// Add Filter button if needed
+					htmlContent = addFilterButtonIfNeeded(htmlContent, paneID, visibility, paneBeliefs, userBeliefs, beliefRegistry)
+
 					//fmt.Printf("*** DEBUG: Applied belief evaluation - pane %s visibility: %s\n", paneID, visibility)
 					//} else {
 					//	fmt.Printf("*** DEBUG: No belief requirements found for pane %s\n", paneID)
@@ -515,4 +524,73 @@ func createSessionBeliefContext(ctx *tenant.Context, sessionID, storyfragmentID 
 		UserBeliefs:     userBeliefs,
 		LastEvaluation:  time.Now(),
 	}
+}
+
+// addFilterButtonIfNeeded adds a Filter back button to HTML if conditions are met
+func addFilterButtonIfNeeded(htmlContent string, paneID string, visibility string, paneBeliefs models.PaneBeliefData, userBeliefs map[string][]string, beliefRegistry *models.StoryfragmentBeliefRegistry) string {
+	// Only show button if: pane is visible due to user beliefs
+	if visibility == "visible" && len(userBeliefs) > 0 && (len(paneBeliefs.HeldBeliefs) > 0 || len(paneBeliefs.WithheldBeliefs) > 0 || len(paneBeliefs.MatchAcross) > 0) {
+		// Calculate which beliefs are making this pane visible
+		beliefEngine := services.NewBeliefEvaluationEngine()
+		effectiveFilter := beliefEngine.CalculateEffectiveFilter(paneBeliefs, userBeliefs)
+
+		// Only add button if there's an actual filter (user beliefs intersect with pane requirements)
+		if len(effectiveFilter) > 0 {
+			// Find scroll target pane
+			gotoPaneID := findScrollTargetPane(effectiveFilter, beliefRegistry)
+
+			filterButtonHTML := beliefEngine.RenderFilterButton(paneID, effectiveFilter, gotoPaneID)
+			return beliefEngine.InjectFilterButton(htmlContent, filterButtonHTML)
+		}
+	}
+
+	return htmlContent
+}
+
+// findScrollTargetPane finds the first pane that has widgets for beliefs being unset
+func findScrollTargetPane(effectiveFilter map[string]interface{}, beliefRegistry *models.StoryfragmentBeliefRegistry) string {
+	// Extract beliefs to unset using v1 logic
+	var beliefsToUnset []string
+
+	// Get all keys except MATCH-ACROSS and LINKED-BELIEFS
+	for key := range effectiveFilter {
+		if key != "MATCH-ACROSS" && key != "LINKED-BELIEFS" {
+			beliefsToUnset = append(beliefsToUnset, key)
+		}
+	}
+
+	// Add LINKED-BELIEFS if present
+	if linkedBeliefsValue, exists := effectiveFilter["LINKED-BELIEFS"]; exists {
+		if linkedArray, ok := linkedBeliefsValue.([]interface{}); ok {
+			for _, linked := range linkedArray {
+				if linkedStr, ok := linked.(string); ok {
+					// Add to beliefsToUnset if not already present
+					found := false
+					for _, existing := range beliefsToUnset {
+						if existing == linkedStr {
+							found = true
+							break
+						}
+					}
+					if !found {
+						beliefsToUnset = append(beliefsToUnset, linkedStr)
+					}
+				}
+			}
+		}
+	}
+
+	// Find pane that has widgets for any of the beliefs being unset
+	// This should be the "source" pane where the user originally clicked
+	for paneID, widgetBeliefs := range beliefRegistry.PaneWidgetBeliefs {
+		for _, widgetBelief := range widgetBeliefs {
+			for _, beliefToUnset := range beliefsToUnset {
+				if widgetBelief == beliefToUnset {
+					return paneID
+				}
+			}
+		}
+	}
+
+	return "" // No scroll target found
 }

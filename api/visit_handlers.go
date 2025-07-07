@@ -611,7 +611,7 @@ func checkImmediateStateUpdate(ctx *tenant.Context, sessionID, storyfragmentID s
 
 		// Use existing broadcast service to find and broadcast affected panes
 		broadcastService := services.NewBeliefBroadcastService(cacheManager, sessionID)
-		broadcastService.BroadcastBeliefChange(ctx.TenantID, sessionID, matchingBeliefs, nil, "")
+		broadcastService.BroadcastBeliefChange(ctx.TenantID, sessionID, matchingBeliefs, nil, "", "")
 	}
 }
 
