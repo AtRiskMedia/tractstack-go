@@ -21,7 +21,8 @@ func NewBeliefBroadcastService(cacheManager *cache.Manager, sessionID string) *B
 }
 
 // BroadcastBeliefChange identifies affected storyfragments and broadcasts updates within tenant
-func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID string) {
+func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID string, gotoPaneID string) {
+	log.Printf("DEBUG: BroadcastBeliefChange received gotoPaneID: '%s'", gotoPaneID)
 	// Find storyfragments using any of the changed beliefs within this tenant
 	affectedStoryfragments := bbs.FindAffectedStoryfragments(tenantID, changedBeliefs)
 
@@ -38,7 +39,7 @@ func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID str
 
 			// NEW: Compute scroll target if we have visibility snapshot
 			var scrollTarget *string
-			if visibilitySnapshot != nil && currentPaneID != "" {
+			if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
 				log.Printf("DEBUG: Computing scroll target for pane %s with snapshot: %v", currentPaneID, visibilitySnapshot[storyfragmentID])
 				scrollTarget = bbs.computeScrollTarget(tenantID, storyfragmentID, currentPaneID, visibilitySnapshot[storyfragmentID], affectedPanes)
 				if scrollTarget != nil {
@@ -46,6 +47,8 @@ func (bbs *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID str
 				} else {
 					log.Printf("DEBUG: No scroll target found")
 				}
+			} else {
+				scrollTarget = &gotoPaneID
 			}
 
 			models.Broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes, scrollTarget)

@@ -2,6 +2,10 @@
 package services
 
 import (
+	"fmt"
+	"regexp"
+	"strings"
+
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -266,4 +270,115 @@ func (bee *BeliefEvaluationEngine) GetUserBeliefsFromSession(
 
 	// Return empty beliefs if session not found
 	return make(map[string][]string)
+}
+
+// CalculateEffectiveFilter determines which user beliefs are making this pane visible
+func (bee *BeliefEvaluationEngine) CalculateEffectiveFilter(
+	paneBeliefs models.PaneBeliefData,
+	userBeliefs map[string][]string,
+) map[string]interface{} {
+	effectiveFilter := make(map[string]interface{})
+
+	// Find user beliefs that match pane's held beliefs requirements
+	for beliefSlug, requiredValues := range paneBeliefs.HeldBeliefs {
+		if bee.hasMatchingBelief(userBeliefs, beliefSlug, requiredValues) {
+			if userValues, exists := userBeliefs[beliefSlug]; exists {
+				effectiveFilter[beliefSlug] = userValues
+			}
+		}
+	}
+
+	// Find user beliefs that match pane's match-across requirements
+	for _, beliefSlug := range paneBeliefs.MatchAcross {
+		if userValues, exists := userBeliefs[beliefSlug]; exists {
+			effectiveFilter[beliefSlug] = userValues
+		}
+	}
+
+	// Add LINKED-BELIEFS if present in user beliefs
+	if linkedValues, exists := userBeliefs["LINKED-BELIEFS"]; exists {
+		effectiveFilter["LINKED-BELIEFS"] = linkedValues
+	}
+
+	// Add MATCH-ACROSS if there are match-across beliefs
+	if len(paneBeliefs.MatchAcross) > 0 {
+		effectiveFilter["MATCH-ACROSS"] = paneBeliefs.MatchAcross
+	}
+
+	return effectiveFilter
+}
+
+// InjectFilterButton adds the filter button to the HTML content
+func (bee *BeliefEvaluationEngine) InjectFilterButton(htmlContent, filterButtonHTML string) string {
+	// Find the opening pane div and inject the button after it
+	panePattern := `(<div[^>]*id="pane-[^"]*"[^>]*>)`
+	re := regexp.MustCompile(panePattern)
+
+	return re.ReplaceAllString(htmlContent, "$1"+filterButtonHTML)
+}
+
+// RenderFilterButton generates the Filter back button HTML
+func (bee *BeliefEvaluationEngine) RenderFilterButton(paneID string, effectiveFilter map[string]interface{}, gotoPaneID string) string {
+	// Extract beliefs to unset using v1 logic
+	var beliefsToUnset []string
+
+	// Get all keys except MATCH-ACROSS and LINKED-BELIEFS
+	for key := range effectiveFilter {
+		if key != "MATCH-ACROSS" && key != "LINKED-BELIEFS" {
+			beliefsToUnset = append(beliefsToUnset, key)
+		}
+	}
+
+	// Add LINKED-BELIEFS if present
+	if linkedBeliefsValue, exists := effectiveFilter["LINKED-BELIEFS"]; exists {
+		if linkedArray, ok := linkedBeliefsValue.([]interface{}); ok {
+			for _, linked := range linkedArray {
+				if linkedStr, ok := linked.(string); ok {
+					// Add to beliefsToUnset if not already present
+					found := false
+					for _, existing := range beliefsToUnset {
+						if existing == linkedStr {
+							found = true
+							break
+						}
+					}
+					if !found {
+						beliefsToUnset = append(beliefsToUnset, linkedStr)
+					}
+				}
+			}
+		}
+	}
+
+	if len(beliefsToUnset) == 0 {
+		return ""
+	}
+
+	// Create comma-separated list
+	unsetBeliefIds := strings.Join(beliefsToUnset, ",")
+
+	// Build hx-vals with gotoPaneID if available
+	var hxVals string
+	if gotoPaneID != "" {
+		hxVals = fmt.Sprintf(`{"unsetBeliefIds": "%s", "paneId": "%s", "gotoPaneID": "%s"}`, unsetBeliefIds, paneID, gotoPaneID)
+	} else {
+		hxVals = fmt.Sprintf(`{"unsetBeliefIds": "%s", "paneId": "%s"}`, unsetBeliefIds, paneID)
+	}
+
+	return fmt.Sprintf(`
+		<button
+			type="button"
+			class="z-10 absolute top-2 right-2 p-1.5 bg-white rounded-full hover:bg-black text-mydarkgrey hover:text-white"
+			title="Go Back"
+			hx-post="/api/v1/state"
+			hx-trigger="click"
+			hx-swap="none"
+			hx-vals='%s'
+			hx-preserve="true"
+		>
+			<svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+				<path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+			</svg>
+		</button>
+	`, hxVals)
 }

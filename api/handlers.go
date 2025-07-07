@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -75,12 +76,63 @@ func StateHandler(c *gin.Context) {
 		return
 	}
 
+	// Check for bulk unset first
+	if unsetBeliefIds := c.PostForm("unsetBeliefIds"); unsetBeliefIds != "" {
+		// Extract session context
+		sessionID := c.GetHeader("X-TractStack-Session-ID")
+		if sessionID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required"})
+			return
+		}
+
+		paneID := c.PostForm("paneId")
+		gotoPaneID := c.PostForm("gotoPaneID")
+
+		// Split comma-separated belief IDs
+		beliefIDs := strings.Split(unsetBeliefIds, ",")
+
+		// Create UNSET events for each belief
+		var eventsCheck []models.Event
+		for _, beliefID := range beliefIDs {
+			beliefID = strings.TrimSpace(beliefID) // Remove any whitespace
+			if beliefID != "" {
+				eventsCheck = append(eventsCheck, models.Event{
+					ID:     beliefID,
+					Type:   "Belief",
+					Verb:   "UNSET",
+					Object: beliefID,
+				})
+			}
+		}
+
+		if len(eventsCheck) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No valid belief IDs provided"})
+			return
+		}
+
+		// Process events array
+		processor := events.NewEventProcessor(ctx.TenantID, sessionID, ctx)
+		err := processor.ProcessEvents(eventsCheck, paneID, gotoPaneID)
+		if err != nil {
+			log.Printf("Error processing bulk unset events: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":       "ok",
+			"tenantId":     ctx.TenantID,
+			"unsetBeliefs": beliefIDs,
+		})
+		return
+	}
+
 	// Extract form data from widgets
 	beliefID := c.PostForm("beliefId")
 	beliefType := c.PostForm("beliefType")
 	beliefValue := c.PostForm("beliefValue")
 	beliefObject := c.PostForm("beliefObject")
-	paneID := c.PostForm("paneId") // NEW
+	paneID := c.PostForm("paneId")
 
 	// Validate required fields
 	if beliefID == "" || beliefType == "" {
@@ -142,7 +194,7 @@ func StateHandler(c *gin.Context) {
 
 	// Process events array with current pane ID
 	eventArray := []models.Event{event}
-	err = processor.ProcessEvents(eventArray, paneID)
+	err = processor.ProcessEvents(eventArray, paneID, "")
 	if err != nil {
 		log.Printf("Error processing events: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})
