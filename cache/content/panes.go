@@ -42,7 +42,7 @@ func (pco *PaneCacheOperations) GetPane(tenantID, id string) (*models.PaneNode, 
 
 	// Update last accessed
 	pco.manager.Mu.Lock()
-	pco.manager.LastAccessed[tenantID] = time.Now()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
 
 	return pane, true
@@ -66,11 +66,11 @@ func (pco *PaneCacheOperations) SetPane(tenantID string, node *models.PaneNode) 
 	tenantCache.SlugToID[node.Slug] = node.ID
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	pco.manager.Mu.Lock()
-	pco.manager.LastAccessed[tenantID] = time.Now()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
 }
 
@@ -106,7 +106,7 @@ func (pco *PaneCacheOperations) GetPaneBySlug(tenantID, slug string) (*models.Pa
 
 	// Update last accessed
 	pco.manager.Mu.Lock()
-	pco.manager.LastAccessed[tenantID] = time.Now()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
 
 	return pane, true
@@ -137,7 +137,7 @@ func (pco *PaneCacheOperations) GetAllPaneIDs(tenantID string) ([]string, bool) 
 
 	// Update last accessed
 	pco.manager.Mu.Lock()
-	pco.manager.LastAccessed[tenantID] = time.Now()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
 
 	// Return copy to avoid external mutation
@@ -163,11 +163,11 @@ func (pco *PaneCacheOperations) SetAllPaneIDs(tenantID string, ids []string) {
 	copy(tenantCache.AllPaneIDs, ids)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	pco.manager.Mu.Lock()
-	pco.manager.LastAccessed[tenantID] = time.Now()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
 }
 
@@ -201,7 +201,7 @@ func (pco *PaneCacheOperations) InvalidatePane(tenantID, id string) {
 	}
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllPanes clears all pane cache for a tenant
@@ -227,7 +227,7 @@ func (pco *PaneCacheOperations) InvalidateAllPanes(tenantID string) {
 	tenantCache.AllPaneIDs = []string{}
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -247,9 +247,9 @@ func (pco *PaneCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	pco.manager.LastAccessed[tenantID] = time.Now()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

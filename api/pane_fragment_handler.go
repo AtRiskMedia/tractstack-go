@@ -514,7 +514,7 @@ func createSessionBeliefContext(ctx *tenant.Context, sessionID, storyfragmentID 
 		SessionID:       sessionID,
 		StoryfragmentID: storyfragmentID,
 		UserBeliefs:     userBeliefs,
-		LastEvaluation:  time.Now(),
+		LastEvaluation:  time.Now().UTC(),
 	}
 }
 

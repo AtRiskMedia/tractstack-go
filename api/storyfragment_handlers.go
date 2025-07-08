@@ -132,7 +132,7 @@ func GetStoryFragmentByIDHandler(c *gin.Context) {
 			SessionID:       sessionID,
 			StoryfragmentID: storyFragmentID,
 			UserBeliefs:     userBeliefs,
-			LastEvaluation:  time.Now(),
+			LastEvaluation:  time.Now().UTC(),
 		}
 
 		// Cache the session belief context for subsequent pane requests

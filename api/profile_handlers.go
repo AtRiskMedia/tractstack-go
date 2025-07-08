@@ -156,8 +156,8 @@ func handleCreateProfile(c *gin.Context, ctx *tenant.Context, req *ProfileReques
 		ShortBio:       req.ShortBio,
 		EncryptedCode:  encryptedCode,
 		EncryptedEmail: encryptedEmail,
-		CreatedAt:      time.Now(),
-		Changed:        time.Now(),
+		CreatedAt:      time.Now().UTC(),
+		Changed:        time.Now().UTC(),
 	}
 
 	if err := CreateLead(lead, ctx); err != nil {
@@ -320,7 +320,7 @@ func handleUpdateProfile(c *gin.Context, ctx *tenant.Context, req *ProfileReques
 		EncryptedCode:  encryptedCode,
 		EncryptedEmail: encryptedEmail,
 		CreatedAt:      existingLead.CreatedAt,
-		Changed:        time.Now(),
+		Changed:        time.Now().UTC(),
 	}
 
 	if err := UpdateLead(updatedLead, ctx); err != nil {
@@ -687,8 +687,8 @@ func handleProfileSession(c *gin.Context, ctx *tenant.Context, profile *models.P
 		FingerprintID: fingerprintID,
 		VisitID:       visitID,
 		LeadID:        &profile.LeadID,
-		LastActivity:  time.Now(),
-		CreatedAt:     time.Now(),
+		LastActivity:  time.Now().UTC(),
+		CreatedAt:     time.Now().UTC(),
 	}
 
 	log.Printf("DEBUG: handleProfileSession - Storing session data: session=%s, fingerprint=%s, visit=%s, lead=%s",

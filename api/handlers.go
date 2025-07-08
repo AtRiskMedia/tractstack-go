@@ -192,7 +192,7 @@ func updateFingerprintBelief(tenantID, sessionID string, event models.Event) err
 			FingerprintID: sessionData.FingerprintID,
 			HeldBeliefs:   make(map[string][]string),
 			HeldBadges:    make(map[string]string),
-			LastActivity:  time.Now(),
+			LastActivity:  time.Now().UTC(),
 		}
 	}
 
@@ -311,7 +311,7 @@ func HealthHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":    "ok",
 		"healthy":   true,
-		"timestamp": time.Now().Unix(),
+		"timestamp": time.Now().UTC().Unix(),
 		"tenantId":  ctx.TenantID,
 	})
 }

@@ -424,7 +424,7 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 	// Parse timestamps
 	created, err := time.Parse(time.RFC3339, paneRow.Created)
 	if err != nil {
-		created = time.Now() // Fallback
+		created = time.Now().UTC() // Fallback
 	}
 
 	changed, err := time.Parse(time.RFC3339, paneRow.Changed)

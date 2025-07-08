@@ -103,7 +103,7 @@ func (bp *BeliefProcessor) updateFingerprintCache(event models.Event, fingerprin
 			FingerprintID: fingerprintID,
 			HeldBeliefs:   make(map[string][]string),
 			HeldBadges:    make(map[string]string),
-			LastActivity:  time.Now(),
+			LastActivity:  time.Now().UTC(),
 		}
 	}
 
@@ -138,7 +138,7 @@ func (bp *BeliefProcessor) persistBelief(beliefID, fingerprintID, visitID string
 		VALUES (?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := bp.ctx.Database.Conn.Exec(actionQuery,
-		utils.GenerateULID(), beliefID, event.Type, visitID, fingerprintID, event.Verb, time.Now())
+		utils.GenerateULID(), beliefID, event.Type, visitID, fingerprintID, event.Verb, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("failed to insert action: %w", err)
 	}
@@ -158,14 +158,14 @@ func (bp *BeliefProcessor) persistBelief(beliefID, fingerprintID, visitID string
 		insertQuery := `INSERT INTO heldbeliefs (id, belief_id, fingerprint_id, verb, object, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?)`
 		_, err = bp.ctx.Database.Conn.Exec(insertQuery,
-			utils.GenerateULID(), beliefID, fingerprintID, event.Verb, event.Object, time.Now())
+			utils.GenerateULID(), beliefID, fingerprintID, event.Verb, event.Object, time.Now().UTC())
 	} else if err == nil {
 		// Update existing belief
 		updateQuery := `UPDATE heldbeliefs 
 			SET verb = ?, object = ?, updated_at = ? 
 			WHERE belief_id = ? AND fingerprint_id = ?`
 		_, err = bp.ctx.Database.Conn.Exec(updateQuery,
-			event.Verb, event.Object, time.Now(), beliefID, fingerprintID)
+			event.Verb, event.Object, time.Now().UTC(), beliefID, fingerprintID)
 	}
 
 	return err

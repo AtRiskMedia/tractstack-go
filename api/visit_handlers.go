@@ -226,8 +226,8 @@ func VisitHandler(c *gin.Context) {
 		visitState := &models.VisitState{
 			VisitID:       finalVisitID,
 			FingerprintID: finalFpID,
-			StartTime:     time.Now(),
-			LastActivity:  time.Now(),
+			StartTime:     time.Now().UTC(),
+			LastActivity:  time.Now().UTC(),
 			CurrentPage:   "",
 		}
 		cache.GetGlobalManager().SetVisitState(ctx.TenantID, visitState)
@@ -237,8 +237,8 @@ func VisitHandler(c *gin.Context) {
 			SessionID:     *req.SessionID, // Use actual session ID
 			FingerprintID: finalFpID,      // Use proper fingerprint ID
 			VisitID:       finalVisitID,
-			LastActivity:  time.Now(),
-			CreatedAt:     time.Now(),
+			LastActivity:  time.Now().UTC(),
+			CreatedAt:     time.Now().UTC(),
 		}
 		if hasProfile && profile != nil {
 			sessionData.LeadID = &profile.LeadID
@@ -256,7 +256,7 @@ func VisitHandler(c *gin.Context) {
 		FingerprintID: finalFpID,
 		HeldBeliefs:   make(map[string][]string),
 		HeldBadges:    make(map[string]string),
-		LastActivity:  time.Now(),
+		LastActivity:  time.Now().UTC(),
 	}
 	cache.GetGlobalManager().SetFingerprintState(ctx.TenantID, fingerprintState)
 
@@ -402,7 +402,7 @@ func SseHandler(c *gin.Context) {
 				return
 			}
 			_, err = fmt.Fprintf(w, "%d,\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n",
-				time.Now().Unix(), sessionID, ctx.TenantID)
+				time.Now().UTC().Unix(), sessionID, ctx.TenantID)
 			if err != nil {
 				log.Printf("SSE heartbeat failed for session %s in tenant %s: %v", sessionID, ctx.TenantID, err)
 				return
@@ -465,7 +465,7 @@ func (vs *VisitService) CreateVisit(visitID, fingerprintID string, campaignID *s
 	query := `INSERT INTO visits (id, fingerprint_id, campaign_id, created_at) 
               VALUES (?, ?, ?, ?)`
 
-	_, err := vs.ctx.Database.Conn.Exec(query, visitID, fingerprintID, campaignID, time.Now())
+	_, err := vs.ctx.Database.Conn.Exec(query, visitID, fingerprintID, campaignID, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("failed to create visit: %w", err)
 	}
@@ -492,7 +492,7 @@ func (vs *VisitService) CreateFingerprint(fingerprintID string, leadID *string) 
 	query := `INSERT INTO fingerprints (id, lead_id, created_at) 
               VALUES (?, ?, ?)`
 
-	_, err := vs.ctx.Database.Conn.Exec(query, fingerprintID, leadID, time.Now())
+	_, err := vs.ctx.Database.Conn.Exec(query, fingerprintID, leadID, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("failed to create fingerprint: %w", err)
 	}
@@ -643,7 +643,7 @@ func checkImmediateStateUpdate(ctx *tenant.Context, sessionID, storyfragmentID s
 //			FingerprintID: sessionData.FingerprintID,
 //			HeldBeliefs:   make(map[string][]string),
 //			HeldBadges:    make(map[string]string),
-//			LastActivity:  time.Now(),
+//			LastActivity:  time.Now().UTC(),
 //		}
 //	}
 //

@@ -92,7 +92,7 @@ func (ap *AnalyticsProcessor) insertAction(objectID, objectType, verb string, du
 			*durationMs,
 			sessionData.VisitID,
 			sessionData.FingerprintID,
-			time.Now(),
+			time.Now().UTC(),
 		}
 	} else {
 		query = `INSERT INTO actions 
@@ -105,7 +105,7 @@ func (ap *AnalyticsProcessor) insertAction(objectID, objectType, verb string, du
 			verb,
 			sessionData.VisitID,
 			sessionData.FingerprintID,
-			time.Now(),
+			time.Now().UTC(),
 		}
 	}
 

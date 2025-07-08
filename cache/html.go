@@ -36,7 +36,7 @@ func (hco *HTMLCacheOperations) GetHTMLChunk(tenantID, paneID string, variant mo
 	if chunk, exists := tenantCache.Chunks[key]; exists {
 		// Update last accessed
 		hco.manager.Mu.Lock()
-		hco.manager.LastAccessed[tenantID] = time.Now()
+		hco.manager.LastAccessed[tenantID] = time.Now().UTC()
 		hco.manager.Mu.Unlock()
 
 		return chunk.HTML, true
@@ -57,7 +57,7 @@ func (hco *HTMLCacheOperations) SetHTMLChunk(tenantID, paneID string, variant mo
 	key := fmt.Sprintf("%s:%s", paneID, variant)
 	tenantCache.Chunks[key] = &models.HTMLChunk{
 		HTML:      html,
-		CachedAt:  time.Now(),
+		CachedAt:  time.Now().UTC(),
 		DependsOn: dependsOn,
 	}
 
@@ -71,7 +71,7 @@ func (hco *HTMLCacheOperations) SetHTMLChunk(tenantID, paneID string, variant mo
 
 	// Update last accessed
 	hco.manager.Mu.Lock()
-	hco.manager.LastAccessed[tenantID] = time.Now()
+	hco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	hco.manager.Mu.Unlock()
 }
 

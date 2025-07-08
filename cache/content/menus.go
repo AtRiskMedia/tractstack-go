@@ -42,7 +42,7 @@ func (mco *MenuCacheOperations) GetMenu(tenantID, id string) (*models.MenuNode, 
 
 	// Update last accessed
 	mco.manager.Mu.Lock()
-	mco.manager.LastAccessed[tenantID] = time.Now()
+	mco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	mco.manager.Mu.Unlock()
 
 	return menu, true
@@ -63,11 +63,11 @@ func (mco *MenuCacheOperations) SetMenu(tenantID string, node *models.MenuNode) 
 	tenantCache.Menus[node.ID] = node
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	mco.manager.Mu.Lock()
-	mco.manager.LastAccessed[tenantID] = time.Now()
+	mco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	mco.manager.Mu.Unlock()
 }
 
@@ -101,7 +101,7 @@ func (mco *MenuCacheOperations) GetAllMenuIDs(tenantID string) ([]string, bool) 
 
 	// Update last accessed
 	mco.manager.Mu.Lock()
-	mco.manager.LastAccessed[tenantID] = time.Now()
+	mco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	mco.manager.Mu.Unlock()
 
 	return ids, true
@@ -124,7 +124,7 @@ func (mco *MenuCacheOperations) InvalidateMenu(tenantID, id string) {
 	delete(tenantCache.Menus, id)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllMenus clears all menu cache for a tenant
@@ -144,7 +144,7 @@ func (mco *MenuCacheOperations) InvalidateAllMenus(tenantID string) {
 	tenantCache.Menus = make(map[string]*models.MenuNode)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -164,9 +164,9 @@ func (mco *MenuCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	mco.manager.LastAccessed[tenantID] = time.Now()
+	mco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

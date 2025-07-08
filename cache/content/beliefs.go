@@ -42,7 +42,7 @@ func (bco *BeliefCacheOperations) GetBelief(tenantID, id string) (*models.Belief
 
 	// Update last accessed
 	bco.manager.Mu.Lock()
-	bco.manager.LastAccessed[tenantID] = time.Now()
+	bco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	bco.manager.Mu.Unlock()
 
 	return belief, true
@@ -66,11 +66,11 @@ func (bco *BeliefCacheOperations) SetBelief(tenantID string, node *models.Belief
 	tenantCache.SlugToID["belief:"+node.Slug] = node.ID
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	bco.manager.Mu.Lock()
-	bco.manager.LastAccessed[tenantID] = time.Now()
+	bco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	bco.manager.Mu.Unlock()
 }
 
@@ -106,7 +106,7 @@ func (bco *BeliefCacheOperations) GetBeliefBySlug(tenantID, slug string) (*model
 
 	// Update last accessed
 	bco.manager.Mu.Lock()
-	bco.manager.LastAccessed[tenantID] = time.Now()
+	bco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	bco.manager.Mu.Unlock()
 
 	return belief, true
@@ -142,7 +142,7 @@ func (bco *BeliefCacheOperations) GetAllBeliefIDs(tenantID string) ([]string, bo
 
 	// Update last accessed
 	bco.manager.Mu.Lock()
-	bco.manager.LastAccessed[tenantID] = time.Now()
+	bco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	bco.manager.Mu.Unlock()
 
 	return ids, true
@@ -170,7 +170,7 @@ func (bco *BeliefCacheOperations) InvalidateBelief(tenantID, id string) {
 	delete(tenantCache.Beliefs, id)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllBeliefs clears all belief cache for a tenant
@@ -195,7 +195,7 @@ func (bco *BeliefCacheOperations) InvalidateAllBeliefs(tenantID string) {
 	tenantCache.Beliefs = make(map[string]*models.BeliefNode)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -215,11 +215,11 @@ func (bco *BeliefCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	bco.manager.LastAccessed[tenantID] = time.Now()
+	bco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }
 
 // GetBeliefIDBySlug retrieves only the belief ID by slug from cache
@@ -245,7 +245,7 @@ func (bco *BeliefCacheOperations) GetBeliefIDBySlug(tenantID, slug string) (stri
 	if exists {
 		// Update last accessed
 		bco.manager.Mu.Lock()
-		bco.manager.LastAccessed[tenantID] = time.Now()
+		bco.manager.LastAccessed[tenantID] = time.Now().UTC()
 		bco.manager.Mu.Unlock()
 	}
 
