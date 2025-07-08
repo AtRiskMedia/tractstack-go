@@ -91,39 +91,7 @@ func StateHandler(c *gin.Context) {
 		// Split comma-separated belief IDs
 		beliefIDs := strings.Split(unsetBeliefIds, ",")
 
-		// Create UNSET events for each belief
-		var eventsCheck []models.Event
-		for _, beliefID := range beliefIDs {
-			beliefID = strings.TrimSpace(beliefID) // Remove any whitespace
-			if beliefID != "" {
-				eventsCheck = append(eventsCheck, models.Event{
-					ID:     beliefID,
-					Type:   "Belief",
-					Verb:   "UNSET",
-					Object: beliefID,
-				})
-			}
-		}
-
-		if len(eventsCheck) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No valid belief IDs provided"})
-			return
-		}
-
-		// Process events array
-		processor := events.NewEventProcessor(ctx.TenantID, sessionID, ctx)
-		err := processor.ProcessEvents(eventsCheck, paneID, gotoPaneID)
-		if err != nil {
-			log.Printf("Error processing bulk unset events: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":       "ok",
-			"tenantId":     ctx.TenantID,
-			"unsetBeliefs": beliefIDs,
-		})
+		handleBulkUnset(c, ctx, sessionID, paneID, gotoPaneID, beliefIDs)
 		return
 	}
 
@@ -278,4 +246,41 @@ func updateFingerprintBelief(tenantID, sessionID string, event models.Event) err
 		beliefSlug, beliefValue, sessionData.FingerprintID, tenantID)
 
 	return nil
+}
+
+// handleBulkUnset processes bulk unset requests
+func handleBulkUnset(c *gin.Context, ctx *tenant.Context, sessionID, paneID, gotoPaneID string, beliefIDs []string) {
+	// Create UNSET events for the provided beliefs (no expansion - button already calculated correctly)
+	var eventsCheck []models.Event
+	for _, beliefID := range beliefIDs {
+		beliefID = strings.TrimSpace(beliefID)
+		if beliefID != "" {
+			eventsCheck = append(eventsCheck, models.Event{
+				ID:     beliefID,
+				Type:   "Belief",
+				Verb:   "UNSET",
+				Object: beliefID,
+			})
+		}
+	}
+
+	if len(eventsCheck) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No valid belief IDs provided"})
+		return
+	}
+
+	// Process events array
+	processor := events.NewEventProcessor(ctx.TenantID, sessionID, ctx)
+	err := processor.ProcessEvents(eventsCheck, paneID, gotoPaneID)
+	if err != nil {
+		log.Printf("Error processing bulk unset events: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":       "ok",
+		"tenantId":     ctx.TenantID,
+		"unsetBeliefs": beliefIDs,
+	})
 }

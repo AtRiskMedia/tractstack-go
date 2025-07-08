@@ -764,8 +764,8 @@ func (m *Manager) SetSessionBeliefContext(tenantID string, context *models.Sessi
 	key := fmt.Sprintf("%s:%s", context.SessionID, context.StoryfragmentID)
 	cache.SessionBeliefContexts[key] = context
 
-	log.Printf("DEBUG: Cached session belief context for session %s on storyfragment %s",
-		context.SessionID, context.StoryfragmentID)
+	// log.Printf("DEBUG: Cached session belief context for session %s on storyfragment %s",
+	//	context.SessionID, context.StoryfragmentID)
 }
 
 func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string) {

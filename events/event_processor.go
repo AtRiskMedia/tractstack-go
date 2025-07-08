@@ -52,7 +52,7 @@ func (ep *EventProcessor) ProcessEvents(events []models.Event, currentPaneID str
 	var visibilitySnapshot map[string]map[string]bool
 	if currentPaneID != "" {
 		visibilitySnapshot = ep.captureVisibilitySnapshot(events)
-		log.Printf("DEBUG: Captured visibility snapshot for pane %s: %v", currentPaneID, visibilitySnapshot)
+		// log.Printf("DEBUG: Captured visibility snapshot for pane %s: %v", currentPaneID, visibilitySnapshot)
 	}
 
 	// Process each event based on type
@@ -100,21 +100,21 @@ func (ep *EventProcessor) captureVisibilitySnapshot(events []models.Event) map[s
 		}
 	}
 
-	log.Printf("DEBUG: Capturing snapshot for changed beliefs: %v", changedBeliefs)
+	// log.Printf("DEBUG: Capturing snapshot for changed beliefs: %v", changedBeliefs)
 
 	// Use the working BeliefBroadcastService to find affected storyfragments
 	broadcastService := services.NewBeliefBroadcastService(ep.cacheManager, ep.sessionID)
 	affectedStoryfragmentMap := broadcastService.FindAffectedStoryfragments(ep.tenantID, changedBeliefs)
 
-	log.Printf("DEBUG: Affected storyfragments: %v", affectedStoryfragmentMap)
+	// log.Printf("DEBUG: Affected storyfragments: %v", affectedStoryfragmentMap)
 
 	// For each affected storyfragment, capture current pane visibility
 	for storyfragmentID := range affectedStoryfragmentMap {
-		log.Printf("DEBUG: Capturing visibility for storyfragment: %s", storyfragmentID)
+		// log.Printf("DEBUG: Capturing visibility for storyfragment: %s", storyfragmentID)
 
 		registry, exists := ep.cacheManager.GetStoryfragmentBeliefRegistry(ep.tenantID, storyfragmentID)
 		if !exists {
-			log.Printf("DEBUG: No registry found for storyfragment: %s", storyfragmentID)
+			// log.Printf("DEBUG: No registry found for storyfragment: %s", storyfragmentID)
 			continue
 		}
 
@@ -126,15 +126,14 @@ func (ep *EventProcessor) captureVisibilitySnapshot(events []models.Event) map[s
 			userBeliefs = make(map[string][]string)
 		}
 
-		log.Printf("DEBUG: User beliefs for snapshot: %v", userBeliefs)
+		// log.Printf("DEBUG: User beliefs for snapshot: %v", userBeliefs)
 
 		snapshot[storyfragmentID] = make(map[string]bool)
 		for paneID, paneBeliefs := range registry.PaneBeliefPayloads {
 			beliefEngine := services.NewBeliefEvaluationEngine()
 			visibilityResult := beliefEngine.EvaluatePaneVisibility(paneBeliefs, userBeliefs)
 			snapshot[storyfragmentID][paneID] = (visibilityResult == "visible" || visibilityResult == "true")
-
-			log.Printf("DEBUG: Pane %s visibility: %v", paneID, snapshot[storyfragmentID][paneID])
+			// log.Printf("DEBUG: Pane %s visibility: %v", paneID, snapshot[storyfragmentID][paneID])
 		}
 	}
 

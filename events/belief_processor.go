@@ -36,6 +36,7 @@ func (bp *BeliefProcessor) ProcessBelief(event models.Event) (bool, error) {
 	// 1. Resolve belief slug → database ID using cache-first lookup
 	beliefID, exists := bp.cacheManager.GetBeliefIDBySlug(bp.tenantID, event.ID)
 	if !exists {
+		log.Printf("ProcessBelief called for belief: %s, verb: %s", event.ID, event.Verb)
 		log.Printf("Belief slug not found in cache: %s", event.ID)
 		return false, fmt.Errorf("belief not found: %s", event.ID)
 	}
@@ -48,7 +49,11 @@ func (bp *BeliefProcessor) ProcessBelief(event models.Event) (bool, error) {
 
 	// 3. Handle UNSET with LINKED-BELIEFS cascade
 	if event.Verb == "UNSET" {
-		return bp.processUnsetBelief(event.ID, sessionData.FingerprintID)
+		changed, err := bp.processUnsetBelief(event.ID, sessionData.FingerprintID)
+		if changed {
+			bp.invalidateSessionBeliefContexts(bp.sessionID)
+		}
+		return changed, err
 	}
 
 	// 4. Update cache first (drives UX)
@@ -57,10 +62,15 @@ func (bp *BeliefProcessor) ProcessBelief(event models.Event) (bool, error) {
 	// 5. Queue database persistence (eventually consistent)
 	go bp.persistBelief(beliefID, sessionData.FingerprintID, sessionData.VisitID, event)
 
+	// 6. Invalidate session belief contexts if beliefs changed
+	if changed {
+		bp.invalidateSessionBeliefContexts(bp.sessionID)
+	}
+
 	return changed, nil
 }
 
-// processUnsetBelief handles UNSET events with LINKED-BELIEFS cascade logic
+// processUnsetBelief handles UNSET events by removing the specified belief
 func (bp *BeliefProcessor) processUnsetBelief(beliefSlug, fingerprintID string) (bool, error) {
 	// Get current fingerprint state
 	fpState, exists := bp.cacheManager.GetFingerprintState(bp.tenantID, fingerprintID)
@@ -68,45 +78,21 @@ func (bp *BeliefProcessor) processUnsetBelief(beliefSlug, fingerprintID string) 
 		return false, nil // No state to unset
 	}
 
-	// Find all beliefs that have this belief in their LINKED-BELIEFS
-	var beliefsToUnset []string
+	// Check if belief exists and remove it
+	if _, exists := fpState.HeldBeliefs[beliefSlug]; exists {
+		delete(fpState.HeldBeliefs, beliefSlug)
 
-	// Check if any beliefs have LINKED-BELIEFS containing our target
-	for slug := range fpState.HeldBeliefs {
-		if slug == "LINKED-BELIEFS" {
-			continue
-		}
-		// For each belief, check if LINKED-BELIEFS contains our target belief
-		if linkedBeliefs, exists := fpState.HeldBeliefs["LINKED-BELIEFS"]; exists {
-			for _, linked := range linkedBeliefs {
-				if linked == beliefSlug {
-					beliefsToUnset = append(beliefsToUnset, slug)
-					break
-				}
-			}
-		}
-	}
-
-	// Remove the target belief and all linked parents
-	beliefsToUnset = append(beliefsToUnset, beliefSlug)
-	changed := false
-
-	for _, slug := range beliefsToUnset {
-		if _, exists := fpState.HeldBeliefs[slug]; exists {
-			delete(fpState.HeldBeliefs, slug)
-			changed = true
-
-			// Queue database deletion
-			go bp.deleteBelief(slug, fingerprintID)
-		}
-	}
-
-	if changed {
+		// Update fingerprint state
 		fpState.UpdateActivity()
 		bp.cacheManager.SetFingerprintState(bp.tenantID, fpState)
+
+		// Queue database deletion
+		go bp.deleteBelief(beliefSlug, fingerprintID)
+
+		return true, nil
 	}
 
-	return changed, nil
+	return false, nil // Belief didn't exist, nothing changed
 }
 
 // updateFingerprintCache updates belief state in cache
@@ -210,4 +196,15 @@ func slicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// invalidateSessionBeliefContexts clears cached session belief contexts for all storyfragments
+func (bp *BeliefProcessor) invalidateSessionBeliefContexts(sessionID string) {
+	// Get all storyfragment IDs that have cached belief registries
+	storyfragmentIDs := bp.cacheManager.GetAllStoryfragmentBeliefRegistryIDs(bp.tenantID)
+
+	// Invalidate session belief context for each storyfragment
+	for _, storyfragmentID := range storyfragmentIDs {
+		bp.cacheManager.InvalidateSessionBeliefContext(bp.tenantID, sessionID, storyfragmentID)
+	}
 }

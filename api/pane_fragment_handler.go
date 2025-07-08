@@ -67,8 +67,8 @@ func GetPaneFragmentHandler(c *gin.Context) {
 			Slug:            paneNode.Slug,
 			IsDecorative:    paneNode.IsDecorative,
 			BgColour:        extractBgColour(paneNode),
-			HeldBeliefs:     paneNode.HeldBeliefs,     // Now matches []string type
-			WithheldBeliefs: paneNode.WithheldBeliefs, // Now matches []string type
+			HeldBeliefs:     paneNode.HeldBeliefs,
+			WithheldBeliefs: paneNode.WithheldBeliefs,
 			CodeHookTarget:  paneNode.CodeHookTarget,
 			CodeHookPayload: paneNode.CodeHookPayload,
 		},
@@ -473,41 +473,33 @@ func getUserBeliefsFromContext(ctx *tenant.Context, sessionID string) map[string
 		return nil
 	}
 
+	// log.Printf("PANE RENDER: getUserBeliefsFromContext for session %s, fingerprint %s, beliefs: %+v",
+	//	sessionID, sessionData.FingerprintID, fingerprintState.HeldBeliefs)
+
 	return fingerprintState.HeldBeliefs
 }
 
-// shouldCreateSessionContext checks if user has beliefs that would require personalization
 func shouldCreateSessionContext(ctx *tenant.Context, sessionID, storyfragmentID string) bool {
 	if sessionID == "" || storyfragmentID == "" {
 		return false
 	}
 
-	// Get user's current beliefs
-	userBeliefs := getUserBeliefsFromContext(ctx, sessionID)
-	if len(userBeliefs) == 0 {
-		return false // No beliefs = no need for context
-	}
-
-	// Get belief registry to check for widget beliefs or pane requirements
+	// Get belief registry to check for pane requirements
 	cacheManager := cache.GetGlobalManager()
 	registry, found := cacheManager.GetStoryfragmentBeliefRegistry(ctx.TenantID, storyfragmentID)
 	if !found {
 		return false // No registry = no requirements
 	}
 
-	// Check if user has any beliefs that match widget beliefs OR pane requirements
-	for beliefSlug := range userBeliefs {
-		// Check widget beliefs
-		if registry.AllWidgetBeliefs[beliefSlug] {
-			return true
-		}
-		// Check traditional pane belief requirements
-		if registry.RequiredBeliefs[beliefSlug] {
-			return true
+	// If ANY pane has belief requirements, we need to evaluate visibility
+	// This ensures that panes get hidden when user has empty beliefs
+	for _, paneBeliefs := range registry.PaneBeliefPayloads {
+		if len(paneBeliefs.HeldBeliefs) > 0 || len(paneBeliefs.WithheldBeliefs) > 0 || len(paneBeliefs.MatchAcross) > 0 {
+			return true // At least one pane has requirements = need evaluation
 		}
 	}
 
-	return false // No matching beliefs
+	return false // No panes have requirements
 }
 
 // createSessionBeliefContext creates a new session belief context
@@ -539,7 +531,7 @@ func addFilterButtonIfNeeded(htmlContent string, paneID string, visibility strin
 			// Find scroll target pane
 			gotoPaneID := findScrollTargetPane(effectiveFilter, beliefRegistry)
 
-			filterButtonHTML := beliefEngine.RenderFilterButton(paneID, effectiveFilter, gotoPaneID)
+			filterButtonHTML := beliefEngine.RenderFilterButton(paneID, effectiveFilter, gotoPaneID, paneBeliefs)
 			return beliefEngine.InjectFilterButton(htmlContent, filterButtonHTML)
 		}
 	}

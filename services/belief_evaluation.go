@@ -272,42 +272,6 @@ func (bee *BeliefEvaluationEngine) GetUserBeliefsFromSession(
 	return make(map[string][]string)
 }
 
-// CalculateEffectiveFilter determines which user beliefs are making this pane visible
-func (bee *BeliefEvaluationEngine) CalculateEffectiveFilter(
-	paneBeliefs models.PaneBeliefData,
-	userBeliefs map[string][]string,
-) map[string]interface{} {
-	effectiveFilter := make(map[string]interface{})
-
-	// Find user beliefs that match pane's held beliefs requirements
-	for beliefSlug, requiredValues := range paneBeliefs.HeldBeliefs {
-		if bee.hasMatchingBelief(userBeliefs, beliefSlug, requiredValues) {
-			if userValues, exists := userBeliefs[beliefSlug]; exists {
-				effectiveFilter[beliefSlug] = userValues
-			}
-		}
-	}
-
-	// Find user beliefs that match pane's match-across requirements
-	for _, beliefSlug := range paneBeliefs.MatchAcross {
-		if userValues, exists := userBeliefs[beliefSlug]; exists {
-			effectiveFilter[beliefSlug] = userValues
-		}
-	}
-
-	// Add LINKED-BELIEFS if present in user beliefs
-	if linkedValues, exists := userBeliefs["LINKED-BELIEFS"]; exists {
-		effectiveFilter["LINKED-BELIEFS"] = linkedValues
-	}
-
-	// Add MATCH-ACROSS if there are match-across beliefs
-	if len(paneBeliefs.MatchAcross) > 0 {
-		effectiveFilter["MATCH-ACROSS"] = paneBeliefs.MatchAcross
-	}
-
-	return effectiveFilter
-}
-
 // InjectFilterButton adds the filter button to the HTML content
 func (bee *BeliefEvaluationEngine) InjectFilterButton(htmlContent, filterButtonHTML string) string {
 	// Find the opening pane div and inject the button after it
@@ -318,33 +282,32 @@ func (bee *BeliefEvaluationEngine) InjectFilterButton(htmlContent, filterButtonH
 }
 
 // RenderFilterButton generates the Filter back button HTML
-func (bee *BeliefEvaluationEngine) RenderFilterButton(paneID string, effectiveFilter map[string]interface{}, gotoPaneID string) string {
+func (bee *BeliefEvaluationEngine) RenderFilterButton(paneID string, effectiveFilter map[string]interface{}, gotoPaneID string, paneBeliefs models.PaneBeliefData) string {
 	// Extract beliefs to unset using v1 logic
 	var beliefsToUnset []string
 
-	// Get all keys except MATCH-ACROSS and LINKED-BELIEFS
+	// Get all keys except MATCH-ACROSS and LINKED-BELIEFS from effective filter (user's actual beliefs)
 	for key := range effectiveFilter {
 		if key != "MATCH-ACROSS" && key != "LINKED-BELIEFS" {
 			beliefsToUnset = append(beliefsToUnset, key)
 		}
 	}
 
-	// Add LINKED-BELIEFS if present
+	// Add LINKED-BELIEFS if present in effectiveFilter (matching V1 logic)
 	if linkedBeliefsValue, exists := effectiveFilter["LINKED-BELIEFS"]; exists {
-		if linkedArray, ok := linkedBeliefsValue.([]interface{}); ok {
-			for _, linked := range linkedArray {
-				if linkedStr, ok := linked.(string); ok {
-					// Add to beliefsToUnset if not already present
-					found := false
-					for _, existing := range beliefsToUnset {
-						if existing == linkedStr {
-							found = true
-							break
-						}
+		// log.Printf("🔧 RenderFilterButton: linkedBeliefsValue type=%T, value=%v", linkedBeliefsValue, linkedBeliefsValue)
+		if linkedArray, ok := linkedBeliefsValue.([]string); ok {
+			for _, linkedStr := range linkedArray {
+				// Add to beliefsToUnset if not already present
+				found := false
+				for _, existing := range beliefsToUnset {
+					if existing == linkedStr {
+						found = true
+						break
 					}
-					if !found {
-						beliefsToUnset = append(beliefsToUnset, linkedStr)
-					}
+				}
+				if !found {
+					beliefsToUnset = append(beliefsToUnset, linkedStr)
 				}
 			}
 		}
@@ -360,9 +323,9 @@ func (bee *BeliefEvaluationEngine) RenderFilterButton(paneID string, effectiveFi
 	// Build hx-vals with gotoPaneID if available
 	var hxVals string
 	if gotoPaneID != "" {
-		hxVals = fmt.Sprintf(`{"unsetBeliefIds": "%s", "paneId": "%s", "gotoPaneID": "%s"}`, unsetBeliefIds, paneID, gotoPaneID)
+		hxVals = fmt.Sprintf(`{"unsetBeliefIds": %q, "paneId": %q, "gotoPaneID": %q}`, unsetBeliefIds, paneID, gotoPaneID)
 	} else {
-		hxVals = fmt.Sprintf(`{"unsetBeliefIds": "%s", "paneId": "%s"}`, unsetBeliefIds, paneID)
+		hxVals = fmt.Sprintf(`{"unsetBeliefIds": %q, "paneId": %q}`, unsetBeliefIds, paneID)
 	}
 
 	return fmt.Sprintf(`
@@ -381,4 +344,40 @@ func (bee *BeliefEvaluationEngine) RenderFilterButton(paneID string, effectiveFi
 			</svg>
 		</button>
 	`, hxVals)
+}
+
+// CalculateEffectiveFilter returns the intersection of user beliefs and pane requirements for unset logic
+func (bee *BeliefEvaluationEngine) CalculateEffectiveFilter(
+	paneBeliefs models.PaneBeliefData,
+	userBeliefs map[string][]string,
+) map[string]interface{} {
+	effectiveFilter := make(map[string]interface{})
+
+	// Add user beliefs that match pane's held beliefs requirements
+	for beliefSlug, requiredValues := range paneBeliefs.HeldBeliefs {
+		if bee.hasMatchingBelief(userBeliefs, beliefSlug, requiredValues) {
+			if userValues, exists := userBeliefs[beliefSlug]; exists {
+				effectiveFilter[beliefSlug] = userValues
+			}
+		}
+	}
+
+	// Add user beliefs that match pane's match-across requirements (OR logic)
+	for _, beliefSlug := range paneBeliefs.MatchAcross {
+		if userValues, exists := userBeliefs[beliefSlug]; exists {
+			effectiveFilter[beliefSlug] = userValues
+		}
+	}
+
+	// Add LINKED-BELIEFS if present in pane configuration
+	if len(paneBeliefs.LinkedBeliefs) > 0 {
+		effectiveFilter["LINKED-BELIEFS"] = paneBeliefs.LinkedBeliefs
+	}
+
+	// Add MATCH-ACROSS if there are match-across beliefs (for metadata, not unset logic)
+	if len(paneBeliefs.MatchAcross) > 0 {
+		effectiveFilter["MATCH-ACROSS"] = paneBeliefs.MatchAcross
+	}
+
+	return effectiveFilter
 }
