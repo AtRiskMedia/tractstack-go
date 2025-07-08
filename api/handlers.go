@@ -284,3 +284,34 @@ func handleBulkUnset(c *gin.Context, ctx *tenant.Context, sessionID, paneID, got
 		"unsetBeliefs": beliefIDs,
 	})
 }
+
+// HealthHandler returns a simple health status with tenant validation
+func HealthHandler(c *gin.Context) {
+	// Ensure tenant context exists before returning healthy status
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"healthy": false,
+			"error":   "tenant context unavailable",
+		})
+		return
+	}
+
+	// Verify tenant is active
+	if ctx.Status != "active" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"healthy": false,
+			"error":   "tenant not active",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "ok",
+		"healthy":   true,
+		"timestamp": time.Now().Unix(),
+		"tenantId":  ctx.TenantID,
+	})
+}

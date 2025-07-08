@@ -193,6 +193,9 @@ func main() {
 	// API routes
 	v1 := r.Group("/api/v1")
 	{
+		// Health checks
+		v1.GET("/health", api.HealthHandler)
+
 		// Authentication and system routes
 		auth := v1.Group("/auth")
 		{
