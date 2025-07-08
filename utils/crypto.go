@@ -123,8 +123,8 @@ func GenerateProfileToken(profile *models.Profile, jwtSecret, aesKey string) (st
 		},
 		"encryptedEmail": encryptedULID,
 		"encryptedCode":  encryptedULID,
-		"iat":            time.Now().Unix(),
-		"exp":            time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"iat":            time.Now().UTC().Unix(),
+		"exp":            time.Now().UTC().Add(30 * 24 * time.Hour).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

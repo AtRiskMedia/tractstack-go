@@ -379,7 +379,7 @@ func (sfs *StoryFragmentService) loadByTractStackFromDB(tractStackID string) ([]
 func (sfs *StoryFragmentService) deserializeRowData(storyFragmentRow *StoryFragmentRowData, paneIDs []string) (*models.StoryFragmentNode, error) {
 	created, err := time.Parse(time.RFC3339, storyFragmentRow.Created)
 	if err != nil {
-		created = time.Now()
+		created = time.Now().UTC()
 	}
 
 	var changed *time.Time

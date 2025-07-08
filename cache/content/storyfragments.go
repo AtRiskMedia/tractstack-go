@@ -42,7 +42,7 @@ func (sfco *StoryFragmentCacheOperations) GetStoryFragment(tenantID, id string) 
 
 	// Update last accessed
 	sfco.manager.Mu.Lock()
-	sfco.manager.LastAccessed[tenantID] = time.Now()
+	sfco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	sfco.manager.Mu.Unlock()
 
 	return storyFragment, true
@@ -83,11 +83,11 @@ func (sfco *StoryFragmentCacheOperations) SetStoryFragment(tenantID string, node
 	}
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	sfco.manager.Mu.Lock()
-	sfco.manager.LastAccessed[tenantID] = time.Now()
+	sfco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	sfco.manager.Mu.Unlock()
 }
 
@@ -123,7 +123,7 @@ func (sfco *StoryFragmentCacheOperations) GetStoryFragmentBySlug(tenantID, slug 
 
 	// Update last accessed
 	sfco.manager.Mu.Lock()
-	sfco.manager.LastAccessed[tenantID] = time.Now()
+	sfco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	sfco.manager.Mu.Unlock()
 
 	return storyFragment, true
@@ -168,7 +168,7 @@ func (sfco *StoryFragmentCacheOperations) GetStoryFragmentsByTractStack(tenantID
 
 	// Update last accessed
 	sfco.manager.Mu.Lock()
-	sfco.manager.LastAccessed[tenantID] = time.Now()
+	sfco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	sfco.manager.Mu.Unlock()
 
 	return storyFragments, true
@@ -204,7 +204,7 @@ func (sfco *StoryFragmentCacheOperations) GetAllStoryFragmentIDs(tenantID string
 
 	// Update last accessed
 	sfco.manager.Mu.Lock()
-	sfco.manager.LastAccessed[tenantID] = time.Now()
+	sfco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	sfco.manager.Mu.Unlock()
 
 	return ids, true
@@ -248,7 +248,7 @@ func (sfco *StoryFragmentCacheOperations) InvalidateStoryFragment(tenantID, id s
 	delete(tenantCache.StoryFragments, id)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllStoryFragments clears all storyfragment cache for a tenant
@@ -280,7 +280,7 @@ func (sfco *StoryFragmentCacheOperations) InvalidateAllStoryFragments(tenantID s
 	tenantCache.StoryFragments = make(map[string]*models.StoryFragmentNode)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -300,9 +300,9 @@ func (sfco *StoryFragmentCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	sfco.manager.LastAccessed[tenantID] = time.Now()
+	sfco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

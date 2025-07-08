@@ -57,7 +57,7 @@ func (brs *BeliefRegistryService) buildRegistryFromPanes(storyfragmentID string,
 		RequiredBadges:     []string{},
 		PaneWidgetBeliefs:  make(map[string][]string),
 		AllWidgetBeliefs:   make(map[string]bool),
-		LastUpdated:        time.Now(),
+		LastUpdated:        time.Now().UTC(),
 	}
 
 	for _, paneID := range paneIDs {
@@ -254,7 +254,7 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID s
 		RequiredBadges:     []string{},
 		PaneWidgetBeliefs:  make(map[string][]string),
 		AllWidgetBeliefs:   make(map[string]bool),
-		LastUpdated:        time.Now(),
+		LastUpdated:        time.Now().UTC(),
 	}
 
 	for _, paneNode := range loadedPanes {

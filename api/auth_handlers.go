@@ -74,8 +74,8 @@ func GenerateSecureToken(length int) (string, error) {
 // GenerateJWT creates a JWT token with given claims
 func GenerateJWT(claims jwt.MapClaims, jwtSecret string) (string, error) {
 	// Set standard claims
-	claims["iat"] = time.Now().Unix()
-	claims["exp"] = time.Now().Add(24 * time.Hour).Unix()
+	claims["iat"] = time.Now().UTC().Unix()
+	claims["exp"] = time.Now().UTC().Add(24 * time.Hour).Unix()
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(jwtSecret))

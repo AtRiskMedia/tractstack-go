@@ -181,7 +181,7 @@ func (bbs *BeliefBroadcastService) computeScrollTarget(tenantID, storyfragmentID
 			SessionID:       bbs.sessionID,
 			StoryfragmentID: storyfragmentID,
 			UserBeliefs:     fingerprintData.HeldBeliefs,
-			LastEvaluation:  time.Now(),
+			LastEvaluation:  time.Now().UTC(),
 		}
 
 	}

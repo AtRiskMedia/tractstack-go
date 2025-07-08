@@ -42,7 +42,7 @@ func (ifco *ImageFileCacheOperations) GetFile(tenantID, id string) (*models.Imag
 
 	// Update last accessed
 	ifco.manager.Mu.Lock()
-	ifco.manager.LastAccessed[tenantID] = time.Now()
+	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	ifco.manager.Mu.Unlock()
 
 	return file, true
@@ -63,11 +63,11 @@ func (ifco *ImageFileCacheOperations) SetFile(tenantID string, node *models.Imag
 	tenantCache.Files[node.ID] = node
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	ifco.manager.Mu.Lock()
-	ifco.manager.LastAccessed[tenantID] = time.Now()
+	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	ifco.manager.Mu.Unlock()
 }
 
@@ -101,7 +101,7 @@ func (ifco *ImageFileCacheOperations) GetAllFileIDs(tenantID string) ([]string, 
 
 	// Update last accessed
 	ifco.manager.Mu.Lock()
-	ifco.manager.LastAccessed[tenantID] = time.Now()
+	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	ifco.manager.Mu.Unlock()
 
 	return ids, true
@@ -124,7 +124,7 @@ func (ifco *ImageFileCacheOperations) InvalidateFile(tenantID, id string) {
 	delete(tenantCache.Files, id)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllFiles clears all imagefile cache for a tenant
@@ -144,7 +144,7 @@ func (ifco *ImageFileCacheOperations) InvalidateAllFiles(tenantID string) {
 	tenantCache.Files = make(map[string]*models.ImageFileNode)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -164,9 +164,9 @@ func (ifco *ImageFileCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	ifco.manager.LastAccessed[tenantID] = time.Now()
+	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

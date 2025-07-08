@@ -68,7 +68,7 @@ func (s *SessionData) IsExpired() bool {
 }
 
 func (s *SessionData) UpdateActivity() {
-	s.LastActivity = time.Now()
+	s.LastActivity = time.Now().UTC()
 }
 
 type Event struct {
@@ -493,7 +493,7 @@ func (v *VisitState) IsVisitActive() bool {
 
 func (v *VisitState) UpdateActivity() {
 	if v != nil {
-		v.LastActivity = time.Now()
+		v.LastActivity = time.Now().UTC()
 	}
 }
 
@@ -506,7 +506,7 @@ type FingerprintState struct {
 
 func (f *FingerprintState) UpdateActivity() {
 	if f != nil {
-		f.LastActivity = time.Now()
+		f.LastActivity = time.Now().UTC()
 	}
 }
 

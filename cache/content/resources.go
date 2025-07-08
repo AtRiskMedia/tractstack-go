@@ -42,7 +42,7 @@ func (rco *ResourceCacheOperations) GetResource(tenantID, id string) (*models.Re
 
 	// Update last accessed
 	rco.manager.Mu.Lock()
-	rco.manager.LastAccessed[tenantID] = time.Now()
+	rco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	rco.manager.Mu.Unlock()
 
 	return resource, true
@@ -86,11 +86,11 @@ func (rco *ResourceCacheOperations) SetResource(tenantID string, node *models.Re
 	}
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	rco.manager.Mu.Lock()
-	rco.manager.LastAccessed[tenantID] = time.Now()
+	rco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	rco.manager.Mu.Unlock()
 }
 
@@ -126,7 +126,7 @@ func (rco *ResourceCacheOperations) GetResourceBySlug(tenantID, slug string) (*m
 
 	// Update last accessed
 	rco.manager.Mu.Lock()
-	rco.manager.LastAccessed[tenantID] = time.Now()
+	rco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	rco.manager.Mu.Unlock()
 
 	return resource, true
@@ -170,7 +170,7 @@ func (rco *ResourceCacheOperations) GetResourcesByCategory(tenantID, category st
 
 	// Update last accessed
 	rco.manager.Mu.Lock()
-	rco.manager.LastAccessed[tenantID] = time.Now()
+	rco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	rco.manager.Mu.Unlock()
 
 	return resources, true
@@ -206,7 +206,7 @@ func (rco *ResourceCacheOperations) GetAllResourceIDs(tenantID string) ([]string
 
 	// Update last accessed
 	rco.manager.Mu.Lock()
-	rco.manager.LastAccessed[tenantID] = time.Now()
+	rco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	rco.manager.Mu.Unlock()
 
 	return ids, true
@@ -252,7 +252,7 @@ func (rco *ResourceCacheOperations) InvalidateResource(tenantID, id string) {
 	delete(tenantCache.Resources, id)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllResources clears all resource cache for a tenant
@@ -280,7 +280,7 @@ func (rco *ResourceCacheOperations) InvalidateAllResources(tenantID string) {
 	tenantCache.Resources = make(map[string]*models.ResourceNode)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -300,9 +300,9 @@ func (rco *ResourceCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	rco.manager.LastAccessed[tenantID] = time.Now()
+	rco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

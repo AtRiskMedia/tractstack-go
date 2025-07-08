@@ -10,7 +10,7 @@ import (
 // PreActivateAllTenants activates all tenants in the registry during startup
 func PreActivateAllTenants(manager *Manager) error {
 	log.Println("=== Starting tenant pre-activation ===")
-	start := time.Now()
+	start := time.Now().UTC()
 
 	// Load the tenant registry to get all known tenants
 	registry, err := LoadTenantRegistry()
@@ -79,7 +79,7 @@ func PreActivateAllTenants(manager *Manager) error {
 
 // preActivateSingleTenant activates a single tenant during startup
 func preActivateSingleTenant(tenantID string) error {
-	tenantStart := time.Now()
+	tenantStart := time.Now().UTC()
 
 	// Load tenant configuration
 	config, err := LoadTenantConfig(tenantID)

@@ -18,7 +18,7 @@ func ActivateTenant(ctx *Context) error {
 	}
 
 	log.Printf("Activating tenant: %s", ctx.TenantID)
-	start := time.Now()
+	start := time.Now().UTC()
 
 	// Determine database type
 	dbType := "sqlite3"

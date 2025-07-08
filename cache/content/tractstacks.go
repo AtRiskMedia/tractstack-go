@@ -42,7 +42,7 @@ func (tsco *TractStackCacheOperations) GetTractStack(tenantID, id string) (*mode
 
 	// Update last accessed
 	tsco.manager.Mu.Lock()
-	tsco.manager.LastAccessed[tenantID] = time.Now()
+	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	tsco.manager.Mu.Unlock()
 
 	return tractStack, true
@@ -66,11 +66,11 @@ func (tsco *TractStackCacheOperations) SetTractStack(tenantID string, node *mode
 	tenantCache.SlugToID["tractstack:"+node.Slug] = node.ID
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 
 	// Update last accessed
 	tsco.manager.Mu.Lock()
-	tsco.manager.LastAccessed[tenantID] = time.Now()
+	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	tsco.manager.Mu.Unlock()
 }
 
@@ -106,7 +106,7 @@ func (tsco *TractStackCacheOperations) GetTractStackBySlug(tenantID, slug string
 
 	// Update last accessed
 	tsco.manager.Mu.Lock()
-	tsco.manager.LastAccessed[tenantID] = time.Now()
+	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	tsco.manager.Mu.Unlock()
 
 	return tractStack, true
@@ -142,7 +142,7 @@ func (tsco *TractStackCacheOperations) GetAllTractStackIDs(tenantID string) ([]s
 
 	// Update last accessed
 	tsco.manager.Mu.Lock()
-	tsco.manager.LastAccessed[tenantID] = time.Now()
+	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	tsco.manager.Mu.Unlock()
 
 	return ids, true
@@ -170,7 +170,7 @@ func (tsco *TractStackCacheOperations) InvalidateTractStack(tenantID, id string)
 	delete(tenantCache.TractStacks, id)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // InvalidateAllTractStacks clears all tractstack cache for a tenant
@@ -195,7 +195,7 @@ func (tsco *TractStackCacheOperations) InvalidateAllTractStacks(tenantID string)
 	tenantCache.TractStacks = make(map[string]*models.TractStackNode)
 
 	// Update last modified
-	tenantCache.LastUpdated = time.Now()
+	tenantCache.LastUpdated = time.Now().UTC()
 }
 
 // ensureTenantCache creates tenant cache if it doesn't exist
@@ -215,9 +215,9 @@ func (tsco *TractStackCacheOperations) ensureTenantCache(tenantID string) {
 			SlugToID:       make(map[string]string),
 			CategoryToIDs:  make(map[string][]string),
 			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now(),
+			LastUpdated:    time.Now().UTC(),
 		}
 	}
 
-	tsco.manager.LastAccessed[tenantID] = time.Now()
+	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

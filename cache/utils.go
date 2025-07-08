@@ -92,7 +92,7 @@ func (cl *CacheLock) Lock(key string) {
 		cl.locks[key] = &sync.Mutex{}
 	}
 	lock := cl.locks[key]
-	cl.lockTimes[key] = time.Now()
+	cl.lockTimes[key] = time.Now().UTC()
 	cl.mu.Unlock()
 
 	lock.Lock()
@@ -114,7 +114,7 @@ func (cl *CacheLock) GetLockInfo() map[string]time.Duration {
 	defer cl.mu.Unlock()
 
 	info := make(map[string]time.Duration)
-	now := time.Now()
+	now := time.Now().UTC()
 	for key, lockTime := range cl.lockTimes {
 		info[key] = now.Sub(lockTime)
 	}
@@ -166,7 +166,7 @@ func ParseHourKey(key string) (time.Time, error) {
 // GetCurrentHourKey returns the current hour key
 // LOCKING: None required (pure computation)
 func GetCurrentHourKey() string {
-	now := time.Now().UTC()
+	now := time.Now().UTC().UTC()
 	return FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 }
 
@@ -174,7 +174,7 @@ func GetCurrentHourKey() string {
 // LOCKING: None required (pure computation)
 func GetHourKeysForRange(hours int) []string {
 	keys := make([]string, 0, hours)
-	now := time.Now().UTC()
+	now := time.Now().UTC().UTC()
 	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
 
 	for i := 0; i < hours; i++ {
@@ -305,7 +305,7 @@ func cleanupExpiredSessions(manager *Manager, tenantID string) {
 	userCache.Mu.Lock()
 	defer userCache.Mu.Unlock()
 
-	now := time.Now()
+	now := time.Now().UTC()
 	for sessionID, session := range userCache.SessionStates {
 		if session.IsExpired() || now.Sub(session.LastActivity) > UserStateTTL {
 			delete(userCache.SessionStates, sessionID)

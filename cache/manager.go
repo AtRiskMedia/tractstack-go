@@ -158,7 +158,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	analyticsExists = m.AnalyticsCache[tenantID] != nil
 
 	if contentExists && userStateExists && htmlExists && analyticsExists {
-		m.LastAccessed[tenantID] = time.Now()
+		m.LastAccessed[tenantID] = time.Now().UTC()
 		return
 	}
 
@@ -209,7 +209,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 		SlugToID:       make(map[string]string),
 		CategoryToIDs:  make(map[string][]string),
 		AllPaneIDs:     make([]string, 0),
-		LastUpdated:    time.Now(),
+		LastUpdated:    time.Now().UTC(),
 		Mu:             sync.RWMutex{},
 	}
 
@@ -220,7 +220,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 		SessionStates:                 make(map[string]*models.SessionData),
 		StoryfragmentBeliefRegistries: make(map[string]*models.StoryfragmentBeliefRegistry),
 		SessionBeliefContexts:         make(map[string]*models.SessionBeliefContext),
-		LastLoaded:                    time.Now(),
+		LastLoaded:                    time.Now().UTC(),
 		Mu:                            sync.RWMutex{},
 	}
 
@@ -234,11 +234,11 @@ func (m *Manager) EnsureTenant(tenantID string) {
 		EpinetBins:  make(map[string]*models.HourlyEpinetBin),
 		ContentBins: make(map[string]*models.HourlyContentBin),
 		SiteBins:    make(map[string]*models.HourlySiteBin),
-		LastUpdated: time.Now(),
+		LastUpdated: time.Now().UTC(),
 		Mu:          sync.RWMutex{},
 	}
 
-	m.LastAccessed[tenantID] = time.Now()
+	m.LastAccessed[tenantID] = time.Now().UTC()
 
 	log.Printf("Cache: Initialized tenant %s with all cache structures", tenantID)
 }
@@ -248,7 +248,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 func (m *Manager) cleanupOldestTenantsUnsafe() {
 	// Find the oldest tenant (caller already holding lock)
 	var oldestTenant string
-	oldestTime := time.Now()
+	oldestTime := time.Now().UTC()
 
 	for tenantID, lastAccessed := range m.LastAccessed {
 		if lastAccessed.Before(oldestTime) {
@@ -560,7 +560,7 @@ func (m *Manager) SetHTMLChunk(tenantID, paneID string, variant models.PaneVaria
 	key := fmt.Sprintf("%s:%s", paneID, variant)
 	cache.Chunks[key] = &models.HTMLChunk{
 		HTML:      html,
-		CachedAt:  time.Now(),
+		CachedAt:  time.Now().UTC(),
 		DependsOn: dependsOn,
 	}
 	for _, depID := range dependsOn {
