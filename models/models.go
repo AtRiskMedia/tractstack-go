@@ -518,8 +518,8 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 		}
 	}()
 
-	log.Printf("🔊 SESSION BROADCAST: Starting broadcast to tenant %s, session %s, storyfragment %s, panes: %v",
-		tenantID, sessionID, storyfragmentID, paneIDs)
+	// log.Printf("🔊 SESSION BROADCAST: Starting broadcast to tenant %s, session %s, storyfragment %s, panes: %v",
+	//	tenantID, sessionID, storyfragmentID, paneIDs)
 
 	// Prepare broadcast message
 	paneIDsJSON, _ := json.Marshal(paneIDs)
@@ -532,7 +532,7 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 			storyfragmentID, paneIDsJSON)
 	}
 
-	log.Printf("🔊 SESSION BROADCAST: Prepared message: %s", strings.ReplaceAll(message, "\n", "\\n"))
+	log.Printf("🔊 SESSION BROADCAST: Outgoing message: %s", strings.ReplaceAll(message, "\n", "\\n"))
 
 	b.mu.Lock()
 	defer b.mu.Unlock()

@@ -2,7 +2,9 @@
 package templates
 
 import (
+	"encoding/json"
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -59,6 +61,16 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 	buttonClasses := getIdentifyAsButtonClasses(isSelected, isOtherSelected)
 	indicatorColor := getIdentifyAsIndicatorColor(isSelected, isOtherSelected)
 
+	// Create JSON for hx-vals using proper marshaling
+	hxValsMap := map[string]string{
+		"beliefId":     beliefSlug,
+		"beliefType":   "Belief",
+		"beliefObject": target,
+		"paneId":       ctx.ContainingPaneID,
+	}
+	hxValsBytes, _ := json.Marshal(hxValsMap)
+	hxVals := html.EscapeString(string(hxValsBytes))
+
 	return fmt.Sprintf(`
 		<div class="block mt-3 w-fit">
 			<button
@@ -68,7 +80,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				hx-post="/api/v1/state"
 				hx-trigger="click"
 				hx-swap="none"
-				hx-vals='{"beliefId": "%s", "beliefType": "Belief", "beliefObject": "%s", "paneId": "%s"}'
+				hx-vals='%s'
 				hx-preserve="true"
 			>
 				<div class="flex items-center">
@@ -80,7 +92,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 				</div>
 			</button>
 		</div>`,
-		buttonID, buttonClasses, beliefSlug, target, ctx.ContainingPaneID, indicatorColor, buttonTitle)
+		buttonID, buttonClasses, hxVals, indicatorColor, buttonTitle)
 }
 
 func parseTargets(targetsString string) []string {
