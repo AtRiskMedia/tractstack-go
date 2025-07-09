@@ -403,3 +403,12 @@ func cleanupSSEConnections() {
 			totalCleaned, totalActive)
 	}
 }
+
+// GetTTLForHour returns appropriate TTL based on whether hour is current or historical
+func GetTTLForHour(hourKey string) time.Duration {
+	currentHour := GetCurrentHourKey()
+	if hourKey == currentHour {
+		return CurrentHourTTL // 15 minutes
+	}
+	return AnalyticsBinTTL // 28 days
+}
