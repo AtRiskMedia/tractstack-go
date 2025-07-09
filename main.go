@@ -206,6 +206,14 @@ func main() {
 			auth.POST("/login", api.LoginHandler)
 		}
 
+		// analytics endpoints
+		analytics := v1.Group("/analytics")
+		{
+			analytics.GET("/dashboard", api.HandleDashboardAnalytics)
+			analytics.GET("/epinet/:id", api.HandleEpinetSankey)
+			analytics.GET("/leads", api.HandleLeadMetrics)
+		}
+
 		// State management (separate from auth)
 		v1.POST("/state", api.StateHandler)
 
