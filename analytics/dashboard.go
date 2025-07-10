@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // ComputeDashboardAnalytics computes dashboard analytics from cached epinet data (exact V1 pattern)
@@ -129,7 +130,7 @@ func computeLineData(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []str
 			}
 
 			// Calculate the period index for this hour (exact V1 pattern)
-			hourTime, err := parseHourKeyToDate(hourKey)
+			hourTime, err := utils.ParseHourKeyToDate(hourKey)
 			if err != nil {
 				continue
 			}

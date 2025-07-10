@@ -3,7 +3,6 @@ package analytics
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -25,9 +24,15 @@ func addNodeVisitor(ctx *tenant.Context, epinetID, hourKey string, step EpinetSt
 		bin = &models.HourlyEpinetBin{
 			Data:       emptyData,
 			ComputedAt: time.Now().UTC(),
-			TTL:        cache.GetTTLForHour(hourKey),
+			TTL: func() time.Duration {
+				now := time.Now().UTC()
+				currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+				if hourKey == currentHourKey {
+					return 15 * time.Minute
+				}
+				return 28 * 24 * time.Hour
+			}(),
 		}
-		log.Printf("DEBUG: Creating new bin for %s:%s", epinetID, hourKey)
 	}
 	if bin.Data.Steps[nodeID] == nil {
 		bin.Data.Steps[nodeID] = &models.HourlyEpinetStepData{
@@ -37,8 +42,6 @@ func addNodeVisitor(ctx *tenant.Context, epinetID, hourKey string, step EpinetSt
 		}
 	}
 	bin.Data.Steps[nodeID].Visitors[fingerprintID] = true
-	// log.Printf("DEBUG: addNodeVisitor called - epinetID=%s, hourKey=%s, contentID=%s, fingerprintID=%s, nodeID=%s, verb=%s, total visitors now: %d",
-	//	epinetID, hourKey, contentID, fingerprintID, nodeID, matchedVerb, len(bin.Data.Steps[nodeID].Visitors))
 	cacheManager.SetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey, bin)
 	return nil
 }

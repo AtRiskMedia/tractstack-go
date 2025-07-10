@@ -2,9 +2,7 @@
 package cache
 
 import (
-	"fmt"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 
@@ -119,70 +117,6 @@ func (cl *CacheLock) GetLockInfo() map[string]time.Duration {
 		info[key] = now.Sub(lockTime)
 	}
 	return info
-}
-
-// getMinutesBasedHourKey parses a time object to provide the minute-based cache key
-// LOCKING: None required (pure computation)
-//func getMinutesBasedHourKey(t time.Time) string {
-//	return fmt.Sprintf("%02d%02d%02d%02d%02d", t.Year()%100, t.Month(), t.Day(), t.Hour(), t.Minute())
-//}
-
-// FormatHourKey converts a time to an hour key for analytics
-// LOCKING: None required (pure computation)
-func FormatHourKey(t time.Time) string {
-	return fmt.Sprintf("%02d%02d%02d%02d", t.Year()%100, t.Month(), t.Day(), t.Hour())
-}
-
-// ParseHourKey converts an hour key back to a time
-// LOCKING: None required (pure computation)
-func ParseHourKey(key string) (time.Time, error) {
-	if len(key) != 8 {
-		return time.Time{}, fmt.Errorf("invalid hour key format: %s", key)
-	}
-
-	year, err := strconv.Atoi("20" + key[:2])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid year in hour key: %s", key)
-	}
-
-	month, err := strconv.Atoi(key[2:4])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid month in hour key: %s", key)
-	}
-
-	day, err := strconv.Atoi(key[4:6])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid day in hour key: %s", key)
-	}
-
-	hour, err := strconv.Atoi(key[6:8])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid hour in hour key: %s", key)
-	}
-
-	return time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC), nil
-}
-
-// GetCurrentHourKey returns the current hour key
-// LOCKING: None required (pure computation)
-func GetCurrentHourKey() string {
-	now := time.Now().UTC().UTC()
-	return FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
-}
-
-// GetHourKeysForRange returns hour keys for a time range
-// LOCKING: None required (pure computation)
-func GetHourKeysForRange(hours int) []string {
-	keys := make([]string, 0, hours)
-	now := time.Now().UTC().UTC()
-	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
-
-	for i := 0; i < hours; i++ {
-		hourDate := currentHour.Add(-time.Duration(i) * time.Hour)
-		keys = append(keys, FormatHourKey(hourDate))
-	}
-
-	return keys
 }
 
 // IsExpired checks if a cached item has exceeded its TTL
@@ -402,13 +336,4 @@ func cleanupSSEConnections() {
 		log.Printf("SSE cleanup: removed %d dead connections across all tenants, %d active remaining",
 			totalCleaned, totalActive)
 	}
-}
-
-// GetTTLForHour returns appropriate TTL based on whether hour is current or historical
-func GetTTLForHour(hourKey string) time.Duration {
-	currentHour := GetCurrentHourKey()
-	if hourKey == currentHour {
-		return CurrentHourTTL // 15 minutes
-	}
-	return AnalyticsBinTTL // 28 days
 }

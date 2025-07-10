@@ -14,6 +14,10 @@ import (
 func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetConfig,
 	analysis *EpinetAnalysis, startTime, endTime time.Time, contentItems map[string]ContentItem,
 ) error {
+	log.Printf("DEBUG: processActionData query time range: startTime=%s, endTime=%s (params: %v, %v)",
+		startTime.Format("2006-01-02 15:04:05"),
+		endTime.Format("2006-01-02 15:04:05"),
+		startTime, endTime)
 	// Prepare query parameters
 	var verbValues []string
 	for verb := range analysis.ActionVerbs {
@@ -59,7 +63,8 @@ func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
             object_id,
             object_type,
             fingerprint_id,
-            verb
+            verb,
+        created_at
         FROM actions
         WHERE %s
     `, whereClause)
@@ -72,8 +77,12 @@ func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 
 	actionEvents := make([]ActionEvent, 0)
 	for rows.Next() {
+		var createdAtStr string
 		var event ActionEvent
-		err := rows.Scan(&event.HourKey, &event.ObjectID, &event.ObjectType, &event.FingerprintID, &event.Verb)
+		err := rows.Scan(&event.HourKey, &event.ObjectID, &event.ObjectType, &event.FingerprintID, &event.Verb, &createdAtStr)
+		log.Printf("DEBUG: Scanned action: hourKey=%s, objectID=%s, verb=%s (in requested hours: %v)",
+			event.HourKey, event.ObjectID, event.Verb, containsString(hourKeys, event.HourKey))
+		log.Printf("DEBUG: Row created_at=%s, hourKey=%s", createdAtStr, event.HourKey)
 		if err != nil {
 			log.Printf("ERROR: Failed to scan action row: %v", err)
 			continue
@@ -88,6 +97,7 @@ func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 
 		actionEvents = append(actionEvents, event)
 	}
+	log.Printf("DEBUG: Raw SQL query returned %d rows before filtering", len(actionEvents))
 
 	log.Printf("DEBUG: Processed %d action events", len(actionEvents))
 
