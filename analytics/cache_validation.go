@@ -10,23 +10,27 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
-// IsRangeFullyCached checks if all hours in the specified range are cached and valid
-func IsRangeFullyCached(ctx *tenant.Context, epinetID string, startHour, endHour int) bool {
-	cacheManager := cache.GetGlobalManager()
+type RangeCacheStatus struct {
+	Action             string // "proceed", "refresh_current", "load_range"
+	CurrentHourExpired bool
+	HistoricalComplete bool
+	MissingHours       []string
+}
 
-	// Get hour keys for the custom range
+func GetRangeCacheStatus(ctx *tenant.Context, epinetID string, startHour, endHour int) RangeCacheStatus {
+	cacheManager := cache.GetGlobalManager()
 	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
 
-	// Check each hour key
+	now := time.Now().UTC()
+	currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+	// log.Printf("DEBUG: Current hour key from utils.FormatHourKey: %s", currentHour)
+
+	var missingHours []string
+	currentHourExpired := false
+	historicalMissing := false
+
 	for _, hourKey := range hourKeys {
 		bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey)
-		if !exists {
-			return false
-		}
-
-		// Check TTL expiration using existing logic from LoadHourlyEpinetData
-		now := time.Now().UTC()
-		currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 
 		ttl := func() time.Duration {
 			if hourKey == currentHour {
@@ -35,12 +39,34 @@ func IsRangeFullyCached(ctx *tenant.Context, epinetID string, startHour, endHour
 			return config.AnalyticsBinTTL
 		}()
 
-		if bin.ComputedAt.Add(ttl).Before(time.Now().UTC()) {
-			return false // Expired
+		isExpired := exists && bin.ComputedAt.Add(ttl).Before(time.Now().UTC())
+
+		if !exists || isExpired {
+			missingHours = append(missingHours, hourKey)
+			if hourKey == currentHour {
+				currentHourExpired = true
+			} else {
+				historicalMissing = true
+			}
 		}
 	}
 
-	return true // All hours cached and valid
+	// Determine action
+	var action string
+	if len(missingHours) == 0 {
+		action = "proceed"
+	} else if currentHourExpired && !historicalMissing {
+		action = "refresh_current"
+	} else {
+		action = "load_range"
+	}
+
+	return RangeCacheStatus{
+		Action:             action,
+		CurrentHourExpired: currentHourExpired,
+		HistoricalComplete: !historicalMissing,
+		MissingHours:       missingHours,
+	}
 }
 
 // FindCacheGap returns missing hour keys from 0 to first cached hour

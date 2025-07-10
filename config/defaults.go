@@ -2,10 +2,61 @@
 package config
 
 import (
+	"bufio"
+	"log"
 	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 )
+
+var envLoaded sync.Once
+
+// loadEnvFile loads environment variables from .env file
+func loadEnvFile() {
+	envLoaded.Do(func() {
+		loadEnvFileOnce()
+	})
+}
+
+func loadEnvFileOnce() {
+	file, err := os.Open(".env")
+	if err != nil {
+		// .env file is optional, don't error if it doesn't exist
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Split on first = sign
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+
+		// Only set if not already set in environment
+		if os.Getenv(key) == "" {
+			os.Setenv(key, value)
+		}
+	}
+}
+
+func init() {
+	// Ensure .env is loaded before any config access
+	loadEnvFile()
+}
 
 // getEnvInt reads environment variable with fallback to default
 func getEnvInt(key string, defaultValue int) int {
@@ -83,3 +134,7 @@ var (
 	SSECleanupInterval    = time.Duration(getEnvInt("SSE_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 	DBPoolCleanupInterval = time.Duration(getEnvInt("DB_POOL_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 )
+
+func init() {
+	log.Printf("DEBUG: Config loaded CURRENT_HOUR_TTL_MINUTES env, CurrentHourTTL=%s", CurrentHourTTL)
+}
