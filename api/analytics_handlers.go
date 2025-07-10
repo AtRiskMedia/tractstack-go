@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// HandleDashboardAnalytics handles GET /api/v1/analytics/dashboard (exact V1 pattern)
+// HandleDashboardAnalytics handles GET /api/v1/analytics/dashboard
 func HandleDashboardAnalytics(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -18,16 +18,19 @@ func HandleDashboardAnalytics(c *gin.Context) {
 		return
 	}
 
-	// Load analytics data
-	err = analytics.LoadHourlyEpinetData(ctx, 672) // Load 28 days
+	// Parse time range parameters
+	startHour, endHour := parseTimeRange(c)
+
+	// Load analytics data for the requested range
+	err = analytics.LoadHourlyEpinetData(ctx, startHour)
 	if err != nil {
 		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
 		return
 	}
 
-	// Compute dashboard analytics
-	dashboard, err := analytics.ComputeDashboardAnalytics(ctx)
+	// Compute dashboard analytics for the custom range
+	dashboard, err := analytics.ComputeDashboardAnalytics(ctx, startHour, endHour)
 	if err != nil {
 		log.Printf("ERROR: ComputeDashboardAnalytics failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute dashboard analytics"})
@@ -165,7 +168,7 @@ func HandleStoryfragmentAnalytics(c *gin.Context) {
 	c.JSON(http.StatusOK, storyfragmentAnalytics)
 }
 
-// HandleLeadMetrics handles GET /api/v1/analytics/leads (exact V1 pattern)
+// HandleLeadMetrics handles GET /api/v1/analytics/leads
 func HandleLeadMetrics(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -173,16 +176,19 @@ func HandleLeadMetrics(c *gin.Context) {
 		return
 	}
 
-	// Load analytics data
-	err = analytics.LoadHourlyEpinetData(ctx, 672) // Load 28 days
+	// Parse time range parameters
+	startHour, endHour := parseTimeRange(c)
+
+	// Load analytics data for the requested range
+	err = analytics.LoadHourlyEpinetData(ctx, startHour)
 	if err != nil {
 		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
 		return
 	}
 
-	// Compute lead metrics
-	metrics, err := analytics.ComputeLeadMetrics(ctx)
+	// Compute lead metrics for the custom range
+	metrics, err := analytics.ComputeLeadMetrics(ctx, startHour, endHour)
 	if err != nil {
 		log.Printf("ERROR: ComputeLeadMetrics failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute lead metrics"})
@@ -190,4 +196,40 @@ func HandleLeadMetrics(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, metrics)
+}
+
+// parseTimeRange parses duration or startHour/endHour from query parameters
+func parseTimeRange(c *gin.Context) (startHour, endHour int) {
+	// Check for custom range first (priority)
+	startHourStr := c.Query("startHour")
+	endHourStr := c.Query("endHour")
+
+	if startHourStr != "" && endHourStr != "" {
+		var err error
+		startHour, err = strconv.Atoi(startHourStr)
+		if err != nil {
+			// Default to weekly if invalid
+			return 168, 0
+		}
+		endHour, err = strconv.Atoi(endHourStr)
+		if err != nil {
+			// Default to weekly if invalid
+			return 168, 0
+		}
+		return startHour, endHour
+	}
+
+	// Check for duration parameter
+	duration := c.DefaultQuery("duration", "weekly")
+
+	switch duration {
+	case "daily":
+		return 24, 0
+	case "weekly":
+		return 168, 0
+	case "monthly":
+		return 672, 0
+	default:
+		return 168, 0 // Default to weekly
+	}
 }
