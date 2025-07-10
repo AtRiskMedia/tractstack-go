@@ -8,10 +8,11 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
-// ComputeLeadMetrics computes lead metrics from hourly epinet data (exact V1 pattern)
-func ComputeLeadMetrics(ctx *tenant.Context) (*models.LeadMetrics, error) {
+// ComputeLeadMetrics computes lead metrics from hourly epinet data for custom range
+func ComputeLeadMetrics(ctx *tenant.Context, startHour, endHour int) (*models.LeadMetrics, error) {
 	// Get all epinets for the tenant
 	epinets, err := getEpinets(ctx)
 	if err != nil {
@@ -22,48 +23,29 @@ func ComputeLeadMetrics(ctx *tenant.Context) (*models.LeadMetrics, error) {
 		return createEmptyLeadMetrics(), nil
 	}
 
-	// Get known fingerprints for visitor classification (exact V1 pattern)
+	// Get known fingerprints for visitor classification
 	knownFingerprints, err := getKnownFingerprints(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get known fingerprints: %w", err)
 	}
 
-	// Get hour keys for different time periods (exact V1 pattern)
-	hours24 := getHourKeysForTimeRange(24)
-	hours7d := getHourKeysForTimeRange(168)  // 7 days
-	hours28d := getHourKeysForTimeRange(672) // 28 days
+	// Get hour keys for the custom time range
+	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
 
-	// Calculate metrics for each time period (exact V1 pattern)
-	metrics24h := aggregateHourlyVisitorMetrics(ctx, epinets, hours24, knownFingerprints)
-	metrics7d := aggregateHourlyVisitorMetrics(ctx, epinets, hours7d, knownFingerprints)
-	metrics28d := aggregateHourlyVisitorMetrics(ctx, epinets, hours28d, knownFingerprints)
+	// Calculate metrics for the custom time period
+	metrics := aggregateHourlyVisitorMetrics(ctx, epinets, hourKeys, knownFingerprints)
 
 	// Calculate all-time metrics
 	allHourKeys := getAllHourKeys(ctx, epinets)
 	totalMetrics := aggregateHourlyVisitorMetrics(ctx, epinets, allHourKeys, knownFingerprints)
 
-	// Calculate totals and percentages (exact V1 pattern)
-	total24h := len(metrics24h.AnonymousVisitors) + len(metrics24h.KnownVisitors)
-	total7d := len(metrics7d.AnonymousVisitors) + len(metrics7d.KnownVisitors)
-	total28d := len(metrics28d.AnonymousVisitors) + len(metrics28d.KnownVisitors)
+	// Calculate totals and percentages for the custom range
+	totalCustomRange := len(metrics.AnonymousVisitors) + len(metrics.KnownVisitors)
 
-	var firstTime24hPercentage, returning24hPercentage float64
-	var firstTime7dPercentage, returning7dPercentage float64
-	var firstTime28dPercentage, returning28dPercentage float64
-
-	if total24h > 0 {
-		firstTime24hPercentage = float64(len(metrics24h.AnonymousVisitors)) / float64(total24h) * 100
-		returning24hPercentage = float64(len(metrics24h.KnownVisitors)) / float64(total24h) * 100
-	}
-
-	if total7d > 0 {
-		firstTime7dPercentage = float64(len(metrics7d.AnonymousVisitors)) / float64(total7d) * 100
-		returning7dPercentage = float64(len(metrics7d.KnownVisitors)) / float64(total7d) * 100
-	}
-
-	if total28d > 0 {
-		firstTime28dPercentage = float64(len(metrics28d.AnonymousVisitors)) / float64(total28d) * 100
-		returning28dPercentage = float64(len(metrics28d.KnownVisitors)) / float64(total28d) * 100
+	var firstTimePercentage, returningPercentage float64
+	if totalCustomRange > 0 {
+		firstTimePercentage = float64(len(metrics.AnonymousVisitors)) / float64(totalCustomRange) * 100
+		returningPercentage = float64(len(metrics.KnownVisitors)) / float64(totalCustomRange) * 100
 	}
 
 	// Get last activity time
@@ -72,19 +54,19 @@ func ComputeLeadMetrics(ctx *tenant.Context) (*models.LeadMetrics, error) {
 	return &models.LeadMetrics{
 		TotalVisits:            totalMetrics.TotalVisitors,
 		LastActivity:           lastActivity,
-		FirstTime24h:           len(metrics24h.AnonymousVisitors),
-		Returning24h:           len(metrics24h.KnownVisitors),
-		FirstTime7d:            len(metrics7d.AnonymousVisitors),
-		Returning7d:            len(metrics7d.KnownVisitors),
-		FirstTime28d:           len(metrics28d.AnonymousVisitors),
-		Returning28d:           len(metrics28d.KnownVisitors),
-		FirstTime24hPercentage: firstTime24hPercentage,
-		Returning24hPercentage: returning24hPercentage,
-		FirstTime7dPercentage:  firstTime7dPercentage,
-		Returning7dPercentage:  returning7dPercentage,
-		FirstTime28dPercentage: firstTime28dPercentage,
-		Returning28dPercentage: returning28dPercentage,
-		TotalLeads:             len(knownFingerprints),
+		FirstTime24h:           len(metrics.AnonymousVisitors),
+		Returning24h:           len(metrics.KnownVisitors),
+		FirstTime7d:            len(metrics.AnonymousVisitors),
+		Returning7d:            len(metrics.KnownVisitors),
+		FirstTime28d:           len(metrics.AnonymousVisitors),
+		Returning28d:           len(metrics.KnownVisitors),
+		FirstTime24hPercentage: firstTimePercentage,
+		Returning24hPercentage: returningPercentage,
+		FirstTime7dPercentage:  firstTimePercentage,
+		Returning7dPercentage:  returningPercentage,
+		FirstTime28dPercentage: firstTimePercentage,
+		Returning28dPercentage: returningPercentage,
+		TotalLeads:             totalMetrics.TotalVisitors,
 	}, nil
 }
 

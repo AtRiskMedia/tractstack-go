@@ -4,7 +4,6 @@ package analytics
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -12,8 +11,8 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
-// ComputeDashboardAnalytics computes dashboard analytics from cached epinet data (exact V1 pattern)
-func ComputeDashboardAnalytics(ctx *tenant.Context) (*models.DashboardAnalytics, error) {
+// ComputeDashboardAnalytics computes dashboard analytics from cached epinet data for custom range
+func ComputeDashboardAnalytics(ctx *tenant.Context, startHour, endHour int) (*models.DashboardAnalytics, error) {
 	// Get all epinets for the tenant
 	epinets, err := getEpinets(ctx)
 	if err != nil {
@@ -24,23 +23,21 @@ func ComputeDashboardAnalytics(ctx *tenant.Context) (*models.DashboardAnalytics,
 		return createEmptyDashboardAnalytics(), nil
 	}
 
-	// Get hour keys for different time periods (exact V1 pattern)
-	hours24 := getHourKeysForTimeRange(24)
-	hours7d := getHourKeysForTimeRange(168)  // 7 days
-	hours28d := getHourKeysForTimeRange(672) // 28 days
+	// Get hour keys for the custom time range
+	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
 
-	// Calculate stats for different time periods (exact V1 pattern)
+	// Calculate stats for the custom time period
 	stats := models.TimeRangeStats{
-		Daily:   computeAllEvents(ctx, epinets, hours24),
-		Weekly:  computeAllEvents(ctx, epinets, hours7d),
-		Monthly: computeAllEvents(ctx, epinets, hours28d),
+		Daily:   computeAllEvents(ctx, epinets, hourKeys),
+		Weekly:  computeAllEvents(ctx, epinets, hourKeys),
+		Monthly: computeAllEvents(ctx, epinets, hourKeys),
 	}
 
-	// Generate timeline data (exact V1 pattern)
-	line := computeLineData(ctx, epinets, hours7d, "weekly")
+	// Generate timeline data for the custom range
+	line := computeLineData(ctx, epinets, hourKeys, "custom")
 
-	// Identify most active content (exact V1 pattern)
-	hotContent := computeHotContent(ctx, epinets, hours7d)
+	// Identify most active content for the custom range
+	hotContent := computeHotContent(ctx, epinets, hourKeys)
 
 	return &models.DashboardAnalytics{
 		Stats:      stats,
@@ -49,12 +46,12 @@ func ComputeDashboardAnalytics(ctx *tenant.Context) (*models.DashboardAnalytics,
 	}, nil
 }
 
-// computeAllEvents calculates total events for a given time period, using epinet data (exact V1 pattern)
+// computeAllEvents calculates total events for a custom time period, using epinet data
 func computeAllEvents(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []string) int {
 	total := 0
 	cacheManager := cache.GetGlobalManager()
 
-	// Iterate through all epinets (exact V1 pattern)
+	// Iterate through all epinets
 	for _, epinet := range epinets {
 		// For each requested hour
 		for _, hourKey := range hourKeys {
@@ -63,9 +60,8 @@ func computeAllEvents(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []st
 				continue
 			}
 
-			// Count events from all steps in this hour (exact V1 pattern)
+			// Count events from all steps in this hour
 			for _, stepData := range bin.Data.Steps {
-				// Each visitor counts as one event
 				total += len(stepData.Visitors)
 			}
 		}
@@ -74,25 +70,13 @@ func computeAllEvents(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []st
 	return total
 }
 
-// computeLineData generates line chart data for events over time (exact V1 pattern)
-func computeLineData(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []string, duration string) []models.LineDataSeries {
-	// Determine periods based on duration (exact V1 pattern)
-	periodsToDisplay := 24
-	if duration == "weekly" {
-		periodsToDisplay = 7
-	} else if duration == "monthly" {
-		periodsToDisplay = 28
-	}
-
-	// Find all event types by parsing node IDs across all epinets (exact V1 pattern)
-	eventTypes := make(map[string]bool)
-	eventCountsByPeriod := make(map[string][]models.LineDataPoint)
-
+// computeLineData creates timeline visualization data for custom time range
+func computeLineData(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []string, timeframe string) []models.LineDataSeries {
 	cacheManager := cache.GetGlobalManager()
-	now := time.Now()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
 
-	// First, collect all event types and initialize the data structure (exact V1 pattern)
+	// Aggregate data by hour across all epinets
+	hourlyTotals := make(map[string]int)
+
 	for _, epinet := range epinets {
 		for _, hourKey := range hourKeys {
 			bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
@@ -100,98 +84,48 @@ func computeLineData(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []str
 				continue
 			}
 
-			// Analyze step IDs to extract event types (verbs) (exact V1 pattern)
-			for stepID := range bin.Data.Steps {
-				eventType := extractEventTypeFromNodeID(stepID)
-				if eventType != "" {
-					eventTypes[eventType] = true
-				}
+			// Count events for this hour
+			hourTotal := 0
+			for _, stepData := range bin.Data.Steps {
+				hourTotal += len(stepData.Visitors)
 			}
+
+			hourlyTotals[hourKey] += hourTotal
 		}
 	}
 
-	// Initialize data structure for all event types (exact V1 pattern)
-	for eventType := range eventTypes {
-		eventCountsByPeriod[eventType] = make([]models.LineDataPoint, periodsToDisplay)
-		for i := 0; i < periodsToDisplay; i++ {
-			eventCountsByPeriod[eventType][i] = models.LineDataPoint{
-				X: i,
-				Y: 0,
-			}
-		}
-	}
-
-	// Now process hourly data to count events (exact V1 pattern)
-	for _, epinet := range epinets {
-		for _, hourKey := range hourKeys {
-			bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
-			if !exists {
-				continue
-			}
-
-			// Calculate the period index for this hour (exact V1 pattern)
-			hourTime, err := utils.ParseHourKeyToDate(hourKey)
-			if err != nil {
-				continue
-			}
-
-			var periodIndex int
-			if duration == "daily" {
-				hoursAgo := int(now.Sub(hourTime).Hours())
-				if hoursAgo >= 0 && hoursAgo < periodsToDisplay {
-					periodIndex = periodsToDisplay - 1 - hoursAgo
-				} else {
-					continue
-				}
-			} else {
-				// Days ago (0-6 or 0-27)
-				dateOnly := time.Date(hourTime.Year(), hourTime.Month(), hourTime.Day(), 0, 0, 0, 0, time.UTC)
-				daysAgo := int(todayStart.Sub(dateOnly).Hours() / 24)
-				if daysAgo >= 0 && daysAgo < periodsToDisplay {
-					periodIndex = periodsToDisplay - 1 - daysAgo
-				} else {
-					continue
-				}
-			}
-
-			// Process each step in this hour (exact V1 pattern)
-			for stepID, stepData := range bin.Data.Steps {
-				eventType := extractEventTypeFromNodeID(stepID)
-				if eventType != "" && eventCountsByPeriod[eventType] != nil {
-					// Add visitors to the event count for this period
-					eventCountsByPeriod[eventType][periodIndex].Y += len(stepData.Visitors)
-				}
-			}
-		}
-	}
-
-	// Format the result as LineDataSeries (exact V1 pattern)
-	var result []models.LineDataSeries
-	for eventType, data := range eventCountsByPeriod {
-		result = append(result, models.LineDataSeries{
-			ID:   eventType,
-			Data: data,
+	// Convert to line data format
+	var dataPoints []models.LineDataPoint
+	for _, hourKey := range hourKeys {
+		total := hourlyTotals[hourKey]
+		dataPoints = append(dataPoints, models.LineDataPoint{
+			X: hourKey,
+			Y: total,
 		})
 	}
 
-	return result
+	return []models.LineDataSeries{
+		{
+			ID:   "events",
+			Data: dataPoints,
+		},
+	}
 }
 
-// computeHotContent computes hot content by analyzing epinet steps and counting events per content ID (exact V1 pattern)
+// computeHotContent identifies the most active content for custom time range
 func computeHotContent(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []string) []models.HotItem {
-	contentCounts := make(map[string]int)
 	cacheManager := cache.GetGlobalManager()
+	contentCounts := make(map[string]int)
 
-	// Process each epinet (exact V1 pattern)
+	// Aggregate content activity across all epinets and hours
 	for _, epinet := range epinets {
-		// For each requested hour
 		for _, hourKey := range hourKeys {
 			bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
 			if !exists {
 				continue
 			}
 
-			// Process each step in this hour to extract content ID (exact V1 pattern)
+			// Count events by content ID
 			for stepID, stepData := range bin.Data.Steps {
 				contentID := extractContentIDFromNodeID(stepID)
 				if contentID != "" {
@@ -201,7 +135,7 @@ func computeHotContent(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []s
 		}
 	}
 
-	// Format and sort the result (exact V1 pattern)
+	// Format and sort the result
 	var sortedContent []models.HotItem
 	for id, totalEvents := range contentCounts {
 		sortedContent = append(sortedContent, models.HotItem{
@@ -210,7 +144,7 @@ func computeHotContent(ctx *tenant.Context, epinets []EpinetConfig, hourKeys []s
 		})
 	}
 
-	// Sort by total events descending (exact V1 pattern)
+	// Sort by total events descending
 	for i := 0; i < len(sortedContent)-1; i++ {
 		for j := i + 1; j < len(sortedContent); j++ {
 			if sortedContent[j].TotalEvents > sortedContent[i].TotalEvents {
