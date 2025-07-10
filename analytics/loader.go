@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
@@ -103,13 +104,12 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	for _, epinet := range epinets {
 		for _, hourKey := range hourKeys {
 			bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
-			log.Printf("DEBUG:   Epinet %s, Hour %s: exists=%v", epinet.ID, hourKey, exists)
 			// Process if current hour, cache missing, or TTL expired
 			ttl := func() time.Duration {
 				if hourKey == currentHour {
-					return 15 * time.Minute
+					return config.CurrentHourTTL
 				}
-				return 28 * 24 * time.Hour
+				return config.AnalyticsBinTTL
 			}()
 			if hourKey == currentHour || !exists || (exists && bin.ComputedAt.Add(ttl).Before(time.Now().UTC())) {
 				if missingEpinetHours[epinet.ID] == nil {
@@ -123,11 +123,6 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	if len(missingEpinetHours) == 0 {
 		log.Printf("DEBUG: All epinet-hour pairs cached and within TTL for tenant %s", ctx.TenantID)
 		return nil
-	}
-
-	// Log missing epinet-hour pairs
-	for epinetID, hours := range missingEpinetHours {
-		log.Printf("DEBUG: Epinet %s: Processing %d missing or expired hours: %v", epinetID, len(hours), hours)
 	}
 
 	// 4. Set up time period for queries
@@ -242,9 +237,9 @@ func processEpinetDataForTimeRange(ctx *tenant.Context, missingEpinetHours map[s
 						now := time.Now().UTC()
 						currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 						if hourKey == currentHourKey {
-							return 15 * time.Minute
+							return config.CurrentHourTTL
 						}
-						return 28 * 24 * time.Hour
+						return config.AnalyticsBinTTL
 					}(),
 				}
 				cacheManager.SetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey, bin)
@@ -335,9 +330,9 @@ func initializeEpinetDataStructure(ctx *tenant.Context, hourKeys []string, epine
 						now := time.Now().UTC()
 						currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 						if hourKey == currentHourKey {
-							return 15 * time.Minute
+							return config.CurrentHourTTL
 						}
-						return 28 * 24 * time.Hour
+						return config.AnalyticsBinTTL
 					}(),
 				}
 
