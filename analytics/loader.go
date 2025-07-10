@@ -34,18 +34,20 @@ type EpinetStep struct {
 }
 
 type ActionEvent struct {
-	ObjectID      string    `json:"objectId"`
-	ObjectType    string    `json:"objectType"`
-	Verb          string    `json:"verb"`
+	ObjectID      string `json:"objectId"`
+	ObjectType    string `json:"objectType"`
+	Verb          string `json:"verb"`
+	HourKey       string
 	FingerprintID string    `json:"fingerprintId"`
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
 type BeliefEvent struct {
-	BeliefID      string    `json:"beliefId"`
-	FingerprintID string    `json:"fingerprintId"`
-	Verb          string    `json:"verb"`
-	Object        *string   `json:"object"` // For identifyAs events
+	BeliefID      string  `json:"beliefId"`
+	FingerprintID string  `json:"fingerprintId"`
+	Verb          string  `json:"verb"`
+	Object        *string `json:"object"`
+	HourKey       string
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
@@ -268,7 +270,7 @@ func initializeEpinetDataStructure(ctx *tenant.Context, hourKeys []string, epine
 
 				bin := &models.HourlyEpinetBin{
 					Data:       emptyData,
-					ComputedAt: time.Now(),
+					ComputedAt: time.Now().UTC(),
 					TTL:        cache.GetTTLForHour(hourKey),
 				}
 
@@ -280,11 +282,6 @@ func initializeEpinetDataStructure(ctx *tenant.Context, hourKeys []string, epine
 	return nil
 }
 
-// =============================================================================
-// Database Query Functions (Exact V1 Translation)
-// =============================================================================
-
-// getEpinets retrieves all epinets for the tenant (exact V1 pattern)
 func getEpinets(ctx *tenant.Context) ([]EpinetConfig, error) {
 	query := `SELECT id, title, options_payload FROM epinets`
 
@@ -322,13 +319,11 @@ func getEpinets(ctx *tenant.Context) ([]EpinetConfig, error) {
 	return epinets, nil
 }
 
-// parseEpinetSteps parses epinet steps from JSON options payload (exact V1 pattern)
 func parseEpinetSteps(optionsPayload string) ([]EpinetStep, error) {
 	if optionsPayload == "" {
 		return []EpinetStep{}, nil
 	}
 
-	// Exact V1 parsing logic from epinetLoader.ts
 	var steps []EpinetStep
 
 	var options interface{}
@@ -358,7 +353,6 @@ func parseEpinetSteps(optionsPayload string) ([]EpinetStep, error) {
 	return steps, nil
 }
 
-// parseStepsArray parses an array of step objects (exact V1 pattern)
 func parseStepsArray(stepsArray []interface{}) ([]EpinetStep, error) {
 	var steps []EpinetStep
 
@@ -477,20 +471,16 @@ func getContentItems(ctx *tenant.Context) (map[string]ContentItem, error) {
 	return contentItems, nil
 }
 
-// =============================================================================
-// Time Helper Functions (Exact V1 Translation)
-// =============================================================================
-
-// getHourKeysForTimeRange generates hour keys for the specified range (exact V1 pattern)
 func getHourKeysForTimeRange(hours int) []string {
 	var hourKeys []string
-
 	now := time.Now().UTC()
-	currentHour := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC)
+	endHour := now.Truncate(time.Hour) // Current hour, inclusive
+	startHour := endHour.Add(-time.Duration(hours) * time.Hour)
 
-	for i := 0; i < hours; i++ {
-		hourTime := currentHour.Add(-time.Duration(i) * time.Hour)
-		hourKey := formatHourKey(hourTime)
+	log.Printf("DEBUG: Generating hourKeys from %s to %s", startHour.Format(time.RFC3339), endHour.Format(time.RFC3339))
+
+	for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
+		hourKey := formatHourKey(t)
 		hourKeys = append(hourKeys, hourKey)
 	}
 

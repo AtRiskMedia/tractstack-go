@@ -10,11 +10,11 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
 
-// processBeliefData processes all belief-related data in one consolidated query (exact V1 pattern)
+// processBeliefData processes all belief-related data in one consolidated query
 func processBeliefData(ctx *tenant.Context, hourKeys []string, epinets []EpinetConfig,
 	analysis *EpinetAnalysis, startTime, endTime time.Time, contentItems map[string]ContentItem,
 ) error {
-	// Prepare query parameters (exact V1 pattern)
+	// Prepare query parameters
 	var verbValues []string
 	for verb := range analysis.BeliefValues {
 		verbValues = append(verbValues, verb)
@@ -25,7 +25,7 @@ func processBeliefData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 		objectValues = append(objectValues, obj)
 	}
 
-	// Build the where clause for the query (exact V1 pattern)
+	// Build the where clause
 	var whereConditions []string
 	var params []interface{}
 	params = append(params, startTime, endTime)
@@ -56,20 +56,20 @@ func processBeliefData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 		return nil
 	}
 
-	// Execute a single efficient query for all beliefs (exact V1 pattern)
+	// Execute query
 	query := fmt.Sprintf(`
-		SELECT 
-			strftime('%%Y-%%m-%%d-%%H', updated_at, 'utc') as hour_key,
-			belief_id,
-			fingerprint_id,
-			verb,
-			object
-		FROM heldbeliefs
-		JOIN beliefs ON heldbeliefs.belief_id = beliefs.id
-		WHERE 
-			updated_at >= ? AND updated_at < ?
-			AND (%s)
-	`, strings.Join(whereConditions, " OR "))
+        SELECT
+            strftime('%%Y-%%m-%%d-%%H', updated_at, 'utc') as hour_key,
+            belief_id,
+            fingerprint_id,
+            verb,
+            object
+        FROM heldbeliefs
+        JOIN beliefs ON heldbeliefs.belief_id = beliefs.id
+        WHERE
+            updated_at >= ? AND updated_at < ?
+            AND (%s)
+    `, strings.Join(whereConditions, " OR "))
 
 	log.Printf("DEBUG: Executing belief query with %d parameters", len(params))
 
@@ -81,39 +81,32 @@ func processBeliefData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 
 	beliefEvents := make([]BeliefEvent, 0)
 	for rows.Next() {
-		var hourKey, beliefID, fingerprintID, verb string
-		var object *string
-
-		err := rows.Scan(&hourKey, &beliefID, &fingerprintID, &verb, &object)
+		var event BeliefEvent
+		err := rows.Scan(&event.HourKey, &event.BeliefID, &event.FingerprintID, &event.Verb, &event.Object)
 		if err != nil {
-			return fmt.Errorf("failed to scan belief row: %w", err)
-		}
-
-		// Only process hours we're interested in
-		if !containsString(hourKeys, hourKey) {
+			log.Printf("ERROR: Failed to scan belief row: %v", err)
 			continue
 		}
 
-		beliefEvents = append(beliefEvents, BeliefEvent{
-			BeliefID:      beliefID,
-			FingerprintID: fingerprintID,
-			Verb:          verb,
-			Object:        object,
-		})
+		if !containsString(hourKeys, event.HourKey) {
+			log.Printf("DEBUG: Skipping hourKey=%s, not in requested hourKeys", event.HourKey)
+			continue
+		}
+
+		log.Printf("DEBUG: Scanned belief event: hourKey=%s, beliefID=%s, fingerprintID=%s, verb=%s, object=%v",
+			event.HourKey, event.BeliefID, event.FingerprintID, event.Verb, event.Object)
+
+		beliefEvents = append(beliefEvents, event)
 	}
 
 	log.Printf("DEBUG: Processed %d belief events", len(beliefEvents))
 
-	// Process all rows and match against epinet steps (exact V1 pattern)
+	// Process all rows and match against epinet steps
 	for _, beliefEvent := range beliefEvents {
-		hourKey := formatHourKey(time.Now()) // This should be derived from the event timestamp
-
-		// Match this belief data against all epinets and their steps
 		for _, epinet := range epinets {
 			for stepIndex, step := range epinet.Steps {
 				matched := false
 				var matchedVerb string
-
 				if step.GateType == "belief" && containsString(step.Values, beliefEvent.Verb) {
 					matched = true
 					matchedVerb = beliefEvent.Verb
@@ -121,9 +114,8 @@ func processBeliefData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 					matched = true
 					matchedVerb = beliefEvent.Verb
 				}
-
 				if matched {
-					err = addNodeVisitor(ctx, epinet.ID, hourKey, step, beliefEvent.BeliefID,
+					err = addNodeVisitor(ctx, epinet.ID, beliefEvent.HourKey, step, beliefEvent.BeliefID,
 						beliefEvent.FingerprintID, stepIndex, contentItems, matchedVerb)
 					if err != nil {
 						log.Printf("WARNING: Failed to add node visitor: %v", err)
