@@ -3,10 +3,13 @@ package analytics
 
 import (
 	"fmt"
+	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
 
@@ -279,4 +282,216 @@ func getHourKeysForCustomRange(startHour, endHour int) []string {
 	}
 
 	return hourKeys
+}
+
+// ComputeStoryfragmentAnalytics computes analytics for all storyfragments from cached epinet data
+func ComputeStoryfragmentAnalytics(ctx *tenant.Context) ([]StoryfragmentAnalytics, error) {
+	// Get all epinets for the tenant (same pattern as dashboard analytics)
+	epinets, err := getEpinets(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get epinets: %w", err)
+	}
+
+	if len(epinets) == 0 {
+		return []StoryfragmentAnalytics{}, nil
+	}
+
+	// Get hour keys for different time periods
+	hours24 := getHourKeysForTimeRange(24)
+	hours7d := getHourKeysForTimeRange(168)  // 7 days
+	hours28d := getHourKeysForTimeRange(672) // 28 days
+
+	// Get known fingerprints for lead counting
+	knownFingerprints, err := getKnownFingerprints(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get known fingerprints: %w", err)
+	}
+
+	cacheManager := cache.GetGlobalManager()
+
+	// Map to accumulate data by storyfragment ID
+	storyfragmentData := make(map[string]*StoryfragmentAnalytics)
+
+	// Process each epinet and each hour key (same pattern as dashboard analytics)
+	for _, epinet := range epinets {
+		// Combine all hour keys for processing
+		allHourKeys := make(map[string]bool)
+		for _, hourKey := range hours24 {
+			allHourKeys[hourKey] = true
+		}
+		for _, hourKey := range hours7d {
+			allHourKeys[hourKey] = true
+		}
+		for _, hourKey := range hours28d {
+			allHourKeys[hourKey] = true
+		}
+
+		// Process each hour
+		for hourKey := range allHourKeys {
+			bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
+			if !exists || bin == nil || bin.Data == nil {
+				continue
+			}
+
+			// Determine which time periods this hour belongs to
+			isIn24h := containsString(hours24, hourKey)
+			isIn7d := containsString(hours7d, hourKey)
+			isIn28d := containsString(hours28d, hourKey)
+
+			// Process each step in this hour to extract storyfragment data
+			for stepID, stepData := range bin.Data.Steps {
+				if stepData == nil {
+					continue
+				}
+
+				// Parse step ID to extract storyfragment information
+				// Expected format: "commitmentAction-StoryFragment-VERB-storyfragmentID"
+				stepParts := strings.Split(stepID, "-")
+				if len(stepParts) < 4 {
+					continue
+				}
+
+				// Only process StoryFragment events
+				if stepParts[1] != "StoryFragment" {
+					continue
+				}
+
+				storyfragmentID := stepParts[len(stepParts)-1]
+
+				// Initialize storyfragment data if needed
+				if _, exists := storyfragmentData[storyfragmentID]; !exists {
+					storyfragmentData[storyfragmentID] = &StoryfragmentAnalytics{
+						ID:                    storyfragmentID,
+						TotalActions:          0,
+						UniqueVisitors:        0,
+						Last24hActions:        0,
+						Last7dActions:         0,
+						Last28dActions:        0,
+						Last24hUniqueVisitors: 0,
+						Last7dUniqueVisitors:  0,
+						Last28dUniqueVisitors: 0,
+						TotalLeads:            len(knownFingerprints),
+					}
+				}
+
+				data := storyfragmentData[storyfragmentID]
+				visitorCount := len(stepData.Visitors)
+
+				// Update total actions and visitors
+				data.TotalActions += visitorCount
+
+				// Update time-specific metrics
+				if isIn24h {
+					data.Last24hActions += visitorCount
+				}
+				if isIn7d {
+					data.Last7dActions += visitorCount
+				}
+				if isIn28d {
+					data.Last28dActions += visitorCount
+				}
+			}
+		}
+	}
+
+	// Calculate unique visitors for each time period (second pass)
+	for storyfragmentID, data := range storyfragmentData {
+		uniqueVisitors := make(map[string]bool)
+		visitors24h := make(map[string]bool)
+		visitors7d := make(map[string]bool)
+		visitors28d := make(map[string]bool)
+
+		// Process all epinets and hours again to count unique visitors
+		for _, epinet := range epinets {
+			allHourKeys := make(map[string]bool)
+			for _, hourKey := range hours24 {
+				allHourKeys[hourKey] = true
+			}
+			for _, hourKey := range hours7d {
+				allHourKeys[hourKey] = true
+			}
+			for _, hourKey := range hours28d {
+				allHourKeys[hourKey] = true
+			}
+
+			for hourKey := range allHourKeys {
+				bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
+				if !exists || bin == nil || bin.Data == nil {
+					continue
+				}
+
+				isIn24h := containsString(hours24, hourKey)
+				isIn7d := containsString(hours7d, hourKey)
+				isIn28d := containsString(hours28d, hourKey)
+
+				// Check each step for this storyfragment
+				for stepID, stepData := range bin.Data.Steps {
+					stepParts := strings.Split(stepID, "-")
+					if len(stepParts) < 4 || stepParts[1] != "StoryFragment" {
+						continue
+					}
+
+					if stepParts[len(stepParts)-1] == storyfragmentID {
+						// Add visitors to appropriate sets
+						for visitor := range stepData.Visitors {
+							uniqueVisitors[visitor] = true
+							if isIn24h {
+								visitors24h[visitor] = true
+							}
+							if isIn7d {
+								visitors7d[visitor] = true
+							}
+							if isIn28d {
+								visitors28d[visitor] = true
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Update visitor counts
+		data.UniqueVisitors = len(uniqueVisitors)
+		data.Last24hUniqueVisitors = len(visitors24h)
+		data.Last7dUniqueVisitors = len(visitors7d)
+		data.Last28dUniqueVisitors = len(visitors28d)
+	}
+
+	// Get storyfragment metadata (titles and slugs)
+	storyFragmentService := content.NewStoryFragmentService(ctx, cacheManager)
+	storyfragmentIDs := make([]string, 0, len(storyfragmentData))
+	for id := range storyfragmentData {
+		storyfragmentIDs = append(storyfragmentIDs, id)
+	}
+
+	if len(storyfragmentIDs) > 0 {
+		storyfragments, err := storyFragmentService.GetByIDs(storyfragmentIDs)
+		if err != nil {
+			log.Printf("Warning: failed to get storyfragment metadata: %v", err)
+		} else {
+			// Update slugs from metadata
+			for _, sf := range storyfragments {
+				if data, exists := storyfragmentData[sf.ID]; exists {
+					data.Slug = sf.Slug
+				}
+			}
+		}
+	}
+
+	// Convert map to slice and sort by total actions
+	result := make([]StoryfragmentAnalytics, 0, len(storyfragmentData))
+	for _, data := range storyfragmentData {
+		result = append(result, *data)
+	}
+
+	// Sort by total actions descending
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[j].TotalActions > result[i].TotalActions {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+
+	return result, nil
 }
