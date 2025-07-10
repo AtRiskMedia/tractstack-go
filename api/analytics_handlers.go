@@ -37,10 +37,11 @@ func HandleDashboardAnalytics(c *gin.Context) {
 	c.JSON(http.StatusOK, dashboard)
 }
 
-// HandleEpinetSankey handles GET /api/v1/analytics/epinet/:id (exact V1 pattern)
+// HandleEpinetSankey handles GET /api/v1/analytics/epinet/:id
 func HandleEpinetSankey(c *gin.Context) {
 	log.Printf("DEBUG: Starting HandleEpinetSankey")
 
+	// Get tenant context
 	ctx, err := getTenantContext(c)
 	if err != nil {
 		log.Printf("ERROR: getTenantContext failed: %v", err)
@@ -49,12 +50,50 @@ func HandleEpinetSankey(c *gin.Context) {
 	}
 	log.Printf("DEBUG: Got tenant context: %s", ctx.TenantID)
 
+	// Get epinet ID
 	epinetID := c.Param("id")
+	if epinetID == "" {
+		log.Printf("ERROR: Epinet ID is empty")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "epinet ID is required"})
+		return
+	}
 	log.Printf("DEBUG: Epinet ID: %s", epinetID)
 
+	// Parse query parameters
+	visitorType := c.DefaultQuery("visitorType", "all")
+	var selectedUserID *string
+	if userID := c.Query("selectedUserId"); userID != "" {
+		selectedUserID = &userID
+	}
+
+	// Parse startHour and endHour
+	var startHour, endHour *int
+	hoursBack := 168 // Default to 168 hours (7 days)
+	startHourStr := c.Query("startHour")
+	endHourStr := c.Query("endHour")
+
+	if startHourStr != "" && endHourStr != "" {
+		start, err := strconv.Atoi(startHourStr)
+		if err == nil && start > 0 {
+			end, err := strconv.Atoi(endHourStr)
+			if err == nil && end >= 0 && start > end {
+				startHour = &start
+				endHour = &end
+				hoursBack = start - end
+				log.Printf("DEBUG: Parsed startHour=%d, endHour=%d, hoursBack=%d", start, end, hoursBack)
+			} else {
+				log.Printf("DEBUG: Invalid endHour '%s' or startHour (%d) <= endHour (%d), defaulting to hoursBack=168", endHourStr, start, end)
+			}
+		} else {
+			log.Printf("DEBUG: Invalid startHour '%s', defaulting to hoursBack=168", startHourStr)
+		}
+	} else {
+		log.Printf("DEBUG: startHour or endHour missing, defaulting to hoursBack=168")
+	}
+
 	// Load analytics data
-	log.Printf("DEBUG: About to call LoadHourlyEpinetData")
-	err = analytics.LoadHourlyEpinetData(ctx, 168) // Load 7 days
+	log.Printf("DEBUG: About to call LoadHourlyEpinetData with hoursBack=%d", hoursBack)
+	err = analytics.LoadHourlyEpinetData(ctx, hoursBack)
 	if err != nil {
 		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
@@ -62,27 +101,7 @@ func HandleEpinetSankey(c *gin.Context) {
 	}
 	log.Printf("DEBUG: LoadHourlyEpinetData completed successfully")
 
-	// Parse query parameters (exact V1 pattern)
-	visitorType := c.DefaultQuery("visitorType", "all")
-
-	var selectedUserID *string
-	if userID := c.Query("selectedUserId"); userID != "" {
-		selectedUserID = &userID
-	}
-
-	var startHour, endHour *int
-	if startHourStr := c.Query("startHour"); startHourStr != "" {
-		if start, err := strconv.Atoi(startHourStr); err == nil {
-			startHour = &start
-		}
-	}
-	if endHourStr := c.Query("endHour"); endHourStr != "" {
-		if end, err := strconv.Atoi(endHourStr); err == nil {
-			endHour = &end
-		}
-	}
-
-	// Create filters (exact V1 pattern)
+	// Create filters
 	filters := &analytics.SankeyFilters{
 		VisitorType:    visitorType,
 		SelectedUserID: selectedUserID,
@@ -91,7 +110,8 @@ func HandleEpinetSankey(c *gin.Context) {
 	}
 
 	// Compute sankey diagram
-	sankey, err := analytics.ComputeEpinetSankey(ctx, epinetID, 168, filters)
+	log.Printf("DEBUG: About to call ComputeEpinetSankey with hoursBack=%d", hoursBack)
+	sankey, err := analytics.ComputeEpinetSankey(ctx, epinetID, hoursBack, filters)
 	if err != nil {
 		log.Printf("ERROR: ComputeEpinetSankey failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute epinet sankey"})

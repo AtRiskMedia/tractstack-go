@@ -3,6 +3,7 @@ package analytics
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -11,48 +12,34 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
 
-// addNodeVisitor adds a visitor to a specific step node (exact V1 pattern)
-func addNodeVisitor(ctx *tenant.Context, epinetID, hourKey string, step EpinetStep,
-	contentID, fingerprintID string, stepIndex int, contentItems map[string]ContentItem, matchedVerb string,
-) error {
-	// Create a unique node ID for this step/content combination (exact V1 pattern)
+func addNodeVisitor(ctx *tenant.Context, epinetID, hourKey string, step EpinetStep, contentID, fingerprintID string, stepIndex int, contentItems map[string]ContentItem, matchedVerb string) error {
 	nodeID := getStepNodeID(step, contentID, matchedVerb)
-
-	// Create a human-readable name for this node (exact V1 pattern)
 	nodeName := getNodeName(step, contentID, contentItems, matchedVerb)
-
-	// Get or create the epinet bin
 	cacheManager := cache.GetGlobalManager()
 	bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey)
 	if !exists {
-		// Create new bin
 		emptyData := &models.HourlyEpinetData{
 			Steps:       make(map[string]*models.HourlyEpinetStepData),
 			Transitions: make(map[string]map[string]*models.HourlyEpinetTransitionData),
 		}
-
 		bin = &models.HourlyEpinetBin{
 			Data:       emptyData,
-			ComputedAt: time.Now(),
+			ComputedAt: time.Now().UTC(),
 			TTL:        cache.GetTTLForHour(hourKey),
 		}
+		log.Printf("DEBUG: Creating new bin for %s:%s", epinetID, hourKey)
 	}
-
-	// Initialize the node if needed
 	if bin.Data.Steps[nodeID] == nil {
 		bin.Data.Steps[nodeID] = &models.HourlyEpinetStepData{
 			Visitors:  make(map[string]bool),
 			Name:      nodeName,
-			StepIndex: stepIndex + 1, // 1-based index
+			StepIndex: stepIndex + 1,
 		}
 	}
-
-	// Record this visitor
 	bin.Data.Steps[nodeID].Visitors[fingerprintID] = true
-
-	// Save back to cache
+	// log.Printf("DEBUG: addNodeVisitor called - epinetID=%s, hourKey=%s, contentID=%s, fingerprintID=%s, nodeID=%s, verb=%s, total visitors now: %d",
+	//	epinetID, hourKey, contentID, fingerprintID, nodeID, matchedVerb, len(bin.Data.Steps[nodeID].Visitors))
 	cacheManager.SetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey, bin)
-
 	return nil
 }
 
