@@ -209,6 +209,7 @@ func main() {
 		// analytics endpoints
 		analytics := v1.Group("/analytics")
 		{
+			analytics.GET("/storyfragments", api.HandleStoryfragmentAnalytics)
 			analytics.GET("/dashboard", api.HandleDashboardAnalytics)
 			analytics.GET("/epinet/:id", api.HandleEpinetSankey)
 			analytics.GET("/leads", api.HandleLeadMetrics)

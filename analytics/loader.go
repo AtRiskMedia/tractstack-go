@@ -64,6 +64,20 @@ type EpinetAnalysis struct {
 	ObjectIDs        map[string]bool
 }
 
+type StoryfragmentAnalytics struct {
+	ID                    string `json:"id"`
+	Slug                  string `json:"slug"`
+	TotalActions          int    `json:"total_actions"`
+	UniqueVisitors        int    `json:"unique_visitors"`
+	Last24hActions        int    `json:"last_24h_actions"`
+	Last7dActions         int    `json:"last_7d_actions"`
+	Last28dActions        int    `json:"last_28d_actions"`
+	Last24hUniqueVisitors int    `json:"last_24h_unique_visitors"`
+	Last7dUniqueVisitors  int    `json:"last_7d_unique_visitors"`
+	Last28dUniqueVisitors int    `json:"last_28d_unique_visitors"`
+	TotalLeads            int    `json:"total_leads"`
+}
+
 // =============================================================================
 // Core Analytics Engine (Exact V1 Pattern Translation)
 // =============================================================================

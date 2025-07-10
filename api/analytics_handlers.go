@@ -138,6 +138,33 @@ func HandleEpinetSankey(c *gin.Context) {
 	c.JSON(http.StatusOK, sankey)
 }
 
+// HandleStoryfragmentAnalytics handles GET /api/v1/analytics/storyfragments
+func HandleStoryfragmentAnalytics(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	// Load analytics data
+	err = analytics.LoadHourlyEpinetData(ctx, 672) // Load 28 days
+	if err != nil {
+		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
+		return
+	}
+
+	// Compute storyfragment analytics
+	storyfragmentAnalytics, err := analytics.ComputeStoryfragmentAnalytics(ctx)
+	if err != nil {
+		log.Printf("ERROR: ComputeStoryfragmentAnalytics failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute storyfragment analytics"})
+		return
+	}
+
+	c.JSON(http.StatusOK, storyfragmentAnalytics)
+}
+
 // HandleLeadMetrics handles GET /api/v1/analytics/leads (exact V1 pattern)
 func HandleLeadMetrics(c *gin.Context) {
 	ctx, err := getTenantContext(c)
