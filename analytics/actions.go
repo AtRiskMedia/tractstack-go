@@ -80,9 +80,7 @@ func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 		var createdAtStr string
 		var event ActionEvent
 		err := rows.Scan(&event.HourKey, &event.ObjectID, &event.ObjectType, &event.FingerprintID, &event.Verb, &createdAtStr)
-		log.Printf("DEBUG: Scanned action: hourKey=%s, objectID=%s, verb=%s (in requested hours: %v)",
-			event.HourKey, event.ObjectID, event.Verb, containsString(hourKeys, event.HourKey))
-		log.Printf("DEBUG: Row created_at=%s, hourKey=%s", createdAtStr, event.HourKey)
+		// log.Printf("DEBUG: Row created_at=%s, hourKey=%s", createdAtStr, event.HourKey)
 		if err != nil {
 			log.Printf("ERROR: Failed to scan action row: %v", err)
 			continue

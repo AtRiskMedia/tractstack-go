@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 )
@@ -28,9 +29,9 @@ func addNodeVisitor(ctx *tenant.Context, epinetID, hourKey string, step EpinetSt
 				now := time.Now().UTC()
 				currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 				if hourKey == currentHourKey {
-					return 15 * time.Minute
+					return config.CurrentHourTTL
 				}
-				return 28 * 24 * time.Hour
+				return config.AnalyticsBinTTL
 			}(),
 		}
 	}

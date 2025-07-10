@@ -68,7 +68,6 @@ func HandleEpinetSankey(c *gin.Context) {
 
 	// Parse startHour and endHour
 	var startHour, endHour *int
-	hoursBack := 168 // Default to 168 hours (7 days)
 	startHourStr := c.Query("startHour")
 	endHourStr := c.Query("endHour")
 
@@ -79,27 +78,60 @@ func HandleEpinetSankey(c *gin.Context) {
 			if err == nil && end >= 0 && start > end {
 				startHour = &start
 				endHour = &end
-				hoursBack = start - end
-				log.Printf("DEBUG: Parsed startHour=%d, endHour=%d, hoursBack=%d", start, end, hoursBack)
+				log.Printf("DEBUG: Parsed startHour=%d, endHour=%d", start, end)
 			} else {
-				log.Printf("DEBUG: Invalid endHour '%s' or startHour (%d) <= endHour (%d), defaulting to hoursBack=168", endHourStr, start, end)
+				log.Printf("DEBUG: Invalid endHour '%s' or startHour (%d) <= endHour (%d)", endHourStr, start, end)
 			}
 		} else {
-			log.Printf("DEBUG: Invalid startHour '%s', defaulting to hoursBack=168", startHourStr)
+			log.Printf("DEBUG: Invalid startHour '%s'", startHourStr)
 		}
 	} else {
-		log.Printf("DEBUG: startHour or endHour missing, defaulting to hoursBack=168")
+		log.Printf("DEBUG: startHour or endHour missing")
 	}
 
-	// Load analytics data
-	log.Printf("DEBUG: About to call LoadHourlyEpinetData with hoursBack=%d", hoursBack)
-	err = analytics.LoadHourlyEpinetData(ctx, hoursBack)
-	if err != nil {
-		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
-		return
+	// Check if range is fully cached
+	if startHour != nil && endHour != nil {
+		if analytics.IsRangeFullyCached(ctx, epinetID, *startHour, *endHour) {
+			log.Printf("DEBUG: Range fully cached, proceeding with computation")
+		} else {
+			log.Printf("DEBUG: Range not fully cached, returning loading status and starting background warming")
+
+			// Start background warming for gaps
+			go func() {
+				err := analytics.LoadHourlyEpinetData(ctx, 672)
+				if err != nil {
+					log.Printf("ERROR: Background LoadHourlyEpinetData failed: %v", err)
+				} else {
+					log.Printf("DEBUG: Background warming completed")
+				}
+			}()
+
+			// Return loading status
+			c.JSON(http.StatusOK, gin.H{"status": "loading"})
+			return
+		}
+	} else {
+		// No specific range provided, check if bulk cache is initialized
+		if analytics.IsBulkCacheInitialized(ctx, epinetID) {
+			log.Printf("DEBUG: Bulk cache initialized, proceeding with computation")
+		} else {
+			log.Printf("DEBUG: Bulk cache not initialized, returning loading status and starting background warming")
+
+			// Start background warming
+			go func() {
+				err := analytics.LoadHourlyEpinetData(ctx, 672)
+				if err != nil {
+					log.Printf("ERROR: Background LoadHourlyEpinetData failed: %v", err)
+				} else {
+					log.Printf("DEBUG: Background warming completed")
+				}
+			}()
+
+			// Return loading status
+			c.JSON(http.StatusOK, gin.H{"status": "loading"})
+			return
+		}
 	}
-	log.Printf("DEBUG: LoadHourlyEpinetData completed successfully")
 
 	// Create filters
 	filters := &analytics.SankeyFilters{
@@ -110,8 +142,8 @@ func HandleEpinetSankey(c *gin.Context) {
 	}
 
 	// Compute sankey diagram
-	log.Printf("DEBUG: About to call ComputeEpinetSankey with hoursBack=%d", hoursBack)
-	sankey, err := analytics.ComputeEpinetSankey(ctx, epinetID, hoursBack, filters)
+	log.Printf("DEBUG: About to call ComputeEpinetSankey")
+	sankey, err := analytics.ComputeEpinetSankey(ctx, epinetID, filters)
 	if err != nil {
 		log.Printf("ERROR: ComputeEpinetSankey failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute epinet sankey"})

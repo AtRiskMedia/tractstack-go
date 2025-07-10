@@ -46,13 +46,13 @@ const maxNodes = 60
 // =============================================================================
 
 // ComputeEpinetSankey generates a Sankey diagram from cached epinet data (exact V1 pattern)
-func ComputeEpinetSankey(ctx *tenant.Context, epinetID string, hours int, filters *SankeyFilters) (*SankeyDiagram, error) {
+func ComputeEpinetSankey(ctx *tenant.Context, epinetID string, filters *SankeyFilters) (*SankeyDiagram, error) {
 	// Get hour keys for the time range (exact V1 pattern)
 	var hourKeys []string
 	if filters != nil && filters.StartHour != nil && filters.EndHour != nil {
 		hourKeys = getHourKeysForCustomRange(*filters.StartHour, *filters.EndHour)
 	} else {
-		hourKeys = getHourKeysForTimeRange(hours)
+		hourKeys = getHourKeysForTimeRange(168)
 	}
 
 	// Get known fingerprints for visitor filtering (exact V1 pattern)
