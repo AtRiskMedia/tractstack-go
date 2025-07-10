@@ -99,6 +99,7 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	missingEpinetHours := make(map[string][]string) // epinetID -> []hourKey
 	now := time.Now().UTC()
 	currentHour := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+	// log.Printf("DEBUG: Current hour key from formatHourKey: %s", currentHour)
 
 	// Check cache for each epinet and hour
 	for _, epinet := range epinets {
@@ -121,7 +122,7 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	}
 
 	if len(missingEpinetHours) == 0 {
-		log.Printf("DEBUG: All epinet-hour pairs cached and within TTL for tenant %s", ctx.TenantID)
+		// log.Printf("DEBUG: All epinet-hour pairs cached and within TTL for tenant %s", ctx.TenantID)
 		return nil
 	}
 
@@ -551,4 +552,10 @@ func getHourKeysForTimeRange(hours int) []string {
 // formatHourKey formats a time as an hour key (exact V1 pattern)
 func formatHourKey(t time.Time) string {
 	return fmt.Sprintf("%d-%02d-%02d-%02d", t.Year(), t.Month(), t.Day(), t.Hour())
+}
+
+func LoadCurrentHourData(ctx *tenant.Context) error {
+	// log.Printf("DEBUG: LoadCurrentHourData started for tenant %s", ctx.TenantID)
+	// Use existing LoadHourlyEpinetData but only for current hour (1 hour back)
+	return LoadHourlyEpinetData(ctx, 1)
 }

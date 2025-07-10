@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
@@ -34,8 +35,18 @@ func (m *Manager) GetHourlyEpinetBin(tenantID, epinetID, hourKey string) (*model
 		return nil, false
 	}
 
-	// Check if bin has expired
-	if IsAnalyticsBinExpired(bin) {
+	// Check if bin has expired using dynamic TTL calculation
+	now := time.Now().UTC()
+	currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+
+	ttl := func() time.Duration {
+		if hourKey == currentHour {
+			return config.CurrentHourTTL
+		}
+		return config.AnalyticsBinTTL
+	}()
+
+	if bin.ComputedAt.Add(ttl).Before(time.Now().UTC()) {
 		return nil, false
 	}
 
