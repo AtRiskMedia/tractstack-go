@@ -6,13 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // =============================================================================
@@ -68,12 +67,10 @@ type EpinetAnalysis struct {
 // Core Analytics Engine (Exact V1 Pattern Translation)
 // =============================================================================
 
-// LoadHourlyEpinetData is the primary entry point for analytics data loading
-// Translates V1 loadHourlyEpinetData function exactly
 func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	log.Printf("DEBUG: LoadHourlyEpinetData started for tenant %s, hoursBack %d", ctx.TenantID, hoursBack)
 
-	// 1. Get all epinets for tenant (exact V1 pattern)
+	// 1. Get all epinets for tenant
 	epinets, err := getEpinets(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get epinets: %w", err)
@@ -84,87 +81,95 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 		return nil
 	}
 
-	log.Printf("DEBUG: Found %d epinets for tenant %s", len(epinets), ctx.TenantID)
-
-	// 2. Get content items for node naming (exact V1 pattern)
+	// 2. Get content items for node naming
 	contentItems, err := getContentItems(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get content items: %w", err)
 	}
 
-	// 3. Generate hour keys for the time range (exact V1 pattern)
+	// 3. Generate hour keys for the time range
 	hourKeys := getHourKeysForTimeRange(hoursBack)
 	if len(hourKeys) == 0 {
 		return nil
 	}
 
-	// NEW: Check cache first to determine what needs processing
 	cacheManager := cache.GetGlobalManager()
-	allCached := true
-	missingHours := make(map[string]bool)
+	// Track missing or expired epinet-hour pairs
+	missingEpinetHours := make(map[string][]string) // epinetID -> []hourKey
+	now := time.Now().UTC()
+	currentHour := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 
+	// Check cache for each epinet and hour
 	for _, epinet := range epinets {
 		for _, hourKey := range hourKeys {
-			_, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
-			if !exists {
-				allCached = false
-				missingHours[hourKey] = true
+			bin, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey)
+			log.Printf("DEBUG:   Epinet %s, Hour %s: exists=%v", epinet.ID, hourKey, exists)
+			// Process if current hour, cache missing, or TTL expired
+			ttl := func() time.Duration {
+				if hourKey == currentHour {
+					return 15 * time.Minute
+				}
+				return 28 * 24 * time.Hour
+			}()
+			if hourKey == currentHour || !exists || (exists && bin.ComputedAt.Add(ttl).Before(time.Now().UTC())) {
+				if missingEpinetHours[epinet.ID] == nil {
+					missingEpinetHours[epinet.ID] = []string{}
+				}
+				missingEpinetHours[epinet.ID] = append(missingEpinetHours[epinet.ID], hourKey)
 			}
 		}
 	}
 
-	if allCached {
-		log.Printf("DEBUG: All hours cached, skipping database processing for tenant %s", ctx.TenantID)
+	if len(missingEpinetHours) == 0 {
+		log.Printf("DEBUG: All epinet-hour pairs cached and within TTL for tenant %s", ctx.TenantID)
 		return nil
 	}
 
-	// Convert missing hours back to slice for existing logic
-	hourKeysToProcess := make([]string, 0, len(missingHours))
-	for hourKey := range missingHours {
-		hourKeysToProcess = append(hourKeysToProcess, hourKey)
+	// Log missing epinet-hour pairs
+	for epinetID, hours := range missingEpinetHours {
+		log.Printf("DEBUG: Epinet %s: Processing %d missing or expired hours: %v", epinetID, len(hours), hours)
 	}
 
-	log.Printf("DEBUG: Processing %d missing hours out of %d total for tenant %s", len(hourKeysToProcess), len(hourKeys), ctx.TenantID)
+	// 4. Set up time period for queries
+	// Find the overall time range for missing hours
+	var firstHourKey, lastHourKey string
+	for _, hours := range missingEpinetHours {
+		for _, hourKey := range hours {
+			if firstHourKey == "" || hourKey < firstHourKey {
+				firstHourKey = hourKey
+			}
+			if lastHourKey == "" || hourKey > lastHourKey {
+				lastHourKey = hourKey
+			}
+		}
+	}
 
-	// 4. Set up time period for queries (exact V1 pattern) - but only for missing hours
-	if len(hourKeysToProcess) == 0 {
+	if firstHourKey == "" || lastHourKey == "" {
 		return nil
 	}
 
-	firstHourKey := hourKeysToProcess[len(hourKeysToProcess)-1]
-	lastHourKey := hourKeysToProcess[0]
-	for _, key := range hourKeysToProcess {
-		if key < firstHourKey {
-			firstHourKey = key
-		}
-		if key > lastHourKey {
-			lastHourKey = key
-		}
-	}
-
-	startTime, err := parseHourKeyToDate(firstHourKey)
+	startTime, err := utils.ParseHourKeyToDate(firstHourKey)
 	if err != nil {
 		return fmt.Errorf("failed to parse start hour key: %w", err)
 	}
 
-	endTime, err := parseHourKeyToDate(lastHourKey)
+	endTime, err := utils.ParseHourKeyToDate(lastHourKey)
 	if err != nil {
 		return fmt.Errorf("failed to parse end hour key: %w", err)
 	}
-	endTime = endTime.Add(time.Hour) // Add one hour to make it exclusive
+	endTime = endTime.Add(time.Hour) // Make end time exclusive
 
 	log.Printf("DEBUG: Processing time range %s to %s", startTime.Format(time.RFC3339), endTime.Format(time.RFC3339))
 
-	// 5. Pre-analyze all epinets to determine what data we need (exact V1 pattern)
+	// 5. Pre-analyze all epinets to determine what data we need
 	epinetAnalysis := analyzeEpinets(epinets)
 
-	// 6. Process epinet data for time range (exact V1 pattern) - but only for missing hours
-	err = processEpinetDataForTimeRange(ctx, hourKeysToProcess, epinets, epinetAnalysis, startTime, endTime, contentItems)
+	// 6. Process epinet data for missing epinet-hour pairs
+	err = processEpinetDataForTimeRange(ctx, missingEpinetHours, epinets, epinetAnalysis, startTime, endTime, contentItems)
 	if err != nil {
 		return fmt.Errorf("failed to process epinet data: %w", err)
 	}
 
-	log.Printf("DEBUG: LoadHourlyEpinetData completed successfully for tenant %s", ctx.TenantID)
 	return nil
 }
 
@@ -214,38 +219,93 @@ func analyzeEpinets(epinets []EpinetConfig) *EpinetAnalysis {
 	return analysis
 }
 
-// processEpinetDataForTimeRange processes data for the specified time range (exact V1 pattern)
-func processEpinetDataForTimeRange(ctx *tenant.Context, hourKeys []string, epinets []EpinetConfig,
+// loader.go
+func processEpinetDataForTimeRange(ctx *tenant.Context, missingEpinetHours map[string][]string, epinets []EpinetConfig,
 	analysis *EpinetAnalysis, startTime, endTime time.Time, contentItems map[string]ContentItem,
 ) error {
-	// Initialize empty data structure for all hours and epinets (exact V1 pattern)
-	err := initializeEpinetDataStructure(ctx, hourKeys, epinets)
-	if err != nil {
-		return fmt.Errorf("failed to initialize data structure: %w", err)
-	}
+	cacheManager := cache.GetGlobalManager()
 
-	// Process all belief-related data in one consolidated query (exact V1 pattern)
-	if len(analysis.BeliefValues) > 0 || len(analysis.IdentifyAsValues) > 0 {
-		err = processBeliefData(ctx, hourKeys, epinets, analysis, startTime, endTime, contentItems)
-		if err != nil {
-			return fmt.Errorf("failed to process belief data: %w", err)
-		}
-	}
-
-	// Process all action-related data in one consolidated query (exact V1 pattern)
-	if len(analysis.ActionVerbs) > 0 {
-		err = processActionData(ctx, hourKeys, epinets, analysis, startTime, endTime, contentItems)
-		if err != nil {
-			return fmt.Errorf("failed to process action data: %w", err)
-		}
-	}
-
-	// Calculate transitions for each epinet and hour (exact V1 pattern)
-	for _, epinet := range epinets {
+	// Initialize empty data structure only for missing epinet-hour pairs
+	for epinetID, hourKeys := range missingEpinetHours {
 		for _, hourKey := range hourKeys {
-			err = calculateChronologicalTransitions(ctx, epinet.ID, hourKey)
+			// Check if bin already exists (in case it was partially cached)
+			_, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey)
+			if !exists {
+				emptyData := &models.HourlyEpinetData{
+					Steps:       make(map[string]*models.HourlyEpinetStepData),
+					Transitions: make(map[string]map[string]*models.HourlyEpinetTransitionData),
+				}
+				bin := &models.HourlyEpinetBin{
+					Data:       emptyData,
+					ComputedAt: time.Now().UTC(),
+					TTL: func() time.Duration {
+						now := time.Now().UTC()
+						currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+						if hourKey == currentHourKey {
+							return 15 * time.Minute
+						}
+						return 28 * 24 * time.Hour
+					}(),
+				}
+				cacheManager.SetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey, bin)
+			}
+		}
+	}
+
+	// Process belief-related data for each epinet
+	if len(analysis.BeliefValues) > 0 || len(analysis.IdentifyAsValues) > 0 {
+		for epinetID, hourKeys := range missingEpinetHours {
+			// Find the epinet config
+			var epinet EpinetConfig
+			for _, e := range epinets {
+				if e.ID == epinetID {
+					epinet = e
+					break
+				}
+			}
+			if epinet.ID == "" {
+				log.Printf("WARNING: Epinet %s not found for processing", epinetID)
+				continue
+			}
+			// Process beliefs for this epinet's missing hours
+			err := processBeliefData(ctx, hourKeys, []EpinetConfig{epinet}, analysis, startTime, endTime, contentItems)
 			if err != nil {
-				log.Printf("WARNING: Failed to calculate transitions for epinet %s hour %s: %v", epinet.ID, hourKey, err)
+				log.Printf("WARNING: Failed to process belief data for epinet %s: %v", epinetID, err)
+				continue
+			}
+		}
+	}
+
+	// Process action-related data for each epinet
+	if len(analysis.ActionVerbs) > 0 {
+		for epinetID, hourKeys := range missingEpinetHours {
+			// Find the epinet config
+			var epinet EpinetConfig
+			for _, e := range epinets {
+				if e.ID == epinetID {
+					epinet = e
+					break
+				}
+			}
+			if epinet.ID == "" {
+				log.Printf("WARNING: Epinet %s not found for processing", epinetID)
+				continue
+			}
+			// Process actions for this epinet's missing hours
+			err := processActionData(ctx, hourKeys, []EpinetConfig{epinet}, analysis, startTime, endTime, contentItems)
+			if err != nil {
+				log.Printf("WARNING: Failed to process action data for epinet %s: %v", epinetID, err)
+				continue
+			}
+		}
+	}
+
+	// Calculate transitions for each missing epinet-hour pair
+	for epinetID, hourKeys := range missingEpinetHours {
+		for _, hourKey := range hourKeys {
+			err := calculateChronologicalTransitions(ctx, epinetID, hourKey)
+			if err != nil {
+				log.Printf("WARNING: Failed to calculate transitions for epinet %s hour %s: %v", epinetID, hourKey, err)
 			}
 		}
 	}
@@ -271,7 +331,14 @@ func initializeEpinetDataStructure(ctx *tenant.Context, hourKeys []string, epine
 				bin := &models.HourlyEpinetBin{
 					Data:       emptyData,
 					ComputedAt: time.Now().UTC(),
-					TTL:        cache.GetTTLForHour(hourKey),
+					TTL: func() time.Duration {
+						now := time.Now().UTC()
+						currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+						if hourKey == currentHourKey {
+							return 15 * time.Minute
+						}
+						return 28 * 24 * time.Hour
+					}(),
 				}
 
 				cacheManager.SetHourlyEpinetBin(ctx.TenantID, epinet.ID, hourKey, bin)
@@ -315,7 +382,6 @@ func getEpinets(ctx *tenant.Context) ([]EpinetConfig, error) {
 		})
 	}
 
-	log.Printf("DEBUG: Retrieved %d epinets", len(epinets))
 	return epinets, nil
 }
 
@@ -490,34 +556,4 @@ func getHourKeysForTimeRange(hours int) []string {
 // formatHourKey formats a time as an hour key (exact V1 pattern)
 func formatHourKey(t time.Time) string {
 	return fmt.Sprintf("%d-%02d-%02d-%02d", t.Year(), t.Month(), t.Day(), t.Hour())
-}
-
-// parseHourKeyToDate parses an hour key back to a time (exact V1 pattern)
-func parseHourKeyToDate(hourKey string) (time.Time, error) {
-	parts := strings.Split(hourKey, "-")
-	if len(parts) != 4 {
-		return time.Time{}, fmt.Errorf("invalid hour key format: %s", hourKey)
-	}
-
-	year, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid year in hour key: %s", hourKey)
-	}
-
-	month, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid month in hour key: %s", hourKey)
-	}
-
-	day, err := strconv.Atoi(parts[2])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid day in hour key: %s", hourKey)
-	}
-
-	hour, err := strconv.Atoi(parts[3])
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid hour in hour key: %s", hourKey)
-	}
-
-	return time.Date(year, time.Month(month), day, hour, 0, 0, 0, time.UTC), nil
 }

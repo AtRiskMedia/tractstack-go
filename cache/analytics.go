@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // =============================================================================
@@ -313,7 +314,7 @@ func (m *Manager) PurgeExpiredBins(tenantID string, olderThan string) {
 	// Parse olderThan parameter
 	cutoffTime := now.Add(-72 * time.Hour) // Default: 3 days
 	if olderThan != "" {
-		if parsedTime, err := ParseHourKey(olderThan); err == nil {
+		if parsedTime, err := utils.ParseHourKeyToDate(olderThan); err == nil {
 			cutoffTime = parsedTime
 		}
 	}
