@@ -61,7 +61,7 @@ func HandleEpinetSankey(c *gin.Context) {
 	// Parse query parameters
 	visitorType := c.DefaultQuery("visitorType", "all")
 	var selectedUserID *string
-	if userID := c.Query("selectedUserId"); userID != "" {
+	if userID := c.Query("userId"); userID != "" {
 		selectedUserID = &userID
 	}
 

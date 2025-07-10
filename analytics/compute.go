@@ -19,7 +19,7 @@ import (
 
 type SankeyFilters struct {
 	VisitorType    string  `json:"visitorType"` // "all", "anonymous", "known"
-	SelectedUserID *string `json:"selectedUserId"`
+	SelectedUserID *string `json:"userId"`
 	StartHour      *int    `json:"startHour"`
 	EndHour        *int    `json:"endHour"`
 }
