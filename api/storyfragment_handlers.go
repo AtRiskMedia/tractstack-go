@@ -31,6 +31,12 @@ func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode 
 		return nil, fmt.Errorf("failed to load panes: %w", err)
 	}
 
+	homeSlug := ctx.Config.HomeSlug
+	if homeSlug == "" {
+		homeSlug = "hello" // Same fallback as GetHomeStoryFragmentHandler
+	}
+	storyFragmentNode.IsHome = (storyFragmentNode.Slug == homeSlug)
+
 	// Extract and cache belief registry using loaded panes
 	beliefRegistryService := services.NewBeliefRegistryService(ctx)
 	registry, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragmentID, loadedPanes)
@@ -46,7 +52,6 @@ func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode 
 			codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
 		}
 	}
-
 	// Populate codeHook targets in the storyfragment node
 	storyFragmentNode.CodeHookTargets = codeHookTargets
 
