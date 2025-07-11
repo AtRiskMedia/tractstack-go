@@ -11,12 +11,89 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/services"
+	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
 // StoryFragmentIDsRequest represents the request body for bulk storyfragment loading
 type StoryFragmentIDsRequest struct {
 	StoryFragmentIDs []string `json:"storyFragmentIds" binding:"required"`
+}
+
+// extractAndWarmStoryfragmentMetadata extracts belief registry and codeHook targets, plus session warming for storyfragments
+func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode *models.StoryFragmentNode, c *gin.Context) (gin.H, error) {
+	storyFragmentID := storyFragmentNode.ID
+
+	// Load all panes once for this storyfragment
+	paneService := content.NewPaneService(ctx, nil)
+	loadedPanes, err := paneService.GetByIDs(storyFragmentNode.PaneIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load panes: %w", err)
+	}
+
+	// Extract and cache belief registry using loaded panes
+	beliefRegistryService := services.NewBeliefRegistryService(ctx)
+	registry, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragmentID, loadedPanes)
+	if err != nil {
+		// Log the error but don't fail the request - belief registry is optional
+		log.Printf("Failed to extract belief registry for storyfragment %s: %v", storyFragmentID, err)
+	}
+
+	// Extract codeHook targets from the same loaded panes
+	codeHookTargets := make(map[string]string)
+	for _, paneNode := range loadedPanes {
+		if paneNode != nil && paneNode.CodeHookTarget != nil && *paneNode.CodeHookTarget != "" {
+			codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
+		}
+	}
+
+	// Populate codeHook targets in the storyfragment node
+	storyFragmentNode.CodeHookTargets = codeHookTargets
+
+	// ===== SESSION BELIEF CONTEXT WARMING =====
+	// Extract session ID from header
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	if sessionID != "" {
+		// Retrieve user beliefs from session -> fingerprint -> fingerprint state
+		userBeliefs := make(map[string][]string)
+
+		// Get session data to find fingerprint ID
+		if sessionData, exists := cache.GetGlobalManager().GetSession(ctx.TenantID, sessionID); exists {
+			// Get fingerprint state to extract user beliefs
+			if fingerprintState, exists := cache.GetGlobalManager().GetFingerprintState(ctx.TenantID, sessionData.FingerprintID); exists {
+				userBeliefs = fingerprintState.HeldBeliefs
+			}
+		}
+
+		// Create and cache session belief context for this session + storyfragment combination
+		sessionBeliefContext := &models.SessionBeliefContext{
+			TenantID:        ctx.TenantID,
+			SessionID:       sessionID,
+			StoryfragmentID: storyFragmentID,
+			UserBeliefs:     userBeliefs,
+			LastEvaluation:  time.Now().UTC(),
+		}
+
+		// Cache the session belief context for subsequent pane requests
+		cache.GetGlobalManager().SetSessionBeliefContext(ctx.TenantID, sessionBeliefContext)
+
+		log.Printf("DEBUG: Warmed session belief context for session %s on storyfragment %s with %d beliefs",
+			sessionID, storyFragmentID, len(userBeliefs))
+	}
+	// ===== END SESSION BELIEF CONTEXT WARMING =====
+
+	// Build belief registry info for response
+	beliefInfo := gin.H{
+		"hasBeliefs": false,
+		"hasBadges":  false,
+	}
+	if registry != nil {
+		beliefInfo["hasBeliefs"] = len(registry.RequiredBeliefs) > 0
+		beliefInfo["hasBadges"] = len(registry.RequiredBadges) > 0
+		beliefInfo["lastUpdated"] = registry.LastUpdated
+	}
+
+	return beliefInfo, nil
 }
 
 // GetAllStoryFragmentIDsHandler returns all storyfragment IDs using cache-first pattern
@@ -69,6 +146,14 @@ func GetStoryFragmentsByIDsHandler(c *gin.Context) {
 		return
 	}
 
+	// Extract metadata for each storyfragment
+	for _, storyFragmentNode := range storyFragments {
+		_, err := extractAndWarmStoryfragmentMetadata(ctx, storyFragmentNode, c)
+		if err != nil {
+			log.Printf("Failed to extract metadata for storyfragment %s: %v", storyFragmentNode.ID, err)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"storyFragments": storyFragments,
 		"count":          len(storyFragments),
@@ -103,55 +188,11 @@ func GetStoryFragmentByIDHandler(c *gin.Context) {
 		return
 	}
 
-	// Extract and cache belief registry for this storyfragment
-	beliefRegistryService := services.NewBeliefRegistryService(ctx)
-	registry, err := beliefRegistryService.ExtractAndCacheBeliefRegistry(storyFragmentID, storyFragmentNode.PaneIDs)
+	// Extract metadata and warm session context
+	beliefInfo, err := extractAndWarmStoryfragmentMetadata(ctx, storyFragmentNode, c)
 	if err != nil {
-		// Log the error but don't fail the request - belief registry is optional
-		log.Printf("Failed to extract belief registry for storyfragment %s: %v", storyFragmentID, err)
-	}
-
-	// ===== NEW SESSION BELIEF CONTEXT WARMING =====
-	// Extract session ID from header
-	sessionID := c.GetHeader("X-TractStack-Session-ID")
-	if sessionID != "" {
-		// Retrieve user beliefs from session -> fingerprint -> fingerprint state
-		userBeliefs := make(map[string][]string)
-
-		// Get session data to find fingerprint ID
-		if sessionData, exists := cache.GetGlobalManager().GetSession(ctx.TenantID, sessionID); exists {
-			// Get fingerprint state to extract user beliefs
-			if fingerprintState, exists := cache.GetGlobalManager().GetFingerprintState(ctx.TenantID, sessionData.FingerprintID); exists {
-				userBeliefs = fingerprintState.HeldBeliefs
-			}
-		}
-
-		// Create and cache session belief context for this session + storyfragment combination
-		sessionBeliefContext := &models.SessionBeliefContext{
-			TenantID:        ctx.TenantID,
-			SessionID:       sessionID,
-			StoryfragmentID: storyFragmentID,
-			UserBeliefs:     userBeliefs,
-			LastEvaluation:  time.Now().UTC(),
-		}
-
-		// Cache the session belief context for subsequent pane requests
-		cache.GetGlobalManager().SetSessionBeliefContext(ctx.TenantID, sessionBeliefContext)
-
-		log.Printf("DEBUG: Warmed session belief context for session %s on storyfragment %s with %d beliefs",
-			sessionID, storyFragmentID, len(userBeliefs))
-	}
-	// ===== END SESSION BELIEF CONTEXT WARMING =====
-
-	// Optional: Add belief registry info to response
-	beliefInfo := gin.H{
-		"hasBeliefs": false,
-		"hasBadges":  false,
-	}
-	if registry != nil {
-		beliefInfo["hasBeliefs"] = len(registry.RequiredBeliefs) > 0
-		beliefInfo["hasBadges"] = len(registry.RequiredBadges) > 0
-		beliefInfo["lastUpdated"] = registry.LastUpdated
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	// Modify the final response to include belief info
@@ -188,6 +229,12 @@ func GetStoryFragmentBySlugHandler(c *gin.Context) {
 		return
 	}
 
+	// Extract metadata and warm session context
+	_, err = extractAndWarmStoryfragmentMetadata(ctx, storyFragmentNode, c)
+	if err != nil {
+		log.Printf("Failed to extract metadata for storyfragment %s: %v", storyFragmentNode.ID, err)
+	}
+
 	c.JSON(http.StatusOK, storyFragmentNode)
 }
 
@@ -218,6 +265,12 @@ func GetHomeStoryFragmentHandler(c *gin.Context) {
 	if storyFragmentNode == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("home storyfragment not found: %s", homeSlug)})
 		return
+	}
+
+	// Extract metadata and warm session context
+	_, err = extractAndWarmStoryfragmentMetadata(ctx, storyFragmentNode, c)
+	if err != nil {
+		log.Printf("Failed to extract metadata for storyfragment %s: %v", storyFragmentNode.ID, err)
 	}
 
 	// Return same JSON structure as GetStoryFragmentBySlugHandler
