@@ -196,6 +196,9 @@ func main() {
 		// Health checks
 		v1.GET("/health", api.HealthHandler)
 
+		// Content map endpoint
+		v1.GET("/content/full-map", api.GetFullContentMapHandler)
+
 		// Authentication and system routes
 		auth := v1.Group("/auth")
 		{
