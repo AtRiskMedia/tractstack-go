@@ -13,7 +13,6 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
-	"github.com/oklog/ulid/v2"
 )
 
 // getTenantContext is a helper to extract tenant context from gin context
@@ -32,11 +31,6 @@ func getTenantManager(c *gin.Context) (*tenant.Manager, error) {
 		return nil, fmt.Errorf("no tenant manager")
 	}
 	return manager.(*tenant.Manager), nil
-}
-
-// generateULID creates a new ULID
-func generateULID() string {
-	return ulid.Make().String()
 }
 
 // DBStatusHandler checks tenant status - SIMPLIFIED: No activation logic
@@ -113,13 +107,6 @@ func StateHandler(c *gin.Context) {
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required"})
 		return
-	}
-
-	// Log pane ID for debugging (optional warning if missing)
-	if paneID == "" {
-		log.Printf("WARNING: No paneId provided for belief %s in session %s", beliefID, sessionID)
-	} else {
-		log.Printf("Processing belief %s from pane %s in session %s", beliefID, paneID, sessionID)
 	}
 
 	// Convert form data to event structure following the plan's conversion logic
