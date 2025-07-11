@@ -390,14 +390,15 @@ func (sfs *StoryFragmentService) deserializeRowData(storyFragmentRow *StoryFragm
 	}
 
 	storyFragmentNode := &models.StoryFragmentNode{
-		ID:           storyFragmentRow.ID,
-		Title:        storyFragmentRow.Title,
-		Slug:         storyFragmentRow.Slug,
-		TractStackID: storyFragmentRow.TractStackID,
-		PaneIDs:      paneIDs,
-		IsHome:       false,
-		Created:      created,
-		Changed:      changed,
+		ID:              storyFragmentRow.ID,
+		Title:           storyFragmentRow.Title,
+		Slug:            storyFragmentRow.Slug,
+		TractStackID:    storyFragmentRow.TractStackID,
+		PaneIDs:         paneIDs,
+		IsHome:          false,
+		CodeHookTargets: make(map[string]string),
+		Created:         created,
+		Changed:         changed,
 	}
 
 	if storyFragmentRow.MenuID != nil {
