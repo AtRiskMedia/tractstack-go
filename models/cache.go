@@ -36,9 +36,7 @@ type TenantContentCache struct {
 	// Lookup indices
 	SlugToID      map[string]string   // slug -> id
 	CategoryToIDs map[string][]string // category -> []id
-
-	// ADD THIS LINE:
-	AllPaneIDs []string // cached list of all pane IDs
+	AllPaneIDs    []string            // cached list of all pane IDs
 
 	// Cache metadata
 	LastUpdated time.Time
@@ -62,6 +60,7 @@ type StoryFragmentNode struct {
 	TailwindBgColour *string           `json:"tailwindBgColour,omitempty"`
 	SocialImagePath  *string           `json:"socialImagePath,omitempty"`
 	CodeHookTargets  map[string]string `json:"codeHookTargets,omitempty"`
+	IsHome           bool              `json:"isHome"`
 	Created          time.Time         `json:"created"`
 	Changed          *time.Time        `json:"changed,omitempty"`
 }

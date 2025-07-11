@@ -395,6 +395,7 @@ func (sfs *StoryFragmentService) deserializeRowData(storyFragmentRow *StoryFragm
 		Slug:         storyFragmentRow.Slug,
 		TractStackID: storyFragmentRow.TractStackID,
 		PaneIDs:      paneIDs,
+		IsHome:       false,
 		Created:      created,
 		Changed:      changed,
 	}
