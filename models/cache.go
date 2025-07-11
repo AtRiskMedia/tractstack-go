@@ -53,16 +53,17 @@ type TractStackNode struct {
 }
 
 type StoryFragmentNode struct {
-	ID               string     `json:"id"`
-	Title            string     `json:"title"`
-	Slug             string     `json:"slug"`
-	TractStackID     string     `json:"tractStackId"`
-	MenuID           *string    `json:"menuId,omitempty"`
-	PaneIDs          []string   `json:"paneIds"`
-	TailwindBgColour *string    `json:"tailwindBgColour,omitempty"`
-	SocialImagePath  *string    `json:"socialImagePath,omitempty"`
-	Created          time.Time  `json:"created"`
-	Changed          *time.Time `json:"changed,omitempty"`
+	ID               string            `json:"id"`
+	Title            string            `json:"title"`
+	Slug             string            `json:"slug"`
+	TractStackID     string            `json:"tractStackId"`
+	MenuID           *string           `json:"menuId,omitempty"`
+	PaneIDs          []string          `json:"paneIds"`
+	TailwindBgColour *string           `json:"tailwindBgColour,omitempty"`
+	SocialImagePath  *string           `json:"socialImagePath,omitempty"`
+	CodeHookTargets  map[string]string `json:"codeHookTargets,omitempty"`
+	Created          time.Time         `json:"created"`
+	Changed          *time.Time        `json:"changed,omitempty"`
 }
 
 type PaneNode struct {
