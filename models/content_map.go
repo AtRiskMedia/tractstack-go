@@ -59,22 +59,6 @@ type BeliefContentMap struct {
 	Scale string `json:"scale"`
 }
 
-// EpinetContentMap represents epinet content in the content map
-type EpinetContentMap struct {
-	ContentMapItem
-	Promoted bool                   `json:"promoted"`
-	Steps    []EpinetContentMapStep `json:"steps"`
-}
-
-// EpinetContentMapStep represents an epinet step in the content map
-type EpinetContentMapStep struct {
-	GateType   string   `json:"gateType"`
-	Title      string   `json:"title"`
-	Values     []string `json:"values"`
-	ObjectType *string  `json:"objectType,omitempty"`
-	ObjectIds  []string `json:"objectIds,omitempty"`
-}
-
 // Topic represents a topic for topic content map
 type Topic struct {
 	ID    int    `json:"id"`
@@ -261,5 +245,51 @@ func (cmb *ContentMapBuilder) BuildTopicContentMap(topics []Topic) TopicContentM
 			Type:  "Topic",
 		},
 		Topics: topics,
+	}
+}
+
+// Add these structs to models/content_map.go (alongside existing content map types)
+
+// EpinetContentMap represents an epinet in the content map
+type EpinetContentMap struct {
+	ContentMapItem
+	Promoted bool                   `json:"promoted"`
+	Steps    []EpinetContentMapStep `json:"steps"`
+}
+
+// EpinetContentMapStep represents an epinet step in the content map
+type EpinetContentMapStep struct {
+	GateType   string   `json:"gateType"`
+	Title      string   `json:"title"`
+	Values     []string `json:"values"`
+	ObjectType *string  `json:"objectType,omitempty"`
+	ObjectIds  []string `json:"objectIds,omitempty"`
+}
+
+// Add this method to ContentMapBuilder (if it exists)
+
+// BuildEpinetContentMap creates an epinet content map item
+func (cmb *ContentMapBuilder) BuildEpinetContentMap(epinet *EpinetNode) EpinetContentMap {
+	// Convert EpinetNodeStep to EpinetContentMapStep
+	var steps []EpinetContentMapStep
+	for _, step := range epinet.Steps {
+		steps = append(steps, EpinetContentMapStep{
+			GateType:   step.GateType,
+			Title:      step.Title,
+			Values:     step.Values,
+			ObjectType: step.ObjectType,
+			ObjectIds:  step.ObjectIDs,
+		})
+	}
+
+	return EpinetContentMap{
+		ContentMapItem: ContentMapItem{
+			ID:    epinet.ID,
+			Title: epinet.Title,
+			Slug:  epinet.ID, // Epinets use ID as slug
+			Type:  "Epinet",
+		},
+		Promoted: epinet.Promoted,
+		Steps:    steps,
 	}
 }

@@ -295,6 +295,7 @@ func (rco *ResourceCacheOperations) ensureTenantCache(tenantID string) {
 			Panes:          make(map[string]*models.PaneNode),
 			Menus:          make(map[string]*models.MenuNode),
 			Resources:      make(map[string]*models.ResourceNode),
+			Epinets:        make(map[string]*models.EpinetNode),
 			Beliefs:        make(map[string]*models.BeliefNode),
 			Files:          make(map[string]*models.ImageFileNode),
 			SlugToID:       make(map[string]string),

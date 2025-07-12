@@ -10,6 +10,21 @@ import (
 	"time"
 )
 
+type EpinetNode struct {
+	ID       string           `json:"id"`
+	Title    string           `json:"title"`
+	Promoted bool             `json:"promoted"`
+	Steps    []EpinetNodeStep `json:"steps"`
+}
+
+type EpinetNodeStep struct {
+	GateType   string   `json:"gateType"`
+	Title      string   `json:"title"`
+	Values     []string `json:"values"`
+	ObjectType *string  `json:"objectType,omitempty"`
+	ObjectIDs  []string `json:"objectIds,omitempty"`
+}
+
 type VisitState struct {
 	VisitID       string    `json:"visitId"`
 	FingerprintID string    `json:"fingerprintId"`

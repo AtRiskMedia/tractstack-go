@@ -16,6 +16,8 @@ type FullContentMapItem struct {
 	Title string `json:"title"`
 	Slug  string `json:"slug"`
 	Type  string `json:"type"`
+	// Epinet specific
+	Promoted *bool `json:"promoted,omitempty"`
 	// Menu specific
 	Theme *string `json:"theme,omitempty"`
 	// Resource specific
@@ -168,6 +170,27 @@ func GetFullContentMapHandler(c *gin.Context) {
 						Slug:  menu.ID, // Menus use ID as slug in V1
 						Type:  "Menu",
 						Theme: &menu.Theme,
+					}
+					contentMap = append(contentMap, item)
+				}
+			}
+		}
+	}
+
+	// Get all Epinets
+	epinetService := content.NewEpinetService(ctx, cacheManager)
+	epinetIDs, err := epinetService.GetAllIDs()
+	if err == nil {
+		epinets, err := epinetService.GetByIDs(epinetIDs)
+		if err == nil {
+			for _, epinet := range epinets {
+				if epinet != nil {
+					item := FullContentMapItem{
+						ID:       epinet.ID,
+						Title:    epinet.Title,
+						Slug:     epinet.ID, // Epinets use ID as slug
+						Type:     "Epinet",
+						Promoted: &epinet.Promoted,
 					}
 					contentMap = append(contentMap, item)
 				}

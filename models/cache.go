@@ -30,6 +30,7 @@ type TenantContentCache struct {
 	Panes          map[string]*PaneNode          // id -> node
 	Menus          map[string]*MenuNode          // id -> node
 	Resources      map[string]*ResourceNode      // id -> node
+	Epinets        map[string]*EpinetNode        // id -> node
 	Beliefs        map[string]*BeliefNode        // id -> node
 	Files          map[string]*ImageFileNode     // id -> node
 

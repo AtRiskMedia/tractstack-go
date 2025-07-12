@@ -2,7 +2,6 @@
 package analytics
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
+	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
@@ -85,7 +85,7 @@ type StoryfragmentAnalytics struct {
 func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	log.Printf("DEBUG: LoadHourlyEpinetData started for tenant %s, hoursBack %d", ctx.TenantID, hoursBack)
 
-	// 1. Get all epinets for tenant
+	// 1. Get all epinets for tenant (now cache-first)
 	epinets, err := getEpinets(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get epinets: %w", err)
@@ -113,7 +113,6 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	missingEpinetHours := make(map[string][]string) // epinetID -> []hourKey
 	now := time.Now().UTC()
 	currentHour := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
-	// log.Printf("DEBUG: Current hour key from formatHourKey: %s", currentHour)
 
 	// Check cache for each epinet and hour
 	for _, epinet := range epinets {
@@ -136,7 +135,6 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	}
 
 	if len(missingEpinetHours) == 0 {
-		// log.Printf("DEBUG: All epinet-hour pairs cached and within TTL for tenant %s", ctx.TenantID)
 		return nil
 	}
 
@@ -229,61 +227,13 @@ func analyzeEpinets(epinets []EpinetConfig) *EpinetAnalysis {
 	return analysis
 }
 
-// loader.go
 func processEpinetDataForTimeRange(ctx *tenant.Context, missingEpinetHours map[string][]string, epinets []EpinetConfig,
 	analysis *EpinetAnalysis, startTime, endTime time.Time, contentItems map[string]ContentItem,
 ) error {
-	cacheManager := cache.GetGlobalManager()
-
-	// Initialize empty data structure only for missing epinet-hour pairs
-	for epinetID, hourKeys := range missingEpinetHours {
-		for _, hourKey := range hourKeys {
-			// Check if bin already exists (in case it was partially cached)
-			_, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey)
-			if !exists {
-				emptyData := &models.HourlyEpinetData{
-					Steps:       make(map[string]*models.HourlyEpinetStepData),
-					Transitions: make(map[string]map[string]*models.HourlyEpinetTransitionData),
-				}
-				bin := &models.HourlyEpinetBin{
-					Data:       emptyData,
-					ComputedAt: time.Now().UTC(),
-					TTL: func() time.Duration {
-						now := time.Now().UTC()
-						currentHourKey := formatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
-						if hourKey == currentHourKey {
-							return config.CurrentHourTTL
-						}
-						return config.AnalyticsBinTTL
-					}(),
-				}
-				cacheManager.SetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey, bin)
-			}
-		}
-	}
-
-	// Process belief-related data for each epinet
-	if len(analysis.BeliefValues) > 0 || len(analysis.IdentifyAsValues) > 0 {
-		for epinetID, hourKeys := range missingEpinetHours {
-			// Find the epinet config
-			var epinet EpinetConfig
-			for _, e := range epinets {
-				if e.ID == epinetID {
-					epinet = e
-					break
-				}
-			}
-			if epinet.ID == "" {
-				log.Printf("WARNING: Epinet %s not found for processing", epinetID)
-				continue
-			}
-			// Process beliefs for this epinet's missing hours
-			err := processBeliefData(ctx, hourKeys, []EpinetConfig{epinet}, analysis, startTime, endTime, contentItems)
-			if err != nil {
-				log.Printf("WARNING: Failed to process belief data for epinet %s: %v", epinetID, err)
-				continue
-			}
-		}
+	// Initialize empty data structure for all missing epinet-hour pairs
+	err := initializeEpinetDataStructure(ctx, getAllMissingHourKeys(missingEpinetHours), epinets)
+	if err != nil {
+		return fmt.Errorf("failed to initialize epinet data structure: %w", err)
 	}
 
 	// Process action-related data for each epinet
@@ -359,42 +309,88 @@ func initializeEpinetDataStructure(ctx *tenant.Context, hourKeys []string, epine
 	return nil
 }
 
-func getEpinets(ctx *tenant.Context) ([]EpinetConfig, error) {
-	query := `SELECT id, title, options_payload FROM epinets`
+// Helper function to extract all unique hour keys from missing epinet hours
+func getAllMissingHourKeys(missingEpinetHours map[string][]string) []string {
+	hourKeySet := make(map[string]bool)
+	for _, hourKeys := range missingEpinetHours {
+		for _, hourKey := range hourKeys {
+			hourKeySet[hourKey] = true
+		}
+	}
 
+	var uniqueHourKeys []string
+	for hourKey := range hourKeySet {
+		uniqueHourKeys = append(uniqueHourKeys, hourKey)
+	}
+
+	return uniqueHourKeys
+}
+
+// getContentItems loads content items for node naming
+func getContentItems(ctx *tenant.Context) (map[string]ContentItem, error) {
+	contentItems := make(map[string]ContentItem)
+
+	// Get story fragments
+	query := `SELECT id, title, slug FROM storyfragments`
 	rows, err := ctx.Database.Conn.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query epinets: %w", err)
+		return nil, fmt.Errorf("failed to query storyfragments: %w", err)
 	}
 	defer rows.Close()
 
-	var epinets []EpinetConfig
 	for rows.Next() {
-		var id, title string
-		var optionsPayload sql.NullString
-
-		err := rows.Scan(&id, &title, &optionsPayload)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan epinet row: %w", err)
-		}
-
-		// Parse steps from options_payload using exact V1 logic
-		steps, err := parseEpinetSteps(optionsPayload.String)
-		if err != nil {
-			log.Printf("ERROR: Failed to parse options_payload for epinet %s: %v", id, err)
+		var id, title, slug string
+		if err := rows.Scan(&id, &title, &slug); err != nil {
 			continue
 		}
-
-		epinets = append(epinets, EpinetConfig{
-			ID:    id,
-			Title: title,
-			Steps: steps,
-		})
+		contentItems[id] = ContentItem{Title: title, Slug: slug}
 	}
 
-	return epinets, nil
+	// Get panes
+	query = `SELECT id, title, slug FROM panes`
+	rows, err = ctx.Database.Conn.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query panes: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id, title, slug string
+		if err := rows.Scan(&id, &title, &slug); err != nil {
+			continue
+		}
+		contentItems[id] = ContentItem{Title: title, Slug: slug}
+	}
+
+	return contentItems, nil
 }
 
+// getHourKeysForTimeRange generates hour keys for the specified time range
+func getHourKeysForTimeRange(hoursBack int) []string {
+	var hourKeys []string
+	now := time.Now().UTC()
+
+	for i := 0; i < hoursBack; i++ {
+		hourTime := now.Add(-time.Duration(i) * time.Hour)
+		hourKey := formatHourKey(time.Date(hourTime.Year(), hourTime.Month(), hourTime.Day(), hourTime.Hour(), 0, 0, 0, time.UTC))
+		hourKeys = append(hourKeys, hourKey)
+	}
+
+	return hourKeys
+}
+
+// formatHourKey formats a time into an hour key string
+func formatHourKey(t time.Time) string {
+	return fmt.Sprintf("%04d-%02d-%02d-%02d", t.Year(), t.Month(), t.Day(), t.Hour())
+}
+
+// LoadCurrentHourData loads analytics data for just the current hour
+func LoadCurrentHourData(ctx *tenant.Context) error {
+	// Use existing LoadHourlyEpinetData but only for current hour (1 hour back)
+	return LoadHourlyEpinetData(ctx, 1)
+}
+
+// parseEpinetSteps parses steps from JSON (kept for backward compatibility)
 func parseEpinetSteps(optionsPayload string) ([]EpinetStep, error) {
 	if optionsPayload == "" {
 		return []EpinetStep{}, nil
@@ -429,6 +425,52 @@ func parseEpinetSteps(optionsPayload string) ([]EpinetStep, error) {
 	return steps, nil
 }
 
+// getEpinets - cache-first wrapper function (maintains existing API)
+func getEpinets(ctx *tenant.Context) ([]EpinetConfig, error) {
+	// Use cache-first epinet service
+	epinetService := content.NewEpinetService(ctx, nil)
+	epinetIDs, err := epinetService.GetAllIDs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get epinet IDs: %w", err)
+	}
+
+	epinetNodes, err := epinetService.GetByIDs(epinetIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get epinets: %w", err)
+	}
+
+	// Convert EpinetNode to EpinetConfig for compatibility
+	var epinets []EpinetConfig
+	for _, node := range epinetNodes {
+		if node != nil {
+			// Convert EpinetNodeStep to EpinetStep
+			var steps []EpinetStep
+			for _, nodeStep := range node.Steps {
+				step := EpinetStep{
+					GateType:   nodeStep.GateType,
+					Title:      nodeStep.Title,
+					Values:     nodeStep.Values,
+					ObjectType: "",
+					ObjectIDs:  nodeStep.ObjectIDs,
+				}
+				if nodeStep.ObjectType != nil {
+					step.ObjectType = *nodeStep.ObjectType
+				}
+				steps = append(steps, step)
+			}
+
+			epinets = append(epinets, EpinetConfig{
+				ID:    node.ID,
+				Title: node.Title,
+				Steps: steps,
+			})
+		}
+	}
+
+	return epinets, nil
+}
+
+// parseStepsArray parses steps from JSON array
 func parseStepsArray(stepsArray []interface{}) ([]EpinetStep, error) {
 	var steps []EpinetStep
 
@@ -487,89 +529,4 @@ func parseStepsArray(stepsArray []interface{}) ([]EpinetStep, error) {
 	}
 
 	return steps, nil
-}
-
-// getContentItems retrieves content items for title mapping (exact V1 pattern)
-func getContentItems(ctx *tenant.Context) (map[string]ContentItem, error) {
-	contentItems := make(map[string]ContentItem)
-
-	// Get StoryFragments
-	query := `SELECT id, title, slug FROM storyfragments`
-	rows, err := ctx.Database.Conn.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query storyfragments: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id, title, slug string
-		err := rows.Scan(&id, &title, &slug)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan storyfragment row: %w", err)
-		}
-		contentItems[id] = ContentItem{Title: title, Slug: slug}
-	}
-
-	// Get Panes
-	query = `SELECT id, title, slug FROM panes`
-	rows, err = ctx.Database.Conn.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query panes: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id, title, slug string
-		err := rows.Scan(&id, &title, &slug)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan pane row: %w", err)
-		}
-		contentItems[id] = ContentItem{Title: title, Slug: slug}
-	}
-
-	// Get Resources
-	query = `SELECT id, title, slug FROM resources`
-	rows, err = ctx.Database.Conn.Query(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query resources: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var id, title, slug string
-		err := rows.Scan(&id, &title, &slug)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan resource row: %w", err)
-		}
-		contentItems[id] = ContentItem{Title: title, Slug: slug}
-	}
-
-	return contentItems, nil
-}
-
-func getHourKeysForTimeRange(hours int) []string {
-	var hourKeys []string
-	now := time.Now().UTC()
-	endHour := now.Truncate(time.Hour) // Current hour, inclusive
-	startHour := endHour.Add(-time.Duration(hours) * time.Hour)
-
-	log.Printf("DEBUG: Generating hourKeys from %s to %s", startHour.Format(time.RFC3339), endHour.Format(time.RFC3339))
-
-	for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
-		hourKey := formatHourKey(t)
-		hourKeys = append(hourKeys, hourKey)
-	}
-
-	return hourKeys
-}
-
-// formatHourKey formats a time as an hour key (exact V1 pattern)
-func formatHourKey(t time.Time) string {
-	return fmt.Sprintf("%d-%02d-%02d-%02d", t.Year(), t.Month(), t.Day(), t.Hour())
-}
-
-func LoadCurrentHourData(ctx *tenant.Context) error {
-	// log.Printf("DEBUG: LoadCurrentHourData started for tenant %s", ctx.TenantID)
-	// Use existing LoadHourlyEpinetData but only for current hour (1 hour back)
-	return LoadHourlyEpinetData(ctx, 1)
 }
