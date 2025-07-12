@@ -7,6 +7,8 @@ import (
 	"strconv"
 
 	"github.com/AtRiskMedia/tractstack-go/analytics"
+	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/gin-gonic/gin"
 )
 
@@ -220,4 +222,123 @@ func parseTimeRange(c *gin.Context) (startHour, endHour int) {
 	default:
 		return 168, 0 // Default to weekly
 	}
+}
+
+// HandleAllAnalytics handles GET /api/v1/analytics/all
+// Returns consolidated analytics data: dashboard + leads + epinet + userCounts + hourlyNodeActivity
+func HandleAllAnalytics(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	// Parse time range parameters (same as other handlers)
+	startHour, endHour := parseTimeRange(c)
+
+	// Parse visitor filtering parameters (for epinet)
+	visitorType := c.DefaultQuery("visitorType", "all")
+	selectedUserID := c.Query("userId")
+
+	// Load analytics data for the requested range (single load, cached)
+	err = analytics.LoadHourlyEpinetData(ctx, startHour)
+	if err != nil {
+		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
+		return
+	}
+
+	// 1. Compute dashboard analytics (uses cached data)
+	dashboard, err := analytics.ComputeDashboardAnalytics(ctx, startHour, endHour)
+	if err != nil {
+		log.Printf("ERROR: ComputeDashboardAnalytics failed: %v", err)
+		dashboard = nil
+	}
+
+	// 2. Compute lead metrics (uses same cached data)
+	leadMetrics, err := analytics.ComputeLeadMetrics(ctx, startHour, endHour)
+	if err != nil {
+		log.Printf("ERROR: ComputeLeadMetrics failed: %v", err)
+		leadMetrics = nil
+	}
+
+	// 3. Get epinet ID using EXISTING cache-first pattern from GetFullContentMapHandler
+	cacheManager := cache.GetGlobalManager()
+	epinetService := content.NewEpinetService(ctx, cacheManager)
+	epinetIDs, err := epinetService.GetAllIDs()
+	if err != nil {
+		log.Printf("ERROR: GetAllEpinetIDs failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
+		return
+	}
+
+	var epinetID string
+	if len(epinetIDs) > 0 {
+		// Use cache-first GetByIDs (same as GetFullContentMapHandler)
+		epinets, err := epinetService.GetByIDs(epinetIDs)
+		if err == nil {
+			// Find promoted epinet or use first one (same logic as frontend)
+			for _, epinet := range epinets {
+				if epinet != nil && epinet.Promoted {
+					epinetID = epinet.ID
+					break
+				}
+				if epinetID == "" && epinet != nil {
+					epinetID = epinet.ID // Use first epinet as fallback
+				}
+			}
+		}
+	}
+
+	var epinet *analytics.SankeyDiagram
+	var userCounts []analytics.UserCount
+	var hourlyNodeActivity analytics.HourlyActivity
+
+	if epinetID != "" {
+		// Convert parameters for epinet functions
+		var startHourPtr, endHourPtr *int
+		var selectedUserIDPtr *string
+
+		startHourPtr = &startHour
+		endHourPtr = &endHour
+		if selectedUserID != "" {
+			selectedUserIDPtr = &selectedUserID
+		}
+
+		// 4. Compute epinet sankey diagram (uses same cached data)
+		epinetResult, err := analytics.ComputeEpinetSankey(ctx, epinetID, &analytics.SankeyFilters{
+			VisitorType:    visitorType,
+			SelectedUserID: selectedUserIDPtr,
+			StartHour:      startHourPtr,
+			EndHour:        endHourPtr,
+		})
+		if err != nil {
+			log.Printf("ERROR: ComputeEpinetSankey failed: %v", err)
+		} else {
+			epinet = epinetResult
+		}
+
+		// 5. Get filtered visitor counts (uses same cached data)
+		userCounts, err = analytics.GetFilteredVisitorCounts(ctx, epinetID, visitorType, startHourPtr, endHourPtr)
+		if err != nil {
+			log.Printf("ERROR: GetFilteredVisitorCounts failed: %v", err)
+			userCounts = []analytics.UserCount{}
+		}
+
+		// 6. Get hourly node activity (uses same cached data)
+		hourlyNodeActivity, err = analytics.GetHourlyNodeActivity(ctx, epinetID, visitorType, startHourPtr, endHourPtr, selectedUserIDPtr)
+		if err != nil {
+			log.Printf("ERROR: GetHourlyNodeActivity failed: %v", err)
+			hourlyNodeActivity = analytics.HourlyActivity{}
+		}
+	}
+
+	// Return consolidated response
+	c.JSON(http.StatusOK, gin.H{
+		"dashboard":          dashboard,
+		"leads":              leadMetrics,
+		"epinet":             epinet,
+		"userCounts":         userCounts,
+		"hourlyNodeActivity": hourlyNodeActivity,
+	})
 }

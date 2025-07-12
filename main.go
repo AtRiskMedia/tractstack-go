@@ -216,6 +216,7 @@ func main() {
 			analytics.GET("/dashboard", api.HandleDashboardAnalytics)
 			analytics.GET("/epinet/:id", api.HandleEpinetSankey)
 			analytics.GET("/leads", api.HandleLeadMetrics)
+			analytics.GET("/all", api.HandleAllAnalytics)
 		}
 
 		// State management (separate from auth)

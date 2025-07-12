@@ -195,6 +195,25 @@ type BeliefEvent struct {
 // Analytics Processing Types (From The Plan)
 // =============================================================================
 
+type UserCount struct {
+	ID      string `json:"id"`
+	Count   int    `json:"count"`
+	IsKnown bool   `json:"isKnown"`
+}
+
+type HourlyActivity map[string]map[string]struct {
+	Events     map[string]int `json:"events"`
+	VisitorIDs []string       `json:"visitorIds"`
+}
+
+type AllAnalytics struct {
+	Dashboard          *DashboardAnalytics `json:"dashboard"`
+	Leads              *LeadMetrics        `json:"leads"`
+	Epinet             *SankeyDiagram      `json:"epinet"`
+	UserCounts         []UserCount         `json:"userCounts"`
+	HourlyNodeActivity HourlyActivity      `json:"hourlyNodeActivity"`
+}
+
 type SankeyFilters struct {
 	VisitorType    string  `json:"visitorType"` // "all", "anonymous", "known"
 	SelectedUserID *string `json:"userId"`
