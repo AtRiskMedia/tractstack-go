@@ -60,6 +60,7 @@ type Manager struct {
 	StoryFragmentOps *content.StoryFragmentCacheOperations
 	MenuOps          *content.MenuCacheOperations
 	ResourceOps      *content.ResourceCacheOperations
+	EpinetOps        *content.EpinetCacheOperations
 	BeliefOps        *content.BeliefCacheOperations
 	ImageFileOps     *content.ImageFileCacheOperations
 }
@@ -82,6 +83,7 @@ func NewManager() *Manager {
 		StoryFragmentOps: content.NewStoryFragmentCacheOperations(cacheManager),
 		MenuOps:          content.NewMenuCacheOperations(cacheManager),
 		ResourceOps:      content.NewResourceCacheOperations(cacheManager),
+		EpinetOps:        content.NewEpinetCacheOperations(cacheManager),
 		BeliefOps:        content.NewBeliefCacheOperations(cacheManager),
 		ImageFileOps:     content.NewImageFileCacheOperations(cacheManager),
 	}
@@ -204,6 +206,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 		Panes:          make(map[string]*models.PaneNode),
 		Menus:          make(map[string]*models.MenuNode),
 		Resources:      make(map[string]*models.ResourceNode),
+		Epinets:        make(map[string]*models.EpinetNode),
 		Beliefs:        make(map[string]*models.BeliefNode),
 		Files:          make(map[string]*models.ImageFileNode),
 		SlugToID:       make(map[string]string),
@@ -791,4 +794,16 @@ func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
 	}
 
 	return storyfragmentIDs
+}
+
+func (m *Manager) GetEpinet(tenantID, id string) (*models.EpinetNode, bool) {
+	return m.EpinetOps.GetEpinet(tenantID, id)
+}
+
+func (m *Manager) SetEpinet(tenantID string, node *models.EpinetNode) {
+	m.EpinetOps.SetEpinet(tenantID, node)
+}
+
+func (m *Manager) GetAllEpinetIDs(tenantID string) ([]string, bool) {
+	return m.EpinetOps.GetAllEpinetIDs(tenantID)
 }

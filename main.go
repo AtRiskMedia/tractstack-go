@@ -264,6 +264,11 @@ func main() {
 			nodes.GET("/beliefs/:id", api.GetBeliefByIDHandler)
 			nodes.GET("/beliefs/slug/:slug", api.GetBeliefBySlugHandler)
 
+			// Epinet routes
+			nodes.GET("/epinets", api.GetAllEpinetIDsHandler)
+			nodes.POST("/epinets", api.GetEpinetsByIDsHandler)
+			nodes.GET("/epinets/:id", api.GetEpinetByIDHandler)
+
 			// ImageFile endpoints
 			nodes.GET("/files", api.GetAllFileIDsHandler)
 			nodes.POST("/files", api.GetFilesByIDsHandler) // Bulk load files

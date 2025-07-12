@@ -32,6 +32,11 @@ type ContentCache interface {
 	GetResourceBySlug(tenantID, slug string) (*models.ResourceNode, bool)
 	GetResourcesByCategory(tenantID, category string) ([]*models.ResourceNode, bool)
 
+	// Epinet operations
+	GetEpinet(tenantID, id string) (*models.EpinetNode, bool)
+	SetEpinet(tenantID string, node *models.EpinetNode)
+	GetAllEpinetIDs(tenantID string) ([]string, bool)
+
 	// Belief operations
 	GetBelief(tenantID, id string) (*models.BeliefNode, bool)
 	SetBelief(tenantID string, node *models.BeliefNode)
