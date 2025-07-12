@@ -23,17 +23,22 @@ func ComputeDashboardAnalytics(ctx *tenant.Context, startHour, endHour int) (*mo
 		return createEmptyDashboardAnalytics(), nil
 	}
 
-	// Get hour keys for the custom time range
+	// Get hour keys for the custom time range (for line data and hot content)
 	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
 
-	// Calculate stats for the custom time period
+	// Calculate stats for FIXED time periods (not custom range)
+	// Each stat should represent its specific time period
+	dailyHourKeys := utils.GetHourKeysForCustomRange(24, 0)    // Last 24 hours
+	weeklyHourKeys := utils.GetHourKeysForCustomRange(168, 0)  // Last 7 days (168 hours)
+	monthlyHourKeys := utils.GetHourKeysForCustomRange(672, 0) // Last 28 days (672 hours)
+
 	stats := models.TimeRangeStats{
-		Daily:   computeAllEvents(ctx, epinets, hourKeys),
-		Weekly:  computeAllEvents(ctx, epinets, hourKeys),
-		Monthly: computeAllEvents(ctx, epinets, hourKeys),
+		Daily:   computeAllEvents(ctx, epinets, dailyHourKeys),
+		Weekly:  computeAllEvents(ctx, epinets, weeklyHourKeys),
+		Monthly: computeAllEvents(ctx, epinets, monthlyHourKeys),
 	}
 
-	// Generate timeline data for the custom range
+	// Generate timeline data for the custom range (this should use the requested range)
 	line := computeLineData(ctx, epinets, hourKeys, "custom")
 
 	// Identify most active content for the custom range
