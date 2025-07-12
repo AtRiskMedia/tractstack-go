@@ -47,8 +47,13 @@ func DecodeProfileHandler(c *gin.Context) {
 
 // LoginHandler handles admin/editor authentication
 func LoginHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
 	var loginReq struct {
-		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
 
@@ -57,9 +62,51 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement actual admin/editor authentication
-	// For now, this is a placeholder
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Admin authentication not implemented"})
+	var role string
+
+	// Check against admin password
+	if ctx.Config.AdminPassword != "" && loginReq.Password == ctx.Config.AdminPassword {
+		role = "admin"
+	} else if ctx.Config.EditorPassword != "" && loginReq.Password == ctx.Config.EditorPassword {
+		role = "editor"
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
+
+	// Generate JWT token
+	claims := jwt.MapClaims{
+		"role":     role,
+		"tenantId": ctx.Config.TenantID,
+		"type":     "admin_auth",
+	}
+
+	token, err := GenerateJWT(claims, ctx.Config.JWTSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token generation failed"})
+		return
+	}
+
+	// Set role-specific HTTP-only cookie
+	cookieName := "admin_auth"
+	if role == "editor" {
+		cookieName = "editor_auth"
+	}
+	c.SetCookie(
+		cookieName, // name (admin_auth or editor_auth)
+		token,      // value
+		86400,      // maxAge (24 hours in seconds)
+		"/",        // path
+		"",         // domain (empty for current domain)
+		false,      // secure (set to true in production with HTTPS)
+		true,       // httpOnly
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"role":   role,
+		"token":  token,
+	})
 }
 
 // GenerateSecureToken generates a cryptographically secure random token
