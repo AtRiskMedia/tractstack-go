@@ -42,103 +42,91 @@ func HandleDashboardAnalytics(c *gin.Context) {
 
 // HandleEpinetSankey handles GET /api/v1/analytics/epinet/:id
 func HandleEpinetSankey(c *gin.Context) {
-	// Get tenant context
 	ctx, err := getTenantContext(c)
 	if err != nil {
-		log.Printf("ERROR: getTenantContext failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Get epinet ID
 	epinetID := c.Param("id")
 	if epinetID == "" {
-		log.Printf("ERROR: Epinet ID is empty")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "epinet ID is required"})
 		return
 	}
 
-	// Parse query parameters
+	// Parse time range parameters
 	visitorType := c.DefaultQuery("visitorType", "all")
-	var selectedUserID *string
-	if userID := c.Query("userId"); userID != "" {
-		selectedUserID = &userID
+	selectedUserID := c.Query("userId")
+	startHourStr := c.DefaultQuery("startHour", "168")
+	endHourStr := c.DefaultQuery("endHour", "0")
+
+	startHour, err := strconv.Atoi(startHourStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid startHour parameter"})
+		return
 	}
 
-	// Parse startHour and endHour
-	var startHour, endHour *int
-	startHourStr := c.Query("startHour")
-	endHourStr := c.Query("endHour")
-
-	if startHourStr != "" && endHourStr != "" {
-		start, err := strconv.Atoi(startHourStr)
-		if err == nil && start > 0 {
-			end, err := strconv.Atoi(endHourStr)
-			if err == nil && end >= 0 && start > end {
-				startHour = &start
-				endHour = &end
-			} else {
-				log.Printf("DEBUG: Invalid endHour '%s' or startHour (%d) <= endHour (%d)", endHourStr, start, end)
-			}
-		} else {
-			log.Printf("DEBUG: Invalid startHour '%s'", startHourStr)
-		}
-	} else {
-		log.Printf("DEBUG: startHour or endHour missing")
+	endHour, err := strconv.Atoi(endHourStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid endHour parameter"})
+		return
 	}
 
-	// Check cache status
-	if startHour != nil && endHour != nil {
-		status := analytics.GetRangeCacheStatus(ctx, epinetID, *startHour, *endHour)
+	// Create pointers for optional parameters
+	var startHourPtr, endHourPtr *int
+	var selectedUserIDPtr *string
 
-		switch status.Action {
-		// case "proceed":
-		//	log.Printf("DEBUG: Range fully cached, proceeding with computation")
-		case "refresh_current":
-			// log.Printf("DEBUG: Current hour expired, refreshing current data")
-			go func() {
-				err := analytics.LoadCurrentHourData(ctx)
-				if err != nil {
-					log.Printf("ERROR: Background LoadCurrentHourData failed: %v", err)
-					//} else {
-					//	log.Printf("DEBUG: Current hour refresh completed")
-				}
-			}()
-			c.JSON(http.StatusOK, gin.H{"status": "loading"})
-			return
-		case "load_range":
-			// log.Printf("DEBUG: Range not fully cached, loading historical data")
-			go func() {
-				err := analytics.LoadHourlyEpinetData(ctx, 672)
-				if err != nil {
-					log.Printf("ERROR: Background LoadHourlyEpinetData failed: %v", err)
-					//} else {
-					//	log.Printf("DEBUG: Background warming completed")
-				}
-			}()
-			c.JSON(http.StatusOK, gin.H{"status": "loading"})
-			return
-		}
+	if startHourStr != "" {
+		startHourPtr = &startHour
+	}
+	if endHourStr != "" {
+		endHourPtr = &endHour
+	}
+	if selectedUserID != "" {
+		selectedUserIDPtr = &selectedUserID
 	}
 
-	// Create filters
-	filters := &analytics.SankeyFilters{
+	// Load analytics data for the requested range
+	err = analytics.LoadHourlyEpinetData(ctx, startHour)
+	if err != nil {
+		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
+		return
+	}
+
+	// Compute epinet sankey diagram
+	epinet, err := analytics.ComputeEpinetSankey(ctx, epinetID, &analytics.SankeyFilters{
 		VisitorType:    visitorType,
-		SelectedUserID: selectedUserID,
-		StartHour:      startHour,
-		EndHour:        endHour,
-	}
-
-	// Compute sankey diagram
-	sankey, err := analytics.ComputeEpinetSankey(ctx, epinetID, filters)
+		SelectedUserID: selectedUserIDPtr,
+		StartHour:      startHourPtr,
+		EndHour:        endHourPtr,
+	})
 	if err != nil {
 		log.Printf("ERROR: ComputeEpinetSankey failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute epinet sankey"})
 		return
 	}
 
-	log.Printf("DEBUG: Sankey computed successfully with %d nodes and %d links", len(sankey.Nodes), len(sankey.Links))
-	c.JSON(http.StatusOK, sankey)
+	// Get filtered visitor counts
+	userCounts, err := analytics.GetFilteredVisitorCounts(ctx, epinetID, visitorType, startHourPtr, endHourPtr)
+	if err != nil {
+		log.Printf("ERROR: GetFilteredVisitorCounts failed: %v", err)
+		userCounts = []analytics.UserCount{}
+	}
+
+	// Get hourly node activity
+	hourlyNodeActivity, err := analytics.GetHourlyNodeActivity(ctx, epinetID, visitorType, startHourPtr, endHourPtr, selectedUserIDPtr)
+	if err != nil {
+		log.Printf("ERROR: GetHourlyNodeActivity failed: %v", err)
+		hourlyNodeActivity = analytics.HourlyActivity{}
+	}
+
+	// Return the combined response matching v1 shape
+	c.JSON(http.StatusOK, gin.H{
+		"epinet":             epinet,
+		"userCounts":         userCounts,
+		"hourlyNodeActivity": hourlyNodeActivity,
+	})
 }
 
 // HandleStoryfragmentAnalytics handles GET /api/v1/analytics/storyfragments

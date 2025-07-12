@@ -495,3 +495,222 @@ func ComputeStoryfragmentAnalytics(ctx *tenant.Context) ([]StoryfragmentAnalytic
 
 	return result, nil
 }
+
+// UserCount represents a visitor with their event count and known status
+type UserCount struct {
+	ID      string `json:"id"`
+	Count   int    `json:"count"`
+	IsKnown bool   `json:"isKnown"`
+}
+
+// HourlyActivity represents hour-by-hour content activity breakdown
+type HourlyActivity map[string]map[string]struct {
+	Events     map[string]int `json:"events"`
+	VisitorIDs []string       `json:"visitorIds"`
+}
+
+// GetFilteredVisitorCounts processes hourly epinet data to return visitor counts
+func GetFilteredVisitorCounts(
+	ctx *tenant.Context,
+	epinetID string,
+	visitorType string, // "all", "anonymous", "known"
+	startHour, endHour *int,
+) ([]UserCount, error) {
+	cacheManager := cache.GetGlobalManager()
+	if cacheManager == nil {
+		return []UserCount{}, fmt.Errorf("cache manager not available")
+	}
+
+	// Get hour keys based on time range
+	var hourKeys []string
+	if startHour != nil && endHour != nil {
+		hourKeys = getHourKeysForCustomRange(*startHour, *endHour)
+	} else {
+		hourKeys = getHourKeysForTimeRange(168) // Default 1 week
+	}
+
+	// Get known fingerprints for filtering
+	knownFingerprints, err := getKnownFingerprints(ctx)
+	if err != nil {
+		return []UserCount{}, err
+	}
+
+	// Collect visitor counts
+	visitorMap := make(map[string]struct {
+		count   int
+		isKnown bool
+	})
+
+	// Process each hour
+	for _, hourKey := range hourKeys {
+		if data, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey); exists {
+			// Process each step in this hour's data
+			for _, stepData := range data.Data.Steps {
+				for visitorID := range stepData.Visitors {
+					isKnown := knownFingerprints[visitorID]
+
+					// Update visitor map
+					if existing, exists := visitorMap[visitorID]; exists {
+						visitorMap[visitorID] = struct {
+							count   int
+							isKnown bool
+						}{
+							count:   existing.count + 1,
+							isKnown: existing.isKnown || isKnown,
+						}
+					} else {
+						visitorMap[visitorID] = struct {
+							count   int
+							isKnown bool
+						}{
+							count:   1,
+							isKnown: isKnown,
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Filter and convert to array
+	var userCounts []UserCount
+	for visitorID, data := range visitorMap {
+		// Apply visitor type filter
+		if visitorType == "all" ||
+			(visitorType == "known" && data.isKnown) ||
+			(visitorType == "anonymous" && !data.isKnown) {
+			userCounts = append(userCounts, UserCount{
+				ID:      visitorID,
+				Count:   data.count,
+				IsKnown: data.isKnown,
+			})
+		}
+	}
+
+	// Sort by count (descending) then by ID (ascending)
+	sort.Slice(userCounts, func(i, j int) bool {
+		if userCounts[i].Count != userCounts[j].Count {
+			return userCounts[i].Count > userCounts[j].Count
+		}
+		return userCounts[i].ID < userCounts[j].ID
+	})
+
+	return userCounts, nil
+}
+
+// GetHourlyNodeActivity processes hourly epinet data to return hour-by-hour content breakdown
+func GetHourlyNodeActivity(
+	ctx *tenant.Context,
+	epinetID string,
+	visitorType string, // "all", "anonymous", "known"
+	startHour, endHour *int,
+	selectedUserID *string,
+) (HourlyActivity, error) {
+	cacheManager := cache.GetGlobalManager()
+	if cacheManager == nil {
+		return HourlyActivity{}, fmt.Errorf("cache manager not available")
+	}
+
+	// Get hour keys based on time range
+	var hourKeys []string
+	if startHour != nil && endHour != nil {
+		hourKeys = getHourKeysForCustomRange(*startHour, *endHour)
+	} else {
+		hourKeys = getHourKeysForTimeRange(168) // Default 1 week
+	}
+
+	// Get known fingerprints for filtering
+	knownFingerprints, err := getKnownFingerprints(ctx)
+	if err != nil {
+		return HourlyActivity{}, err
+	}
+
+	hourlyActivity := make(HourlyActivity)
+
+	// Process each hour
+	for _, hourKey := range hourKeys {
+		if data, exists := cacheManager.GetHourlyEpinetBin(ctx.TenantID, epinetID, hourKey); exists {
+			hourData := make(map[string]struct {
+				Events     map[string]int `json:"events"`
+				VisitorIDs []string       `json:"visitorIds"`
+			})
+
+			// Track unique visitors per content item for this hour
+			contentVisitors := make(map[string]map[string]bool)
+
+			// Process each step
+			for nodeID, stepData := range data.Data.Steps {
+				// Filter visitors based on type
+				var filteredVisitors []string
+				for visitorID := range stepData.Visitors {
+					isKnown := knownFingerprints[visitorID]
+
+					// Apply visitor type filter
+					if visitorType == "all" ||
+						(visitorType == "known" && isKnown) ||
+						(visitorType == "anonymous" && !isKnown) {
+
+						// Apply selected user filter if specified
+						if selectedUserID == nil || *selectedUserID == visitorID {
+							filteredVisitors = append(filteredVisitors, visitorID)
+						}
+					}
+				}
+
+				if len(filteredVisitors) == 0 {
+					continue
+				}
+
+				// Parse nodeID to extract contentID and verb
+				// Expected format: actionType-contentType-VERB-contentID
+				parts := strings.Split(nodeID, "-")
+				if len(parts) >= 4 {
+					contentID := parts[len(parts)-1]
+					verb := parts[len(parts)-2]
+
+					// Initialize content data if needed
+					if _, exists := hourData[contentID]; !exists {
+						hourData[contentID] = struct {
+							Events     map[string]int `json:"events"`
+							VisitorIDs []string       `json:"visitorIds"`
+						}{
+							Events:     make(map[string]int),
+							VisitorIDs: []string{},
+						}
+						contentVisitors[contentID] = make(map[string]bool)
+					}
+
+					// Update event count
+					content := hourData[contentID]
+					content.Events[verb] = len(filteredVisitors)
+
+					// Track unique visitors
+					for _, visitorID := range filteredVisitors {
+						contentVisitors[contentID][visitorID] = true
+					}
+
+					hourData[contentID] = content
+				}
+			}
+
+			// Update visitor IDs for each content
+			for contentID, visitors := range contentVisitors {
+				if content, exists := hourData[contentID]; exists {
+					var visitorIDs []string
+					for visitorID := range visitors {
+						visitorIDs = append(visitorIDs, visitorID)
+					}
+					content.VisitorIDs = visitorIDs
+					hourData[contentID] = content
+				}
+			}
+
+			// Only add hour if it has content
+			if len(hourData) > 0 {
+				hourlyActivity[hourKey] = hourData
+			}
+		}
+	}
+
+	return hourlyActivity, nil
+}
