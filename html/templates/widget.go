@@ -74,7 +74,9 @@ func (wr *WidgetRenderer) renderSignUp(nodeID, classNames string, hook *models.C
 	// Matches: hook === "signup" && value1
 	if hook.Value1 != nil && *hook.Value1 != "" {
 		persona := *hook.Value1
-		prompt := "Keep in touch!" // Default value
+		prompt := "Keep in touch!"
+
+		// Default value
 		if hook.Value2 != nil && *hook.Value2 != "" {
 			prompt = *hook.Value2
 		}
@@ -100,10 +102,21 @@ func (wr *WidgetRenderer) renderResource(nodeID, classNames string, hook *models
 	return ""
 }
 
-// getNodeClasses retrieves CSS classes for widget - placeholder for Stage 3
+// getNodeClasses retrieves CSS classes for widget - direct elementCss access like other renderers
 func (wr *WidgetRenderer) getNodeClasses(nodeID string) string {
-	// For Stage 3, return default "auto" - will connect to actual CSS processor in Stage 4
-	return "auto"
+	nodeData := wr.getNodeData(nodeID)
+	if nodeData != nil && nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
+		return *nodeData.ElementCSS
+	}
+	return "auto" // Default fallback
+}
+
+// getNodeData retrieves node data from real context - matches other renderer patterns
+func (wr *WidgetRenderer) getNodeData(nodeID string) *models.NodeRenderData {
+	if wr.ctx.AllNodes == nil {
+		return nil
+	}
+	return wr.ctx.AllNodes[nodeID]
 }
 
 func (wr *WidgetRenderer) getUserBeliefs() map[string][]string {

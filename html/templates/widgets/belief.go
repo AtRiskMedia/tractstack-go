@@ -36,7 +36,7 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 		labelText = placeholder
 	}
 	html += fmt.Sprintf(`
-    <label id="%s" for="%s" class="block text-sm font-medium text-gray-900 mb-2">
+    <label id="%s" for="%s">
         %s
     </label>`, labelID, selectID, labelText)
 
@@ -44,7 +44,7 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 	html += fmt.Sprintf(`
     <select id="%s" 
             name="beliefValue" 
-            class="block w-fit min-w-48 max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 disabled:bg-gray-50 disabled:text-gray-500" 
+            class="my-6 block w-fit min-w-48 max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 disabled:bg-gray-50 disabled:text-gray-500" 
             data-belief-id="%s" 
             data-belief-type="Belief"
             data-pane-id="%s"
