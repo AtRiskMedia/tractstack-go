@@ -57,6 +57,7 @@ type StoryFragmentNode struct {
 	Slug             string            `json:"slug"`
 	TractStackID     string            `json:"tractStackId"`
 	MenuID           *string           `json:"menuId,omitempty"`
+	Menu             *MenuNode         `json:"menu,omitempty"`
 	PaneIDs          []string          `json:"paneIds"`
 	TailwindBgColour *string           `json:"tailwindBgColour,omitempty"`
 	SocialImagePath  *string           `json:"socialImagePath,omitempty"`
