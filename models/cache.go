@@ -39,6 +39,10 @@ type TenantContentCache struct {
 	CategoryToIDs map[string][]string // category -> []id
 	AllPaneIDs    []string            // cached list of all pane IDs
 
+	// Content map cache
+	FullContentMap        []FullContentMapItem `json:"fullContentMap,omitempty"`
+	ContentMapLastUpdated time.Time            `json:"contentMapLastUpdated"`
+
 	// Cache metadata
 	LastUpdated time.Time
 	Mu          sync.RWMutex // Exported for access

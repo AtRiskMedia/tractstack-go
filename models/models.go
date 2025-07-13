@@ -618,3 +618,32 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 		//	log.Printf("🔊 SESSION BROADCAST: ❌ No tenant sessions found for tenant %s", tenantID)
 	}
 }
+
+// FullContentMapItem matches V1's FullContentMap structure exactly
+type FullContentMapItem struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Slug  string `json:"slug"`
+	Type  string `json:"type"`
+	// Epinet specific
+	Promoted *bool `json:"promoted,omitempty"`
+	// Menu specific
+	Theme *string `json:"theme,omitempty"`
+	// Resource specific
+	CategorySlug *string `json:"categorySlug,omitempty"`
+	// Pane specific
+	IsContext *bool `json:"isContext,omitempty"`
+	// StoryFragment specific
+	ParentID        *string  `json:"parentId,omitempty"`
+	ParentTitle     *string  `json:"parentTitle,omitempty"`
+	ParentSlug      *string  `json:"parentSlug,omitempty"`
+	Panes           []string `json:"panes,omitempty"`
+	SocialImagePath *string  `json:"socialImagePath,omitempty"`
+	ThumbSrc        *string  `json:"thumbSrc,omitempty"`
+	ThumbSrcSet     *string  `json:"thumbSrcSet,omitempty"`
+	Description     *string  `json:"description,omitempty"`
+	Topics          []string `json:"topics,omitempty"`
+	Changed         *string  `json:"changed,omitempty"`
+	// Belief specific
+	Scale *string `json:"scale,omitempty"`
+}
