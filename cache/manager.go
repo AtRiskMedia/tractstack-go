@@ -807,3 +807,79 @@ func (m *Manager) SetEpinet(tenantID string, node *models.EpinetNode) {
 func (m *Manager) GetAllEpinetIDs(tenantID string) ([]string, bool) {
 	return m.EpinetOps.GetAllEpinetIDs(tenantID)
 }
+
+// =============================================================================
+// Content Map Operations
+// =============================================================================
+
+// GetFullContentMap retrieves the cached content map for a tenant
+func (m *Manager) GetFullContentMap(tenantID string) ([]models.FullContentMapItem, bool) {
+	m.Mu.RLock()
+	tenantCache, exists := m.ContentCache[tenantID]
+	m.Mu.RUnlock()
+
+	if !exists {
+		return nil, false
+	}
+
+	tenantCache.Mu.RLock()
+	defer tenantCache.Mu.RUnlock()
+
+	// Check if content map cache exists and is not expired (24 hour TTL)
+	if tenantCache.FullContentMap == nil ||
+		time.Since(tenantCache.ContentMapLastUpdated) > models.TTL24Hours.Duration() {
+		return nil, false
+	}
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now().UTC()
+	m.Mu.Unlock()
+
+	return tenantCache.FullContentMap, true
+}
+
+// SetFullContentMap stores the content map in cache for a tenant
+func (m *Manager) SetFullContentMap(tenantID string, contentMap []models.FullContentMapItem) {
+	m.EnsureTenant(tenantID)
+
+	m.Mu.RLock()
+	tenantCache := m.ContentCache[tenantID]
+	m.Mu.RUnlock()
+
+	tenantCache.Mu.Lock()
+	defer tenantCache.Mu.Unlock()
+
+	// Store the content map
+	tenantCache.FullContentMap = contentMap
+	tenantCache.ContentMapLastUpdated = time.Now().UTC()
+
+	// Update last modified
+	tenantCache.LastUpdated = time.Now().UTC()
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now().UTC()
+	m.Mu.Unlock()
+}
+
+// InvalidateFullContentMap clears the cached content map for a tenant
+func (m *Manager) InvalidateFullContentMap(tenantID string) {
+	m.Mu.RLock()
+	tenantCache, exists := m.ContentCache[tenantID]
+	m.Mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	tenantCache.Mu.Lock()
+	defer tenantCache.Mu.Unlock()
+
+	// Clear the content map cache
+	tenantCache.FullContentMap = nil
+	tenantCache.ContentMapLastUpdated = time.Time{} // Zero time
+
+	// Update last modified
+	tenantCache.LastUpdated = time.Now().UTC()
+}
