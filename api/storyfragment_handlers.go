@@ -37,6 +37,18 @@ func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode 
 	}
 	storyFragmentNode.IsHome = (storyFragmentNode.Slug == homeSlug)
 
+	// Load menu if MenuID exists
+	if storyFragmentNode.MenuID != nil {
+		menuService := content.NewMenuService(ctx, cache.GetGlobalManager())
+		menuData, err := menuService.GetByID(*storyFragmentNode.MenuID)
+		if err != nil {
+			log.Printf("Failed to load menu %s for storyfragment %s: %v",
+				*storyFragmentNode.MenuID, storyFragmentNode.ID, err)
+		} else {
+			storyFragmentNode.Menu = menuData
+		}
+	}
+
 	// Extract and cache belief registry using loaded panes
 	beliefRegistryService := services.NewBeliefRegistryService(ctx)
 	registry, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragmentID, loadedPanes)
