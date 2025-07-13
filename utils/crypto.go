@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"log"
@@ -26,12 +27,27 @@ func Encrypt(data, key string) (string, error) {
 		return "", errors.New("empty encryption key")
 	}
 
-	if len(key) != 16 && len(key) != 24 && len(key) != 32 {
-		log.Printf("ERROR: Invalid key length %d. Must be 16, 24, or 32 bytes", len(key))
+	// Hex decode the key first if it's a hex string
+	var keyBytes []byte
+	if len(key) == 32 || len(key) == 48 || len(key) == 64 {
+		// Try to hex decode first
+		decoded, err := hex.DecodeString(key)
+		if err == nil && (len(decoded) == 16 || len(decoded) == 24 || len(decoded) == 32) {
+			keyBytes = decoded
+		} else {
+			// If hex decode fails or results in wrong length, treat as raw bytes
+			keyBytes = []byte(key)
+		}
+	} else {
+		keyBytes = []byte(key)
+	}
+
+	if len(keyBytes) != 16 && len(keyBytes) != 24 && len(keyBytes) != 32 {
+		log.Printf("ERROR: Invalid key length %d. Must be 16, 24, or 32 bytes", len(keyBytes))
 		return "", errors.New("invalid key length")
 	}
 
-	block, err := aes.NewCipher([]byte(key))
+	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
 		log.Printf("ERROR: aes.NewCipher failed: %v", err)
 		return "", err
@@ -62,7 +78,27 @@ func Decrypt(encrypted, key string) (string, error) {
 		return "", err
 	}
 
-	block, err := aes.NewCipher([]byte(key))
+	// Hex decode the key first if it's a hex string
+	var keyBytes []byte
+	if len(key) == 32 || len(key) == 48 || len(key) == 64 {
+		// Try to hex decode first
+		decoded, err := hex.DecodeString(key)
+		if err == nil && (len(decoded) == 16 || len(decoded) == 24 || len(decoded) == 32) {
+			keyBytes = decoded
+		} else {
+			// If hex decode fails or results in wrong length, treat as raw bytes
+			keyBytes = []byte(key)
+		}
+	} else {
+		keyBytes = []byte(key)
+	}
+
+	if len(keyBytes) != 16 && len(keyBytes) != 24 && len(keyBytes) != 32 {
+		log.Printf("ERROR: Invalid key length %d. Must be 16, 24, or 32 bytes", len(keyBytes))
+		return "", errors.New("invalid key length")
+	}
+
+	block, err := aes.NewCipher(keyBytes)
 	if err != nil {
 		log.Printf("ERROR: aes.NewCipher failed in Decrypt: %v", err)
 		return "", err

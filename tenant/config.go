@@ -10,18 +10,37 @@ import (
 	"path/filepath"
 )
 
+// BrandConfig holds tenant-specific branding configuration
+type BrandConfig struct {
+	Logo         string `json:"LOGO"`
+	Wordmark     string `json:"WORDMARK"`
+	WordmarkMode string `json:"WORDMARK_MODE"`
+	Footer       string `json:"FOOTER"`
+	Socials      string `json:"SOCIALS"`
+	SiteURL      string `json:"SITE_URL"`
+	Slogan       string `json:"SLOGAN"`
+	Gtag         string `json:"GTAG"`
+	OGAuthor     string `json:"OGAUTHOR"`
+	OGTitle      string `json:"OGTITLE"`
+	OGDesc       string `json:"OGDESC"`
+	OG           string `json:"OG"`
+	OGLogo       string `json:"OGLOGO"`
+	Favicon      string `json:"FAVICON"`
+}
+
 // Config holds tenant-specific configuration
 type Config struct {
-	TenantID           string `json:"tenantId"`
-	TursoDatabase      string `json:"TURSO_DATABASE_URL"`
-	TursoToken         string `json:"TURSO_AUTH_TOKEN"`
-	JWTSecret          string `json:"JWT_SECRET"`
-	AESKey             string `json:"AES_KEY"`
-	AdminPassword      string `json:"ADMIN_PASSWORD,omitempty"`
-	EditorPassword     string `json:"EDITOR_PASSWORD,omitempty"`
-	HomeSlug           string `json:"HOME_SLUG,omitempty"`
-	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG,omitempty"`
-	SQLitePath         string `json:"-"` // computed, not from JSON
+	TenantID           string       `json:"tenantId"`
+	TursoDatabase      string       `json:"TURSO_DATABASE_URL"`
+	TursoToken         string       `json:"TURSO_AUTH_TOKEN"`
+	JWTSecret          string       `json:"JWT_SECRET"`
+	AESKey             string       `json:"AES_KEY"`
+	AdminPassword      string       `json:"ADMIN_PASSWORD,omitempty"`
+	EditorPassword     string       `json:"EDITOR_PASSWORD,omitempty"`
+	HomeSlug           string       `json:"HOME_SLUG,omitempty"`
+	TractStackHomeSlug string       `json:"TRACTSTACK_HOME_SLUG,omitempty"`
+	SQLitePath         string       `json:"-"` // computed, not from JSON
+	BrandConfig        *BrandConfig `json:"-"`
 }
 
 // TenantRegistry holds the global tenant configuration
@@ -67,6 +86,43 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 	}
 
 	return &registry, nil
+}
+
+// LoadBrandConfig loads brand configuration for a specific tenant
+func LoadBrandConfig(tenantID string) (*BrandConfig, error) {
+	brandPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantID, "brand.json")
+
+	// Return defaults if file doesn't exist
+	if _, err := os.Stat(brandPath); os.IsNotExist(err) {
+		return &BrandConfig{
+			Logo:         "",
+			Wordmark:     "",
+			WordmarkMode: "",
+			Footer:       "",
+			Socials:      "",
+			SiteURL:      "",
+			Slogan:       "",
+			Gtag:         "",
+			OGAuthor:     "",
+			OGTitle:      "",
+			OGDesc:       "",
+			OG:           "",
+			OGLogo:       "",
+			Favicon:      "",
+		}, nil
+	}
+
+	data, err := os.ReadFile(brandPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read brand config: %w", err)
+	}
+
+	var brand BrandConfig
+	if err := json.Unmarshal(data, &brand); err != nil {
+		return nil, fmt.Errorf("failed to parse brand config: %w", err)
+	}
+
+	return &brand, nil
 }
 
 // LoadTenantConfig loads configuration for a specific tenant and ensures all required fields exist
@@ -123,6 +179,13 @@ func LoadTenantConfig(tenantID string) (*Config, error) {
 
 	config.TenantID = tenantID
 	config.SQLitePath = filepath.Join(os.Getenv("HOME"), "t8k-go-server", "db", tenantID, "tractstack.db")
+
+	// Load brand configuration
+	brandConfig, err := LoadBrandConfig(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load brand config: %w", err)
+	}
+	config.BrandConfig = brandConfig
 
 	return config, nil
 }
