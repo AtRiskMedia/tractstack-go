@@ -225,6 +225,9 @@ func main() {
 		// Database status
 		v1.GET("/db/status", api.DBStatusHandler)
 
+		// Config per tenant
+		v1.GET("/config/brand", api.GetBrandConfigHandler)
+
 		// Content nodes
 		nodes := v1.Group("/nodes")
 		{
