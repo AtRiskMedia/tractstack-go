@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetFullContentMapHandler returns the unified content map with caching and complete SEO data
+// GetFullContentMapHandler returns the unified content map with timestamp-based caching
 func GetFullContentMapHandler(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -24,13 +25,41 @@ func GetFullContentMapHandler(c *gin.Context) {
 
 	cacheManager := cache.GetGlobalManager()
 
+	// Get client's lastUpdated parameter
+	clientLastUpdated := c.Query("lastUpdated")
+
 	// Check cache first
 	if cachedContentMap, found := cacheManager.GetFullContentMap(ctx.TenantID); found {
-		c.JSON(http.StatusOK, cachedContentMap)
+		// Get server's last updated timestamp
+		cacheManager.Mu.RLock()
+		tenantCache := cacheManager.ContentCache[ctx.TenantID]
+		cacheManager.Mu.RUnlock()
+
+		tenantCache.Mu.RLock()
+		serverLastUpdated := tenantCache.ContentMapLastUpdated.Unix()
+		tenantCache.Mu.RUnlock()
+
+		// Compare timestamps if client provided one
+		if clientLastUpdated != "" {
+			if clientTimestamp, err := strconv.ParseInt(clientLastUpdated, 10, 64); err == nil {
+				if clientTimestamp == serverLastUpdated {
+					c.Status(http.StatusNotModified)
+					return
+				}
+			}
+		}
+
+		// Return data with wrapper that works with TractStackAPI
+		c.JSON(http.StatusOK, gin.H{
+			"data": gin.H{
+				"data":        cachedContentMap,
+				"lastUpdated": serverLastUpdated,
+			},
+		})
 		return
 	}
 
-	// Cache miss - build content map from database using single query
+	// Cache miss - build content map from database
 	contentMap, err := buildFullContentMapFromDB(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -40,7 +69,22 @@ func GetFullContentMapHandler(c *gin.Context) {
 	// Store in cache
 	cacheManager.SetFullContentMap(ctx.TenantID, contentMap)
 
-	c.JSON(http.StatusOK, contentMap)
+	// Get timestamp after caching
+	cacheManager.Mu.RLock()
+	tenantCache := cacheManager.ContentCache[ctx.TenantID]
+	cacheManager.Mu.RUnlock()
+
+	tenantCache.Mu.RLock()
+	serverLastUpdated := tenantCache.ContentMapLastUpdated.Unix()
+	tenantCache.Mu.RUnlock()
+
+	// Return data with wrapper that works with TractStackAPI
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"data":        contentMap,
+			"lastUpdated": serverLastUpdated,
+		},
+	})
 }
 
 // buildFullContentMapFromDB builds the content map using a single efficient UNION query
