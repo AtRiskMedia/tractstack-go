@@ -239,22 +239,23 @@ func shouldIncludeVisitor(visitor string, filters *SankeyFilters, knownFingerpri
 
 // getKnownFingerprints retrieves known fingerprints from the database (exact V1 pattern)
 func getKnownFingerprints(ctx *tenant.Context) (map[string]bool, error) {
-	query := `SELECT DISTINCT id FROM fingerprints WHERE lead_id IS NOT NULL`
+	query := `SELECT id, CASE WHEN lead_id IS NOT NULL THEN 1 ELSE 0 END as is_known FROM fingerprints`
 
 	rows, err := ctx.Database.Conn.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query known fingerprints: %w", err)
+		return nil, fmt.Errorf("failed to query fingerprints: %w", err)
 	}
 	defer rows.Close()
 
 	knownFingerprints := make(map[string]bool)
 	for rows.Next() {
 		var fingerprintID string
-		err := rows.Scan(&fingerprintID)
+		var isKnown bool
+		err := rows.Scan(&fingerprintID, &isKnown)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan fingerprint row: %w", err)
 		}
-		knownFingerprints[fingerprintID] = true
+		knownFingerprints[fingerprintID] = isKnown
 	}
 
 	return knownFingerprints, nil

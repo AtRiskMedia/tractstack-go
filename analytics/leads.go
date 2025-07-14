@@ -11,7 +11,9 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
-// ComputeLeadMetrics computes lead metrics from hourly epinet data for custom range
+// ComputeLeadMetrics computes lead metrics using FIXED time periods (like dashboard analytics)
+// The startHour/endHour parameters are used for TotalVisits calculation only.
+// All other metrics (24h/7d/28d) use their respective fixed time periods.
 func ComputeLeadMetrics(ctx *tenant.Context, startHour, endHour int) (*models.LeadMetrics, error) {
 	// Get all epinets for the tenant
 	epinets, err := getEpinets(ctx)
@@ -29,45 +31,89 @@ func ComputeLeadMetrics(ctx *tenant.Context, startHour, endHour int) (*models.Le
 		return nil, fmt.Errorf("failed to get known fingerprints: %w", err)
 	}
 
-	// Get hour keys for the custom time range
-	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
+	// Calculate metrics for FIXED time periods (matching dashboard.go pattern)
+	dailyHourKeys := utils.GetHourKeysForCustomRange(24, 0)    // Last 24 hours
+	weeklyHourKeys := utils.GetHourKeysForCustomRange(168, 0)  // Last 7 days (168 hours)
+	monthlyHourKeys := utils.GetHourKeysForCustomRange(672, 0) // Last 28 days (672 hours)
 
-	// Calculate metrics for the custom time period
-	metrics := aggregateHourlyVisitorMetrics(ctx, epinets, hourKeys, knownFingerprints)
+	// Calculate visitor metrics for each time period
+	dailyMetrics := aggregateHourlyVisitorMetrics(ctx, epinets, dailyHourKeys, knownFingerprints)
+	weeklyMetrics := aggregateHourlyVisitorMetrics(ctx, epinets, weeklyHourKeys, knownFingerprints)
+	monthlyMetrics := aggregateHourlyVisitorMetrics(ctx, epinets, monthlyHourKeys, knownFingerprints)
 
-	// Calculate all-time metrics
-	allHourKeys := getAllHourKeys(ctx, epinets)
-	totalMetrics := aggregateHourlyVisitorMetrics(ctx, epinets, allHourKeys, knownFingerprints)
+	// Calculate all-time metrics for TotalVisits (using custom range for now, could be all-time)
+	customHourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
+	customMetrics := aggregateHourlyVisitorMetrics(ctx, epinets, customHourKeys, knownFingerprints)
 
-	// Calculate totals and percentages for the custom range
-	totalCustomRange := len(metrics.AnonymousVisitors) + len(metrics.KnownVisitors)
+	// Calculate percentages for each time period
+	daily24hTotal := len(dailyMetrics.AnonymousVisitors) + len(dailyMetrics.KnownVisitors)
+	var firstTime24hPercentage, returning24hPercentage float64
+	if daily24hTotal > 0 {
+		firstTime24hPercentage = float64(len(dailyMetrics.AnonymousVisitors)) / float64(daily24hTotal) * 100
+		returning24hPercentage = float64(len(dailyMetrics.KnownVisitors)) / float64(daily24hTotal) * 100
+	}
 
-	var firstTimePercentage, returningPercentage float64
-	if totalCustomRange > 0 {
-		firstTimePercentage = float64(len(metrics.AnonymousVisitors)) / float64(totalCustomRange) * 100
-		returningPercentage = float64(len(metrics.KnownVisitors)) / float64(totalCustomRange) * 100
+	weekly7dTotal := len(weeklyMetrics.AnonymousVisitors) + len(weeklyMetrics.KnownVisitors)
+	var firstTime7dPercentage, returning7dPercentage float64
+	if weekly7dTotal > 0 {
+		firstTime7dPercentage = float64(len(weeklyMetrics.AnonymousVisitors)) / float64(weekly7dTotal) * 100
+		returning7dPercentage = float64(len(weeklyMetrics.KnownVisitors)) / float64(weekly7dTotal) * 100
+	}
+
+	monthly28dTotal := len(monthlyMetrics.AnonymousVisitors) + len(monthlyMetrics.KnownVisitors)
+	var firstTime28dPercentage, returning28dPercentage float64
+	if monthly28dTotal > 0 {
+		firstTime28dPercentage = float64(len(monthlyMetrics.AnonymousVisitors)) / float64(monthly28dTotal) * 100
+		returning28dPercentage = float64(len(monthlyMetrics.KnownVisitors)) / float64(monthly28dTotal) * 100
+	}
+
+	// Get ACTUAL lead count from database (not visitor count)
+	actualLeadCount, err := getActualLeadCount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get actual lead count: %w", err)
 	}
 
 	// Get last activity time
 	lastActivity := time.Now().Format(time.RFC3339)
 
 	return &models.LeadMetrics{
-		TotalVisits:            totalMetrics.TotalVisitors,
-		LastActivity:           lastActivity,
-		FirstTime24h:           len(metrics.AnonymousVisitors),
-		Returning24h:           len(metrics.KnownVisitors),
-		FirstTime7d:            len(metrics.AnonymousVisitors),
-		Returning7d:            len(metrics.KnownVisitors),
-		FirstTime28d:           len(metrics.AnonymousVisitors),
-		Returning28d:           len(metrics.KnownVisitors),
-		FirstTime24hPercentage: firstTimePercentage,
-		Returning24hPercentage: returningPercentage,
-		FirstTime7dPercentage:  firstTimePercentage,
-		Returning7dPercentage:  returningPercentage,
-		FirstTime28dPercentage: firstTimePercentage,
-		Returning28dPercentage: returningPercentage,
-		TotalLeads:             totalMetrics.TotalVisitors,
+		TotalVisits:  customMetrics.TotalVisitors, // Based on custom range (for now)
+		LastActivity: lastActivity,
+
+		// 24-hour metrics (using ACTUAL 24-hour data)
+		FirstTime24h:           len(dailyMetrics.AnonymousVisitors),
+		Returning24h:           len(dailyMetrics.KnownVisitors),
+		FirstTime24hPercentage: firstTime24hPercentage,
+		Returning24hPercentage: returning24hPercentage,
+
+		// 7-day metrics (using ACTUAL 7-day data)
+		FirstTime7d:           len(weeklyMetrics.AnonymousVisitors),
+		Returning7d:           len(weeklyMetrics.KnownVisitors),
+		FirstTime7dPercentage: firstTime7dPercentage,
+		Returning7dPercentage: returning7dPercentage,
+
+		// 28-day metrics (using ACTUAL 28-day data)
+		FirstTime28d:           len(monthlyMetrics.AnonymousVisitors),
+		Returning28d:           len(monthlyMetrics.KnownVisitors),
+		FirstTime28dPercentage: firstTime28dPercentage,
+		Returning28dPercentage: returning28dPercentage,
+
+		// ACTUAL lead count from database
+		TotalLeads: actualLeadCount,
 	}, nil
+}
+
+// getActualLeadCount queries the actual leads table for the real lead count
+func getActualLeadCount(ctx *tenant.Context) (int, error) {
+	query := `SELECT COUNT(*) FROM leads`
+
+	var count int
+	err := ctx.Database.Conn.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query lead count: %w", err)
+	}
+
+	return count, nil
 }
 
 // TimeRangeMetrics holds visitor metrics for a time range (exact V1 pattern)
