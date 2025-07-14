@@ -14,10 +14,10 @@ import (
 func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetConfig,
 	analysis *EpinetAnalysis, startTime, endTime time.Time, contentItems map[string]ContentItem,
 ) error {
-	log.Printf("DEBUG: processActionData query time range: startTime=%s, endTime=%s (params: %v, %v)",
-		startTime.Format("2006-01-02 15:04:05"),
-		endTime.Format("2006-01-02 15:04:05"),
-		startTime, endTime)
+	// log.Printf("DEBUG: processActionData query time range: startTime=%s, endTime=%s (params: %v, %v)",
+	//	startTime.Format("2006-01-02 15:04:05"),
+	//	endTime.Format("2006-01-02 15:04:05"),
+	//	startTime, endTime)
 	// Prepare query parameters
 	var verbValues []string
 	for verb := range analysis.ActionVerbs {
@@ -95,9 +95,9 @@ func processActionData(ctx *tenant.Context, hourKeys []string, epinets []EpinetC
 
 		actionEvents = append(actionEvents, event)
 	}
-	log.Printf("DEBUG: Raw SQL query returned %d rows before filtering", len(actionEvents))
 
-	log.Printf("DEBUG: Processed %d action events", len(actionEvents))
+	// log.Printf("DEBUG: Raw SQL query returned %d rows before filtering", len(actionEvents))
+	// log.Printf("DEBUG: Processed %d action events", len(actionEvents))
 
 	// Process all rows and match against epinet steps
 	for _, actionEvent := range actionEvents {
