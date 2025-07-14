@@ -83,7 +83,7 @@ type StoryfragmentAnalytics struct {
 // =============================================================================
 
 func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
-	log.Printf("DEBUG: LoadHourlyEpinetData started for tenant %s, hoursBack %d", ctx.TenantID, hoursBack)
+	// log.Printf("DEBUG: LoadHourlyEpinetData started for tenant %s, hoursBack %d", ctx.TenantID, hoursBack)
 
 	// 1. Get all epinets for tenant (now cache-first)
 	epinets, err := getEpinets(ctx)
@@ -92,7 +92,7 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	}
 
 	if len(epinets) == 0 {
-		log.Printf("DEBUG: No epinets found for tenant %s", ctx.TenantID)
+		// log.Printf("DEBUG: No epinets found for tenant %s", ctx.TenantID)
 		return nil
 	}
 
@@ -167,7 +167,7 @@ func LoadHourlyEpinetData(ctx *tenant.Context, hoursBack int) error {
 	}
 	endTime = endTime.Add(time.Hour) // Make end time exclusive
 
-	log.Printf("DEBUG: Processing time range %s to %s", startTime.Format(time.RFC3339), endTime.Format(time.RFC3339))
+	// log.Printf("DEBUG: Processing time range %s to %s", startTime.Format(time.RFC3339), endTime.Format(time.RFC3339))
 
 	// 5. Pre-analyze all epinets to determine what data we need
 	epinetAnalysis := analyzeEpinets(epinets)
