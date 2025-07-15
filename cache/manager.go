@@ -214,6 +214,7 @@ func (m *Manager) EnsureTenant(tenantID string) {
 		AllPaneIDs:     make([]string, 0),
 		LastUpdated:    time.Now().UTC(),
 		Mu:             sync.RWMutex{},
+		OrphanAnalysis: nil,
 	}
 
 	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
@@ -882,4 +883,69 @@ func (m *Manager) InvalidateFullContentMap(tenantID string) {
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
+}
+
+// GetOrphanAnalysis retrieves cached orphan analysis
+func (m *Manager) GetOrphanAnalysis(tenantID string) (*models.OrphanAnalysisPayload, string, bool) {
+	m.Mu.RLock()
+	tenantCache, exists := m.ContentCache[tenantID]
+	m.Mu.RUnlock()
+
+	if !exists || tenantCache.OrphanAnalysis == nil {
+		return nil, "", false
+	}
+
+	tenantCache.Mu.RLock()
+	defer tenantCache.Mu.RUnlock()
+
+	// Check if cache is expired (24 hour TTL)
+	if time.Since(tenantCache.OrphanAnalysis.LastUpdated) > models.TTL24Hours.Duration() {
+		return nil, "", false
+	}
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now().UTC()
+	m.Mu.Unlock()
+
+	return tenantCache.OrphanAnalysis.Data, tenantCache.OrphanAnalysis.ETag, true
+}
+
+// SetOrphanAnalysis stores orphan analysis in cache
+func (m *Manager) SetOrphanAnalysis(tenantID string, payload *models.OrphanAnalysisPayload, etag string) {
+	m.EnsureTenant(tenantID)
+
+	m.Mu.RLock()
+	tenantCache := m.ContentCache[tenantID]
+	m.Mu.RUnlock()
+
+	tenantCache.Mu.Lock()
+	defer tenantCache.Mu.Unlock()
+
+	tenantCache.OrphanAnalysis = &models.OrphanAnalysisCache{
+		Data:        payload,
+		ETag:        etag,
+		LastUpdated: time.Now().UTC(),
+	}
+
+	// Update last accessed
+	m.Mu.Lock()
+	m.LastAccessed[tenantID] = time.Now().UTC()
+	m.Mu.Unlock()
+}
+
+// InvalidateOrphanAnalysis clears cached orphan analysis
+func (m *Manager) InvalidateOrphanAnalysis(tenantID string) {
+	m.Mu.RLock()
+	tenantCache, exists := m.ContentCache[tenantID]
+	m.Mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	tenantCache.Mu.Lock()
+	defer tenantCache.Mu.Unlock()
+
+	tenantCache.OrphanAnalysis = nil
 }

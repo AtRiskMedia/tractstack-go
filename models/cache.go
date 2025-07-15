@@ -43,6 +43,9 @@ type TenantContentCache struct {
 	FullContentMap        []FullContentMapItem `json:"fullContentMap,omitempty"`
 	ContentMapLastUpdated time.Time            `json:"contentMapLastUpdated"`
 
+	// Orphan analysis
+	OrphanAnalysis *OrphanAnalysisCache `json:"orphanAnalysis"`
+
 	// Cache metadata
 	LastUpdated time.Time
 	Mu          sync.RWMutex // Exported for access
