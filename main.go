@@ -231,6 +231,13 @@ func main() {
 		v1.GET("/config/advanced", api.GetAdvancedConfigStatusHandler)
 		v1.PUT("/config/advanced", api.UpdateAdvancedConfigHandler)
 
+		// Admin routes
+		adminRoutes := v1.Group("/admin")
+		{
+			// ... existing admin routes ...
+			adminRoutes.GET("/orphan-analysis", api.GetOrphanAnalysisHandler)
+		}
+
 		// Content nodes
 		nodes := v1.Group("/nodes")
 		{
