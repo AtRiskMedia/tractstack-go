@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/events"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
@@ -25,13 +24,13 @@ func getTenantContext(c *gin.Context) (*tenant.Context, error) {
 }
 
 // getTenantManager is a helper to extract tenant manager from gin context
-func getTenantManager(c *gin.Context) (*tenant.Manager, error) {
-	manager, exists := c.Get("tenantManager")
-	if !exists {
-		return nil, fmt.Errorf("no tenant manager")
-	}
-	return manager.(*tenant.Manager), nil
-}
+//func getTenantManager(c *gin.Context) (*tenant.Manager, error) {
+//	manager, exists := c.Get("tenantManager")
+//	if !exists {
+//		return nil, fmt.Errorf("no tenant manager")
+//	}
+//	return manager.(*tenant.Manager), nil
+//}
 
 // DBStatusHandler checks tenant status - SIMPLIFIED: No activation logic
 func DBStatusHandler(c *gin.Context) {
@@ -164,76 +163,76 @@ func StateHandler(c *gin.Context) {
 }
 
 // updateFingerprintBelief updates user beliefs in fingerprint state
-func updateFingerprintBelief(tenantID, sessionID string, event models.Event) error {
-	// Get session data to find fingerprint ID
-	sessionData, exists := cache.GetGlobalManager().GetSession(tenantID, sessionID)
-	if !exists {
-		return fmt.Errorf("session %s not found in tenant %s", sessionID, tenantID)
-	}
-
-	// Get current fingerprint state
-	fingerprintState, exists := cache.GetGlobalManager().GetFingerprintState(tenantID, sessionData.FingerprintID)
-	if !exists {
-		// Create new fingerprint state if it doesn't exist
-		fingerprintState = &models.FingerprintState{
-			FingerprintID: sessionData.FingerprintID,
-			HeldBeliefs:   make(map[string][]string),
-			HeldBadges:    make(map[string]string),
-			LastActivity:  time.Now().UTC(),
-		}
-	}
-
-	// Update beliefs based on event
-	beliefSlug := event.Object
-	beliefValue := event.Verb
-
-	// Initialize belief array if it doesn't exist
-	if fingerprintState.HeldBeliefs[beliefSlug] == nil {
-		fingerprintState.HeldBeliefs[beliefSlug] = make([]string, 0)
-	}
-
-	// Update belief value (simple append for now - can be enhanced for proper belief logic)
-	switch event.ID {
-	case "ADD_BELIEF", "UPDATE_BELIEF":
-		// Add or update belief value
-		found := false
-		for _, existing := range fingerprintState.HeldBeliefs[beliefSlug] {
-			if existing == beliefValue {
-				found = true
-				break
-			}
-		}
-		if !found {
-			fingerprintState.HeldBeliefs[beliefSlug] = append(fingerprintState.HeldBeliefs[beliefSlug], beliefValue)
-		}
-
-	case "REMOVE_BELIEF":
-		// Remove belief value
-		for i, existing := range fingerprintState.HeldBeliefs[beliefSlug] {
-			if existing == beliefValue {
-				fingerprintState.HeldBeliefs[beliefSlug] = append(
-					fingerprintState.HeldBeliefs[beliefSlug][:i],
-					fingerprintState.HeldBeliefs[beliefSlug][i+1:]...)
-				break
-			}
-		}
-
-	default:
-		// Default: set belief value
-		fingerprintState.HeldBeliefs[beliefSlug] = []string{beliefValue}
-	}
-
-	// Update timestamp
-	fingerprintState.UpdateActivity()
-
-	// Save updated fingerprint state
-	cache.GetGlobalManager().SetFingerprintState(tenantID, fingerprintState)
-
-	log.Printf("Updated belief %s = %s for fingerprint %s in tenant %s",
-		beliefSlug, beliefValue, sessionData.FingerprintID, tenantID)
-
-	return nil
-}
+//func updateFingerprintBelief(tenantID, sessionID string, event models.Event) error {
+//	// Get session data to find fingerprint ID
+//	sessionData, exists := cache.GetGlobalManager().GetSession(tenantID, sessionID)
+//	if !exists {
+//		return fmt.Errorf("session %s not found in tenant %s", sessionID, tenantID)
+//	}
+//
+//	// Get current fingerprint state
+//	fingerprintState, exists := cache.GetGlobalManager().GetFingerprintState(tenantID, sessionData.FingerprintID)
+//	if !exists {
+//		// Create new fingerprint state if it doesn't exist
+//		fingerprintState = &models.FingerprintState{
+//			FingerprintID: sessionData.FingerprintID,
+//			HeldBeliefs:   make(map[string][]string),
+//			HeldBadges:    make(map[string]string),
+//			LastActivity:  time.Now().UTC(),
+//		}
+//	}
+//
+//	// Update beliefs based on event
+//	beliefSlug := event.Object
+//	beliefValue := event.Verb
+//
+//	// Initialize belief array if it doesn't exist
+//	if fingerprintState.HeldBeliefs[beliefSlug] == nil {
+//		fingerprintState.HeldBeliefs[beliefSlug] = make([]string, 0)
+//	}
+//
+//	// Update belief value (simple append for now - can be enhanced for proper belief logic)
+//	switch event.ID {
+//	case "ADD_BELIEF", "UPDATE_BELIEF":
+//		// Add or update belief value
+//		found := false
+//		for _, existing := range fingerprintState.HeldBeliefs[beliefSlug] {
+//			if existing == beliefValue {
+//				found = true
+//				break
+//			}
+//		}
+//		if !found {
+//			fingerprintState.HeldBeliefs[beliefSlug] = append(fingerprintState.HeldBeliefs[beliefSlug], beliefValue)
+//		}
+//
+//	case "REMOVE_BELIEF":
+//		// Remove belief value
+//		for i, existing := range fingerprintState.HeldBeliefs[beliefSlug] {
+//			if existing == beliefValue {
+//				fingerprintState.HeldBeliefs[beliefSlug] = append(
+//					fingerprintState.HeldBeliefs[beliefSlug][:i],
+//					fingerprintState.HeldBeliefs[beliefSlug][i+1:]...)
+//				break
+//			}
+//		}
+//
+//	default:
+//		// Default: set belief value
+//		fingerprintState.HeldBeliefs[beliefSlug] = []string{beliefValue}
+//	}
+//
+//	// Update timestamp
+//	fingerprintState.UpdateActivity()
+//
+//	// Save updated fingerprint state
+//	cache.GetGlobalManager().SetFingerprintState(tenantID, fingerprintState)
+//
+//	log.Printf("Updated belief %s = %s for fingerprint %s in tenant %s",
+//		beliefSlug, beliefValue, sessionData.FingerprintID, tenantID)
+//
+//	return nil
+//}
 
 // handleBulkUnset processes bulk unset requests
 func handleBulkUnset(c *gin.Context, ctx *tenant.Context, sessionID, paneID, gotoPaneID string, beliefIDs []string) {
