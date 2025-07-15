@@ -227,6 +227,7 @@ func main() {
 
 		// Config per tenant
 		v1.GET("/config/brand", api.GetBrandConfigHandler)
+		v1.PUT("/config/brand", api.UpdateBrandConfigHandler)
 
 		// Content nodes
 		nodes := v1.Group("/nodes")

@@ -12,20 +12,32 @@ import (
 
 // BrandConfig holds tenant-specific branding configuration
 type BrandConfig struct {
-	Logo         string `json:"LOGO"`
-	Wordmark     string `json:"WORDMARK"`
-	WordmarkMode string `json:"WORDMARK_MODE"`
-	Footer       string `json:"FOOTER"`
-	Socials      string `json:"SOCIALS"`
-	SiteURL      string `json:"SITE_URL"`
-	Slogan       string `json:"SLOGAN"`
-	Gtag         string `json:"GTAG"`
-	OGAuthor     string `json:"OGAUTHOR"`
-	OGTitle      string `json:"OGTITLE"`
-	OGDesc       string `json:"OGDESC"`
-	OG           string `json:"OG"`
-	OGLogo       string `json:"OGLOGO"`
-	Favicon      string `json:"FAVICON"`
+	SiteInit           bool   `json:"SITE_INIT"`
+	WordmarkMode       string `json:"WORDMARK_MODE"`
+	OpenDemo           bool   `json:"OPEN_DEMO"`
+	HomeSlug           string `json:"HOME_SLUG"`
+	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG"`
+	Theme              string `json:"THEME"`
+	BrandColours       string `json:"BRAND_COLOURS"`
+	Socials            string `json:"SOCIALS"`
+	SiteURL            string `json:"SITE_URL"`
+	Slogan             string `json:"SLOGAN"`
+	Footer             string `json:"FOOTER"`
+	OGTitle            string `json:"OGTITLE"`
+	OGAuthor           string `json:"OGAUTHOR"`
+	OGDesc             string `json:"OGDESC"`
+	Gtag               string `json:"GTAG"`
+	StylesVer          int64  `json:"STYLES_VER"`
+	Logo               string `json:"LOGO"`
+	Wordmark           string `json:"WORDMARK"`
+	Favicon            string `json:"FAVICON"`
+	OG                 string `json:"OG"`
+	OGLogo             string `json:"OGLOGO"`
+	LogoBase64         string `json:"LOGO_BASE64,omitempty"`
+	WordmarkBase64     string `json:"WORDMARK_BASE64,omitempty"`
+	OGBase64           string `json:"OG_BASE64,omitempty"`
+	OGLogoBase64       string `json:"OGLOGO_BASE64,omitempty"`
+	FaviconBase64      string `json:"FAVICON_BASE64,omitempty"`
 }
 
 // Config holds tenant-specific configuration

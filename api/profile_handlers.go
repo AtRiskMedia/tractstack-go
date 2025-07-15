@@ -178,7 +178,7 @@ func handleCreateProfile(c *gin.Context, ctx *tenant.Context, req *ProfileReques
 	}
 
 	// Handle session and fingerprint creation
-	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID, encryptedEmail, encryptedCode)
+	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID)
 	if sessionResponse == nil {
 		return // Error already handled in function
 	}
@@ -237,7 +237,7 @@ func handleUpdateProfile(c *gin.Context, ctx *tenant.Context, req *ProfileReques
 		}
 
 		// Handle session and fingerprint
-		sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID, existingLead.EncryptedEmail, existingLead.EncryptedCode)
+		sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID)
 		if sessionResponse == nil {
 			return // Error already handled in function
 		}
@@ -341,7 +341,7 @@ func handleUpdateProfile(c *gin.Context, ctx *tenant.Context, req *ProfileReques
 	}
 
 	// Handle session and fingerprint
-	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID, encryptedEmail, encryptedCode)
+	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID)
 	if sessionResponse == nil {
 		return // Error already handled in function
 	}
@@ -489,7 +489,7 @@ func handleEncryptedCredentials(c *gin.Context, ctx *tenant.Context, req *Profil
 	}
 
 	// Handle session and fingerprint
-	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID, *req.EncryptedEmail, *req.EncryptedCode)
+	sessionResponse := handleProfileSession(c, ctx, profile, *req.SessionID)
 	if sessionResponse == nil {
 		return // Error already handled in function
 	}
@@ -610,7 +610,7 @@ func GetLeadByID(leadID string, ctx *tenant.Context) (*models.Lead, error) {
 	return &lead, nil
 }
 
-func handleProfileSession(c *gin.Context, ctx *tenant.Context, profile *models.Profile, sessionID, encryptedEmail, encryptedCode string) *SessionResponse {
+func handleProfileSession(c *gin.Context, ctx *tenant.Context, profile *models.Profile, sessionID string) *SessionResponse {
 	log.Printf("DEBUG: handleProfileSession - Starting for lead %s, session %s", profile.LeadID, sessionID)
 
 	// Create visit service to handle fingerprint and visit creation

@@ -300,7 +300,7 @@ func buildFullContentMapFromDB(ctx *tenant.Context) ([]models.FullContentMapItem
 			id, slug, title, contentType, extra,
 			parentID, parentTitle, parentSlug, changed,
 			paneIDs, description, topics, isContext,
-			categorySlug, scale, promoted, socialImagePath,
+			categorySlug, scale, socialImagePath,
 		)
 
 		contentMap = append(contentMap, item)
@@ -336,7 +336,7 @@ func buildContentMapItem(
 	id, slug, title, contentType string, extra *string,
 	parentID, parentTitle, parentSlug, changed *string,
 	paneIDs, description, topics *string, isContext *bool,
-	categorySlug, scale *string, promoted *bool, socialImagePath *string,
+	categorySlug, scale *string, socialImagePath *string,
 ) models.FullContentMapItem {
 	switch contentType {
 	case "Menu":
