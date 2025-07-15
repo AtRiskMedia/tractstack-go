@@ -45,6 +45,7 @@ type Config struct {
 	TenantID           string       `json:"tenantId"`
 	TursoDatabase      string       `json:"TURSO_DATABASE_URL"`
 	TursoToken         string       `json:"TURSO_AUTH_TOKEN"`
+	AAIAPIKey          string       `json:"AAI_API_KEY"`
 	JWTSecret          string       `json:"JWT_SECRET"`
 	AESKey             string       `json:"AES_KEY"`
 	AdminPassword      string       `json:"ADMIN_PASSWORD,omitempty"`
