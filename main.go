@@ -265,6 +265,9 @@ func main() {
 			nodes.GET("/menus", api.GetAllMenuIDsHandler)
 			nodes.POST("/menus", api.GetMenusByIDsHandler) // Bulk load menus
 			nodes.GET("/menus/:id", api.GetMenuByIDHandler)
+			nodes.POST("/menus/create", api.CreateMenuHandler)
+			nodes.PUT("/menus/:id", api.UpdateMenuHandler)
+			nodes.DELETE("/menus/:id", api.DeleteMenuHandler)
 
 			// Resource endpoints
 			nodes.GET("/resources", api.GetAllResourceIDsHandler)
