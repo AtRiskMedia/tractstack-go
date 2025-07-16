@@ -84,10 +84,6 @@ func GetOrphanAnalysisHandler(c *gin.Context) {
 		Panes:          make(map[string][]string),
 		Menus:          make(map[string][]string),
 		Files:          make(map[string][]string),
-		Resources:      make(map[string][]string),
-		Beliefs:        make(map[string][]string),
-		Epinets:        make(map[string][]string),
-		TractStacks:    make(map[string][]string),
 		Status:         "loading",
 	}
 
