@@ -80,25 +80,38 @@ func UpdateBrandConfigHandler(c *gin.Context) {
 		return
 	}
 
-	// Extract admin_auth cookie
+	// Try admin cookie first
 	adminCookie, err := c.Cookie("admin_auth")
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin authentication required"})
-		return
-	}
-
-	// Validate JWT token
-	claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-		return
-	}
-
-	// Extract and verify role
-	role, ok := claims["role"].(string)
-	if !ok || role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
-		return
+	if err == nil {
+		if claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret); err == nil {
+			if role, ok := claims["role"].(string); ok && role == "admin" {
+				// Admin authenticated - continue
+			} else {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Admin or editor access required"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
+			return
+		}
+	} else {
+		// Try editor cookie
+		editorCookie, err := c.Cookie("editor_auth")
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin or editor authentication required"})
+			return
+		}
+		if claims, err := utils.ValidateJWT(editorCookie, ctx.Config.JWTSecret); err == nil {
+			if role, ok := claims["role"].(string); ok && role == "editor" {
+				// Editor authenticated - continue
+			} else {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Admin or editor access required"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
+			return
+		}
 	}
 
 	// 2. Request Parsing
