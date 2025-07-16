@@ -200,11 +200,12 @@ func (oas *OrphanAnalysisService) computeStoryFragmentDependencies(payload *mode
 	return nil
 }
 
-// computePaneDependencies finds what depends on each pane
+// computePaneDependencies finds what story fragments depend on each pane
 func (oas *OrphanAnalysisService) computePaneDependencies(payload *models.OrphanAnalysisPayload) error {
+	// storyfragment_panes junction table
 	rows, err := oas.ctx.Database.Conn.Query(`
-		SELECT sp.pane_id, sp.storyfragment_id 
-		FROM storyfragment_panes sp
+		SELECT sfp.storyfragment_id, sfp.pane_id 
+		FROM storyfragment_panes sfp
 	`)
 	if err != nil {
 		return err
@@ -212,8 +213,8 @@ func (oas *OrphanAnalysisService) computePaneDependencies(payload *models.Orphan
 	defer rows.Close()
 
 	for rows.Next() {
-		var paneID, sfID string
-		if err := rows.Scan(&paneID, &sfID); err == nil {
+		var sfID, paneID string
+		if err := rows.Scan(&sfID, &paneID); err == nil {
 			if dependents, exists := payload.Panes[paneID]; exists {
 				payload.Panes[paneID] = append(dependents, sfID)
 			}
@@ -223,12 +224,13 @@ func (oas *OrphanAnalysisService) computePaneDependencies(payload *models.Orphan
 	return nil
 }
 
-// computeMenuDependencies finds what depends on each menu
+// computeMenuDependencies finds what story fragments depend on each menu
 func (oas *OrphanAnalysisService) computeMenuDependencies(payload *models.OrphanAnalysisPayload) error {
+	// Direct menu_id references in storyfragments
 	rows, err := oas.ctx.Database.Conn.Query(`
-		SELECT sf.menu_id, sf.id 
-		FROM storyfragments sf
-		WHERE sf.menu_id IS NOT NULL
+		SELECT menu_id, id 
+		FROM storyfragments 
+		WHERE menu_id IS NOT NULL
 	`)
 	if err != nil {
 		return err
@@ -302,48 +304,133 @@ func (oas *OrphanAnalysisService) computeFileDependencies(payload *models.Orphan
 	return nil
 }
 
-// computeBeliefDependencies finds what panes depend on each belief
+// computeBeliefDependencies finds what panes depend on each belief - COMPREHENSIVE FIX
 func (oas *OrphanAnalysisService) computeBeliefDependencies(payload *models.OrphanAnalysisPayload) error {
-	// Find belief usage in pane options_payload
-	paneRows, err := oas.ctx.Database.Conn.Query(`
-		SELECT id, options_payload 
-		FROM panes 
-		WHERE options_payload LIKE '%heldBeliefs%' 
-		   OR options_payload LIKE '%withheldBeliefs%'
-	`)
+	// Bulk load all panes with belief detection
+	rows, err := oas.ctx.Database.Conn.Query("SELECT id, options_payload FROM panes")
 	if err != nil {
 		return err
 	}
-	defer paneRows.Close()
+	defer rows.Close()
 
-	for paneRows.Next() {
+	// Collect all belief slugs first, then bulk lookup belief IDs
+	beliefSlugs := make(map[string][]string) // beliefSlug -> []paneIDs
+
+	for rows.Next() {
 		var paneID, optionsPayload string
-		if err := paneRows.Scan(&paneID, &optionsPayload); err != nil {
+		if err := rows.Scan(&paneID, &optionsPayload); err != nil {
 			continue
 		}
 
-		// Parse options payload to extract belief references
+		if optionsPayload == "" {
+			continue
+		}
+
+		// Parse options payload once
 		var options map[string]interface{}
 		if err := json.Unmarshal([]byte(optionsPayload), &options); err != nil {
 			continue
 		}
 
-		// Check held beliefs
+		// 1. Traditional pane-level beliefs
 		if heldBeliefs, ok := options["heldBeliefs"].(map[string]interface{}); ok {
 			for beliefSlug := range heldBeliefs {
-				oas.addBeliefDependency(payload, beliefSlug, paneID)
+				if beliefSlug != "MATCH-ACROSS" && beliefSlug != "LINKED-BELIEFS" {
+					beliefSlugs[beliefSlug] = append(beliefSlugs[beliefSlug], paneID)
+				}
 			}
 		}
 
-		// Check withheld beliefs
 		if withheldBeliefs, ok := options["withheldBeliefs"].(map[string]interface{}); ok {
 			for beliefSlug := range withheldBeliefs {
-				oas.addBeliefDependency(payload, beliefSlug, paneID)
+				beliefSlugs[beliefSlug] = append(beliefSlugs[beliefSlug], paneID)
+			}
+		}
+
+		// 2. Widget beliefs using efficient string scanning (no full node extraction)
+		widgetBeliefs := oas.scanForWidgetBeliefs(optionsPayload)
+		for _, beliefSlug := range widgetBeliefs {
+			beliefSlugs[beliefSlug] = append(beliefSlugs[beliefSlug], paneID)
+		}
+	}
+
+	// Bulk lookup belief IDs and populate payload
+	for beliefSlug, paneIDs := range beliefSlugs {
+		var beliefID string
+		if err := oas.ctx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", beliefSlug).Scan(&beliefID); err == nil {
+			if dependents, exists := payload.Beliefs[beliefID]; exists {
+				// Add all pane IDs for this belief, avoiding duplicates
+				for _, paneID := range paneIDs {
+					found := false
+					for _, existing := range dependents {
+						if existing == paneID {
+							found = true
+							break
+						}
+					}
+					if !found {
+						payload.Beliefs[beliefID] = append(dependents, paneID)
+					}
+				}
 			}
 		}
 	}
 
 	return nil
+}
+
+// scanForWidgetBeliefs efficiently scans JSON for belief widgets without full node extraction
+func (oas *OrphanAnalysisService) scanForWidgetBeliefs(optionsPayload string) []string {
+	var beliefs []string
+
+	// Look for code elements with codeHookParams - efficient string scanning
+	if !strings.Contains(optionsPayload, `"tagName":"code"`) {
+		return beliefs
+	}
+
+	if !strings.Contains(optionsPayload, `"codeHookParams"`) {
+		return beliefs
+	}
+
+	// Parse just enough to find code nodes with belief widgets
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(optionsPayload), &payload); err != nil {
+		return beliefs
+	}
+
+	// Recursively scan for code nodes
+	oas.scanMapForBeliefWidgets(payload, &beliefs)
+	return beliefs
+}
+
+// scanMapForBeliefWidgets recursively scans a map for belief widgets
+func (oas *OrphanAnalysisService) scanMapForBeliefWidgets(data interface{}, beliefs *[]string) {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Check if this is a code TagElement with belief widget
+		if tagName, ok := v["tagName"].(string); ok && tagName == "code" {
+			if copy, ok := v["copy"].(string); ok {
+				if params, ok := v["codeHookParams"].([]interface{}); ok && len(params) > 0 {
+					// Extract widget type from copy (belief(...), toggle(...), identifyAs(...))
+					if strings.HasPrefix(copy, "belief(") || strings.HasPrefix(copy, "toggle(") || strings.HasPrefix(copy, "identifyAs(") {
+						if beliefSlug, ok := params[0].(string); ok && beliefSlug != "" {
+							*beliefs = append(*beliefs, beliefSlug)
+						}
+					}
+				}
+			}
+		}
+
+		// Recursively scan all values
+		for _, value := range v {
+			oas.scanMapForBeliefWidgets(value, beliefs)
+		}
+	case []interface{}:
+		// Recursively scan array elements
+		for _, item := range v {
+			oas.scanMapForBeliefWidgets(item, beliefs)
+		}
+	}
 }
 
 // addBeliefDependency adds a pane dependency to a belief by slug
