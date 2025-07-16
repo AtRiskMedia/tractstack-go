@@ -280,6 +280,9 @@ func main() {
 			nodes.POST("/beliefs", api.GetBeliefsByIDsHandler) // Bulk load beliefs
 			nodes.GET("/beliefs/:id", api.GetBeliefByIDHandler)
 			nodes.GET("/beliefs/slug/:slug", api.GetBeliefBySlugHandler)
+			nodes.POST("/beliefs/create", api.CreateBeliefHandler)
+			nodes.PUT("/beliefs/:id", api.UpdateBeliefHandler)
+			nodes.DELETE("/beliefs/:id", api.DeleteBeliefHandler)
 
 			// Epinet routes
 			nodes.GET("/epinets", api.GetAllEpinetIDsHandler)

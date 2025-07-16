@@ -8,7 +8,8 @@ type OrphanAnalysisPayload struct {
 	Panes          map[string][]string `json:"panes"`          // id -> [storyfragment_ids_using_this_pane]
 	Menus          map[string][]string `json:"menus"`          // id -> [storyfragment_ids_using_this_menu]
 	Files          map[string][]string `json:"files"`          // id -> [pane_ids_using_this_file]
-	Status         string              `json:"status"`         // "loading" | "complete"
+	Beliefs        map[string][]string `json:"beliefs"`
+	Status         string              `json:"status"` // "loading" | "complete"
 }
 
 // OrphanAnalysisCache stores cached orphan analysis with ETag

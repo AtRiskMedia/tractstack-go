@@ -36,6 +36,7 @@ func (oas *OrphanAnalysisService) ComputeOrphanAnalysis() (*models.OrphanAnalysi
 		Panes:          make(map[string][]string),
 		Menus:          make(map[string][]string),
 		Files:          make(map[string][]string),
+		Beliefs:        make(map[string][]string),
 		Status:         "complete",
 	}
 
@@ -55,6 +56,9 @@ func (oas *OrphanAnalysisService) ComputeOrphanAnalysis() (*models.OrphanAnalysi
 		return nil, err
 	}
 	if err := oas.computeFileDependencies(payload); err != nil {
+		return nil, err
+	}
+	if err := oas.computeBeliefDependencies(payload); err != nil {
 		return nil, err
 	}
 
@@ -109,6 +113,19 @@ func (oas *OrphanAnalysisService) initializeContentIDs(payload *models.OrphanAna
 			var id string
 			if err := rows.Scan(&id); err == nil {
 				payload.Files[id] = []string{}
+			}
+		}
+	} else {
+		return err
+	}
+
+	// Beliefs
+	if rows, err := oas.ctx.Database.Conn.Query("SELECT id FROM beliefs"); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err == nil {
+				payload.Beliefs[id] = []string{}
 			}
 		}
 	} else {
@@ -283,6 +300,71 @@ func (oas *OrphanAnalysisService) computeFileDependencies(payload *models.Orphan
 	}
 
 	return nil
+}
+
+// computeBeliefDependencies finds what panes depend on each belief
+func (oas *OrphanAnalysisService) computeBeliefDependencies(payload *models.OrphanAnalysisPayload) error {
+	// Find belief usage in pane options_payload
+	paneRows, err := oas.ctx.Database.Conn.Query(`
+		SELECT id, options_payload 
+		FROM panes 
+		WHERE options_payload LIKE '%heldBeliefs%' 
+		   OR options_payload LIKE '%withheldBeliefs%'
+	`)
+	if err != nil {
+		return err
+	}
+	defer paneRows.Close()
+
+	for paneRows.Next() {
+		var paneID, optionsPayload string
+		if err := paneRows.Scan(&paneID, &optionsPayload); err != nil {
+			continue
+		}
+
+		// Parse options payload to extract belief references
+		var options map[string]interface{}
+		if err := json.Unmarshal([]byte(optionsPayload), &options); err != nil {
+			continue
+		}
+
+		// Check held beliefs
+		if heldBeliefs, ok := options["heldBeliefs"].(map[string]interface{}); ok {
+			for beliefSlug := range heldBeliefs {
+				oas.addBeliefDependency(payload, beliefSlug, paneID)
+			}
+		}
+
+		// Check withheld beliefs
+		if withheldBeliefs, ok := options["withheldBeliefs"].(map[string]interface{}); ok {
+			for beliefSlug := range withheldBeliefs {
+				oas.addBeliefDependency(payload, beliefSlug, paneID)
+			}
+		}
+	}
+
+	return nil
+}
+
+// addBeliefDependency adds a pane dependency to a belief by slug
+func (oas *OrphanAnalysisService) addBeliefDependency(payload *models.OrphanAnalysisPayload, beliefSlug, paneID string) {
+	// Find belief ID by slug
+	var beliefID string
+	if err := oas.ctx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", beliefSlug).Scan(&beliefID); err == nil {
+		if dependents, exists := payload.Beliefs[beliefID]; exists {
+			// Check if paneID is already in the list
+			found := false
+			for _, dep := range dependents {
+				if dep == paneID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				payload.Beliefs[beliefID] = append(dependents, paneID)
+			}
+		}
+	}
 }
 
 // extractSlugFromURL extracts slug from URL path
