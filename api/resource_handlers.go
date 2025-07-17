@@ -28,7 +28,7 @@ type CreateResourceRequest struct {
 	Title          string                 `json:"title" binding:"required"`
 	Slug           string                 `json:"slug" binding:"required"`
 	CategorySlug   string                 `json:"categorySlug" binding:"required"`
-	Oneliner       string                 `json:"oneliner" binding:"required"`
+	Oneliner       string                 `json:"oneliner"`
 	OptionsPayload map[string]interface{} `json:"optionsPayload"`
 	ActionLisp     *string                `json:"actionLisp,omitempty"`
 }
@@ -37,7 +37,7 @@ type UpdateResourceRequest struct {
 	Title          string                 `json:"title" binding:"required"`
 	Slug           string                 `json:"slug" binding:"required"`
 	CategorySlug   string                 `json:"categorySlug" binding:"required"`
-	Oneliner       string                 `json:"oneliner" binding:"required"`
+	Oneliner       string                 `json:"oneliner"`
 	OptionsPayload map[string]interface{} `json:"optionsPayload"`
 	ActionLisp     *string                `json:"actionLisp,omitempty"`
 }
@@ -483,10 +483,6 @@ func validateResourceRequest(ctx *tenant.Context, title, slug, categorySlug, one
 
 	if strings.TrimSpace(categorySlug) == "" {
 		return fmt.Errorf("categorySlug is required")
-	}
-
-	if strings.TrimSpace(oneliner) == "" {
-		return fmt.Errorf("oneliner is required")
 	}
 
 	// Get known resources schema from tenant context
