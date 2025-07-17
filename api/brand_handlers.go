@@ -53,6 +53,9 @@ type BrandConfigUpdateRequest struct {
 
 	// Version Tracking Field
 	StylesVer int64 `json:"STYLES_VER,omitempty"`
+
+	// Known Resources Field
+	KnownResources *tenant.KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 }
 
 // GetBrandConfigHandler returns tenant brand configuration
@@ -286,6 +289,11 @@ func updateBrandConfigFields(config *tenant.BrandConfig, request *BrandConfigUpd
 	config.SiteInit = request.SiteInit
 	config.OpenDemo = request.OpenDemo
 
+	// Update known resources
+	if request.KnownResources != nil {
+		config.KnownResources = request.KnownResources
+	}
+
 	return config
 }
 
@@ -296,6 +304,11 @@ func saveBrandConfig(tenantID string, config *tenant.BrandConfig) error {
 	// Ensure config directory exists
 	if err := os.MkdirAll(configPath, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write knownResources
+	if err := saveKnownResources(tenantID, config.KnownResources); err != nil {
+		return err
 	}
 
 	// Write brand config
@@ -331,4 +344,31 @@ func getExtensionFromBase64(data string) string {
 	}
 
 	return ".png" // fallback
+}
+
+// saveKnownResources saves the known resources configuration to disk
+func saveKnownResources(tenantID string, knownResources *tenant.KnownResourcesConfig) error {
+	if knownResources == nil {
+		return nil // Nothing to save
+	}
+
+	configPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantID)
+
+	// Ensure config directory exists
+	if err := os.MkdirAll(configPath, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write known resources config
+	knownResourcesPath := filepath.Join(configPath, "knownResources.json")
+	data, err := json.MarshalIndent(knownResources, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal known resources config: %w", err)
+	}
+
+	if err := os.WriteFile(knownResourcesPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write known resources config: %w", err)
+	}
+
+	return nil
 }
