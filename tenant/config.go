@@ -10,34 +10,48 @@ import (
 	"path/filepath"
 )
 
+// FieldDefinition represents a field definition in known resources
+type FieldDefinition struct {
+	Type              string      `json:"type"`
+	Optional          bool        `json:"optional"`
+	DefaultValue      interface{} `json:"defaultValue,omitempty"`
+	BelongsToCategory string      `json:"belongsToCategory,omitempty"`
+	MinNumber         *int        `json:"minNumber,omitempty"`
+	MaxNumber         *int        `json:"maxNumber,omitempty"`
+}
+
+// KnownResourcesConfig holds resource category definitions
+type KnownResourcesConfig map[string]map[string]FieldDefinition
+
 // BrandConfig holds tenant-specific branding configuration
 type BrandConfig struct {
-	SiteInit           bool   `json:"SITE_INIT"`
-	WordmarkMode       string `json:"WORDMARK_MODE"`
-	OpenDemo           bool   `json:"OPEN_DEMO"`
-	HomeSlug           string `json:"HOME_SLUG"`
-	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG"`
-	Theme              string `json:"THEME"`
-	BrandColours       string `json:"BRAND_COLOURS"`
-	Socials            string `json:"SOCIALS"`
-	SiteURL            string `json:"SITE_URL"`
-	Slogan             string `json:"SLOGAN"`
-	Footer             string `json:"FOOTER"`
-	OGTitle            string `json:"OGTITLE"`
-	OGAuthor           string `json:"OGAUTHOR"`
-	OGDesc             string `json:"OGDESC"`
-	Gtag               string `json:"GTAG"`
-	StylesVer          int64  `json:"STYLES_VER"`
-	Logo               string `json:"LOGO"`
-	Wordmark           string `json:"WORDMARK"`
-	Favicon            string `json:"FAVICON"`
-	OG                 string `json:"OG"`
-	OGLogo             string `json:"OGLOGO"`
-	LogoBase64         string `json:"LOGO_BASE64,omitempty"`
-	WordmarkBase64     string `json:"WORDMARK_BASE64,omitempty"`
-	OGBase64           string `json:"OG_BASE64,omitempty"`
-	OGLogoBase64       string `json:"OGLOGO_BASE64,omitempty"`
-	FaviconBase64      string `json:"FAVICON_BASE64,omitempty"`
+	SiteInit           bool                  `json:"SITE_INIT"`
+	WordmarkMode       string                `json:"WORDMARK_MODE"`
+	OpenDemo           bool                  `json:"OPEN_DEMO"`
+	HomeSlug           string                `json:"HOME_SLUG"`
+	TractStackHomeSlug string                `json:"TRACTSTACK_HOME_SLUG"`
+	Theme              string                `json:"THEME"`
+	BrandColours       string                `json:"BRAND_COLOURS"`
+	Socials            string                `json:"SOCIALS"`
+	SiteURL            string                `json:"SITE_URL"`
+	Slogan             string                `json:"SLOGAN"`
+	Footer             string                `json:"FOOTER"`
+	OGTitle            string                `json:"OGTITLE"`
+	OGAuthor           string                `json:"OGAUTHOR"`
+	OGDesc             string                `json:"OGDESC"`
+	Gtag               string                `json:"GTAG"`
+	StylesVer          int64                 `json:"STYLES_VER"`
+	Logo               string                `json:"LOGO"`
+	Wordmark           string                `json:"WORDMARK"`
+	Favicon            string                `json:"FAVICON"`
+	OG                 string                `json:"OG"`
+	OGLogo             string                `json:"OGLOGO"`
+	LogoBase64         string                `json:"LOGO_BASE64,omitempty"`
+	WordmarkBase64     string                `json:"WORDMARK_BASE64,omitempty"`
+	OGBase64           string                `json:"OG_BASE64,omitempty"`
+	OGLogoBase64       string                `json:"OGLOGO_BASE64,omitempty"`
+	FaviconBase64      string                `json:"FAVICON_BASE64,omitempty"`
+	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 }
 
 // Config holds tenant-specific configuration
@@ -198,6 +212,14 @@ func LoadTenantConfig(tenantID string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load brand config: %w", err)
 	}
+
+	// Load known resources and attach to brand config
+	knownResourcesConfig, err := LoadKnownResources(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load known resources config: %w", err)
+	}
+	brandConfig.KnownResources = knownResourcesConfig
+
 	config.BrandConfig = brandConfig
 
 	return config, nil
@@ -298,4 +320,27 @@ func RegisterTenant(tenantID string) error {
 	}
 
 	return nil
+}
+
+// LoadKnownResources loads known resources configuration for a tenant
+func LoadKnownResources(tenantID string) (*KnownResourcesConfig, error) {
+	knownResourcesPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantID, "knownResources.json")
+
+	// Return empty config if file doesn't exist
+	if _, err := os.Stat(knownResourcesPath); os.IsNotExist(err) {
+		emptyConfig := make(KnownResourcesConfig)
+		return &emptyConfig, nil
+	}
+
+	data, err := os.ReadFile(knownResourcesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read known resources config: %w", err)
+	}
+
+	var knownResources KnownResourcesConfig
+	if err := json.Unmarshal(data, &knownResources); err != nil {
+		return nil, fmt.Errorf("failed to parse known resources config: %w", err)
+	}
+
+	return &knownResources, nil
 }

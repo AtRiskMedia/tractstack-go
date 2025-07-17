@@ -274,6 +274,9 @@ func main() {
 			nodes.POST("/resources", api.GetResourcesByIDsHandler) // Bulk load resources
 			nodes.GET("/resources/:id", api.GetResourceByIDHandler)
 			nodes.GET("/resources/slug/:slug", api.GetResourceBySlugHandler)
+			nodes.POST("/resources/create", api.CreateResourceHandler)
+			nodes.PUT("/resources/:id", api.UpdateResourceHandler)
+			nodes.DELETE("/resources/:id", api.DeleteResourceHandler)
 
 			// Belief endpoints
 			nodes.GET("/beliefs", api.GetAllBeliefIDsHandler)

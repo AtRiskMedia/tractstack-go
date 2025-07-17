@@ -2,12 +2,19 @@
 package api
 
 import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
+	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
+	"github.com/oklog/ulid/v2"
 )
 
 // ResourceIDsRequest represents the request body for bulk resource loading
@@ -15,6 +22,24 @@ type ResourceIDsRequest struct {
 	ResourceIDs []string `json:"resourceIds,omitempty"` // Made optional
 	Categories  []string `json:"categories,omitempty"`  // New - filter by categories
 	Slugs       []string `json:"slugs,omitempty"`       // New - filter by slugs
+}
+
+type CreateResourceRequest struct {
+	Title          string                 `json:"title" binding:"required"`
+	Slug           string                 `json:"slug" binding:"required"`
+	CategorySlug   string                 `json:"categorySlug" binding:"required"`
+	Oneliner       string                 `json:"oneliner" binding:"required"`
+	OptionsPayload map[string]interface{} `json:"optionsPayload"`
+	ActionLisp     *string                `json:"actionLisp,omitempty"`
+}
+
+type UpdateResourceRequest struct {
+	Title          string                 `json:"title" binding:"required"`
+	Slug           string                 `json:"slug" binding:"required"`
+	CategorySlug   string                 `json:"categorySlug" binding:"required"`
+	Oneliner       string                 `json:"oneliner" binding:"required"`
+	OptionsPayload map[string]interface{} `json:"optionsPayload"`
+	ActionLisp     *string                `json:"actionLisp,omitempty"`
 }
 
 // GetResourcesByIDsHandler returns multiple resources by IDs, categories, or slugs using cache-first pattern
@@ -203,4 +228,389 @@ func GetResourcesByCategoryHandler(c *gin.Context) {
 		"category":  category,
 		"count":     len(resources),
 	})
+}
+
+// CreateResourceHandler creates a new resource with authentication and validation
+func CreateResourceHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Authentication - Admin OR Editor required
+	if !validateAdminOrEditor(c, ctx) {
+		return
+	}
+
+	// Parse request
+	var req CreateResourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	// Validate resource data against known resources schema
+	if err := validateResourceRequest(ctx, req.Title, req.Slug, req.CategorySlug, req.Oneliner, req.OptionsPayload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check for slug uniqueness
+	var existingID string
+	err = ctx.Database.Conn.QueryRow("SELECT id FROM resources WHERE slug = ?", req.Slug).Scan(&existingID)
+	if err != sql.ErrNoRows {
+		if err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Resource with this slug already exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Generate new ID
+	resourceID := ulid.Make().String()
+
+	// Convert options payload to database format
+	optionsPayloadJSON, err := json.Marshal(req.OptionsPayload)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize options payload"})
+		return
+	}
+
+	// Insert into database
+	query := `INSERT INTO resources (id, title, slug, category_slug, oneliner, options_payload, action_lisp) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	_, err = ctx.Database.Conn.Exec(query, resourceID, req.Title, req.Slug, req.CategorySlug, req.Oneliner, string(optionsPayloadJSON), req.ActionLisp)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create resource"})
+		return
+	}
+
+	// Create response resource node
+	resourceNode := &models.ResourceNode{
+		ID:             resourceID,
+		Title:          req.Title,
+		Slug:           req.Slug,
+		CategorySlug:   &req.CategorySlug,
+		Oneliner:       req.Oneliner,
+		OptionsPayload: req.OptionsPayload,
+		ActionLisp:     req.ActionLisp,
+	}
+
+	// Cache invalidation cascade
+	cache.GetGlobalManager().SetResource(ctx.TenantID, resourceNode)
+	cache.GetGlobalManager().InvalidateFullContentMap(ctx.TenantID)
+	cache.GetGlobalManager().InvalidateOrphanAnalysis(ctx.TenantID)
+
+	c.JSON(http.StatusCreated, resourceNode)
+}
+
+// UpdateResourceHandler updates an existing resource with authentication and validation
+func UpdateResourceHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Authentication - Admin OR Editor required
+	if !validateAdminOrEditor(c, ctx) {
+		return
+	}
+
+	resourceID := c.Param("id")
+	if resourceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Resource ID is required"})
+		return
+	}
+
+	// Parse request
+	var req UpdateResourceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format", "details": err.Error()})
+		return
+	}
+
+	// Validate resource data against known resources schema
+	if err := validateResourceRequest(ctx, req.Title, req.Slug, req.CategorySlug, req.Oneliner, req.OptionsPayload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if resource exists
+	var existingID string
+	err = ctx.Database.Conn.QueryRow("SELECT id FROM resources WHERE id = ?", resourceID).Scan(&existingID)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Resource not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Check for slug uniqueness (excluding current resource)
+	var conflictingID string
+	err = ctx.Database.Conn.QueryRow("SELECT id FROM resources WHERE slug = ? AND id != ?", req.Slug, resourceID).Scan(&conflictingID)
+	if err != sql.ErrNoRows {
+		if err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Another resource with this slug already exists"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Convert options payload to database format
+	optionsPayloadJSON, err := json.Marshal(req.OptionsPayload)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize options payload"})
+		return
+	}
+
+	// Update database
+	query := `UPDATE resources SET title = ?, slug = ?, category_slug = ?, oneliner = ?, options_payload = ?, action_lisp = ? WHERE id = ?`
+	_, err = ctx.Database.Conn.Exec(query, req.Title, req.Slug, req.CategorySlug, req.Oneliner, string(optionsPayloadJSON), req.ActionLisp, resourceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update resource"})
+		return
+	}
+
+	// Create response resource node
+	resourceNode := &models.ResourceNode{
+		ID:             resourceID,
+		Title:          req.Title,
+		Slug:           req.Slug,
+		CategorySlug:   &req.CategorySlug,
+		Oneliner:       req.Oneliner,
+		OptionsPayload: req.OptionsPayload,
+		ActionLisp:     req.ActionLisp,
+	}
+
+	// Cache invalidation cascade
+	cache.GetGlobalManager().SetResource(ctx.TenantID, resourceNode)
+	cache.GetGlobalManager().InvalidateFullContentMap(ctx.TenantID)
+	cache.GetGlobalManager().InvalidateOrphanAnalysis(ctx.TenantID)
+
+	c.JSON(http.StatusOK, resourceNode)
+}
+
+// DeleteResourceHandler deletes a resource with authentication and usage check
+func DeleteResourceHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Authentication - Admin OR Editor required
+	if !validateAdminOrEditor(c, ctx) {
+		return
+	}
+
+	resourceID := c.Param("id")
+	if resourceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Resource ID is required"})
+		return
+	}
+
+	// Check if resource exists
+	var existingSlug string
+	err = ctx.Database.Conn.QueryRow("SELECT slug FROM resources WHERE id = ?", resourceID).Scan(&existingSlug)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Resource not found"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// Check for resource references in other resources' options_payload
+	var usageCount int
+	rows, err := ctx.Database.Conn.Query("SELECT options_payload FROM resources WHERE id != ?", resourceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check resource usage"})
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var optionsPayloadStr string
+		if err := rows.Scan(&optionsPayloadStr); err != nil {
+			continue
+		}
+
+		// Check if this resource's slug is referenced in the options payload
+		if strings.Contains(optionsPayloadStr, existingSlug) {
+			usageCount++
+		}
+	}
+
+	if usageCount > 0 {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":      "Cannot delete resource: it is referenced by other resources",
+			"usageCount": usageCount,
+		})
+		return
+	}
+
+	// Delete from database
+	_, err = ctx.Database.Conn.Exec("DELETE FROM resources WHERE id = ?", resourceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete resource"})
+		return
+	}
+
+	// Cache invalidation cascade
+	cache.GetGlobalManager().InvalidateResource(ctx.TenantID, resourceID)
+	cache.GetGlobalManager().InvalidateFullContentMap(ctx.TenantID)
+	cache.GetGlobalManager().InvalidateOrphanAnalysis(ctx.TenantID)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Resource deleted successfully"})
+}
+
+// validateResourceRequest validates resource creation/update data against known resources schema
+func validateResourceRequest(ctx *tenant.Context, title, slug, categorySlug, oneliner string, optionsPayload map[string]interface{}) error {
+	// Basic field validation
+	if strings.TrimSpace(title) == "" {
+		return fmt.Errorf("title is required")
+	}
+
+	if strings.TrimSpace(slug) == "" {
+		return fmt.Errorf("slug is required")
+	}
+
+	if strings.TrimSpace(categorySlug) == "" {
+		return fmt.Errorf("categorySlug is required")
+	}
+
+	if strings.TrimSpace(oneliner) == "" {
+		return fmt.Errorf("oneliner is required")
+	}
+
+	// Get known resources schema from tenant context
+	if ctx.Config.BrandConfig == nil || ctx.Config.BrandConfig.KnownResources == nil {
+		return fmt.Errorf("known resources configuration not available")
+	}
+
+	knownResources := *ctx.Config.BrandConfig.KnownResources
+
+	// Check if category exists in known resources
+	categoryDefinition, exists := knownResources[categorySlug]
+	if !exists {
+		return fmt.Errorf("category '%s' is not defined in known resources", categorySlug)
+	}
+
+	// Validate each field in options payload against category definition
+	for fieldName, fieldDef := range categoryDefinition {
+		value, hasValue := optionsPayload[fieldName]
+
+		// Check required fields
+		if !fieldDef.Optional && !hasValue {
+			return fmt.Errorf("field '%s' is required for category '%s'", fieldName, categorySlug)
+		}
+
+		// Skip validation if field is optional and not provided
+		if !hasValue {
+			continue
+		}
+
+		// Validate field type and constraints
+		if err := validateFieldValue(fieldName, value, fieldDef, knownResources); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateFieldValue validates a single field value against its definition
+func validateFieldValue(fieldName string, value interface{}, fieldDef tenant.FieldDefinition, knownResources tenant.KnownResourcesConfig) error {
+	switch fieldDef.Type {
+	case "string":
+		strVal, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("field '%s' must be a string", fieldName)
+		}
+
+		// If this field references another category, validate the reference
+		if fieldDef.BelongsToCategory != "" {
+			if err := validateCategoryReference(fieldName, strVal, fieldDef.BelongsToCategory, knownResources); err != nil {
+				return err
+			}
+		}
+
+	case "number":
+		// Handle both int and float values from JSON
+		var numVal float64
+		switch v := value.(type) {
+		case float64:
+			numVal = v
+		case int:
+			numVal = float64(v)
+		case string:
+			// Try to parse string as number
+			parsed, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				return fmt.Errorf("field '%s' must be a number", fieldName)
+			}
+			numVal = parsed
+		default:
+			return fmt.Errorf("field '%s' must be a number", fieldName)
+		}
+
+		// Check min/max constraints
+		if fieldDef.MinNumber != nil && numVal < float64(*fieldDef.MinNumber) {
+			return fmt.Errorf("field '%s' must be at least %d", fieldName, *fieldDef.MinNumber)
+		}
+		if fieldDef.MaxNumber != nil && numVal > float64(*fieldDef.MaxNumber) {
+			return fmt.Errorf("field '%s' must be at most %d", fieldName, *fieldDef.MaxNumber)
+		}
+
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("field '%s' must be a boolean", fieldName)
+		}
+
+	case "multi":
+		// Multi fields should be arrays
+		if _, ok := value.([]interface{}); !ok {
+			return fmt.Errorf("field '%s' must be an array", fieldName)
+		}
+
+	case "date":
+		// Date fields should be numbers (Unix timestamps)
+		switch value.(type) {
+		case float64, int:
+			// Valid timestamp
+		default:
+			return fmt.Errorf("field '%s' must be a Unix timestamp", fieldName)
+		}
+
+	case "image":
+		// Image fields should be strings (URLs or base64)
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("field '%s' must be a string", fieldName)
+		}
+
+	default:
+		return fmt.Errorf("unknown field type '%s' for field '%s'", fieldDef.Type, fieldName)
+	}
+
+	return nil
+}
+
+// validateCategoryReference validates that a reference to another category is valid
+func validateCategoryReference(fieldName, value, referencedCategory string, knownResources tenant.KnownResourcesConfig) error {
+	// Check if the referenced category exists
+	if _, exists := knownResources[referencedCategory]; !exists {
+		return fmt.Errorf("field '%s' references category '%s' which does not exist", fieldName, referencedCategory)
+	}
+
+	// Note: We can't validate that the specific resource exists here because
+	// this validation runs during creation/update, and we'd need database access.
+	// The frontend should handle this validation using the content map.
+
+	return nil
 }
