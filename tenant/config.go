@@ -62,6 +62,7 @@ type Config struct {
 	AAIAPIKey          string       `json:"AAI_API_KEY"`
 	JWTSecret          string       `json:"JWT_SECRET"`
 	AESKey             string       `json:"AES_KEY"`
+	TursoEnabled       bool         `json:"TURSO_ENABLED"`
 	AdminPassword      string       `json:"ADMIN_PASSWORD,omitempty"`
 	EditorPassword     string       `json:"EDITOR_PASSWORD,omitempty"`
 	HomeSlug           string       `json:"HOME_SLUG,omitempty"`
@@ -197,6 +198,12 @@ func LoadTenantConfig(tenantID string) (*Config, error) {
 		needsSave = true
 	}
 
+	// Set default admin password if not present (for initial setup)
+	if config.AdminPassword == "" {
+		config.AdminPassword = "storykeep" // Default admin password
+		needsSave = true
+	}
+
 	// Save config if we generated new keys or set defaults
 	if needsSave {
 		if err := saveConfig(config, configPath); err != nil {
@@ -243,10 +250,12 @@ func saveConfig(config *Config, configPath string) error {
 	}
 
 	// Create config data (exclude computed fields)
-	configData := map[string]string{
+	configData := map[string]interface{}{
 		"JWT_SECRET": config.JWTSecret,
 		"AES_KEY":    config.AESKey,
 	}
+
+	configData["TURSO_ENABLED"] = config.TursoEnabled
 
 	// Include Turso credentials if present
 	if config.TursoDatabase != "" {

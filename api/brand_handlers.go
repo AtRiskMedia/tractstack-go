@@ -144,6 +144,7 @@ func UpdateBrandConfigHandler(c *gin.Context) {
 
 	// 5. Configuration Update
 	finalConfig := updateBrandConfigFields(updatedConfig, &request)
+	finalConfig.SiteInit = true
 
 	// 6. Configuration Save
 	if err := saveBrandConfig(ctx.Config.TenantID, finalConfig); err != nil {
