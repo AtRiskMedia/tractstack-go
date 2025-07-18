@@ -306,14 +306,18 @@ func saveBrandConfig(tenantID string, config *tenant.BrandConfig) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Write knownResources
+	// Write knownResources separately
 	if err := saveKnownResources(tenantID, config.KnownResources); err != nil {
 		return err
 	}
 
-	// Write brand config
+	// Create a copy of the config WITHOUT KnownResources for brand.json
+	brandConfigForFile := *config
+	brandConfigForFile.KnownResources = nil // Exclude KnownResources from brand.json
+
+	// Write brand config (without KnownResources)
 	brandPath := filepath.Join(configPath, "brand.json")
-	data, err := json.MarshalIndent(config, "", "  ")
+	data, err := json.MarshalIndent(brandConfigForFile, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal brand config: %w", err)
 	}
