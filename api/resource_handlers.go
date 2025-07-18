@@ -395,7 +395,9 @@ func UpdateResourceHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resourceNode)
 }
 
-// DeleteResourceHandler deletes a resource with authentication and usage check
+// Replace the existing DeleteResourceHandler function with this updated version:
+
+// DeleteResourceHandler deletes a resource with authentication and cache-first reference check
 func DeleteResourceHandler(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -414,7 +416,7 @@ func DeleteResourceHandler(c *gin.Context) {
 		return
 	}
 
-	// Check if resource exists
+	// Check if resource exists and get its slug
 	var existingSlug string
 	err = ctx.Database.Conn.QueryRow("SELECT slug FROM resources WHERE id = ?", resourceID).Scan(&existingSlug)
 	if err == sql.ErrNoRows {
@@ -426,25 +428,11 @@ func DeleteResourceHandler(c *gin.Context) {
 		return
 	}
 
-	// Check for resource references in other resources' options_payload
-	var usageCount int
-	rows, err := ctx.Database.Conn.Query("SELECT options_payload FROM resources WHERE id != ?", resourceID)
+	// Check for resource references using cache-first approach
+	usageCount, err := checkResourceReferencesWithCache(ctx, existingSlug)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check resource usage"})
 		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var optionsPayloadStr string
-		if err := rows.Scan(&optionsPayloadStr); err != nil {
-			continue
-		}
-
-		// Check if this resource's slug is referenced in the options payload
-		if strings.Contains(optionsPayloadStr, existingSlug) {
-			usageCount++
-		}
 	}
 
 	if usageCount > 0 {
@@ -468,6 +456,70 @@ func DeleteResourceHandler(c *gin.Context) {
 	cache.GetGlobalManager().InvalidateOrphanAnalysis(ctx.TenantID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Resource deleted successfully"})
+}
+
+// checkResourceReferencesWithCache performs cache-first reference validation
+func checkResourceReferencesWithCache(ctx *tenant.Context, resourceSlug string) (int, error) {
+	var usageCount int
+
+	// Get known resources schema
+	if ctx.Config.BrandConfig == nil || ctx.Config.BrandConfig.KnownResources == nil {
+		return 0, nil // No schema = no validation
+	}
+	knownResources := *ctx.Config.BrandConfig.KnownResources
+
+	// Use cache-first resource service to get all resources
+	resourceService := content.NewResourceService(ctx, cache.GetGlobalManager())
+
+	// Get all resource IDs (this will warm the cache if needed)
+	allIDs, err := resourceService.GetAllIDs()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get all resource IDs: %w", err)
+	}
+
+	// Get all resources (these should now be in cache)
+	allResources, err := resourceService.GetByIDs(allIDs)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get resources: %w", err)
+	}
+
+	// Check each resource for references to the target slug
+	for _, resource := range allResources {
+		if resource.CategorySlug == nil {
+			continue
+		}
+
+		// Get category definition
+		categoryDef, exists := knownResources[*resource.CategorySlug]
+		if !exists {
+			continue
+		}
+
+		// Check only fields with BelongsToCategory relationships
+		for fieldName, fieldDef := range categoryDef {
+			if fieldDef.BelongsToCategory != "" {
+				if fieldValue, exists := resource.OptionsPayload[fieldName]; exists {
+					// Handle both string and array of strings
+					switch v := fieldValue.(type) {
+					case string:
+						if v == resourceSlug {
+							usageCount++
+						}
+					case []interface{}:
+						// Handle multi-select reference fields
+						for _, item := range v {
+							if strItem, ok := item.(string); ok && strItem == resourceSlug {
+								usageCount++
+								break // Count this resource only once even if multiple refs
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return usageCount, nil
 }
 
 // validateResourceRequest validates resource creation/update data against known resources schema
