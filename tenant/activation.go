@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // ActivateTenant creates tables and indexes for an inactive tenant
@@ -42,6 +44,11 @@ func ActivateTenant(ctx *Context) error {
 	}
 	if !tablesExist {
 		return fmt.Errorf("tables creation failed - not all tables exist")
+	}
+
+	// Insert initial content
+	if err := insertInitialContent(ctx.Database); err != nil {
+		return fmt.Errorf("failed to insert initial content: %w", err)
 	}
 
 	// Only mark as active after confirming tables exist
@@ -82,6 +89,38 @@ func CheckTablesExist(db *Database) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// insertInitialContent creates the default tractstack and hello storyfragment
+func insertInitialContent(db *Database) error {
+	// Generate ULIDs for IDs
+	tractStackID := utils.GenerateULID()
+	storyFragmentID := utils.GenerateULID()
+	now := time.Now().UTC()
+
+	// Insert default tractstack
+	_, err := db.Conn.Exec(`
+		INSERT INTO tractstacks (id, title, slug, social_image_path) 
+		VALUES (?, ?, ?, ?) 
+		ON CONFLICT (slug) DO NOTHING`,
+		tractStackID, "Tract Stack", "HELLO", "")
+	if err != nil {
+		return fmt.Errorf("failed to insert default tractstack: %w", err)
+	}
+
+	// Insert default hello storyfragment
+	_, err = db.Conn.Exec(`
+		INSERT INTO storyfragments (
+			id, title, slug, tractstack_id, created, changed, 
+			menu_id, social_image_path, tailwind_background_colour
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
+		ON CONFLICT (slug) DO NOTHING`,
+		storyFragmentID, "", "hello", tractStackID, now, now, nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to insert default storyfragment: %w", err)
+	}
+
+	return nil
 }
 
 // createTables creates all required database tables

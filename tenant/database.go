@@ -61,8 +61,8 @@ func NewDatabase(config *Config) (*Database, error) {
 	var err error
 	var useTurso bool
 
-	// Try Turso first if credentials are available
-	if config.TursoDatabase != "" && config.TursoToken != "" {
+	// Try Turso first if enabled AND credentials are available
+	if config.TursoEnabled && config.TursoDatabase != "" && config.TursoToken != "" {
 		connStr := config.TursoDatabase + "?authToken=" + config.TursoToken
 		conn, err = sql.Open("libsql", connStr)
 		if err == nil {

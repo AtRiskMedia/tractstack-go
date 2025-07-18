@@ -22,6 +22,7 @@ type AdvancedConfigStatusResponse struct {
 	AdminPasswordSet  bool `json:"adminPasswordSet"`
 	EditorPasswordSet bool `json:"editorPasswordSet"`
 	AAIAPIKeySet      bool `json:"aaiAPIKeySet"`
+	TursoEnabled      bool `json:"tursoEnabled"`
 }
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
@@ -31,6 +32,7 @@ type AdvancedConfigUpdateRequest struct {
 	AdminPassword      string `json:"ADMIN_PASSWORD,omitempty"`
 	EditorPassword     string `json:"EDITOR_PASSWORD,omitempty"`
 	AAIAPIKey          string `json:"AAI_API_KEY,omitempty"`
+	TursoEnabled       bool   `json:"TURSO_ENABLED,omitempty"`
 	HomeSlug           string `json:"HOME_SLUG,omitempty"`
 	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG,omitempty"`
 }
@@ -71,6 +73,7 @@ func GetAdvancedConfigStatusHandler(c *gin.Context) {
 		AdminPasswordSet:  ctx.Config.AdminPassword != "",
 		EditorPasswordSet: ctx.Config.EditorPassword != "",
 		AAIAPIKeySet:      ctx.Config.AAIAPIKey != "",
+		TursoEnabled:      ctx.Config.TursoEnabled,
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": status})
@@ -208,6 +211,8 @@ func updateAdvancedConfig(config *tenant.Config, request *AdvancedConfigUpdateRe
 		updatedConfig.TractStackHomeSlug = request.TractStackHomeSlug
 	}
 
+	updatedConfig.TursoEnabled = request.TursoEnabled
+
 	return &updatedConfig, nil
 }
 
@@ -231,6 +236,7 @@ func saveAdvancedConfig(tenantID string, config *tenant.Config) error {
 		"TRACTSTACK_HOME_SLUG": config.TractStackHomeSlug,
 		"JWT_SECRET":           config.JWTSecret,
 		"AES_KEY":              config.AESKey,
+		"TURSO_ENABLED":        config.TursoEnabled,
 	}
 
 	// Write env.json
