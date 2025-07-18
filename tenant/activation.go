@@ -93,31 +93,50 @@ func CheckTablesExist(db *Database) (bool, error) {
 
 // insertInitialContent creates the default tractstack and hello storyfragment
 func insertInitialContent(db *Database) error {
-	// Generate ULIDs for IDs
-	tractStackID := utils.GenerateULID()
-	storyFragmentID := utils.GenerateULID()
-	now := time.Now().UTC()
-
-	// Insert default tractstack
-	_, err := db.Conn.Exec(`
-		INSERT INTO tractstacks (id, title, slug, social_image_path) 
-		VALUES (?, ?, ?, ?) 
-		ON CONFLICT (slug) DO NOTHING`,
-		tractStackID, "Tract Stack", "HELLO", "")
+	// Check if tractstack already exists
+	var tractStackExists bool
+	err := db.Conn.QueryRow("SELECT EXISTS(SELECT 1 FROM tractstacks WHERE slug = 'HELLO')").Scan(&tractStackExists)
 	if err != nil {
-		return fmt.Errorf("failed to insert default tractstack: %w", err)
+		return fmt.Errorf("failed to check tractstack existence: %w", err)
 	}
 
-	// Insert default hello storyfragment
-	_, err = db.Conn.Exec(`
-		INSERT INTO storyfragments (
-			id, title, slug, tractstack_id, created, changed, 
-			menu_id, social_image_path, tailwind_background_colour
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
-		ON CONFLICT (slug) DO NOTHING`,
-		storyFragmentID, "", "hello", tractStackID, now, now, nil, nil, nil)
+	if !tractStackExists {
+		tractStackID := utils.GenerateULID()
+		_, err = db.Conn.Exec(`
+			INSERT INTO tractstacks (id, title, slug, social_image_path) 
+			VALUES (?, ?, ?, ?)`,
+			tractStackID, "Tract Stack", "HELLO", "")
+		if err != nil {
+			return fmt.Errorf("failed to insert default tractstack: %w", err)
+		}
+	}
+
+	// Check if hello storyfragment already exists
+	var storyFragmentExists bool
+	err = db.Conn.QueryRow("SELECT EXISTS(SELECT 1 FROM storyfragments WHERE slug = 'hello')").Scan(&storyFragmentExists)
 	if err != nil {
-		return fmt.Errorf("failed to insert default storyfragment: %w", err)
+		return fmt.Errorf("failed to check storyfragment existence: %w", err)
+	}
+
+	if !storyFragmentExists {
+		// Get tractstack ID
+		var tractStackID string
+		err = db.Conn.QueryRow("SELECT id FROM tractstacks WHERE slug = 'HELLO'").Scan(&tractStackID)
+		if err != nil {
+			return fmt.Errorf("failed to get tractstack ID: %w", err)
+		}
+
+		storyFragmentID := utils.GenerateULID()
+		now := time.Now().UTC()
+		_, err = db.Conn.Exec(`
+			INSERT INTO storyfragments (
+				id, title, slug, tractstack_id, created, changed, 
+				menu_id, social_image_path, tailwind_background_colour
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			storyFragmentID, "", "hello", tractStackID, now, now, nil, nil, nil)
+		if err != nil {
+			return fmt.Errorf("failed to insert default storyfragment: %w", err)
+		}
 	}
 
 	return nil
