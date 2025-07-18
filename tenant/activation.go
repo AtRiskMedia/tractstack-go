@@ -139,6 +139,25 @@ func insertInitialContent(db *Database) error {
 		}
 	}
 
+	// Check if default epinet already exists
+	var epinetExists bool
+	err = db.Conn.QueryRow("SELECT EXISTS(SELECT 1 FROM epinets WHERE title = 'My Tract Stack')").Scan(&epinetExists)
+	if err != nil {
+		return fmt.Errorf("failed to check epinet existence: %w", err)
+	}
+
+	if !epinetExists {
+		epinetID := utils.GenerateULID()
+		epinetPayload := `{"promoted": true, "steps": [{"title": "Entered Site", "gateType": "commitmentAction", "objectType": "StoryFragment", "values": ["ENTERED"]}, {"title": "Experienced Site", "gateType": "commitmentAction", "objectType": "StoryFragment", "values": ["PAGEVIEWED"]}, {"title": "Experienced Content", "gateType": "commitmentAction", "objectType": "Pane", "values": ["READ", "GLOSSED", "CLICKED", "WATCHED"]}]}`
+		_, err = db.Conn.Exec(`
+			INSERT INTO epinets (id, title, options_payload) 
+			VALUES (?, ?, ?)`,
+			epinetID, "My Tract Stack", epinetPayload)
+		if err != nil {
+			return fmt.Errorf("failed to insert default epinet: %w", err)
+		}
+	}
+
 	return nil
 }
 
