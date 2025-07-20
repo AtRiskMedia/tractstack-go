@@ -77,6 +77,38 @@ func PreActivateAllTenants(manager *Manager) error {
 	return nil
 }
 
+// GetTenantList returns a list of all tenant IDs from the registry
+func GetTenantList() ([]string, error) {
+	registry, err := LoadTenantRegistry()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tenant registry: %w", err)
+	}
+
+	tenantIDs := make([]string, 0, len(registry.Tenants))
+	for tenantID := range registry.Tenants {
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+
+	return tenantIDs, nil
+}
+
+// GetActiveTenantCount returns the number of active tenants
+func GetActiveTenantCount() (int, error) {
+	registry, err := LoadTenantRegistry()
+	if err != nil {
+		return 0, fmt.Errorf("failed to load tenant registry: %w", err)
+	}
+
+	activeCount := 0
+	for _, tenantInfo := range registry.Tenants {
+		if tenantInfo.Status == "active" {
+			activeCount++
+		}
+	}
+
+	return activeCount, nil
+}
+
 // preActivateSingleTenant activates a single tenant during startup
 func preActivateSingleTenant(tenantID string) error {
 	tenantStart := time.Now().UTC()
@@ -85,6 +117,29 @@ func preActivateSingleTenant(tenantID string) error {
 	config, err := LoadTenantConfig(tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Check tenant status from registry
+	registry, err := LoadTenantRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to load registry: %w", err)
+	}
+
+	tenantInfo, exists := registry.Tenants[tenantID]
+	if !exists {
+		return fmt.Errorf("tenant %s not found in registry", tenantID)
+	}
+
+	// Skip activation for "reserved" status tenants
+	if tenantInfo.Status == "reserved" {
+		log.Printf("  - Tenant '%s' has reserved status - skipping activation", tenantID)
+		return nil
+	}
+
+	// Process both "inactive" and other non-active statuses
+	if tenantInfo.Status == "active" {
+		log.Printf("  - Tenant '%s' already active - skipping", tenantID)
+		return nil
 	}
 
 	// Create database connection
@@ -140,16 +195,23 @@ func ValidatePreActivation() error {
 
 	inactiveTenants := make([]string, 0)
 	activeTenants := make([]string, 0)
+	reservedTenants := make([]string, 0)
 
 	for tenantID, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status != "active" {
-			inactiveTenants = append(inactiveTenants, tenantID)
-		} else {
+		switch tenantInfo.Status {
+		case "active":
 			activeTenants = append(activeTenants, tenantID)
+		case "reserved":
+			reservedTenants = append(reservedTenants, tenantID)
+		default:
+			inactiveTenants = append(inactiveTenants, tenantID)
 		}
 	}
 
 	log.Printf("Active tenants: %v", activeTenants)
+	if len(reservedTenants) > 0 {
+		log.Printf("Reserved tenants (awaiting activation): %v", reservedTenants)
+	}
 
 	if len(inactiveTenants) > 0 {
 		log.Printf("Inactive tenants: %v", inactiveTenants)
@@ -157,38 +219,6 @@ func ValidatePreActivation() error {
 			len(inactiveTenants), inactiveTenants)
 	}
 
-	log.Printf("✓ Validation passed - all %d tenants are active", len(registry.Tenants))
+	log.Printf("✓ Validation passed - %d tenants active, %d reserved", len(activeTenants), len(reservedTenants))
 	return nil
-}
-
-// GetTenantList returns a list of all tenant IDs from the registry
-func GetTenantList() ([]string, error) {
-	registry, err := LoadTenantRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load tenant registry: %w", err)
-	}
-
-	tenantIDs := make([]string, 0, len(registry.Tenants))
-	for tenantID := range registry.Tenants {
-		tenantIDs = append(tenantIDs, tenantID)
-	}
-
-	return tenantIDs, nil
-}
-
-// GetActiveTenantCount returns the number of active tenants
-func GetActiveTenantCount() (int, error) {
-	registry, err := LoadTenantRegistry()
-	if err != nil {
-		return 0, fmt.Errorf("failed to load tenant registry: %w", err)
-	}
-
-	activeCount := 0
-	for _, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status == "active" {
-			activeCount++
-		}
-	}
-
-	return activeCount, nil
 }

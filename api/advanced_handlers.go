@@ -2,7 +2,6 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,7 +31,7 @@ type AdvancedConfigUpdateRequest struct {
 	AdminPassword      string `json:"ADMIN_PASSWORD,omitempty"`
 	EditorPassword     string `json:"EDITOR_PASSWORD,omitempty"`
 	AAIAPIKey          string `json:"AAI_API_KEY,omitempty"`
-	TursoEnabled       bool   `json:"TURSO_ENABLED,omitempty"`
+	TursoEnabled       *bool  `json:"TURSO_ENABLED,omitempty"`
 	HomeSlug           string `json:"HOME_SLUG,omitempty"`
 	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG,omitempty"`
 }
@@ -126,7 +125,7 @@ func UpdateAdvancedConfigHandler(c *gin.Context) {
 
 	// Test Turso connection if credentials provided
 	if hasTursoURL && hasTursoToken {
-		if err := testTursoConnection(request.TursoDatabaseURL, request.TursoAuthToken); err != nil {
+		if err := TestTursoConnection(request.TursoDatabaseURL, request.TursoAuthToken); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Turso connection test failed: %v", err)})
 			return
 		}
@@ -149,32 +148,6 @@ func UpdateAdvancedConfigHandler(c *gin.Context) {
 	ctx.Config = updatedConfig
 
 	c.JSON(http.StatusOK, gin.H{"message": "Configuration updated successfully"})
-}
-
-// testTursoConnection tests the Turso database connection
-func testTursoConnection(databaseURL, authToken string) error {
-	// Create connection string
-	connStr := fmt.Sprintf("%s?authToken=%s", databaseURL, authToken)
-
-	// Attempt to open connection
-	db, err := sql.Open("libsql", connStr)
-	if err != nil {
-		return fmt.Errorf("failed to open connection: %w", err)
-	}
-	defer db.Close()
-
-	// Test with a simple query
-	var result int
-	err = db.QueryRow("SELECT 1").Scan(&result)
-	if err != nil {
-		return fmt.Errorf("connection test query failed: %w", err)
-	}
-
-	if result != 1 {
-		return fmt.Errorf("unexpected query result: %d", result)
-	}
-
-	return nil
 }
 
 // updateAdvancedConfig applies updates to the tenant configuration
@@ -211,7 +184,9 @@ func updateAdvancedConfig(config *tenant.Config, request *AdvancedConfigUpdateRe
 		updatedConfig.TractStackHomeSlug = request.TractStackHomeSlug
 	}
 
-	updatedConfig.TursoEnabled = request.TursoEnabled
+	if request.TursoEnabled != nil {
+		updatedConfig.TursoEnabled = *request.TursoEnabled
+	}
 
 	return &updatedConfig, nil
 }
