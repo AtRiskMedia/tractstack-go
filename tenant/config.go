@@ -67,6 +67,7 @@ type Config struct {
 	EditorPassword     string       `json:"EDITOR_PASSWORD,omitempty"`
 	HomeSlug           string       `json:"HOME_SLUG,omitempty"`
 	TractStackHomeSlug string       `json:"TRACTSTACK_HOME_SLUG,omitempty"`
+	ActivationToken    string       `json:"ACTIVATION_TOKEN,omitempty"`
 	SQLitePath         string       `json:"-"` // computed, not from JSON
 	BrandConfig        *BrandConfig `json:"-"`
 }
@@ -352,4 +353,42 @@ func LoadKnownResources(tenantID string) (*KnownResourcesConfig, error) {
 	}
 
 	return &knownResources, nil
+}
+
+// RegisterTenantWithStatus adds a new tenant to the registry with specified status
+func RegisterTenantWithStatus(tenantID, status string) error {
+	registryPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", "t8k", "tenants.json")
+
+	registry, err := LoadTenantRegistry()
+	if err != nil {
+		return err
+	}
+
+	// Add tenant if it doesn't exist
+	if _, exists := registry.Tenants[tenantID]; !exists {
+		registry.Tenants[tenantID] = TenantInfo{
+			TenantID:     tenantID,
+			Domains:      []string{"*"},
+			Status:       status,
+			DatabaseType: "",
+		}
+
+		// Ensure directory exists
+		registryDir := filepath.Dir(registryPath)
+		if err := os.MkdirAll(registryDir, 0755); err != nil {
+			return fmt.Errorf("failed to create registry directory: %w", err)
+		}
+
+		// Save registry
+		data, err := json.MarshalIndent(registry, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal registry: %w", err)
+		}
+
+		if err := os.WriteFile(registryPath, data, 0644); err != nil {
+			return fmt.Errorf("failed to write registry: %w", err)
+		}
+	}
+
+	return nil
 }

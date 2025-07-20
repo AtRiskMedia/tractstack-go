@@ -3,6 +3,7 @@ package tenant
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,8 +41,14 @@ func (d *Detector) DetectTenant(c *gin.Context) (string, error) {
 	var tenantID string
 
 	if d.multiTenant {
-		// Get tenant ID from header (set by Astro middleware)
+		// Get tenant ID from header first (set by Astro middleware)
 		tenantID = c.GetHeader("X-Tenant-ID")
+		// FALLBACK: Check query parameter for SSE connections
+		// EventSource API cannot set custom headers, so we allow tenantId as query param
+		if tenantID == "" {
+			tenantID = c.Query("tenantId")
+		}
+
 		if tenantID == "" {
 			return "", fmt.Errorf("missing tenant ID header in multi-tenant mode")
 		}
@@ -67,6 +74,8 @@ func (d *Detector) DetectTenant(c *gin.Context) (string, error) {
 			return "", fmt.Errorf("unknown tenant: %s", tenantID)
 		}
 	}
+
+	log.Printf("DEBUG: Request from TenantId: '%s'", tenantID) // ADD THIS
 
 	return tenantID, nil
 }

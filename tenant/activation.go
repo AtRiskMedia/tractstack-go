@@ -52,7 +52,7 @@ func ActivateTenant(ctx *Context) error {
 	}
 
 	// Only mark as active after confirming tables exist
-	if err := updateTenantStatus(ctx.TenantID, "active", dbType); err != nil {
+	if err := UpdateTenantStatus(ctx.TenantID, "active", dbType); err != nil {
 		return fmt.Errorf("failed to update tenant status: %w", err)
 	}
 
@@ -254,8 +254,7 @@ func createIndexes(db *Database) error {
 	return nil
 }
 
-// updateTenantStatus updates the tenant status in the registry
-func updateTenantStatus(tenantID, status, dbType string) error {
+func UpdateTenantStatus(tenantID, status, dbType string) error {
 	registryPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", "t8k", "tenants.json")
 
 	// Load current registry

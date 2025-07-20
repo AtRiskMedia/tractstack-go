@@ -1,11 +1,11 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/api"
@@ -18,6 +18,22 @@ import (
 )
 
 var GlobalCacheManager *cache.Manager
+
+// isMultiTenantEnabled checks if multi-tenant mode is enabled via environment variable
+func isMultiTenantEnabled() bool {
+	enableMultiTenant := os.Getenv("ENABLE_MULTI_TENANT")
+	if enableMultiTenant == "" {
+		return false
+	}
+
+	enabled, err := strconv.ParseBool(enableMultiTenant)
+	if err != nil {
+		log.Printf("Invalid ENABLE_MULTI_TENANT value: %s, defaulting to false", enableMultiTenant)
+		return false
+	}
+
+	return enabled
+}
 
 func main() {
 	if err := godotenv.Load(); err != nil {
@@ -94,7 +110,6 @@ func main() {
 		},
 	}))
 
-	// Add tenant context middleware - MODIFIED: Added fail-fast check
 	r.Use(func(c *gin.Context) {
 		tenantCtx, err := tenantManager.GetContext(c)
 		if err != nil {
@@ -105,14 +120,10 @@ func main() {
 		}
 		defer tenantCtx.Close()
 
-		// log.Printf("DEBUG: Tenant %s status: %s", tenantCtx.TenantID, tenantCtx.Status)
-		// *** NEW: FAIL FAST IF TENANT NOT ACTIVE ***
-		if tenantCtx.Status != "active" {
-			log.Printf("ERROR: Tenant %s is not active (status: %s) - should have been pre-activated",
-				tenantCtx.TenantID, tenantCtx.Status)
-			c.JSON(500, gin.H{
-				"error": fmt.Sprintf("tenant %s not ready (status: %s)", tenantCtx.TenantID, tenantCtx.Status),
-			})
+		// Allow reserved tenants ONLY for activation endpoint
+		if tenantCtx.Status == "reserved" && c.Request.URL.Path != "/api/v1/activate-tenant" {
+			// Block reserved tenants from other endpoints
+			c.JSON(500, gin.H{"error": "tenant not activated"})
 			c.Abort()
 			return
 		}
@@ -234,8 +245,17 @@ func main() {
 		// Admin routes
 		adminRoutes := v1.Group("/admin")
 		{
-			// ... existing admin routes ...
 			adminRoutes.GET("/orphan-analysis", api.GetOrphanAnalysisHandler)
+		}
+
+		// Multi-tenant routes (conditional)
+		if isMultiTenantEnabled() {
+			log.Println("SYSTEM MODE: Multi-tenant enabled - registering tenant endpoints")
+			v1.POST("/tenant/activation", api.ActivateTenantHandler)
+			v1.GET("/tenant/capacity", api.GetTenantCapacityHandler)
+			v1.POST("/tenant/provision", api.ProvisionTenantHandler)
+		} else {
+			log.Println("SYSTEM MODE: Multi-tenant disabled - tenant endpoints not available")
 		}
 
 		// Content nodes
