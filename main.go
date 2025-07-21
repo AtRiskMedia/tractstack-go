@@ -11,8 +11,8 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/api"
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	defaults "github.com/AtRiskMedia/tractstack-go/config"
-	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
+	"github.com/AtRiskMedia/tractstack-go/warming"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -79,9 +79,7 @@ func main() {
 	}
 	log.Println("All tenants pre-activated successfully!")
 
-	log.Println("Starting critical content warming...")
-	if err := content.WarmAllTenants(tenantManager); err != nil {
-		// Non-blocking: log warning but don't fail startup
+	if err := warming.WarmAllTenants(tenantManager); err != nil {
 		log.Printf("Warning: Content warming failed: %v", err)
 	} else {
 		log.Println("Critical content warmed successfully!")
