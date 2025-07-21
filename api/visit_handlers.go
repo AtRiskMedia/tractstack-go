@@ -89,8 +89,39 @@ func VisitHandler(c *gin.Context) {
 	// log.Printf("DEBUG: VisitHandler - checking request type (encrypted email: %v, session ID: %v)",
 	//	req.EncryptedEmail != nil, req.SessionID != nil)
 
-	if req.EncryptedEmail != nil && req.EncryptedCode != nil {
-		// log.Printf("DEBUG: VisitHandler - handling encrypted email/code scenario")
+	// Require session ID for all requests
+	if req.SessionID == nil {
+		log.Printf("DEBUG: VisitHandler - session ID required but missing")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required"})
+		return
+	}
+
+	// PATH 1: Check session cache FIRST (always, regardless of auth status)
+	if existingSession, exists := cache.GetGlobalManager().GetSession(ctx.TenantID, *req.SessionID); exists {
+		finalFpID = existingSession.FingerprintID
+		// log.Printf("DEBUG: VisitHandler - PATH 1: Using existing session fingerprint %s", finalFpID)
+
+		// Check if this session already has profile info
+		if existingSession.LeadID != nil {
+			// Load existing lead profile
+			if lead, err := GetLeadByID(*existingSession.LeadID, ctx); err == nil && lead != nil {
+				profile = &models.Profile{
+					Fingerprint:    finalFpID,
+					LeadID:         lead.ID,
+					Firstname:      lead.FirstName,
+					Email:          lead.Email,
+					ContactPersona: lead.ContactPersona,
+					ShortBio:       lead.ShortBio,
+				}
+				hasProfile = true
+				// log.Printf("DEBUG: VisitHandler - PATH 1: Loaded existing profile for lead %s", lead.ID)
+			}
+		}
+		// Session found and fingerprint assigned - skip to visit creation
+
+	} else if req.EncryptedEmail != nil && req.EncryptedCode != nil {
+		// PATH 2: No session cache, but have lead credentials - look up lead fingerprint
+		// log.Printf("DEBUG: VisitHandler - PATH 2: handling encrypted email/code scenario")
 
 		// Handle encrypted email/code scenario
 		decryptedEmail, err := utils.Decrypt(*req.EncryptedEmail, ctx.Config.AESKey)
@@ -116,40 +147,20 @@ func VisitHandler(c *gin.Context) {
 		}
 		// log.Printf("DEBUG: VisitHandler - lead validation successful for lead %s", lead.ID)
 
-		// PRIORITY 1: Always use existing fingerprint for this lead
+		// Use existing fingerprint for this lead OR generate new
 		if existingFpID := visitService.FindFingerprintByLeadID(lead.ID); existingFpID != nil {
 			finalFpID = *existingFpID
-			// log.Printf("DEBUG: VisitHandler - PRIORITY 1: Using existing lead fingerprint %s for lead %s", finalFpID, lead.ID)
+			// log.Printf("DEBUG: VisitHandler - PATH 2: Using existing lead fingerprint %s for lead %s", finalFpID, lead.ID)
 		} else {
-			// PRIORITY 2: No existing lead fingerprint, check if session has one
-			if req.SessionID != nil {
-				if existingSession, exists := cache.GetGlobalManager().GetSession(ctx.TenantID, *req.SessionID); exists {
-					finalFpID = existingSession.FingerprintID
-					// log.Printf("DEBUG: VisitHandler - PRIORITY 2: Using session fingerprint %s for lead %s", finalFpID, lead.ID)
+			finalFpID = utils.GenerateULID()
+			// log.Printf("DEBUG: VisitHandler - PATH 2: Generated new fingerprint %s for lead %s", finalFpID, lead.ID)
+		}
 
-					// Link this fingerprint to the lead
-					if err := visitService.UpdateFingerprintLeadID(finalFpID, &lead.ID); err != nil {
-						log.Printf("ERROR: VisitHandler - Failed to link fingerprint to lead: %v", err)
-						//} else {
-						//	log.Printf("DEBUG: VisitHandler - Successfully linked fingerprint %s to lead %s", finalFpID, lead.ID)
-					}
-				} else {
-					// PRIORITY 3: Generate new fingerprint
-					finalFpID = utils.GenerateULID()
-					// log.Printf("DEBUG: VisitHandler - PRIORITY 3: Generated new fingerprint %s for lead %s", finalFpID, lead.ID)
-				}
-			} else {
-				// PRIORITY 3: Generate new fingerprint
-				finalFpID = utils.GenerateULID()
-				// log.Printf("DEBUG: VisitHandler - PRIORITY 3: Generated new fingerprint %s for lead %s (no session)", finalFpID, lead.ID)
-			}
-
-			// Create fingerprint if it doesn't exist
-			if err := visitService.CreateFingerprint(finalFpID, &lead.ID); err != nil {
-				log.Printf("DEBUG: VisitHandler - failed to create fingerprint: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
-				return
-			}
+		// Create fingerprint if it doesn't exist
+		if err := visitService.CreateFingerprint(finalFpID, &lead.ID); err != nil {
+			log.Printf("DEBUG: VisitHandler - failed to create fingerprint: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
+			return
 		}
 
 		// Create profile
@@ -163,19 +174,14 @@ func VisitHandler(c *gin.Context) {
 		}
 
 		hasProfile = true
-		// log.Printf("DEBUG: VisitHandler - created profile for authenticated user with fingerprint %s", finalFpID)
+		// log.Printf("DEBUG: VisitHandler - PATH 2: created profile for authenticated user with fingerprint %s", finalFpID)
 
 	} else {
-		// log.Printf("DEBUG: VisitHandler - handling anonymous visit")
-		// Anonymous visit - generate ULID fingerprint (NOT session ID)
-		if req.SessionID == nil {
-			log.Printf("DEBUG: VisitHandler - session ID required but missing")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required for anonymous visits"})
-			return
-		}
+		// PATH 3: No session cache AND no lead credentials - generate new anonymous fingerprint
+		// log.Printf("DEBUG: VisitHandler - PATH 3: generating new anonymous fingerprint")
 
 		finalFpID = utils.GenerateULID()
-		// log.Printf("DEBUG: VisitHandler - generated fingerprint %s for anonymous visit", finalFpID)
+		// log.Printf("DEBUG: VisitHandler - PATH 3: generated fingerprint %s for anonymous visit", finalFpID)
 
 		// Check if fingerprint exists, create if not
 		exists, err := visitService.FingerprintExists(finalFpID)
@@ -251,12 +257,22 @@ func VisitHandler(c *gin.Context) {
 		return
 	}
 
-	// Update fingerprint state cache
-	fingerprintState := &models.FingerprintState{
-		FingerprintID: finalFpID,
-		HeldBeliefs:   make(map[string][]string),
-		HeldBadges:    make(map[string]string),
-		LastActivity:  time.Now().UTC(),
+	// Update fingerprint state cache - preserve existing beliefs if fingerprint already exists
+	var fingerprintState *models.FingerprintState
+	if existingFpState, exists := cache.GetGlobalManager().GetFingerprintState(ctx.TenantID, finalFpID); exists {
+		// Preserve existing beliefs and badges, just update activity
+		fingerprintState = existingFpState
+		fingerprintState.LastActivity = time.Now().UTC()
+		// log.Printf("DEBUG: VisitHandler - preserving existing fingerprint state with %d beliefs", len(existingFpState.HeldBeliefs))
+	} else {
+		// Create new fingerprint state with empty beliefs
+		fingerprintState = &models.FingerprintState{
+			FingerprintID: finalFpID,
+			HeldBeliefs:   make(map[string][]string),
+			HeldBadges:    make(map[string]string),
+			LastActivity:  time.Now().UTC(),
+		}
+		// log.Printf("DEBUG: VisitHandler - creating new fingerprint state")
 	}
 	cache.GetGlobalManager().SetFingerprintState(ctx.TenantID, fingerprintState)
 

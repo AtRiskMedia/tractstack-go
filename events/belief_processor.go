@@ -75,11 +75,15 @@ func (bp *BeliefProcessor) processUnsetBelief(beliefSlug, fingerprintID string) 
 	// Get current fingerprint state
 	fpState, exists := bp.cacheManager.GetFingerprintState(bp.tenantID, fingerprintID)
 	if !exists {
+		log.Printf("FINGERPRINT_TRACE: processUnsetBelief - no fingerprint state found for %s", fingerprintID)
 		return false, nil // No state to unset
 	}
 
+	log.Printf("FINGERPRINT_TRACE: processUnsetBelief - current state for %s: %+v", fingerprintID, fpState.HeldBeliefs)
+
 	// Check if belief exists and remove it
 	if _, exists := fpState.HeldBeliefs[beliefSlug]; exists {
+		log.Printf("FINGERPRINT_TRACE: processUnsetBelief - removing belief %s from fingerprint %s", beliefSlug, fingerprintID)
 		delete(fpState.HeldBeliefs, beliefSlug)
 
 		// Update fingerprint state
@@ -91,6 +95,8 @@ func (bp *BeliefProcessor) processUnsetBelief(beliefSlug, fingerprintID string) 
 
 		return true, nil
 	}
+
+	log.Printf("FINGERPRINT_TRACE: processUnsetBelief - belief %s NOT FOUND in fingerprint %s state: %+v", beliefSlug, fingerprintID, fpState.HeldBeliefs)
 
 	return false, nil // Belief didn't exist, nothing changed
 }
