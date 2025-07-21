@@ -3,7 +3,6 @@ package tenant
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -75,7 +74,7 @@ func (d *Detector) DetectTenant(c *gin.Context) (string, error) {
 		}
 	}
 
-	log.Printf("DEBUG: Request from TenantId: '%s'", tenantID) // ADD THIS
+	// log.Printf("DEBUG: Request from TenantId: '%s'", tenantID)
 
 	return tenantID, nil
 }
