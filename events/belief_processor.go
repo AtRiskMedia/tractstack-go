@@ -4,7 +4,6 @@ package events
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -36,8 +35,6 @@ func (bp *BeliefProcessor) ProcessBelief(event models.Event) (bool, error) {
 	// 1. Resolve belief slug → database ID using cache-first lookup
 	beliefID, exists := bp.cacheManager.GetBeliefIDBySlug(bp.tenantID, event.ID)
 	if !exists {
-		log.Printf("ProcessBelief called for belief: %s, verb: %s", event.ID, event.Verb)
-		log.Printf("Belief slug not found in cache: %s", event.ID)
 		return false, fmt.Errorf("belief not found: %s", event.ID)
 	}
 
@@ -75,15 +72,11 @@ func (bp *BeliefProcessor) processUnsetBelief(beliefSlug, fingerprintID string) 
 	// Get current fingerprint state
 	fpState, exists := bp.cacheManager.GetFingerprintState(bp.tenantID, fingerprintID)
 	if !exists {
-		log.Printf("FINGERPRINT_TRACE: processUnsetBelief - no fingerprint state found for %s", fingerprintID)
 		return false, nil // No state to unset
 	}
 
-	log.Printf("FINGERPRINT_TRACE: processUnsetBelief - current state for %s: %+v", fingerprintID, fpState.HeldBeliefs)
-
 	// Check if belief exists and remove it
 	if _, exists := fpState.HeldBeliefs[beliefSlug]; exists {
-		log.Printf("FINGERPRINT_TRACE: processUnsetBelief - removing belief %s from fingerprint %s", beliefSlug, fingerprintID)
 		delete(fpState.HeldBeliefs, beliefSlug)
 
 		// Update fingerprint state
@@ -95,8 +88,6 @@ func (bp *BeliefProcessor) processUnsetBelief(beliefSlug, fingerprintID string) 
 
 		return true, nil
 	}
-
-	log.Printf("FINGERPRINT_TRACE: processUnsetBelief - belief %s NOT FOUND in fingerprint %s state: %+v", beliefSlug, fingerprintID, fpState.HeldBeliefs)
 
 	return false, nil // Belief didn't exist, nothing changed
 }

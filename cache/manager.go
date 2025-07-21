@@ -4,7 +4,6 @@ package cache
 import (
 	"fmt"
 	"log"
-	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -654,13 +653,9 @@ func (m *Manager) GetFingerprintState(tenantID, fingerprintID string) (*models.F
 }
 
 func (m *Manager) SetFingerprintState(tenantID string, state *models.FingerprintState) {
-	log.Printf("FINGERPRINT_TRACE: SetFingerprintState called for %s with beliefs: %+v", state.FingerprintID, state.HeldBeliefs)
-	log.Printf("FINGERPRINT_TRACE: SetFingerprintState stack trace: %s", debug.Stack()) // Add import "runtime/debug"
-
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
 	if cache == nil {
-		log.Printf("ERROR: UserStateCache[%s] is nil in SetFingerprintState", tenantID)
 		return
 	}
 	cache.Mu.Lock()
@@ -771,9 +766,6 @@ func (m *Manager) SetSessionBeliefContext(tenantID string, context *models.Sessi
 	// Set the context
 	key := fmt.Sprintf("%s:%s", context.SessionID, context.StoryfragmentID)
 	cache.SessionBeliefContexts[key] = context
-
-	// log.Printf("DEBUG: Cached session belief context for session %s on storyfragment %s",
-	//	context.SessionID, context.StoryfragmentID)
 }
 
 func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string) {
