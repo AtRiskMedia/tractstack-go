@@ -324,57 +324,57 @@ func (sfs *StoryFragmentService) getBulkPaneIDsFromDB(storyFragmentIDs []string)
 	return paneRelationships, rows.Err()
 }
 
-func (sfs *StoryFragmentService) loadByTractStackFromDB(tractStackID string) ([]*models.StoryFragmentNode, error) {
-	query := `SELECT id, title, slug, tractstack_id, menu_id, tailwind_background_colour, social_image_path, created, changed 
-          FROM storyfragments WHERE tractstack_id = ? ORDER BY title`
-
-	rows, err := sfs.ctx.Database.Conn.Query(query, tractStackID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var storyFragments []*models.StoryFragmentNode
-
-	for rows.Next() {
-		var storyFragmentRow StoryFragmentRowData
-		var menuID, tailwindBgColour, socialImagePath, changed sql.NullString
-
-		err := rows.Scan(&storyFragmentRow.ID, &storyFragmentRow.Title, &storyFragmentRow.Slug,
-			&storyFragmentRow.TractStackID, &menuID, &tailwindBgColour, &socialImagePath,
-			&storyFragmentRow.Created, &changed)
-		if err != nil {
-			return nil, err
-		}
-
-		if menuID.Valid {
-			storyFragmentRow.MenuID = &menuID.String
-		}
-		if tailwindBgColour.Valid {
-			storyFragmentRow.TailwindBgColour = &tailwindBgColour.String
-		}
-		if socialImagePath.Valid {
-			storyFragmentRow.SocialImagePath = &socialImagePath.String
-		}
-		if changed.Valid {
-			storyFragmentRow.Changed = &changed.String
-		}
-
-		paneIDs, err := sfs.getPaneIDsFromDB(storyFragmentRow.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get pane IDs for storyfragment %s: %w", storyFragmentRow.ID, err)
-		}
-
-		storyFragmentNode, err := sfs.deserializeRowData(&storyFragmentRow, paneIDs)
-		if err != nil {
-			return nil, fmt.Errorf("failed to deserialize storyfragment %s: %w", storyFragmentRow.ID, err)
-		}
-
-		storyFragments = append(storyFragments, storyFragmentNode)
-	}
-
-	return storyFragments, rows.Err()
-}
+//func (sfs *StoryFragmentService) loadByTractStackFromDB(tractStackID string) ([]*models.StoryFragmentNode, error) {
+//	query := `SELECT id, title, slug, tractstack_id, menu_id, tailwind_background_colour, social_image_path, created, changed
+//          FROM storyfragments WHERE tractstack_id = ? ORDER BY title`
+//
+//	rows, err := sfs.ctx.Database.Conn.Query(query, tractStackID)
+//	if err != nil {
+//		return nil, err
+//	}
+//	defer rows.Close()
+//
+//	var storyFragments []*models.StoryFragmentNode
+//
+//	for rows.Next() {
+//		var storyFragmentRow StoryFragmentRowData
+//		var menuID, tailwindBgColour, socialImagePath, changed sql.NullString
+//
+//		err := rows.Scan(&storyFragmentRow.ID, &storyFragmentRow.Title, &storyFragmentRow.Slug,
+//			&storyFragmentRow.TractStackID, &menuID, &tailwindBgColour, &socialImagePath,
+//			&storyFragmentRow.Created, &changed)
+//		if err != nil {
+//			return nil, err
+//		}
+//
+//		if menuID.Valid {
+//			storyFragmentRow.MenuID = &menuID.String
+//		}
+//		if tailwindBgColour.Valid {
+//			storyFragmentRow.TailwindBgColour = &tailwindBgColour.String
+//		}
+//		if socialImagePath.Valid {
+//			storyFragmentRow.SocialImagePath = &socialImagePath.String
+//		}
+//		if changed.Valid {
+//			storyFragmentRow.Changed = &changed.String
+//		}
+//
+//		paneIDs, err := sfs.getPaneIDsFromDB(storyFragmentRow.ID)
+//		if err != nil {
+//			return nil, fmt.Errorf("failed to get pane IDs for storyfragment %s: %w", storyFragmentRow.ID, err)
+//		}
+//
+//		storyFragmentNode, err := sfs.deserializeRowData(&storyFragmentRow, paneIDs)
+//		if err != nil {
+//			return nil, fmt.Errorf("failed to deserialize storyfragment %s: %w", storyFragmentRow.ID, err)
+//		}
+//
+//		storyFragments = append(storyFragments, storyFragmentNode)
+//	}
+//
+//	return storyFragments, rows.Err()
+//}
 
 func (sfs *StoryFragmentService) deserializeRowData(storyFragmentRow *StoryFragmentRowData, paneIDs []string) (*models.StoryFragmentNode, error) {
 	created, err := time.Parse(time.RFC3339, storyFragmentRow.Created)

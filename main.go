@@ -11,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/api"
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	defaults "github.com/AtRiskMedia/tractstack-go/config"
+	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -77,6 +78,14 @@ func main() {
 		log.Fatalf("Tenant pre-activation validation failed: %v", err)
 	}
 	log.Println("All tenants pre-activated successfully!")
+
+	log.Println("Starting critical content warming...")
+	if err := content.WarmAllTenants(tenantManager); err != nil {
+		// Non-blocking: log warning but don't fail startup
+		log.Printf("Warning: Content warming failed: %v", err)
+	} else {
+		log.Println("Critical content warmed successfully!")
+	}
 
 	r := gin.Default()
 	r.SetTrustedProxies([]string{"127.0.0.1", "::1"}) // Add IPv6 support
