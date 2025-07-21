@@ -296,7 +296,8 @@ func SseHandler(c *gin.Context) {
 		return
 	}
 
-	storyfragmentID := c.Query("storyfragment")
+	// Remove storyfragmentID parameter handling
+	// storyfragmentID := c.Query("storyfragment")
 
 	currentConnections := atomic.LoadInt64(&activeSSEConnections)
 	if currentConnections >= maxSSEConnections {
@@ -322,19 +323,18 @@ func SseHandler(c *gin.Context) {
 		time.Duration(defaults.SSEConnectionTimeoutMinutes)*time.Minute)
 	ch := models.Broadcaster.AddClientWithSession(ctx.TenantID, sessionID)
 
-	if storyfragmentID != "" {
-		models.Broadcaster.RegisterStoryfragmentSubscription(ctx.TenantID, sessionID, storyfragmentID)
-		log.Printf("SSE connected for %s+%s+%s - ready for immediate state check", ctx.TenantID, storyfragmentID, sessionID)
-		checkImmediateStateUpdate(ctx, sessionID, storyfragmentID)
-		// log.Printf("SSE: Registered session %s with storyfragment %s in tenant %s",
-		//	sessionID, storyfragmentID, ctx.TenantID)
-	}
+	// Remove all storyfragment subscription logic
+	// if storyfragmentID != "" {
+	//     models.Broadcaster.RegisterStoryfragmentSubscription(ctx.TenantID, sessionID, storyfragmentID)
+	//     log.Printf("SSE connected for %s+%s+%s - ready for immediate state check", ctx.TenantID, storyfragmentID, sessionID)
+	//     checkImmediateStateUpdate(ctx, sessionID, storyfragmentID)
+	// }
 
 	defer func() {
 		atomic.AddInt64(&activeSSEConnections, -1)
 		cancel()
 		models.Broadcaster.RemoveClientWithSession(ch, ctx.TenantID, sessionID)
-		models.Broadcaster.UnregisterStoryfragmentSubscription(ctx.TenantID, sessionID)
+		// Remove: models.Broadcaster.UnregisterStoryfragmentSubscription(ctx.TenantID, sessionID)
 
 		select {
 		case <-ch:
@@ -360,22 +360,16 @@ func SseHandler(c *gin.Context) {
 		return
 	}
 
-	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"tenantId\":\"%s\",\"storyfragmentId\":\"%s\",\"connectionCount\":%d}\n\n",
-		sessionID, ctx.TenantID, storyfragmentID, models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID))
+	// Remove storyfragmentID from connected message
+	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"tenantId\":\"%s\",\"connectionCount\":%d}\n\n",
+		sessionID, ctx.TenantID, models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID))
 	flusher.Flush()
-
-	// log.Printf("SSE test")
-	// triggerTemporarySSETest(ctx, storyfragmentID, sessionID) // TEMPORARY: Remove after testing
 
 	heartbeat := time.NewTicker(time.Duration(defaults.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer heartbeat.Stop()
 
 	inactivityTimeout := time.NewTimer(time.Duration(defaults.SSEInactivityTimeoutMinutes) * time.Minute)
 	defer inactivityTimeout.Stop()
-
-	// log.Printf("SSE connection established for session %s in tenant %s (storyfragment: %s). Active connections: %d (session: %d)",
-	//	sessionID, ctx.TenantID, storyfragmentID, atomic.LoadInt64(&activeSSEConnections),
-	//	models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID))
 
 	for {
 		select {
@@ -423,10 +417,7 @@ func SseHandler(c *gin.Context) {
 					sessionID, ctx.TenantID)
 				fmt.Fprintf(w, "event: timeout\ndata: {\"reason\":\"max_duration\",\"action\":\"reconnect\",\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n",
 					sessionID, ctx.TenantID)
-			// case context.Canceled:
-			//	log.Printf("SSE connection closed by client for session %s in tenant %s", sessionID, ctx.TenantID)
 			default:
-				// log.Printf("SSE connection closed for session %s in tenant %s: %v", sessionID, ctx.TenantID, sseCtx.Err())
 			}
 			flusher.Flush()
 			return
