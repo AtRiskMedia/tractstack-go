@@ -4,6 +4,7 @@ package cache
 import (
 	"fmt"
 	"log"
+	"runtime/debug"
 	"sort"
 	"sync"
 	"time"
@@ -653,6 +654,9 @@ func (m *Manager) GetFingerprintState(tenantID, fingerprintID string) (*models.F
 }
 
 func (m *Manager) SetFingerprintState(tenantID string, state *models.FingerprintState) {
+	log.Printf("FINGERPRINT_TRACE: SetFingerprintState called for %s with beliefs: %+v", state.FingerprintID, state.HeldBeliefs)
+	log.Printf("FINGERPRINT_TRACE: SetFingerprintState stack trace: %s", debug.Stack()) // Add import "runtime/debug"
+
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
 	if cache == nil {
