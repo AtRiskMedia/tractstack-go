@@ -60,7 +60,7 @@ func GetFullContentMapHandler(c *gin.Context) {
 	}
 
 	// Cache miss - build content map from database
-	contentMap, err := buildFullContentMapFromDB(ctx)
+	contentMap, err := BuildFullContentMapFromDB(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -87,8 +87,8 @@ func GetFullContentMapHandler(c *gin.Context) {
 	})
 }
 
-// buildFullContentMapFromDB builds the content map using a single efficient UNION query
-func buildFullContentMapFromDB(ctx *tenant.Context) ([]models.FullContentMapItem, error) {
+// BuildFullContentMapFromDB builds the content map using a single efficient UNION query
+func BuildFullContentMapFromDB(ctx *tenant.Context) ([]models.FullContentMapItem, error) {
 	// Single UNION ALL query to get all content types efficiently
 	query := `
 		SELECT 
