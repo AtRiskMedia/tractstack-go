@@ -75,6 +75,46 @@ func (ep *EventProcessor) ProcessEvents(events []models.Event, currentPaneID str
 				continue // Don't fail entire array
 			}
 
+			// Check if this is a PAGEVIEWED event that needs belief state sync
+			if event.Type == "StoryFragment" && event.Verb == "PAGEVIEWED" {
+				storyfragmentID := event.ID
+				// Check if user has existing beliefs for this storyfragment
+				if sessionContext, exists := ep.cacheManager.GetSessionBeliefContext(ep.tenantID, ep.sessionID, storyfragmentID); exists {
+					if len(sessionContext.UserBeliefs) > 0 {
+						// Get belief registry
+						if beliefRegistry, registryExists := ep.cacheManager.GetStoryfragmentBeliefRegistry(ep.tenantID, storyfragmentID); registryExists {
+
+							// Create "before" snapshot (visibility with no beliefs = default state)
+							emptyBeliefs := make(map[string][]string)
+
+							beliefEngine := services.NewBeliefEvaluationEngine()
+							var affectedPanes []string
+
+							for paneID, paneBeliefs := range beliefRegistry.PaneBeliefPayloads {
+								// Evaluate visibility without user beliefs (default state)
+								beforeVisibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, emptyBeliefs)
+								beforeVisible := (beforeVisibility == "visible")
+
+								// Evaluate visibility with current user beliefs
+								afterVisibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
+								afterVisible := (afterVisibility == "visible")
+
+								// Only include panes whose visibility changed
+								if beforeVisible != afterVisible {
+									affectedPanes = append(affectedPanes, paneID)
+								}
+							}
+
+							if len(affectedPanes) > 0 {
+								// Trigger SSE broadcast to sync UI with existing belief state
+								// Use the Broadcaster directly for session-specific broadcast
+								models.Broadcaster.BroadcastToSpecificSession(ep.tenantID, ep.sessionID, storyfragmentID, affectedPanes, nil)
+							}
+						}
+					}
+				}
+			}
+
 		default:
 			log.Printf("Unknown event type: %s", event.Type)
 		}

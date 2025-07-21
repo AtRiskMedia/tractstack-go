@@ -36,8 +36,6 @@ func GetPaneFragmentHandler(c *gin.Context) {
 	// Extract storyfragment ID from header (sent by HTMX)
 	storyfragmentID := c.GetHeader("X-StoryFragment-ID")
 
-	// ===== END SESSION CONTEXT EXTRACTION =====
-
 	// Use cache-first pane service
 	paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
 	paneNode, err := paneService.GetByID(paneID)
@@ -530,12 +528,10 @@ func addFilterButtonIfNeeded(htmlContent string, paneID string, visibility strin
 		if len(effectiveFilter) > 0 {
 			// Find scroll target pane
 			gotoPaneID := findScrollTargetPane(effectiveFilter, beliefRegistry)
-
 			filterButtonHTML := beliefEngine.RenderFilterButton(paneID, effectiveFilter, gotoPaneID, paneBeliefs)
 			return beliefEngine.InjectFilterButton(htmlContent, filterButtonHTML)
 		}
 	}
-
 	return htmlContent
 }
 
