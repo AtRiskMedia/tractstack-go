@@ -179,14 +179,12 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	if totalTenants >= MaxTenants {
 		// Log warning and trigger immediate cleanup
 		fmt.Printf("WARNING: Maximum tenant limit reached (%d/%d). Triggering cleanup.\n", totalTenants, MaxTenants)
-		// FIXED: Use unsafe version since we already hold the write lock
 		m.cleanupOldestTenantsUnsafe()
 
 		// Check again after cleanup - if still at limit, force creation anyway
 		// to prevent cache corruption and nil pointer panics
 		if len(m.ContentCache) >= MaxTenants {
 			fmt.Printf("WARNING: Cache limit still exceeded after cleanup (%d/%d). Creating tenant anyway to prevent corruption.\n", len(m.ContentCache), MaxTenants)
-			// REMOVED: return - this was the bug that caused nil pointer panics
 		}
 	}
 
@@ -195,7 +193,6 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	estimatedMB := stats.Size / (1024 * 1024)
 	if estimatedMB > int64(MaxMemoryMB) {
 		fmt.Printf("WARNING: Memory limit approaching (%dMB/%dMB). Triggering cleanup.\n", estimatedMB, MaxMemoryMB)
-		// FIXED: Use unsafe version since we already hold the write lock
 		m.cleanupOldestTenantsUnsafe()
 	}
 
@@ -718,6 +715,9 @@ func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *mode
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 
+	if cache.StoryfragmentBeliefRegistries == nil {
+		cache.StoryfragmentBeliefRegistries = make(map[string]*models.StoryfragmentBeliefRegistry)
+	}
 	// Set the registry
 	cache.StoryfragmentBeliefRegistries[registry.StoryfragmentID] = registry
 }
