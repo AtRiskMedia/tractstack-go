@@ -88,9 +88,9 @@ func (brs *BeliefRegistryService) addToRequiredBeliefs(required map[string]bool,
 	}
 }
 
-// Cache operations
 func (brs *BeliefRegistryService) getFromCache(storyfragmentID string) (*models.StoryfragmentBeliefRegistry, bool) {
-	return cache.GetGlobalManager().GetStoryfragmentBeliefRegistry(brs.ctx.TenantID, storyfragmentID)
+	registry, found := cache.GetGlobalManager().GetStoryfragmentBeliefRegistry(brs.ctx.TenantID, storyfragmentID)
+	return registry, found
 }
 
 func (brs *BeliefRegistryService) setInCache(storyfragmentID string, registry *models.StoryfragmentBeliefRegistry) {
@@ -164,11 +164,8 @@ func extractWidgetTypeFromCopy(copyText string) string {
 func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID string, loadedPanes []*models.PaneNode) (*models.StoryfragmentBeliefRegistry, error) {
 	// Check if registry already exists in cache
 	if registry, found := brs.getFromCache(storyfragmentID); found {
-		// log.Printf("CACHE HIT: Registry for storyfragment %s found in cache, skipping rebuild", storyfragmentID)
 		return registry, nil
 	}
-
-	// log.Printf("CACHE MISS: Building registry for storyfragment %s with %d loaded panes", storyfragmentID, len(loadedPanes))
 
 	registry := &models.StoryfragmentBeliefRegistry{
 		StoryfragmentID:    storyfragmentID,
@@ -228,7 +225,5 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(storyfragmentID s
 
 	// Cache the registry
 	brs.setInCache(storyfragmentID, registry)
-	// log.Printf("CACHE SET: Registry for storyfragment %s cached successfully", storyfragmentID)
-
 	return registry, nil
 }

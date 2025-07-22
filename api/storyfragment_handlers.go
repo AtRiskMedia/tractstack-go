@@ -21,15 +21,9 @@ type StoryFragmentIDsRequest struct {
 }
 
 // extractAndWarmStoryfragmentMetadata extracts belief registry and codeHook targets, plus session warming for storyfragments
+// NOW CACHE-FIRST: Only hits database if data not available in cache
 func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode *models.StoryFragmentNode, c *gin.Context) (gin.H, error) {
 	storyFragmentID := storyFragmentNode.ID
-
-	// Load all panes once for this storyfragment
-	paneService := content.NewPaneService(ctx, nil)
-	loadedPanes, err := paneService.GetByIDs(storyFragmentNode.PaneIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load panes: %w", err)
-	}
 
 	homeSlug := ctx.Config.HomeSlug
 	if homeSlug == "" {
@@ -37,8 +31,8 @@ func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode 
 	}
 	storyFragmentNode.IsHome = (storyFragmentNode.Slug == homeSlug)
 
-	// Load menu if MenuID exists
-	if storyFragmentNode.MenuID != nil {
+	// === CACHE-FIRST MENU LOADING ===
+	if storyFragmentNode.MenuID != nil && storyFragmentNode.Menu == nil {
 		menuService := content.NewMenuService(ctx, cache.GetGlobalManager())
 		menuData, err := menuService.GetByID(*storyFragmentNode.MenuID)
 		if err != nil {
@@ -49,25 +43,38 @@ func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode 
 		}
 	}
 
-	// Extract and cache belief registry using loaded panes
-	beliefRegistryService := services.NewBeliefRegistryService(ctx)
-	registry, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragmentID, loadedPanes)
-	if err != nil {
-		// Log the error but don't fail the request - belief registry is optional
-		log.Printf("Failed to extract belief registry for storyfragment %s: %v", storyFragmentID, err)
-	}
+	// === CACHE-FIRST CODEHOOK TARGETS ===
+	if storyFragmentNode.CodeHookTargets == nil {
+		// Need to load panes to extract codeHook targets
+		paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
+		loadedPanes, err := paneService.GetByIDs(storyFragmentNode.PaneIDs)
+		if err != nil {
+			log.Printf("CACHE-FIRST: Failed to load panes for codeHook extraction: %v", err)
+		} else {
+			codeHookTargets := make(map[string]string)
+			extractedCount := 0
 
-	// Extract codeHook targets from the same loaded panes
-	codeHookTargets := make(map[string]string)
-	for _, paneNode := range loadedPanes {
-		if paneNode != nil && paneNode.CodeHookTarget != nil && *paneNode.CodeHookTarget != "" {
-			codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
+			for _, paneNode := range loadedPanes {
+				if paneNode != nil && paneNode.CodeHookTarget != nil && *paneNode.CodeHookTarget != "" {
+					codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
+					extractedCount++
+				}
+			}
+
+			storyFragmentNode.CodeHookTargets = codeHookTargets
 		}
 	}
-	// Populate codeHook targets in the storyfragment node
-	storyFragmentNode.CodeHookTargets = codeHookTargets
 
-	// ===== SESSION BELIEF CONTEXT WARMING =====
+	// === CACHE-FIRST BELIEF REGISTRY ===
+	beliefRegistryService := services.NewBeliefRegistryService(ctx)
+
+	// Check if registry is already cached
+	registry, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragmentID, nil)
+	if err != nil {
+		log.Printf("Failed to get belief registry for storyfragment %s: %v", storyFragmentID, err)
+	}
+
+	// === SESSION BELIEF CONTEXT WARMING ===
 	// Extract session ID from header
 	sessionID := c.GetHeader("X-TractStack-Session-ID")
 	if sessionID != "" {
@@ -93,11 +100,7 @@ func extractAndWarmStoryfragmentMetadata(ctx *tenant.Context, storyFragmentNode 
 
 		// Cache the session belief context for subsequent pane requests
 		cache.GetGlobalManager().SetSessionBeliefContext(ctx.TenantID, sessionBeliefContext)
-
-		log.Printf("DEBUG: Warmed session belief context for session %s on storyfragment %s with %d beliefs",
-			sessionID, storyFragmentID, len(userBeliefs))
 	}
-	// ===== END SESSION BELIEF CONTEXT WARMING =====
 
 	// Build belief registry info for response
 	beliefInfo := gin.H{

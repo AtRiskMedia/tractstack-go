@@ -21,7 +21,6 @@ import (
 // This function ensures that home pages load quickly for first-time visitors by pre-loading
 // and caching all necessary content structures, HTML fragments, and belief registries.
 func WarmAllTenants(tenantManager *tenant.Manager) error {
-	log.Println("=== Starting critical content warming ===")
 	start := time.Now().UTC()
 
 	// Get list of active tenants
@@ -34,8 +33,6 @@ func WarmAllTenants(tenantManager *tenant.Manager) error {
 		log.Println("No active tenants found - skipping content warming")
 		return nil
 	}
-
-	log.Printf("Warming critical content for %d active tenants", len(activeTenants))
 
 	// Track warming results
 	warmedCount := 0
@@ -58,8 +55,6 @@ func WarmAllTenants(tenantManager *tenant.Manager) error {
 	// Report results
 	elapsed := time.Since(start)
 	log.Printf("=== Content warming complete in %v ===", elapsed)
-	log.Printf("  - Warmed: %d tenants", warmedCount)
-	log.Printf("  - Failed: %d tenants", len(failedTenants))
 
 	if len(failedTenants) > 0 {
 		log.Printf("Failed tenants: %v", failedTenants)
@@ -67,7 +62,6 @@ func WarmAllTenants(tenantManager *tenant.Manager) error {
 		return fmt.Errorf("content warming failed for %d tenants: %v", len(failedTenants), failedTenants)
 	}
 
-	log.Println("✓ All tenant content successfully warmed!")
 	return nil
 }
 
@@ -113,8 +107,6 @@ func warmTenantContent(tenantID string) error {
 		homeSlug = "hello" // Default fallback
 	}
 
-	log.Printf("  - Warming HOME storyfragment with slug: '%s'", homeSlug)
-
 	storyFragment, err := storyFragmentService.GetBySlug(homeSlug)
 	if err != nil {
 		return fmt.Errorf("failed to warm HOME storyfragment '%s': %w", homeSlug, err)
@@ -125,55 +117,46 @@ func warmTenantContent(tenantID string) error {
 		return nil
 	}
 
-	log.Printf("  - HOME storyfragment '%s' loaded (ID: %s, %d panes)",
-		homeSlug, storyFragment.ID, len(storyFragment.PaneIDs))
-
 	// === Phase 2: Warm All Associated Panes ===
 	var loadedPanes []*models.PaneNode
 	if len(storyFragment.PaneIDs) > 0 {
-		log.Printf("  - Warming %d panes for HOME storyfragment", len(storyFragment.PaneIDs))
-
 		paneService := content.NewPaneService(ctx, cacheManager)
 		loadedPanes, err = paneService.GetByIDs(storyFragment.PaneIDs)
 		if err != nil {
 			return fmt.Errorf("failed to load panes: %w", err)
 		}
-
-		log.Printf("  - Loaded %d panes successfully", len(loadedPanes))
 	}
 
-	// === Phase 3: Warm Menu if Present ===
+	// === Phase 3: Warm Menu and Attach to StoryFragment ===
 	if storyFragment.MenuID != nil {
-		log.Printf("  - Warming menu (ID: %s)", *storyFragment.MenuID)
-
 		menuService := content.NewMenuService(ctx, cacheManager)
 		menuData, err := menuService.GetByID(*storyFragment.MenuID)
 		if err != nil {
 			log.Printf("  - Warning: Failed to load menu %s: %v", *storyFragment.MenuID, err)
 		} else if menuData != nil {
-			log.Printf("  - Menu '%s' warmed successfully", menuData.Title)
+			// ✅ NEW: Attach menu to storyfragment
 			storyFragment.Menu = menuData
 		}
 	}
 
 	// === Phase 4: Warm Belief Registry ===
 	if len(loadedPanes) > 0 {
-		log.Printf("  - Building belief registry for storyfragment")
-
 		beliefRegistryService := services.NewBeliefRegistryService(ctx)
-		registry, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragment.ID, loadedPanes)
+		_, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragment.ID, loadedPanes)
 		if err != nil {
 			log.Printf("  - Warning: Failed to build belief registry: %v", err)
-		} else {
-			log.Printf("  - Belief registry built (%d required beliefs, %d badges)",
-				len(registry.RequiredBeliefs), len(registry.RequiredBadges))
-		}
+		} // else {
+		// Verify it was actually cached
+		//if _, found := cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyFragment.ID); found {
+		//	log.Printf("  - ✅ Belief registry successfully cached and verified for %s", storyFragment.ID)
+		//} else {
+		//	log.Printf("  - ❌ ERROR: Belief registry failed to cache for %s", storyFragment.ID)
+		//}
+		//}
 	}
 
 	// === Phase 5: Generate and Cache HTML Fragments ===
 	if len(loadedPanes) > 0 {
-		log.Printf("  - Generating HTML fragments for %d panes", len(loadedPanes))
-
 		fragmentsGenerated := 0
 		for _, paneNode := range loadedPanes {
 			if paneNode == nil {
@@ -224,35 +207,44 @@ func warmTenantContent(tenantID string) error {
 
 			fragmentsGenerated++
 		}
-
-		log.Printf("  - Generated and cached %d HTML fragments", fragmentsGenerated)
 	}
+
+	// === Phase 5.5: Extract and Attach CodeHook Targets ===
+	if len(loadedPanes) > 0 {
+		codeHookTargets := make(map[string]string)
+		extractedCount := 0
+
+		for _, paneNode := range loadedPanes {
+			if paneNode != nil && paneNode.CodeHookTarget != nil && *paneNode.CodeHookTarget != "" {
+				codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
+				extractedCount++
+			}
+		}
+		storyFragment.CodeHookTargets = codeHookTargets
+	}
+
+	// === Phase 5.7: Re-cache the Enriched StoryFragment ===
+	cacheManager.SetStoryFragment(tenantID, storyFragment)
 
 	// === Phase 6: Warm TRACTSTACK_HOME_SLUG if Different ===
 	if config.TractStackHomeSlug != "" && config.TractStackHomeSlug != homeSlug {
-		log.Printf("  - Warming TRACTSTACK HOME storyfragment with slug: '%s'", config.TractStackHomeSlug)
-
-		tractStackStoryFragment, err := storyFragmentService.GetBySlug(config.TractStackHomeSlug)
+		_, err := storyFragmentService.GetBySlug(config.TractStackHomeSlug)
 		if err != nil {
 			log.Printf("  - Warning: Failed to warm TRACTSTACK HOME storyfragment '%s': %v",
 				config.TractStackHomeSlug, err)
-		} else if tractStackStoryFragment != nil {
-			log.Printf("  - TRACTSTACK HOME storyfragment '%s' warmed (ID: %s, %d panes)",
-				config.TractStackHomeSlug, tractStackStoryFragment.ID, len(tractStackStoryFragment.PaneIDs))
+			//} else if tractStackStoryFragment != nil {
+			//	log.Printf("  - TRACTSTACK HOME storyfragment '%s' warmed (ID: %s, %d panes)",
+			//		config.TractStackHomeSlug, tractStackStoryFragment.ID, len(tractStackStoryFragment.PaneIDs))
 		}
 	}
 
 	// === Phase 7: Warm Full Content Map using existing API function ===
-	log.Printf("  - Generating full content map")
-
-	// Use the exact same function that GetFullContentMapHandler uses
 	contentMap, err := api.BuildFullContentMapFromDB(ctx)
 	if err != nil {
 		log.Printf("  - Warning: Failed to build content map from database: %v", err)
 	} else {
 		// Cache the complete content map
 		cacheManager.SetFullContentMap(tenantID, contentMap)
-		log.Printf("  - Content map cached with %d items", len(contentMap))
 	}
 
 	elapsed := time.Since(tenantStart)
