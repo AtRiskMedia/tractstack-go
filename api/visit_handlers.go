@@ -158,9 +158,14 @@ func VisitHandler(c *gin.Context) {
 
 		// Create fingerprint if it doesn't exist
 		if err := visitService.CreateFingerprint(finalFpID, &lead.ID); err != nil {
-			log.Printf("DEBUG: VisitHandler - failed to create fingerprint: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
-			return
+			// Check if it's a UNIQUE constraint error (race condition)
+			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				// log.Printf("DEBUG: VisitHandler - fingerprint %s already created by concurrent request, continuing", finalFpID)
+			} else {
+				log.Printf("DEBUG: VisitHandler - failed to create fingerprint: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
+				return
+			}
 		}
 
 		// Create profile
