@@ -296,3 +296,122 @@ func GetHomeStoryFragmentHandler(c *gin.Context) {
 	// Return same JSON structure as GetStoryFragmentBySlugHandler
 	c.JSON(http.StatusOK, storyFragmentNode)
 }
+
+// GetStoryFragmentFullPayloadBySlugHandler returns a complete V1-compatible payload for a storyfragment
+// This includes the storyfragment, all its panes, extracted child nodes, tractstack, and menu data
+func GetStoryFragmentFullPayloadBySlugHandler(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Authentication - Admin OR Editor required
+	if !validateAdminOrEditor(c, ctx) {
+		return
+	}
+
+	slug := c.Param("slug")
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "storyfragment slug is required"})
+		return
+	}
+
+	// === STEP 1: Get StoryFragment ===
+	storyFragmentService := content.NewStoryFragmentService(ctx, cache.GetGlobalManager())
+	storyFragment, err := storyFragmentService.GetBySlug(slug)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if storyFragment == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "storyfragment not found"})
+		return
+	}
+
+	// === STEP 2: Get TractStack ===
+	tractStackService := content.NewTractStackService(ctx, cache.GetGlobalManager())
+	tractStack, err := tractStackService.GetByID(storyFragment.TractStackID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if tractStack == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "tractstack not found"})
+		return
+	}
+
+	// === STEP 3: Get All Panes ===
+	var panes []*models.PaneNode
+	if len(storyFragment.PaneIDs) > 0 {
+		paneService := content.NewPaneService(ctx, cache.GetGlobalManager())
+		panes, err = paneService.GetByIDs(storyFragment.PaneIDs)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	// === STEP 4: Extract Child Nodes and Clean Panes ===
+	var allChildNodes []interface{}
+	cleanedPanes := make([]*models.PaneNode, len(panes))
+
+	for i, pane := range panes {
+		if pane == nil {
+			continue
+		}
+
+		// Extract child nodes from this pane's OptionsPayload
+		if pane.OptionsPayload != nil {
+			if nodes, exists := pane.OptionsPayload["nodes"]; exists {
+				if nodesArray, ok := nodes.([]interface{}); ok {
+					allChildNodes = append(allChildNodes, nodesArray...)
+				}
+			}
+		}
+
+		// Create cleaned pane (without embedded nodes)
+		cleanedPane := *pane
+		cleanedPane.OptionsPayload = make(map[string]interface{})
+
+		// Copy all fields except "nodes"
+		if pane.OptionsPayload != nil {
+			for k, v := range pane.OptionsPayload {
+				if k != "nodes" {
+					cleanedPane.OptionsPayload[k] = v
+				}
+			}
+		}
+
+		cleanedPanes[i] = &cleanedPane
+	}
+
+	// === STEP 5: Get Menu (if exists) ===
+	var menuNodes []*models.MenuNode
+	if storyFragment.MenuID != nil {
+		menuService := content.NewMenuService(ctx, cache.GetGlobalManager())
+		menu, err := menuService.GetByID(*storyFragment.MenuID)
+		if err != nil {
+			log.Printf("Failed to load menu %s: %v", *storyFragment.MenuID, err)
+		} else if menu != nil {
+			menuNodes = []*models.MenuNode{menu}
+		}
+	}
+
+	// === STEP 6: Build V1-Compatible Response ===
+	response := gin.H{
+		"storyfragmentNodes": []*models.StoryFragmentNode{storyFragment},
+		"paneNodes":          cleanedPanes,
+		"childNodes":         allChildNodes,
+		"tractstackNodes":    []*models.TractStackNode{tractStack},
+	}
+
+	// Add menu nodes if they exist
+	if len(menuNodes) > 0 {
+		response["menuNodes"] = menuNodes
+	}
+
+	c.JSON(http.StatusOK, response)
+}

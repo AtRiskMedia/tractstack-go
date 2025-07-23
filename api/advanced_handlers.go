@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/AtRiskMedia/tractstack-go/tenant"
-	"github.com/AtRiskMedia/tractstack-go/utils"
 	"github.com/gin-gonic/gin"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
@@ -44,24 +43,7 @@ func GetAdvancedConfigStatusHandler(c *gin.Context) {
 		return
 	}
 
-	// Validate admin authentication (following brand_handlers.go pattern)
-	adminCookie, err := c.Cookie("admin_auth")
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin authentication required"})
-		return
-	}
-
-	// Validate JWT token
-	claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-		return
-	}
-
-	// Extract and verify role
-	role, ok := claims["role"].(string)
-	if !ok || role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+	if !validateAdmin(c, ctx) {
 		return
 	}
 
@@ -86,24 +68,7 @@ func UpdateAdvancedConfigHandler(c *gin.Context) {
 		return
 	}
 
-	// Validate admin authentication (following brand_handlers.go pattern)
-	adminCookie, err := c.Cookie("admin_auth")
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin authentication required"})
-		return
-	}
-
-	// Validate JWT token
-	claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-		return
-	}
-
-	// Extract and verify role
-	role, ok := claims["role"].(string)
-	if !ok || role != "admin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+	if !validateAdmin(c, ctx) {
 		return
 	}
 
