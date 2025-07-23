@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
@@ -126,4 +127,75 @@ func GenerateJWT(claims jwt.MapClaims, jwtSecret string) (string, error) {
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(jwtSecret))
+}
+
+// validateAdmin checks for admin authentication only
+func validateAdmin(c *gin.Context, ctx *tenant.Context) bool {
+	adminCookie, err := c.Cookie("admin_auth")
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin authentication required"})
+		return false
+	}
+
+	claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
+		return false
+	}
+
+	role, ok := claims["role"].(string)
+	if !ok || role != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+		return false
+	}
+
+	return true
+}
+
+// validateEditor checks for editor authentication only
+func validateEditor(c *gin.Context, ctx *tenant.Context) bool {
+	editorCookie, err := c.Cookie("editor_auth")
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Editor authentication required"})
+		return false
+	}
+
+	claims, err := utils.ValidateJWT(editorCookie, ctx.Config.JWTSecret)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
+		return false
+	}
+
+	role, ok := claims["role"].(string)
+	if !ok || role != "editor" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Editor access required"})
+		return false
+	}
+
+	return true
+}
+
+// validateAdminOrEditor checks for admin OR editor authentication
+func validateAdminOrEditor(c *gin.Context, ctx *tenant.Context) bool {
+	// Try admin first (don't send response on failure)
+	if adminCookie, err := c.Cookie("admin_auth"); err == nil {
+		if claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret); err == nil {
+			if role, ok := claims["role"].(string); ok && role == "admin" {
+				return true
+			}
+		}
+	}
+
+	// Try editor (don't send response on failure)
+	if editorCookie, err := c.Cookie("editor_auth"); err == nil {
+		if claims, err := utils.ValidateJWT(editorCookie, ctx.Config.JWTSecret); err == nil {
+			if role, ok := claims["role"].(string); ok && role == "editor" {
+				return true
+			}
+		}
+	}
+
+	// Only send error response if both failed
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin or Editor authentication required"})
+	return false
 }

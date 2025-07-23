@@ -12,7 +12,6 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/services"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
-	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // GetOrphanAnalysisHandler handles GET /api/v1/admin/orphan-analysis
@@ -23,39 +22,8 @@ func GetOrphanAnalysisHandler(c *gin.Context) {
 		return
 	}
 
-	// INLINE AUTH CHECK - following exact pattern from advanced_handlers.go
-	// Try admin_auth cookie first
-	adminCookie, err := c.Cookie("admin_auth")
-	if err == nil {
-		if claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret); err == nil {
-			if role, ok := claims["role"].(string); ok && role == "admin" {
-				// Admin authenticated - continue
-			} else {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Admin or editor access required"})
-				return
-			}
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-			return
-		}
-	} else {
-		// Try editor_auth cookie
-		editorCookie, err := c.Cookie("editor_auth")
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin or editor authentication required"})
-			return
-		}
-		if claims, err := utils.ValidateJWT(editorCookie, ctx.Config.JWTSecret); err == nil {
-			if role, ok := claims["role"].(string); ok && role == "editor" {
-				// Editor authenticated - continue
-			} else {
-				c.JSON(http.StatusForbidden, gin.H{"error": "Admin or editor access required"})
-				return
-			}
-		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-			return
-		}
+	if !validateAdminOrEditor(c, ctx) {
+		return
 	}
 
 	tenantID := ctx.TenantID

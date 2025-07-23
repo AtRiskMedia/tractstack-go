@@ -11,8 +11,6 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
-	"github.com/AtRiskMedia/tractstack-go/tenant"
-	"github.com/AtRiskMedia/tractstack-go/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
 )
@@ -315,30 +313,6 @@ func DeleteMenuHandler(c *gin.Context) {
 	cache.GetGlobalManager().InvalidateOrphanAnalysis(ctx.TenantID)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Menu deleted successfully"})
-}
-
-// validateAdminOrEditor checks authentication and authorization
-func validateAdminOrEditor(c *gin.Context, ctx *tenant.Context) bool {
-	// Try admin cookie first
-	if adminCookie, err := c.Cookie("admin_auth"); err == nil {
-		if claims, err := utils.ValidateJWT(adminCookie, ctx.Config.JWTSecret); err == nil {
-			if role, ok := claims["role"].(string); ok && role == "admin" {
-				return true
-			}
-		}
-	}
-
-	// Try editor cookie
-	if editorCookie, err := c.Cookie("editor_auth"); err == nil {
-		if claims, err := utils.ValidateJWT(editorCookie, ctx.Config.JWTSecret); err == nil {
-			if role, ok := claims["role"].(string); ok && role == "editor" {
-				return true
-			}
-		}
-	}
-
-	c.JSON(http.StatusUnauthorized, gin.H{"error": "Admin or Editor authentication required"})
-	return false
 }
 
 // validateMenuRequest validates menu creation/update data

@@ -286,6 +286,7 @@ func main() {
 			nodes.POST("/storyfragments", api.GetStoryFragmentsByIDsHandler) // Bulk load storyfragments
 			nodes.GET("/storyfragments/:id", api.GetStoryFragmentByIDHandler)
 			nodes.GET("/storyfragments/slug/:slug", api.GetStoryFragmentBySlugHandler)
+			nodes.GET("/storyfragments/slug/:slug/full-payload", api.GetStoryFragmentFullPayloadBySlugHandler)
 			nodes.GET("/storyfragments/home", api.GetHomeStoryFragmentHandler)
 
 			// Menu endpoints
