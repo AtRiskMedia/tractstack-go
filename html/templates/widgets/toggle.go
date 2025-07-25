@@ -2,89 +2,106 @@
 package templates
 
 import (
-	"fmt"
+	"bytes"
+	"html/template"
+	"log"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
-// RenderToggle renders an accessible native HTML checkbox toggle for binary belief toggles
-func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) string {
-	// Get user's current beliefs
-	userBeliefs := getUserBeliefs(ctx)
-	currentBelief := getCurrentBeliefState(userBeliefs, slug)
+var toggleWidgetTmpl = template.Must(template.New("toggleWidget").Parse(
+	`{{define "wrapper"}}<div class="{{.ClassNames}} mt-6" data-belief="{{.Slug}}" data-pane-id="{{.PaneID}}">{{end}}` +
 
-	// Determine current toggle state
-	isEnabled := getToggleState(currentBelief)
-
-	// Generate unique IDs for accessibility
-	checkboxID := fmt.Sprintf("toggle-checkbox-%s", slug)
-	labelID := fmt.Sprintf("toggle-label-%s", slug)
-	helpID := fmt.Sprintf("toggle-help-%s", slug)
-
-	// Build the accessible HTML toggle
-	html := fmt.Sprintf(`<div class="%s mt-6" data-belief="%s" data-pane-id="%s">`, classNames, slug, ctx.ContainingPaneID)
-
-	// Accessible toggle with proper ARIA attributes
-	html += fmt.Sprintf(`
+		`{{define "toggle"}}
     <div class="flex items-center">
         <input type="checkbox"
-               id="%s"
+               id="{{.CheckboxID}}"
                name="beliefValue"
-               %s
+               {{if .IsEnabled}}checked{{end}}
                class="sr-only peer"
-               data-belief-id="%s"
+               data-belief-id="{{.Slug}}"
                data-belief-type="Belief"
-               data-pane-id="%s"
+               data-pane-id="{{.PaneID}}"
                role="switch"
-               aria-checked="%s"
-               aria-labelledby="%s"
-               aria-describedby="%s">
+               aria-checked="{{.IsEnabled}}"
+               aria-labelledby="{{.LabelID}}"
+               aria-describedby="{{.HelpID}}">
 
-        <!-- Visual toggle switch -->
-        <label for="%s"
+        <label for="{{.CheckboxID}}"
                class="relative inline-flex items-center cursor-pointer"
-               id="%s">
-            <!-- Toggle track -->
+               id="{{.LabelID}}">
             <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600">
             </div>
-
-            <!-- Label text -->
-            <span class="ml-3 text-sm text-gray-900">%s</span>
+            <span class="ml-3 text-sm text-gray-900">{{.Prompt}}</span>
         </label>
-    </div>`,
-		checkboxID,
-		getCheckedAttribute(isEnabled),
-		slug,
-		ctx.ContainingPaneID,
-		getBooleanString(isEnabled),
-		labelID,
-		helpID,
-		checkboxID,
-		labelID,
-		prompt,
-	)
+    </div>{{end}}` +
 
-	// Add screen reader help text
-	html += fmt.Sprintf(`
-    <div id="%s" class="sr-only">
-        Toggle switch. Currently %s. Press space to toggle.
-    </div>`,
-		helpID,
-		getToggleStateText(isEnabled),
-	)
+		`{{define "helpText"}}
+    <div id="{{.HelpID}}" class="sr-only">
+        Toggle switch. Currently {{.StateText}}. Press space to toggle.
+    </div>{{end}}`,
+))
 
-	html += `</div>`
+// Data structs for template execution
+type (
+	toggleWrapperData struct{ ClassNames, Slug, PaneID string }
+	toggleData        struct {
+		CheckboxID, LabelID, HelpID, Slug, PaneID, Prompt string
+		IsEnabled                                         bool
+	}
+)
 
-	return html
+// Renamed to avoid redeclaration error
+type toggleHelpTextData struct{ HelpID, StateText string }
+
+// RenderToggle renders an accessible native HTML checkbox toggle for binary belief toggles
+func RenderToggle(ctx *models.RenderContext, classNames, slug, prompt string) string {
+	userBeliefs := getUserBeliefs(ctx)
+	currentBelief := getCurrentBeliefState(userBeliefs, slug)
+	isEnabled := getToggleState(currentBelief)
+
+	checkboxID := "toggle-checkbox-" + slug
+	labelID := "toggle-label-" + slug
+	helpID := "toggle-help-" + slug
+
+	var buf bytes.Buffer
+
+	// Render each part of the component using secure templates
+	executeToggleTemplate(&buf, "wrapper", toggleWrapperData{ClassNames: classNames, Slug: slug, PaneID: ctx.ContainingPaneID})
+
+	executeToggleTemplate(&buf, "toggle", toggleData{
+		CheckboxID: checkboxID,
+		LabelID:    labelID,
+		HelpID:     helpID,
+		Slug:       slug,
+		PaneID:     ctx.ContainingPaneID,
+		Prompt:     prompt,
+		IsEnabled:  isEnabled,
+	})
+
+	// Use the correctly named struct with the correct field
+	executeToggleTemplate(&buf, "helpText", toggleHelpTextData{HelpID: helpID, StateText: getToggleStateText(isEnabled)})
+
+	buf.WriteString(`</div>`)
+
+	return buf.String()
 }
 
-// getToggleState determines if the toggle should be checked based on current belief
+// executeToggleTemplate is a helper to render a named template and handle errors
+func executeToggleTemplate(buf *bytes.Buffer, name string, data interface{}) {
+	err := toggleWidgetTmpl.ExecuteTemplate(buf, name, data)
+	if err != nil {
+		log.Printf("ERROR: Failed to execute toggle widget template '%s': %v", name, err)
+		buf.WriteString("<!-- template error -->")
+	}
+}
+
+// Helper functions do not generate HTML and remain unchanged
+
 func getToggleState(currentBelief *BeliefState) bool {
 	if currentBelief == nil {
 		return false
 	}
-
-	// Check for positive belief verbs that indicate "enabled"
 	switch currentBelief.Verb {
 	case "BELIEVES_YES", "ENABLE", "ACTIVATE", "TOGGLE_ON":
 		return true
@@ -93,23 +110,6 @@ func getToggleState(currentBelief *BeliefState) bool {
 	}
 }
 
-// getCheckedAttribute returns the checked attribute string if enabled
-func getCheckedAttribute(isEnabled bool) string {
-	if isEnabled {
-		return "checked"
-	}
-	return ""
-}
-
-// getBooleanString converts boolean to string for ARIA attributes
-func getBooleanString(value bool) string {
-	if value {
-		return "true"
-	}
-	return "false"
-}
-
-// getToggleStateText returns human-readable state for screen readers
 func getToggleStateText(isEnabled bool) string {
 	if isEnabled {
 		return "enabled"

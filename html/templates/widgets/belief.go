@@ -1,14 +1,46 @@
+// Package templates provides Belief widget implementation
 package templates
 
 import (
-	"fmt"
-	// Add log package for debugging
+	"bytes"
+	"html/template"
+	"log"
+
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
+var beliefWidgetTmpl = template.Must(template.New("beliefWidget").Parse(
+	`{{define "wrapper"}}<div id="belief-container-{{.Slug}}" class="{{.ClassNames}}" data-belief="{{.Slug}}">{{end}}` +
+
+		`{{define "label"}}<label id="{{.LabelID}}" for="{{.SelectID}}">{{.LabelText}}</label>{{end}}` +
+
+		`{{define "selectTag"}}<select id="{{.SelectID}}" name="beliefValue" class="my-6 block w-fit min-w-48 max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 disabled:bg-gray-50 disabled:text-gray-500" data-belief-id="{{.Slug}}" data-belief-type="Belief" data-pane-id="{{.PaneID}}" aria-labelledby="{{.LabelID}}">{{end}}` +
+
+		`{{define "placeholderOption"}}<option value=""{{if .IsSelected}} selected{{end}} aria-label="{{.AriaLabel}}">{{.Text}}</option>{{end}}` +
+
+		`{{define "valueOption"}}<option value="{{.Slug}}"{{if .IsSelected}} selected{{end}} aria-label="{{.Name}}">{{.Name}}</option>{{end}}` +
+
+		`{{define "helpText"}}<div id="{{.HelpID}}" class="sr-only">Select your belief level. This choice affects the content you see and helps personalize your experience.</div>{{end}}`,
+))
+
+// Data structs for template execution
+type (
+	beliefWrapperData     struct{ Slug, ClassNames string }
+	beliefLabelData       struct{ LabelID, SelectID, LabelText string }
+	beliefSelectData      struct{ SelectID, Slug, PaneID, LabelID string }
+	placeholderOptionData struct {
+		Text, AriaLabel string
+		IsSelected      bool
+	}
+)
+type valueOptionData struct {
+	Slug, Name string
+	IsSelected bool
+}
+type helpTextData struct{ HelpID string }
+
 // RenderBelief renders an accessible native HTML select component for belief scales
 func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra string) string {
-	// Retrieve user beliefs
 	userBeliefs := getUserBeliefs(ctx)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
 	placeholder := getPlaceholderText(scale)
@@ -24,73 +56,58 @@ func RenderBelief(ctx *models.RenderContext, classNames, slug, scale, extra stri
 		}
 	}
 
-	selectID := fmt.Sprintf("belief-select-%s", slug)
-	labelID := fmt.Sprintf("belief-label-%s", slug)
-	helpID := fmt.Sprintf("belief-help-%s", slug)
+	selectID := "belief-select-" + slug
+	labelID := "belief-label-" + slug
+	helpID := "belief-help-" + slug
 
-	html := fmt.Sprintf(`<div id="belief-container-%s" class="%s" data-belief="%s">`, slug, classNames, slug)
+	var buf bytes.Buffer
 
-	// Add label for accessibility
+	// Render each part of the component using secure templates
+	executeBeliefTemplate(&buf, "wrapper", beliefWrapperData{Slug: slug, ClassNames: classNames})
+
 	labelText := extra
 	if labelText == "" {
 		labelText = placeholder
 	}
-	html += fmt.Sprintf(`
-    <label id="%s" for="%s">
-        %s
-    </label>`, labelID, selectID, labelText)
+	executeBeliefTemplate(&buf, "label", beliefLabelData{LabelID: labelID, SelectID: selectID, LabelText: labelText})
 
-	// Add accessible select with proper ARIA attributes
-	html += fmt.Sprintf(`
-    <select id="%s" 
-            name="beliefValue" 
-            class="my-6 block w-fit min-w-48 max-w-xs px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-600 focus:border-cyan-600 disabled:bg-gray-50 disabled:text-gray-500" 
-            data-belief-id="%s" 
-            data-belief-type="Belief"
-            data-pane-id="%s"
-            aria-labelledby="%s">`, selectID, slug, ctx.ContainingPaneID, labelID)
+	executeBeliefTemplate(&buf, "selectTag", beliefSelectData{SelectID: selectID, Slug: slug, PaneID: ctx.ContainingPaneID, LabelID: labelID})
 
-	// Add default option that's properly accessible
+	// Render placeholder option
 	if selectedValue == "" {
-		html += fmt.Sprintf(`
-        <option value="" selected aria-label="No selection made">%s</option>`, placeholder)
+		executeBeliefTemplate(&buf, "placeholderOption", placeholderOptionData{Text: placeholder, AriaLabel: "No selection made", IsSelected: true})
 	} else {
-		html += fmt.Sprintf(`
-        <option value="" aria-label="Reset to no selection">%s</option>`, placeholder)
+		executeBeliefTemplate(&buf, "placeholderOption", placeholderOptionData{Text: placeholder, AriaLabel: "Reset to no selection", IsSelected: false})
 	}
 
-	// Add actual options with proper accessibility
+	// Render actual value options
 	for _, option := range actualOptions {
-		isSelected := option.Slug == selectedValue
-		selectedAttr := ""
-		if isSelected {
-			selectedAttr = " selected"
-		}
-
-		html += fmt.Sprintf(`
-        <option value="%s"%s aria-label="%s">
-            %s
-        </option>`,
-			option.Slug,
-			selectedAttr,
-			option.Name,
-			option.Name)
+		executeBeliefTemplate(&buf, "valueOption", valueOptionData{
+			Slug:       option.Slug,
+			Name:       option.Name,
+			IsSelected: option.Slug == selectedValue,
+		})
 	}
 
-	html += `
-    </select>`
+	buf.WriteString(`</select>`)
 
-	// Add help text for screen readers
-	html += fmt.Sprintf(`
-    <div id="%s" class="sr-only">
-        Select your belief level. This choice affects the content you see and helps personalize your experience.
-    </div>`, helpID)
+	executeBeliefTemplate(&buf, "helpText", helpTextData{HelpID: helpID})
 
-	html += `
-    </div>`
+	buf.WriteString(`</div>`)
 
-	return html
+	return buf.String()
 }
+
+// executeBeliefTemplate is a helper to render a named template and handle errors
+func executeBeliefTemplate(buf *bytes.Buffer, name string, data interface{}) {
+	err := beliefWidgetTmpl.ExecuteTemplate(buf, name, data)
+	if err != nil {
+		log.Printf("ERROR: Failed to execute belief widget template '%s': %v", name, err)
+		buf.WriteString("<!-- template error -->")
+	}
+}
+
+// The helper functions below do not generate HTML and remain unchanged.
 
 func getScaleOptions(scale string) []ScaleOption {
 	switch scale {

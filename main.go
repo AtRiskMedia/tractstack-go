@@ -128,8 +128,7 @@ func main() {
 		defer tenantCtx.Close()
 
 		// Allow reserved tenants ONLY for activation endpoint
-		if tenantCtx.Status == "reserved" && c.Request.URL.Path != "/api/v1/activate-tenant" {
-			// Block reserved tenants from other endpoints
+		if tenantCtx.Status == "reserved" && c.Request.URL.Path != "/api/v1/tenant/activation" {
 			c.JSON(500, gin.H{"error": "tenant not activated"})
 			c.Abort()
 			return

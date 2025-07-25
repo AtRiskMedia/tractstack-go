@@ -2,11 +2,16 @@
 package templates
 
 import (
-	"fmt"
+	"html/template"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+// nodeButtonTmpl is a pre-parsed template for rendering the button's opening tag.
+// Using html/template automatically escapes the class attribute, preventing HTML injection.
+var nodeButtonTmpl = template.Must(template.New("nodeButton").Parse(`<button class="{{.}}" onclick="return false;">`))
 
 // NodeButtonRenderer handles NodeButton.astro rendering logic
 type NodeButtonRenderer struct {
@@ -31,21 +36,22 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 
 	var html strings.Builder
 
-	// Opening <button> tag
-	html.WriteString(`<button`)
-
-	// Add CSS classes - EXACT match: className={`${node.elementCss || ""} whitespace-nowrap`}
+	// Prepare CSS classes string
+	// EXACT match: className={`${node.elementCss || ""} whitespace-nowrap`}
 	var cssClasses strings.Builder
 	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
 		cssClasses.WriteString(*nodeData.ElementCSS)
 	}
 	cssClasses.WriteString(" whitespace-nowrap")
-	html.WriteString(fmt.Sprintf(` class="%s"`, strings.TrimSpace(cssClasses.String())))
+	finalClasses := strings.TrimSpace(cssClasses.String())
 
-	// Basic onclick for now - ButtonIsland logic is placeholder
-	html.WriteString(` onclick="return false;"`)
-
-	html.WriteString(`>`)
+	// Use the pre-parsed template to safely render the opening <button> tag.
+	// This replaces the insecure fmt.Sprintf() call.
+	err := nodeButtonTmpl.Execute(&html, finalClasses)
+	if err != nil {
+		log.Printf("ERROR: Failed to execute nodeButton template for nodeID %s: %v", nodeID, err)
+		return `<!-- error rendering button -->`
+	}
 
 	// Render all child nodes with <span class="whitespace-nowrap"> wrapper
 	// This matches the expected output: <span class="whitespace-nowrap">Talk to me!​​ </span>

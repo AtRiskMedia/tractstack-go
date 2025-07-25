@@ -2,12 +2,46 @@
 package html
 
 import (
+	"bytes"
 	"fmt"
+	"html/template"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/html/templates"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+var paneTemplates = template.Must(template.New("paneRenderer").Parse(
+	`{{define "paneWrapper"}}<div id="pane-{{.ID}}" class="{{.Class}}" style="position: relative;">{{end}}` +
+		`{{define "contentDiv"}}<div id="{{.ID}}" class="{{.Class}}" style="{{.Style}}">{{end}}` +
+		`{{define "flexLayoutDiv"}}<div id="{{.ID}}" class="flex flex-nowrap {{.FlexDirection}} {{.Classes}}">{{end}}` +
+		`{{define "imageSideDiv"}}<div class="relative overflow-hidden {{.Class}}">{{end}}` +
+		`{{define "contentSideDiv"}}<div class="{{.ContentClasses}} {{.SizeClass}}" style="{{.Style}}">{{end}}`,
+))
+
+type paneWrapperData struct {
+	ID    string
+	Class string
+}
+type contentDivData struct {
+	ID    string
+	Class string
+	Style template.CSS
+}
+type flexLayoutDivData struct {
+	ID            string
+	FlexDirection string
+	Classes       string
+}
+type imageSideDivData struct {
+	Class string
+}
+type contentSideDivData struct {
+	ContentClasses string
+	SizeClass      string
+	Style          template.CSS
+}
 
 // CSSProcessor interface for dependency injection
 type CSSProcessor interface {
@@ -41,19 +75,16 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 		return nr.renderEmptyNode()
 	}
 
-	// Get node data - FIXED TO USE REAL DATA
 	nodeData := nr.getNodeRenderData(nodeID)
 	if nodeData == nil {
 		return nr.renderEmptyNode()
 	}
 
-	// Determine node type for switching - matches Node.astro logic
 	nodeType := nodeData.NodeType
 	if nodeData.TagName != nil {
 		nodeType = *nodeData.TagName
 	}
 
-	// Handle code nodes with widget hooks first (matches Node.astro special case)
 	if nodeType == "code" {
 		hookData := nr.parseCodeHook(nodeData)
 		if hookData != nil {
@@ -62,7 +93,6 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 		return nr.renderEmptyNode()
 	}
 
-	// Main switch statement matching Node.astro getElement function
 	switch nodeType {
 	case "Pane":
 		return nr.renderPane(nodeID)
@@ -74,7 +104,6 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 		return nr.renderBgPaneWrapper(nodeID)
 	case "TagElement":
 		return nr.renderTagElement(nodeID)
-	// Basic HTML tag elements
 	case "h2", "h3", "h4", "p", "em", "strong", "li", "ol", "ul", "aside":
 		return nr.renderNodeBasicTag(nodeID)
 	case "text":
@@ -88,7 +117,6 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 	case "impression":
 		return nr.renderEmptyNode()
 	default:
-		// console.log equivalent for debugging
 		fmt.Printf("Node.astro miss on %s\n", nodeType)
 		return nr.renderEmptyNode()
 	}
@@ -174,14 +202,12 @@ func (nr *NodeRendererImpl) getNodeRenderData(nodeID string) *models.NodeRenderD
 	return nr.ctx.AllNodes[nodeID]
 }
 
-// PaneRenderer handles Pane.astro rendering logic - COMPLETE REWRITE
 type PaneRenderer struct {
 	ctx          *models.RenderContext
 	cssProcessor *CSSProcessorImpl
 	nodeRenderer NodeRenderer
 }
 
-// Render implements the COMPLETE Pane.astro rendering logic
 func (pr *PaneRenderer) Render(nodeID string) string {
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.PaneData == nil {
@@ -192,75 +218,64 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	heldBeliefs, withheldBeliefs := pr.getPaneBeliefs(nodeID)
 	isDecorative := paneData.IsDecorative
 
-	// Get slug for inner div - matches Pane.astro: const slug = getCtx().getPaneSlug(nodeId)
 	slug := pr.getPaneSlug(nodeID)
 
-	// Build wrapper classes - matches Pane.astro: `grid ${getCtx().getNodeClasses(nodeId, 'auto')}`
-	wrapperClasses := fmt.Sprintf("grid %s", pr.cssProcessor.GetNodeClasses(nodeID, "auto"))
+	wrapperClasses := "grid " + pr.cssProcessor.GetNodeClasses(nodeID, "auto")
 
-	// Content classes and styles - matches Pane.astro exactly
 	contentClasses := "relative w-full h-auto justify-self-start"
 	contentStyles := pr.cssProcessor.GetNodeStringStyles(nodeID) + "; grid-area: 1/1/1/1; position: relative; z-index: 1"
 
-	// Get background node - matches Pane.astro background node detection
 	bgNode := pr.getBackgroundNode(nodeID)
 
-	// Determine layout type - matches Pane.astro conditional logic
 	useFlexLayout := bgNode != nil && (bgNode.Position == "leftBleed" || bgNode.Position == "rightBleed")
 	deferFlexLayout := bgNode != nil && (bgNode.Position == "left" || bgNode.Position == "right")
 
-	// Build the pane HTML - matches Pane.astro structure exactly
-	var html strings.Builder
+	var html bytes.Buffer
 
-	// Opening div with pane ID - matches: <div id={`pane-${nodeId}`} class={isDecorative ? `` : `pane`} style="position: relative;">
-	html.WriteString(fmt.Sprintf(`<div id="pane-%s"`, nodeID))
-
+	wrapperData := paneWrapperData{ID: nodeID}
 	if isDecorative {
-		html.WriteString(` class=""`)
+		wrapperData.Class = ""
 	} else {
-		html.WriteString(` class="pane"`)
+		wrapperData.Class = "pane"
 	}
-	html.WriteString(` style="position: relative;">`)
+	pr.executeTemplate(&html, "paneWrapper", wrapperData)
 
-	// Add Filter component for beliefs (placeholder for now)
-	// Add Filter component for beliefs (placeholder for now)
 	if len(heldBeliefs) > 0 || len(withheldBeliefs) > 0 {
 		html.WriteString(`<!-- Filter component placeholder -->`)
 	}
 
-	// Handle CodeHook payload (placeholder for now)
 	codeHookPayload := pr.getCodeHookPayload(nodeID)
 	if codeHookPayload != nil {
-		html.WriteString(fmt.Sprintf(`<div id="%s" style="%s">`, slug, contentStyles))
-		html.WriteString(`<!-- CodeHook component placeholder -->`)
-		html.WriteString(`</div>`)
+		pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Style: template.CSS(contentStyles)})
+		html.WriteString(`<!-- CodeHook component placeholder --></div>`)
 	} else if useFlexLayout {
-		// useFlexLayout - matches Pane.astro flex layout for leftBleed/rightBleed
 		flexDirection := "flex-col md:flex-row"
 		if bgNode.Position == "rightBleed" {
 			flexDirection = "flex-col md:flex-row-reverse"
 		}
 
-		html.WriteString(fmt.Sprintf(`<div id="%s" class="flex flex-nowrap %s %s">`,
-			slug, flexDirection, pr.cssProcessor.GetNodeClasses(nodeID, "auto")))
+		pr.executeTemplate(&html, "flexLayoutDiv", flexLayoutDivData{
+			ID:            slug,
+			FlexDirection: flexDirection,
+			Classes:       pr.cssProcessor.GetNodeClasses(nodeID, "auto"),
+		})
 
-		// Image side
 		imageSizeClass := pr.getSizeClasses(bgNode.Size, "image")
-		html.WriteString(fmt.Sprintf(`<div class="relative overflow-hidden %s">`, imageSizeClass))
+		pr.executeTemplate(&html, "imageSideDiv", imageSideDivData{Class: imageSizeClass})
 
-		// Render only BgPane children
 		bgChildrenIDs := pr.getBgPaneChildren(nodeID)
 		for _, childID := range bgChildrenIDs {
 			html.WriteString(pr.nodeRenderer.RenderNode(childID))
 		}
 		html.WriteString(`</div>`)
 
-		// Content side
 		contentSizeClass := pr.getSizeClasses(bgNode.Size, "content")
-		html.WriteString(fmt.Sprintf(`<div class="%s %s" style="%s">`,
-			contentClasses, contentSizeClass, pr.cssProcessor.GetNodeStringStyles(nodeID)))
+		pr.executeTemplate(&html, "contentSideDiv", contentSideDivData{
+			ContentClasses: contentClasses,
+			SizeClass:      contentSizeClass,
+			Style:          template.CSS(pr.cssProcessor.GetNodeStringStyles(nodeID)),
+		})
 
-		// Render non-BgPane children
 		contentChildrenIDs := pr.getNonBgPaneChildren(nodeID)
 		for _, childID := range contentChildrenIDs {
 			html.WriteString(pr.nodeRenderer.RenderNode(childID))
@@ -269,11 +284,9 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 
 		html.WriteString(`</div>`)
 	} else if deferFlexLayout {
-		// deferFlexLayout - matches Pane.astro deferred flex layout for left/right
-		html.WriteString(fmt.Sprintf(`<div id="%s" class="%s">`, slug, wrapperClasses))
-		html.WriteString(fmt.Sprintf(`<div class="%s" style="%s">`, contentClasses, contentStyles))
+		pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Class: wrapperClasses})
+		pr.executeTemplate(&html, "contentDiv", contentDivData{Class: contentClasses, Style: template.CSS(contentStyles)})
 
-		// Render non-BgPane children (BgPane handled in Markdown.astro)
 		contentChildrenIDs := pr.getNonBgPaneChildren(nodeID)
 		for _, childID := range contentChildrenIDs {
 			html.WriteString(pr.nodeRenderer.RenderNode(childID))
@@ -281,11 +294,9 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 		html.WriteString(`</div>`)
 		html.WriteString(`</div>`)
 	} else {
-		// Standard layout - matches Pane.astro default case
-		html.WriteString(fmt.Sprintf(`<div id="%s" class="%s">`, slug, wrapperClasses))
-		html.WriteString(fmt.Sprintf(`<div class="%s" style="%s">`, contentClasses, contentStyles))
+		pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Class: wrapperClasses})
+		pr.executeTemplate(&html, "contentDiv", contentDivData{Class: contentClasses, Style: template.CSS(contentStyles)})
 
-		// Render all children
 		childNodeIDs := pr.nodeRenderer.GetChildNodeIDs(nodeID)
 		for _, childID := range childNodeIDs {
 			html.WriteString(pr.nodeRenderer.RenderNode(childID))
@@ -298,11 +309,15 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	return html.String()
 }
 
-// Helper methods for Pane rendering
+func (pr *PaneRenderer) executeTemplate(buf *bytes.Buffer, name string, data interface{}) {
+	err := paneTemplates.ExecuteTemplate(buf, name, data)
+	if err != nil {
+		log.Printf("ERROR: Failed to execute pane template '%s': %v", name, err)
+		buf.WriteString("<!-- template error -->")
+	}
+}
 
 func (pr *PaneRenderer) getPaneSlug(nodeID string) string {
-	// Placeholder - implement slug extraction logic
-	// This should match getCtx().getPaneSlug(nodeId) from Astro
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData != nil && nodeData.PaneData != nil && nodeData.PaneData.Slug != "" {
 		return nodeData.PaneData.Slug
@@ -330,7 +345,6 @@ func (pr *PaneRenderer) getBackgroundNode(nodeID string) *models.BackgroundNode 
 }
 
 func (pr *PaneRenderer) getSizeClasses(size string, side string) string {
-	// Matches Pane.astro getSizeClasses exactly
 	switch size {
 	case "narrow":
 		if side == "image" {
@@ -374,11 +388,9 @@ func (pr *PaneRenderer) getNonBgPaneChildren(nodeID string) []string {
 }
 
 func (pr *PaneRenderer) getCodeHookPayload(nodeID string) map[string]interface{} {
-	// Placeholder for CodeHook detection
 	return nil
 }
 
-// getPaneBeliefs returns separated held and withheld beliefs preserving distinction
 func (pr *PaneRenderer) getPaneBeliefs(nodeID string) (map[string][]string, map[string][]string) {
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.PaneData == nil {
@@ -388,14 +400,12 @@ func (pr *PaneRenderer) getPaneBeliefs(nodeID string) (map[string][]string, map[
 	heldBeliefs := make(map[string][]string)
 	withheldBeliefs := make(map[string][]string)
 
-	// Copy held beliefs
 	if nodeData.PaneData.HeldBeliefs != nil {
 		for k, v := range nodeData.PaneData.HeldBeliefs {
 			heldBeliefs[k] = v
 		}
 	}
 
-	// Copy withheld beliefs
 	if nodeData.PaneData.WithheldBeliefs != nil {
 		for k, v := range nodeData.PaneData.WithheldBeliefs {
 			withheldBeliefs[k] = v
@@ -417,19 +427,16 @@ func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) *mode
 		return nil
 	}
 
-	// Get copy field to extract widget type
 	copyText := ""
 	if nodeData.Copy != nil {
 		copyText = *nodeData.Copy
 	}
 
-	// Extract widget type from copy field (e.g., "belief(...)" → "belief")
 	hook := extractWidgetTypeFromCopy(copyText)
 	if hook == "" {
 		return nil
 	}
 
-	// Get codeHookParams from CustomData
 	var params []string
 	if nodeData.CustomData != nil {
 		if codeHookParams, exists := nodeData.CustomData["codeHookParams"]; exists {
@@ -439,12 +446,10 @@ func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) *mode
 		}
 	}
 
-	// Create CodeHook with parsed data
 	codeHook := &models.CodeHook{
 		Hook: hook,
 	}
 
-	// Assign parameters to Value1, Value2, Value3 based on availability
 	if len(params) > 0 && params[0] != "" {
 		codeHook.Value1 = &params[0]
 	}
@@ -454,40 +459,29 @@ func (nr *NodeRendererImpl) parseCodeHook(nodeData *models.NodeRenderData) *mode
 	}
 
 	if len(params) > 2 {
-		codeHook.Value3 = params[2] // Value3 is string, not *string
+		codeHook.Value3 = params[2]
 	}
 
 	return codeHook
 }
 
 func (nr *NodeRendererImpl) renderWidget(nodeID string, hook *models.CodeHook) string {
-	// Validate hook data
 	if hook == nil {
 		return `<!-- Widget error: no hook data -->`
 	}
-
-	// Log parameters for debugging (as requested)
-	// log.Printf("Widget found - NodeID: %s, Hook: %s, Value1: %v, Value2: %v, Value3: %s",
-	//	nodeID, hook.Hook, hook.Value1, hook.Value2, hook.Value3)
-
-	// Create widget renderer and dispatch
 	widgetRenderer := templates.NewWidgetRenderer(nr.ctx)
 	return widgetRenderer.Render(nodeID, hook)
 }
 
-// 4. ADD NEW HELPER FUNCTION:
-// Add this new function to html/renderer.go
 func extractWidgetTypeFromCopy(copyText string) string {
 	if copyText == "" {
 		return ""
 	}
 
-	// Find the first opening parenthesis
 	parenIndex := strings.Index(copyText, "(")
 	if parenIndex == -1 {
 		return ""
 	}
 
-	// Return everything before the parenthesis
 	return copyText[:parenIndex]
 }

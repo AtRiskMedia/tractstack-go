@@ -2,11 +2,16 @@
 package templates
 
 import (
-	"html"
+	"html/template"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+// textEscaper is a pre-parsed template used for securely escaping text content.
+// This replaces the direct call to html.EscapeString() for consistency across the project.
+var textEscaper = template.Must(template.New("textEscaper").Parse("{{.}}"))
 
 // NodeTextRenderer handles NodeText.astro rendering logic
 type NodeTextRenderer struct {
@@ -39,30 +44,37 @@ func (ntr *NodeTextRenderer) Render(nodeID string) string {
 			// Empty or whitespace-only content gets non-breaking space + space
 			content = "\u00A0 "
 		} else {
-			content = html.EscapeString(*nodeData.Copy)
+			// Use the pre-parsed template to securely escape the text content for consistency.
+			var escapedContentBuilder strings.Builder
+			err := textEscaper.Execute(&escapedContentBuilder, *nodeData.Copy)
+			if err != nil {
+				log.Printf("ERROR: Failed to escape text content for nodeID %s: %v", nodeID, err)
+				return "<!-- error escaping text -->"
+			}
+			content = escapedContentBuilder.String()
 		}
 	} else {
 		content = ""
 	}
 
-	// Check if this text should have &nbsp; around it (for button spacing)
-	// Based on the expected output: &nbsp;  <a class="..."> ... </a> &nbsp;
+	// Check if this text should have   around it (for button spacing)
+	// Based on the expected output:    <a class="..."> ... </a>
 	needsLeadingNbsp := ntr.shouldAddLeadingNbsp(nodeID)
 	needsTrailingNbsp := ntr.shouldAddTrailingNbsp(nodeID)
 
 	var result strings.Builder
 
-	// Add leading &nbsp; if needed
+	// Add leading   if needed
 	if needsLeadingNbsp {
-		result.WriteString("&nbsp;")
+		result.WriteString(" ")
 	}
 
 	// Add the main content
 	result.WriteString(content)
 
-	// Add trailing &nbsp; if needed, otherwise regular space for non-links
+	// Add trailing   if needed, otherwise regular space for non-links
 	if needsTrailingNbsp {
-		result.WriteString("&nbsp;")
+		result.WriteString(" ")
 	} else if !isLink {
 		// EXACT match NodeText.astro: {isLink ? `` : " "}
 		result.WriteString(" ")
@@ -71,7 +83,7 @@ func (ntr *NodeTextRenderer) Render(nodeID string) string {
 	return result.String()
 }
 
-// shouldAddLeadingNbsp checks if this text node should have leading &nbsp;
+// shouldAddLeadingNbsp checks if this text node should have leading
 func (ntr *NodeTextRenderer) shouldAddLeadingNbsp(nodeID string) bool {
 	nodeData := ntr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.ParentID == "" {
@@ -107,7 +119,7 @@ func (ntr *NodeTextRenderer) shouldAddLeadingNbsp(nodeID string) bool {
 	return false
 }
 
-// shouldAddTrailingNbsp checks if this text node should have trailing &nbsp;
+// shouldAddTrailingNbsp checks if this text node should have trailing
 func (ntr *NodeTextRenderer) shouldAddTrailingNbsp(nodeID string) bool {
 	nodeData := ntr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.ParentID == "" {
@@ -143,15 +155,15 @@ func (ntr *NodeTextRenderer) shouldAddTrailingNbsp(nodeID string) bool {
 	return false
 }
 
-// isSpacingText checks if this is a spacing text node (contains only whitespace/&nbsp;)
+// isSpacingText checks if this is a spacing text node (contains only whitespace/ )
 func (ntr *NodeTextRenderer) isSpacingText(nodeData *models.NodeRenderData) bool {
 	if nodeData.Copy == nil {
 		return false
 	}
 
 	text := strings.TrimSpace(*nodeData.Copy)
-	// Check if it's empty, contains only spaces, or is already &nbsp;
-	return text == "" || text == " " || text == "&nbsp;" || text == "\u00A0"
+	// Check if it's empty, contains only spaces, or is already
+	return text == "" || text == " " || text == " " || text == "\u00A0"
 }
 
 // Helper methods
