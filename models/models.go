@@ -13,6 +13,7 @@ import (
 type EpinetNode struct {
 	ID       string           `json:"id"`
 	Title    string           `json:"title"`
+	NodeType string           `json:"nodeType"`
 	Promoted bool             `json:"promoted"`
 	Steps    []EpinetNodeStep `json:"steps"`
 }

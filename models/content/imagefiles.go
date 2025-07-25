@@ -250,6 +250,7 @@ func (ifs *ImageFileService) deserializeRowData(imagefileRow *ImageFileRowData) 
 	// Build ImageFileNode
 	imagefileNode := &models.ImageFileNode{
 		ID:             imagefileRow.ID,
+		NodeType:       "File",
 		Filename:       imagefileRow.Filename,
 		AltDescription: imagefileRow.AltDescription,
 		URL:            imagefileRow.URL,

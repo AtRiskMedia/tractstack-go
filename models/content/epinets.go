@@ -207,8 +207,9 @@ func (es *EpinetService) loadMultipleFromDB(ids []string) ([]*models.EpinetNode,
 // deserializeRowData converts database row to EpinetNode
 func (es *EpinetService) deserializeRowData(rowData EpinetRowData) (*models.EpinetNode, error) {
 	epinet := &models.EpinetNode{
-		ID:    rowData.ID,
-		Title: rowData.Title,
+		ID:       rowData.ID,
+		Title:    rowData.Title,
+		NodeType: "Epinet",
 	}
 
 	// Parse options_payload to extract promoted flag and steps
