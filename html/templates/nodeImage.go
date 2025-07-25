@@ -2,11 +2,27 @@
 package templates
 
 import (
-	"fmt"
+	"html/template"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+// nodeImageTmpl is a secure, pre-parsed template for the <img> tag.
+// It uses Go's html/template to prevent XSS by automatically escaping all attributes.
+// Optional attributes (src, srcset) are only rendered if they have a value.
+var nodeImageTmpl = template.Must(template.New("nodeImage").Parse(
+	`<img{{if .Src}} src="{{.Src}}"{{end}}{{if .SrcSet}} srcset="{{.SrcSet}}"{{end}} class="{{.Class}}" alt="{{.Alt}}" />`,
+))
+
+// nodeImageData holds the data for the nodeImage template.
+type nodeImageData struct {
+	Src    string
+	SrcSet string
+	Class  string
+	Alt    string
+}
 
 // NodeImgRenderer handles NodeImg.astro rendering logic
 type NodeImgRenderer struct {
@@ -25,36 +41,34 @@ func (nir *NodeImgRenderer) Render(nodeID string) string {
 		return `<img alt="missing image" />`
 	}
 
-	var html strings.Builder
-	html.WriteString(`<img`)
+	// Prepare the data for the template, applying logic from the original file.
+	data := nodeImageData{
+		// Default values matching NodeImg.astro logic
+		Class: "auto",
+		Alt:   "image",
+	}
 
-	// Add src attribute
 	if nodeData.ImageURL != nil && *nodeData.ImageURL != "" {
-		html.WriteString(fmt.Sprintf(` src="%s"`, *nodeData.ImageURL))
+		data.Src = *nodeData.ImageURL
 	}
-
-	// Add srcSet attribute if available - matches NodeImg.astro: {...node.srcSet ? { srcSet: node.srcSet } : {}}
 	if nodeData.SrcSet != nil && *nodeData.SrcSet != "" {
-		html.WriteString(fmt.Sprintf(` srcset="%s"`, *nodeData.SrcSet))
+		data.SrcSet = *nodeData.SrcSet
 	}
-
-	// Add CSS classes - matches NodeImg.astro: class={getCtx().getNodeClasses(nodeId, `auto`)}
-	cssClasses := ""
 	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
-		cssClasses = *nodeData.ElementCSS
-	} else {
-		cssClasses = "auto" // Default fallback
+		data.Class = *nodeData.ElementCSS // Override default
 	}
-	html.WriteString(fmt.Sprintf(` class="%s"`, cssClasses))
-
-	// Add alt attribute - matches NodeImg.astro: alt={node.alt}
-	altText := "image"
 	if nodeData.AltText != nil && *nodeData.AltText != "" {
-		altText = *nodeData.AltText
+		data.Alt = *nodeData.AltText // Override default
 	}
-	html.WriteString(fmt.Sprintf(` alt="%s"`, altText))
 
-	html.WriteString(` />`)
+	var html strings.Builder
+	// Use the pre-parsed template to safely render the <img> tag.
+	// This replaces the four insecure fmt.Sprintf() calls.
+	err := nodeImageTmpl.Execute(&html, data)
+	if err != nil {
+		log.Printf("ERROR: Failed to execute nodeImage template for nodeID %s: %v", nodeID, err)
+		return `<!-- error rendering image -->`
+	}
 	return html.String()
 }
 
@@ -63,6 +77,5 @@ func (nir *NodeImgRenderer) getNodeData(nodeID string) *models.NodeRenderData {
 	if nir.ctx.AllNodes == nil {
 		return nil
 	}
-
 	return nir.ctx.AllNodes[nodeID]
 }

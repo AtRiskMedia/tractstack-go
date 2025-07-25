@@ -2,11 +2,26 @@
 package templates
 
 import (
-	"fmt"
+	"html/template"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
+
+// nodeATmpl is a pre-parsed and secure template for the opening <a> tag.
+// It uses Go's html/template to prevent XSS by automatically escaping the
+// href, target, and class attributes.
+var nodeATmpl = template.Must(template.New("nodeA").Parse(
+	`<a href="{{.Href}}"{{if .Target}} target="{{.Target}}"{{end}}{{if .Class}} class="{{.Class}}"{{end}}>`,
+))
+
+// nodeAData holds the data for the nodeA template.
+type nodeAData struct {
+	Href   string
+	Target string
+	Class  string
+}
 
 // NodeARenderer handles NodeA.astro rendering logic
 type NodeARenderer struct {
@@ -31,27 +46,27 @@ func (nar *NodeARenderer) Render(nodeID string) string {
 
 	var html strings.Builder
 
-	// Opening <a> tag
-	html.WriteString(`<a`)
-
-	// Add href attribute
-	href := "#"
+	// Prepare the data for the template
+	data := nodeAData{
+		Href: "#", // Default href
+	}
 	if nodeData.Href != nil && *nodeData.Href != "" {
-		href = *nodeData.Href
+		data.Href = *nodeData.Href
 	}
-	html.WriteString(fmt.Sprintf(` href="%s"`, href))
-
-	// Add target attribute if specified
 	if nodeData.Target != nil && *nodeData.Target != "" {
-		html.WriteString(fmt.Sprintf(` target="%s"`, *nodeData.Target))
+		data.Target = *nodeData.Target
 	}
-
-	// Add CSS classes
 	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
-		html.WriteString(fmt.Sprintf(` class="%s"`, *nodeData.ElementCSS))
+		data.Class = *nodeData.ElementCSS
 	}
 
-	html.WriteString(`>`)
+	// Use the pre-parsed template to safely render the opening <a> tag.
+	// This replaces the three insecure fmt.Sprintf() calls.
+	err := nodeATmpl.Execute(&html, data)
+	if err != nil {
+		log.Printf("ERROR: Failed to execute nodeA template for nodeID %s: %v", nodeID, err)
+		return `<!-- error rendering link -->`
+	}
 
 	// Render all child nodes with <span class="whitespace-nowrap"> wrapper
 	// This matches the expected output: <span class="whitespace-nowrap">See Pricing</span>

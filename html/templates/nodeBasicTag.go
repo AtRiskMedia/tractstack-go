@@ -2,10 +2,42 @@
 package templates
 
 import (
-	"fmt"
+	"html/template"
+	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
+)
+
+var (
+	// classAttrTmpl is a small, secure template just for rendering the class attribute.
+	// This prevents attribute injection from user-provided CSS.
+	classAttrTmpl = template.Must(template.New("classAttr").Parse(` class="{{.}}"`))
+
+	// allowedTags is a security allowlist. Only tags in this map are allowed to be
+	// rendered. This is crucial to prevent arbitrary HTML injection (e.g., <script>).
+	allowedTags = map[string]struct{}{
+		"div":     {},
+		"p":       {},
+		"span":    {},
+		"section": {},
+		"article": {},
+		"header":  {},
+		"footer":  {},
+		"h1":      {},
+		"h2":      {},
+		"h3":      {},
+		"h4":      {},
+		"h5":      {},
+		"h6":      {},
+		"ul":      {},
+		"ol":      {},
+		"li":      {},
+		"strong":  {},
+		"em":      {},
+		"b":       {},
+		"i":       {},
+	}
 )
 
 // NodeBasicTagRenderer handles NodeBasicTag.astro rendering logic
@@ -29,38 +61,47 @@ func (nbtr *NodeBasicTagRenderer) Render(nodeID string) string {
 		return `<div></div>`
 	}
 
-	// Get tag name - matches NodeBasicTag.astro: const Tag = node.tagName || EmptyNode;
-	tagName := "div" // Default fallback
+	// SECURITY: Validate the user-provided tag name against an allowlist.
+	// Default to "div" if the tag is not in the list. This prevents HTML injection.
+	safeTag := "div" // Default fallback
 	if nodeData.TagName != nil {
-		tagName = *nodeData.TagName
+		if _, ok := allowedTags[*nodeData.TagName]; ok {
+			safeTag = *nodeData.TagName
+		}
 	}
 
-	// Get CSS classes - matches NodeBasicTag.astro: class={node.elementCss || ``}
+	// Get CSS classes
 	cssClasses := ""
 	if nodeData.ElementCSS != nil {
 		cssClasses = *nodeData.ElementCSS
 	}
 
-	// Get child nodes - matches NodeBasicTag.astro child iteration
-	childNodeIDs := nbtr.nodeRenderer.GetChildNodeIDs(nodeID)
-
-	// Build the HTML exactly like NodeBasicTag.astro
 	var html strings.Builder
 
-	// Opening tag with CSS classes
+	// Manually write the validated, safe opening tag.
+	html.WriteString("<" + safeTag)
+
+	// If CSS classes exist, render them using the secure template.
+	// This replaces the insecure fmt.Sprintf() for the class attribute.
 	if cssClasses != "" {
-		html.WriteString(fmt.Sprintf(`<%s class="%s">`, tagName, cssClasses))
-	} else {
-		html.WriteString(fmt.Sprintf(`<%s>`, tagName))
+		err := classAttrTmpl.Execute(&html, cssClasses)
+		if err != nil {
+			log.Printf("ERROR: Failed to execute classAttr template for nodeID %s: %v", nodeID, err)
+			// Don't return here, just log the error and continue rendering the tag without classes.
+		}
 	}
 
-	// Render all child nodes - matches getCtx().getChildNodeIDs(nodeId).map((id) => <Node nodeId={id} />)
+	html.WriteString(">")
+
+	// Render all child nodes
+	childNodeIDs := nbtr.nodeRenderer.GetChildNodeIDs(nodeID)
 	for _, childID := range childNodeIDs {
 		html.WriteString(nbtr.nodeRenderer.RenderNode(childID))
 	}
 
-	// Closing tag
-	html.WriteString(fmt.Sprintf(`</%s>`, tagName))
+	// Closing tag, using the same validated safe tag.
+	// This replaces the final insecure fmt.Sprintf().
+	html.WriteString("</" + safeTag + ">")
 
 	return html.String()
 }
@@ -70,7 +111,5 @@ func (nbtr *NodeBasicTagRenderer) getNodeData(nodeID string) *models.NodeRenderD
 	if nbtr.ctx.AllNodes == nil {
 		return nil
 	}
-
-	// Use real data from context
 	return nbtr.ctx.AllNodes[nodeID]
 }
