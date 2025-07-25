@@ -54,6 +54,7 @@ type TenantContentCache struct {
 type TractStackNode struct {
 	ID              string  `json:"id"`
 	Title           string  `json:"title"`
+	NodeType        string  `json:"nodeType"`
 	Slug            string  `json:"slug"`
 	SocialImagePath *string `json:"socialImagePath,omitempty"`
 }
@@ -61,6 +62,7 @@ type TractStackNode struct {
 type StoryFragmentNode struct {
 	ID               string            `json:"id"`
 	Title            string            `json:"title"`
+	NodeType         string            `json:"nodeType"`
 	Slug             string            `json:"slug"`
 	TractStackID     string            `json:"tractStackId"`
 	MenuID           *string           `json:"menuId,omitempty"`
@@ -77,6 +79,7 @@ type StoryFragmentNode struct {
 type PaneNode struct {
 	ID              string              `json:"id"`
 	Title           string              `json:"title"`
+	NodeType        string              `json:"nodeType"`
 	Slug            string              `json:"slug"`
 	IsContextPane   bool                `json:"isContextPane"`
 	IsDecorative    bool                `json:"isDecorative"`
@@ -93,6 +96,7 @@ type PaneNode struct {
 type MenuNode struct {
 	ID             string     `json:"id"`
 	Title          string     `json:"title"`
+	NodeType       string     `json:"nodeType"`
 	Theme          string     `json:"theme"`
 	OptionsPayload []MenuLink `json:"optionsPayload"`
 }
@@ -100,6 +104,7 @@ type MenuNode struct {
 type ResourceNode struct {
 	ID             string         `json:"id"`
 	Title          string         `json:"title"`
+	NodeType       string         `json:"nodeType"`
 	Slug           string         `json:"slug"`
 	CategorySlug   *string        `json:"categorySlug,omitempty"`
 	Oneliner       string         `json:"oneliner"`
@@ -110,6 +115,7 @@ type ResourceNode struct {
 type BeliefNode struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
+	NodeType     string   `json:"nodeType"`
 	Slug         string   `json:"slug"`
 	Scale        string   `json:"scale"`
 	CustomValues []string `json:"customValues,omitempty"`
@@ -118,6 +124,7 @@ type BeliefNode struct {
 type ImageFileNode struct {
 	ID             string  `json:"id"`
 	Filename       string  `json:"filename"`
+	NodeType       string  `json:"nodeType"`
 	AltDescription string  `json:"altDescription"`
 	URL            string  `json:"url"`
 	SrcSet         *string `json:"srcSet,omitempty"`

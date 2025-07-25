@@ -282,9 +282,10 @@ func (tss *TractStackService) getTractStackRowData(id string) (*TractStackRowDat
 func (tss *TractStackService) deserializeRowData(tractStackRow *TractStackRowData) *models.TractStackNode {
 	// Build TractStackNode
 	tractStackNode := &models.TractStackNode{
-		ID:    tractStackRow.ID,
-		Title: tractStackRow.Title,
-		Slug:  tractStackRow.Slug,
+		ID:       tractStackRow.ID,
+		Title:    tractStackRow.Title,
+		NodeType: "TractStack",
+		Slug:     tractStackRow.Slug,
 	}
 
 	// Optional fields

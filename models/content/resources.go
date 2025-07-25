@@ -386,6 +386,7 @@ func (rs *ResourceService) deserializeRowData(resourceRow *ResourceRowData) (*mo
 	resourceNode := &models.ResourceNode{
 		ID:             resourceRow.ID,
 		Title:          resourceRow.Title,
+		NodeType:       "Resource",
 		Slug:           resourceRow.Slug,
 		Oneliner:       resourceRow.Oneliner,
 		OptionsPayload: optionsPayload,

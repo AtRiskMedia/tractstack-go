@@ -252,6 +252,7 @@ func (ms *MenuService) deserializeRowData(menuRow *MenuRowData) (*models.MenuNod
 	menuNode := &models.MenuNode{
 		ID:             menuRow.ID,
 		Title:          menuRow.Title,
+		NodeType:       "Menu",
 		Theme:          menuRow.Theme,
 		OptionsPayload: optionsPayload,
 	}

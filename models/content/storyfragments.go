@@ -392,6 +392,7 @@ func (sfs *StoryFragmentService) deserializeRowData(storyFragmentRow *StoryFragm
 	storyFragmentNode := &models.StoryFragmentNode{
 		ID:              storyFragmentRow.ID,
 		Title:           storyFragmentRow.Title,
+		NodeType:        "StoryFragment",
 		Slug:            storyFragmentRow.Slug,
 		TractStackID:    storyFragmentRow.TractStackID,
 		PaneIDs:         paneIDs,

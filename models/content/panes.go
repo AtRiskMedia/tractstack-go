@@ -466,6 +466,7 @@ func (ps *PaneService) deserializeRowData(paneRow *PaneRowData, markdownRow *Mar
 	paneNode := &models.PaneNode{
 		ID:             paneRow.ID,
 		Title:          paneRow.Title,
+		NodeType:       "Pane",
 		Slug:           paneRow.Slug,
 		IsContextPane:  paneRow.IsContextPane == 1,
 		IsDecorative:   isDecorative,

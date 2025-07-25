@@ -292,10 +292,11 @@ func (bs *BeliefService) getBeliefRowData(id string) (*BeliefRowData, error) {
 func (bs *BeliefService) deserializeRowData(beliefRow *BeliefRowData) (*models.BeliefNode, error) {
 	// Build BeliefNode
 	beliefNode := &models.BeliefNode{
-		ID:    beliefRow.ID,
-		Title: beliefRow.Title,
-		Slug:  beliefRow.Slug,
-		Scale: beliefRow.Scale,
+		ID:       beliefRow.ID,
+		Title:    beliefRow.Title,
+		NodeType: "Belief",
+		Slug:     beliefRow.Slug,
+		Scale:    beliefRow.Scale,
 	}
 
 	// Parse custom values if present
