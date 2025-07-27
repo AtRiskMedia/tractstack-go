@@ -3,6 +3,7 @@ package cache
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/config"
@@ -23,6 +24,7 @@ func (m *Manager) GetHourlyEpinetBin(tenantID, epinetID, hourKey string) (*model
 	m.Mu.RUnlock()
 
 	if !exists {
+		// log.Printf("CACHE_MISS_NO_CACHE: No analytics cache for tenant %s", tenantID)
 		return nil, false
 	}
 
@@ -32,6 +34,7 @@ func (m *Manager) GetHourlyEpinetBin(tenantID, epinetID, hourKey string) (*model
 	binKey := fmt.Sprintf("%s:%s", epinetID, hourKey)
 	bin, found := analyticsCache.EpinetBins[binKey]
 	if !found {
+		// log.Printf("CACHE_MISS_NO_BIN: No bin found for key %s", binKey)
 		return nil, false
 	}
 
@@ -46,10 +49,32 @@ func (m *Manager) GetHourlyEpinetBin(tenantID, epinetID, hourKey string) (*model
 		return config.AnalyticsBinTTL
 	}()
 
-	if bin.ComputedAt.Add(ttl).Before(time.Now().UTC()) {
+	age := now.Sub(bin.ComputedAt)
+	expirationTime := bin.ComputedAt.Add(ttl)
+	isExpired := expirationTime.Before(now)
+
+	// Log detailed information about this TTL check
+	// log.Printf("CACHE_TTL_CHECK: binKey=%s, currentHour=%s, isCurrentHour=%v",
+	//	binKey, currentHour, hourKey == currentHour)
+	// log.Printf("CACHE_TTL_TIMING: computedAt=%v, now=%v, age=%v",
+	//	bin.ComputedAt.Format("15:04:05.000"), now.Format("15:04:05.000"), age)
+	// log.Printf("CACHE_TTL_LOGIC: ttl=%v, expirationTime=%v, isExpired=%v",
+	//	ttl, expirationTime.Format("15:04:05.000"), isExpired)
+
+	if isExpired {
+		// log.Printf("CACHE_MISS_EXPIRED: Bin for %s expired in GetHourlyEpinetBin (age=%v, ttl=%v)",
+		//	binKey, age, ttl)
+
+		// Log warning if a very new bin is being expired
+		if age < 5*time.Minute {
+			log.Printf("WARNING: Very fresh bin %s is being expired after only %v (ttl=%v)",
+				binKey, age, ttl)
+		}
+
 		return nil, false
 	}
 
+	// log.Printf("CACHE_HIT: Bin %s found and valid (age=%v, ttl=%v)", binKey, age, ttl)
 	return bin, true
 }
 
@@ -295,7 +320,7 @@ func (m *Manager) GetHourlyEpinetRange(tenantID, epinetID string, hourKeys []str
 		binKey := fmt.Sprintf("%s:%s", epinetID, hourKey)
 		bin, exists := analyticsCache.EpinetBins[binKey]
 
-		if exists && !IsAnalyticsBinExpired(bin) {
+		if exists && !IsAnalyticsBinExpired(bin, hourKey) {
 			found[hourKey] = bin
 		} else {
 			missing = append(missing, hourKey)
@@ -332,7 +357,7 @@ func (m *Manager) PurgeExpiredBins(tenantID string, olderThan string) {
 
 	// Purge expired epinet bins
 	for binKey, bin := range analyticsCache.EpinetBins {
-		if bin.ComputedAt.Before(cutoffTime) || IsAnalyticsBinExpired(bin) {
+		if bin.ComputedAt.Before(cutoffTime) || IsAnalyticsBinExpired(bin, binKey) {
 			delete(analyticsCache.EpinetBins, binKey)
 		}
 	}
@@ -396,7 +421,9 @@ func (m *Manager) GetAnalyticsSummary(tenantID string) map[string]interface{} {
 	}
 }
 
-// InvalidateAnalyticsCache clears all analytics data for a tenant
+// InvalidateAnalyticsCache clears high-level computed analytics data for a tenant
+// without deleting the expensive-to-compute hourly bins. This prevents race
+// conditions with the cache warmer.
 func (m *Manager) InvalidateAnalyticsCache(tenantID string) {
 	m.EnsureTenant(tenantID)
 
@@ -411,16 +438,18 @@ func (m *Manager) InvalidateAnalyticsCache(tenantID string) {
 	analyticsCache.Mu.Lock()
 	defer analyticsCache.Mu.Unlock()
 
-	// Clear all bins
-	analyticsCache.EpinetBins = make(map[string]*models.HourlyEpinetBin)
-	analyticsCache.ContentBins = make(map[string]*models.HourlyContentBin)
-	analyticsCache.SiteBins = make(map[string]*models.HourlySiteBin)
+	// CRITICAL FIX: Do NOT clear the expensive-to-compute hourly bins.
+	// These are the source of truth for the GetRangeCacheStatus check and are
+	// protected by the locking mechanism in the API handlers.
+	// analyticsCache.EpinetBins = make(map[string]*models.HourlyEpinetBin)
+	// analyticsCache.ContentBins = make(map[string]*models.HourlyContentBin)
+	// analyticsCache.SiteBins = make(map[string]*models.HourlySiteBin)
 
-	// Clear computed metrics
+	// ONLY clear the quickly-recomputed high-level metrics. This is safe.
 	analyticsCache.LeadMetrics = nil
 	analyticsCache.DashboardData = nil
 
-	// Reset metadata
+	// Reset metadata to indicate that high-level metrics are stale.
 	analyticsCache.LastFullHour = ""
 	analyticsCache.LastUpdated = time.Now()
 }

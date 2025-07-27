@@ -16,31 +16,6 @@ import (
 =============================================================================
 CRITICAL LOCKING HIERARCHY DOCUMENTATION
 =============================================================================
-
-To prevent deadlocks, ALL cache operations MUST follow this strict locking hierarchy:
-
-LOCK HIERARCHY (highest to lowest):
-1. Manager.Mu (highest priority - top level)
-2. Individual cache mutexes (ContentCache.Mu, UserStateCache.Mu, etc.)
-
-RULES TO PREVENT DEADLOCKS:
-- NEVER acquire a higher-level lock while holding a lower-level lock
-- Methods ending in "Unsafe" assume locks are already held by caller
-- Public methods acquire their own locks; internal "Unsafe" methods do NOT
-- Always use "defer unlock" pattern for safety
-- When multiple tenant caches need locking, acquire in consistent order
-
-INTERNAL vs PUBLIC METHOD PATTERN:
-- Public methods (GetTenantStats): acquire Manager.Mu, call unsafe version
-- Internal methods (getTenantStatsUnsafe): assume Manager.Mu already held
-- EnsureTenant calls unsafe versions since it holds Manager.Mu.Lock()
-
-VIOLATION EXAMPLES (DO NOT DO):
-- Calling GetTenantStats() from within EnsureTenant (deadlock)
-- Acquiring Manager.Mu while holding any cache.Mu (lock order violation)
-- Any method calling another public method while holding locks
-
-=============================================================================
 */
 
 var GlobalInstance *Manager
@@ -118,136 +93,90 @@ func (m *Manager) GetSession(tenantID, sessionID string) (*models.SessionData, b
 func (m *Manager) SetSession(tenantID string, session *models.SessionData) {
 	m.EnsureTenant(tenantID)
 
-	// Enforce session limits per tenant
 	m.Mu.RLock()
 	tenant := m.UserStateCache[tenantID]
 	m.Mu.RUnlock()
 
 	tenant.Mu.Lock()
 	if len(tenant.SessionStates) >= MaxSessionsPerTenant {
-		// Remove oldest sessions (keep newest 80%)
 		m.evictOldestSessions(tenantID, MaxSessionsPerTenant*8/10)
 	}
 	tenant.SessionStates[session.SessionID] = session
 	tenant.Mu.Unlock()
 }
 
-// EnsureTenant initializes cache structures for a tenant if they don't exist
-// CRITICAL: This method has been refactored to eliminate deadlocks by using lock-free internal methods
+// EnsureTenant initializes cache structures for a tenant if they don't exist.
 func (m *Manager) EnsureTenant(tenantID string) {
-	// Check if we need write lock first (read-only check)
 	m.Mu.RLock()
-	contentExists := m.ContentCache[tenantID] != nil
-	userStateExists := m.UserStateCache[tenantID] != nil
-	htmlExists := m.HTMLChunkCache[tenantID] != nil
-	analyticsExists := m.AnalyticsCache[tenantID] != nil
-
-	// Check if tenant fully exists
-	if contentExists && userStateExists && htmlExists && analyticsExists {
+	_, analyticsExists := m.AnalyticsCache[tenantID]
+	_, contentExists := m.ContentCache[tenantID]
+	_, userStateExists := m.UserStateCache[tenantID]
+	_, htmlExists := m.HTMLChunkCache[tenantID]
+	if analyticsExists && contentExists && userStateExists && htmlExists {
 		m.Mu.RUnlock()
-		return // FIXED: Don't update LastAccessed in the fast path - only update when we actually do work
+		return
 	}
 	m.Mu.RUnlock()
 
-	// Need to create or recreate - acquire write lock immediately
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	// Double-check after acquiring write lock (another goroutine might have created it)
-	contentExists = m.ContentCache[tenantID] != nil
-	userStateExists = m.UserStateCache[tenantID] != nil
-	htmlExists = m.HTMLChunkCache[tenantID] != nil
-	analyticsExists = m.AnalyticsCache[tenantID] != nil
-
-	if contentExists && userStateExists && htmlExists && analyticsExists {
-		m.LastAccessed[tenantID] = time.Now().UTC()
-		return
-	}
-
-	// If tenant partially exists, recreate completely
-	if contentExists || userStateExists || htmlExists || analyticsExists {
-		// Clean up partial state
-		delete(m.ContentCache, tenantID)
-		delete(m.UserStateCache, tenantID)
-		delete(m.HTMLChunkCache, tenantID)
-		delete(m.AnalyticsCache, tenantID)
-		delete(m.LastAccessed, tenantID)
-	}
-
-	// Check cache bounds before creating new tenant
-	totalTenants := len(m.ContentCache)
-	if totalTenants >= MaxTenants {
-		// Log warning and trigger immediate cleanup
-		fmt.Printf("WARNING: Maximum tenant limit reached (%d/%d). Triggering cleanup.\n", totalTenants, MaxTenants)
-		m.cleanupOldestTenantsUnsafe()
-
-		// Check again after cleanup - if still at limit, force creation anyway
-		// to prevent cache corruption and nil pointer panics
-		if len(m.ContentCache) >= MaxTenants {
-			fmt.Printf("WARNING: Cache limit still exceeded after cleanup (%d/%d). Creating tenant anyway to prevent corruption.\n", len(m.ContentCache), MaxTenants)
+	if m.ContentCache[tenantID] == nil {
+		m.ContentCache[tenantID] = &models.TenantContentCache{
+			TractStacks:    make(map[string]*models.TractStackNode),
+			StoryFragments: make(map[string]*models.StoryFragmentNode),
+			Panes:          make(map[string]*models.PaneNode),
+			Menus:          make(map[string]*models.MenuNode),
+			Resources:      make(map[string]*models.ResourceNode),
+			Epinets:        make(map[string]*models.EpinetNode),
+			Beliefs:        make(map[string]*models.BeliefNode),
+			Files:          make(map[string]*models.ImageFileNode),
+			SlugToID:       make(map[string]string),
+			CategoryToIDs:  make(map[string][]string),
+			AllPaneIDs:     make([]string, 0),
+			LastUpdated:    time.Now().UTC(),
+			Mu:             sync.RWMutex{},
+			OrphanAnalysis: nil,
 		}
 	}
 
-	// Check memory bounds
-	stats := m.getTenantStatsUnsafe("")
-	estimatedMB := stats.Size / (1024 * 1024)
-	if estimatedMB > int64(MaxMemoryMB) {
-		fmt.Printf("WARNING: Memory limit approaching (%dMB/%dMB). Triggering cleanup.\n", estimatedMB, MaxMemoryMB)
-		m.cleanupOldestTenantsUnsafe()
+	if m.UserStateCache[tenantID] == nil {
+		m.UserStateCache[tenantID] = &models.TenantUserStateCache{
+			FingerprintStates:             make(map[string]*models.FingerprintState),
+			VisitStates:                   make(map[string]*models.VisitState),
+			KnownFingerprints:             make(map[string]bool),
+			SessionStates:                 make(map[string]*models.SessionData),
+			StoryfragmentBeliefRegistries: make(map[string]*models.StoryfragmentBeliefRegistry),
+			SessionBeliefContexts:         make(map[string]*models.SessionBeliefContext),
+			LastLoaded:                    time.Now().UTC(),
+			Mu:                            sync.RWMutex{},
+		}
 	}
 
-	// Create new tenant caches
-	m.ContentCache[tenantID] = &models.TenantContentCache{
-		TractStacks:    make(map[string]*models.TractStackNode),
-		StoryFragments: make(map[string]*models.StoryFragmentNode),
-		Panes:          make(map[string]*models.PaneNode),
-		Menus:          make(map[string]*models.MenuNode),
-		Resources:      make(map[string]*models.ResourceNode),
-		Epinets:        make(map[string]*models.EpinetNode),
-		Beliefs:        make(map[string]*models.BeliefNode),
-		Files:          make(map[string]*models.ImageFileNode),
-		SlugToID:       make(map[string]string),
-		CategoryToIDs:  make(map[string][]string),
-		AllPaneIDs:     make([]string, 0),
-		LastUpdated:    time.Now().UTC(),
-		Mu:             sync.RWMutex{},
-		OrphanAnalysis: nil,
+	if m.HTMLChunkCache[tenantID] == nil {
+		m.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
+			Chunks: make(map[string]*models.HTMLChunk),
+			Deps:   make(map[string][]string),
+			Mu:     sync.RWMutex{},
+		}
 	}
 
-	m.UserStateCache[tenantID] = &models.TenantUserStateCache{
-		FingerprintStates:             make(map[string]*models.FingerprintState),
-		VisitStates:                   make(map[string]*models.VisitState),
-		KnownFingerprints:             make(map[string]bool),
-		SessionStates:                 make(map[string]*models.SessionData),
-		StoryfragmentBeliefRegistries: make(map[string]*models.StoryfragmentBeliefRegistry),
-		SessionBeliefContexts:         make(map[string]*models.SessionBeliefContext),
-		LastLoaded:                    time.Now().UTC(),
-		Mu:                            sync.RWMutex{},
-	}
-
-	m.HTMLChunkCache[tenantID] = &models.TenantHTMLChunkCache{
-		Chunks: make(map[string]*models.HTMLChunk),
-		Deps:   make(map[string][]string),
-		Mu:     sync.RWMutex{},
-	}
-
-	m.AnalyticsCache[tenantID] = &models.TenantAnalyticsCache{
-		EpinetBins:  make(map[string]*models.HourlyEpinetBin),
-		ContentBins: make(map[string]*models.HourlyContentBin),
-		SiteBins:    make(map[string]*models.HourlySiteBin),
-		LastUpdated: time.Now().UTC(),
-		Mu:          sync.RWMutex{},
+	if m.AnalyticsCache[tenantID] == nil {
+		m.AnalyticsCache[tenantID] = &models.TenantAnalyticsCache{
+			EpinetBins:  make(map[string]*models.HourlyEpinetBin),
+			ContentBins: make(map[string]*models.HourlyContentBin),
+			SiteBins:    make(map[string]*models.HourlySiteBin),
+			LastUpdated: time.Now().UTC(),
+			Mu:          sync.RWMutex{},
+		}
 	}
 
 	m.LastAccessed[tenantID] = time.Now().UTC()
-
-	log.Printf("Cache: Initialized tenant %s with all cache structures", tenantID)
 }
 
 // cleanupOldestTenantsUnsafe removes the oldest accessed tenants to make room for new ones
 // INTERNAL USE ONLY: Assumes caller already holds m.Mu.Lock()
 func (m *Manager) cleanupOldestTenantsUnsafe() {
-	// Find the oldest tenant (caller already holding lock)
 	var oldestTenant string
 	oldestTime := time.Now().UTC()
 
@@ -268,14 +197,6 @@ func (m *Manager) cleanupOldestTenantsUnsafe() {
 	}
 }
 
-// cleanupOldestTenants removes the oldest accessed tenants to make room for new ones
-// PUBLIC METHOD: Acquires its own lock for external callers
-func (m *Manager) cleanupOldestTenants() {
-	m.Mu.Lock()
-	defer m.Mu.Unlock()
-	m.cleanupOldestTenantsUnsafe()
-}
-
 // InvalidateTenant removes all cached data for a tenant
 func (m *Manager) InvalidateTenant(tenantID string) {
 	m.Mu.Lock()
@@ -284,7 +205,9 @@ func (m *Manager) InvalidateTenant(tenantID string) {
 	delete(m.ContentCache, tenantID)
 	delete(m.UserStateCache, tenantID)
 	delete(m.HTMLChunkCache, tenantID)
-	delete(m.AnalyticsCache, tenantID)
+	// CRITICAL FIX: Do not invalidate the analytics cache during a general tenant invalidation.
+	// This prevents the StateHandler from destructively interfering with a running cache warmer process.
+	// delete(m.AnalyticsCache, tenantID)
 	delete(m.LastAccessed, tenantID)
 }
 
@@ -592,14 +515,11 @@ func (m *Manager) SetVisitState(tenantID string, state *models.VisitState) {
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 
-	// Enforce single active visit per fingerprint - remove old visits
 	for visitID, existingState := range cache.VisitStates {
 		if existingState.FingerprintID == state.FingerprintID && visitID != state.VisitID {
 			delete(cache.VisitStates, visitID)
 		}
 	}
-
-	// Set the new active visit
 	cache.VisitStates[state.VisitID] = state
 }
 
@@ -673,12 +593,10 @@ func (m *Manager) evictOldestSessions(tenantID string, keepCount int) {
 		sessions = append(sessions, sessionAge{id: id, lastUsed: session.LastActivity})
 	}
 
-	// Sort by age (oldest first)
 	sort.Slice(sessions, func(i, j int) bool {
 		return sessions[i].lastUsed.Before(sessions[j].lastUsed)
 	})
 
-	// Remove oldest sessions
 	toRemove := len(sessions) - keepCount
 	for i := 0; i < toRemove && i < len(sessions); i++ {
 		delete(cache.SessionStates, sessions[i].id)
@@ -689,22 +607,15 @@ func (m *Manager) evictOldestSessions(tenantID string, keepCount int) {
 // Belief Registry Cache Operations
 // =============================================================================
 
-// GetStoryfragmentBeliefRegistry retrieves belief registry from cache
 func (m *Manager) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*models.StoryfragmentBeliefRegistry, bool) {
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-
 	registry, exists := cache.StoryfragmentBeliefRegistries[storyfragmentID]
-	if !exists {
-		return nil, false
-	}
-
-	return registry, true
+	return registry, exists
 }
 
-// SetStoryfragmentBeliefRegistry stores belief registry in cache
 func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *models.StoryfragmentBeliefRegistry) {
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
@@ -718,34 +629,25 @@ func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *mode
 	if cache.StoryfragmentBeliefRegistries == nil {
 		cache.StoryfragmentBeliefRegistries = make(map[string]*models.StoryfragmentBeliefRegistry)
 	}
-	// Set the registry
 	cache.StoryfragmentBeliefRegistries[registry.StoryfragmentID] = registry
 }
 
-// InvalidateStoryfragmentBeliefRegistry removes belief registry from cache
 func (m *Manager) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) {
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
-
 	delete(cache.StoryfragmentBeliefRegistries, storyfragmentID)
 }
 
-// GetSessionBeliefContext provides Cache Operations
 func (m *Manager) GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*models.SessionBeliefContext, bool) {
 	m.EnsureTenant(tenantID)
 	cache := m.UserStateCache[tenantID]
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-
 	key := fmt.Sprintf("%s:%s", sessionID, storyfragmentID)
 	context, exists := cache.SessionBeliefContexts[key]
-	if !exists {
-		return nil, false
-	}
-
-	return context, true
+	return context, exists
 }
 
 func (m *Manager) SetSessionBeliefContext(tenantID string, context *models.SessionBeliefContext) {
@@ -758,12 +660,9 @@ func (m *Manager) SetSessionBeliefContext(tenantID string, context *models.Sessi
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 
-	// Initialize map if needed
 	if cache.SessionBeliefContexts == nil {
 		cache.SessionBeliefContexts = make(map[string]*models.SessionBeliefContext)
 	}
-
-	// Set the context
 	key := fmt.Sprintf("%s:%s", context.SessionID, context.StoryfragmentID)
 	cache.SessionBeliefContexts[key] = context
 }
@@ -773,19 +672,26 @@ func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragm
 	cache := m.UserStateCache[tenantID]
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
-
 	key := fmt.Sprintf("%s:%s", sessionID, storyfragmentID)
 	delete(cache.SessionBeliefContexts, key)
 }
 
-// GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries
 func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string {
-	m.EnsureTenant(tenantID)
-	cache := m.UserStateCache[tenantID]
+	m.Mu.RLock()
+	cache, exists := m.UserStateCache[tenantID]
+	m.Mu.RUnlock()
+	if !exists {
+		return []string{}
+	}
+
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
 
-	var storyfragmentIDs []string
+	if cache.StoryfragmentBeliefRegistries == nil {
+		return []string{}
+	}
+
+	storyfragmentIDs := make([]string, 0, len(cache.StoryfragmentBeliefRegistries))
 	for storyfragmentID := range cache.StoryfragmentBeliefRegistries {
 		storyfragmentIDs = append(storyfragmentIDs, storyfragmentID)
 	}
@@ -809,7 +715,6 @@ func (m *Manager) GetAllEpinetIDs(tenantID string) ([]string, bool) {
 // Content Map Operations
 // =============================================================================
 
-// GetFullContentMap retrieves the cached content map for a tenant
 func (m *Manager) GetFullContentMap(tenantID string) ([]models.FullContentMapItem, bool) {
 	m.Mu.RLock()
 	tenantCache, exists := m.ContentCache[tenantID]
@@ -822,13 +727,11 @@ func (m *Manager) GetFullContentMap(tenantID string) ([]models.FullContentMapIte
 	tenantCache.Mu.RLock()
 	defer tenantCache.Mu.RUnlock()
 
-	// Check if content map cache exists and is not expired (24 hour TTL)
 	if tenantCache.FullContentMap == nil ||
 		time.Since(tenantCache.ContentMapLastUpdated) > models.TTL24Hours.Duration() {
 		return nil, false
 	}
 
-	// Update last accessed
 	m.Mu.Lock()
 	m.LastAccessed[tenantID] = time.Now().UTC()
 	m.Mu.Unlock()
@@ -836,7 +739,6 @@ func (m *Manager) GetFullContentMap(tenantID string) ([]models.FullContentMapIte
 	return tenantCache.FullContentMap, true
 }
 
-// SetFullContentMap stores the content map in cache for a tenant
 func (m *Manager) SetFullContentMap(tenantID string, contentMap []models.FullContentMapItem) {
 	m.EnsureTenant(tenantID)
 
@@ -847,20 +749,15 @@ func (m *Manager) SetFullContentMap(tenantID string, contentMap []models.FullCon
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
 
-	// Store the content map
 	tenantCache.FullContentMap = contentMap
 	tenantCache.ContentMapLastUpdated = time.Now().UTC()
-
-	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
 
-	// Update last accessed
 	m.Mu.Lock()
 	m.LastAccessed[tenantID] = time.Now().UTC()
 	m.Mu.Unlock()
 }
 
-// InvalidateFullContentMap clears the cached content map for a tenant
 func (m *Manager) InvalidateFullContentMap(tenantID string) {
 	m.Mu.RLock()
 	tenantCache, exists := m.ContentCache[tenantID]
@@ -873,15 +770,12 @@ func (m *Manager) InvalidateFullContentMap(tenantID string) {
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
 
-	// Clear the content map cache
 	tenantCache.FullContentMap = nil
-	tenantCache.ContentMapLastUpdated = time.Time{} // Zero time
+	tenantCache.ContentMapLastUpdated = time.Time{}
 
-	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
 }
 
-// GetOrphanAnalysis retrieves cached orphan analysis
 func (m *Manager) GetOrphanAnalysis(tenantID string) (*models.OrphanAnalysisPayload, string, bool) {
 	m.Mu.RLock()
 	tenantCache, exists := m.ContentCache[tenantID]
@@ -894,12 +788,10 @@ func (m *Manager) GetOrphanAnalysis(tenantID string) (*models.OrphanAnalysisPayl
 	tenantCache.Mu.RLock()
 	defer tenantCache.Mu.RUnlock()
 
-	// Check if cache is expired (24 hour TTL)
 	if time.Since(tenantCache.OrphanAnalysis.LastUpdated) > models.TTL24Hours.Duration() {
 		return nil, "", false
 	}
 
-	// Update last accessed
 	m.Mu.Lock()
 	m.LastAccessed[tenantID] = time.Now().UTC()
 	m.Mu.Unlock()
@@ -907,7 +799,6 @@ func (m *Manager) GetOrphanAnalysis(tenantID string) (*models.OrphanAnalysisPayl
 	return tenantCache.OrphanAnalysis.Data, tenantCache.OrphanAnalysis.ETag, true
 }
 
-// SetOrphanAnalysis stores orphan analysis in cache
 func (m *Manager) SetOrphanAnalysis(tenantID string, payload *models.OrphanAnalysisPayload, etag string) {
 	m.EnsureTenant(tenantID)
 
@@ -924,13 +815,11 @@ func (m *Manager) SetOrphanAnalysis(tenantID string, payload *models.OrphanAnaly
 		LastUpdated: time.Now().UTC(),
 	}
 
-	// Update last accessed
 	m.Mu.Lock()
 	m.LastAccessed[tenantID] = time.Now().UTC()
 	m.Mu.Unlock()
 }
 
-// InvalidateOrphanAnalysis clears cached orphan analysis
 func (m *Manager) InvalidateOrphanAnalysis(tenantID string) {
 	m.Mu.RLock()
 	tenantCache, exists := m.ContentCache[tenantID]

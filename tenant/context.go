@@ -2,6 +2,8 @@
 package tenant
 
 import (
+	"log"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,6 +63,31 @@ func (m *Manager) GetContext(c *gin.Context) (*Context, error) {
 		Config:   config,
 		Database: database,
 		Status:   status,
+	}, nil
+}
+
+// NewContextFromID creates a new tenant context from a tenant ID string.
+// This is used for background tasks that are not tied to a specific HTTP request.
+func NewContextFromID(tenantID string) (*Context, error) {
+	// Load tenant configuration from the given ID
+	config, err := LoadTenantConfig(tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new durable database connection for the background task
+	database, err := NewDatabase(config)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("Background tenant context created: (%s)", database.GetConnectionInfo())
+
+	return &Context{
+		TenantID: tenantID,
+		Config:   config,
+		Database: database,
+		Status:   "background", // Indicates a non-request context
 	}, nil
 }
 

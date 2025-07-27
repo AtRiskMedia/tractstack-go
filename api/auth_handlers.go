@@ -152,29 +152,6 @@ func validateAdmin(c *gin.Context, ctx *tenant.Context) bool {
 	return true
 }
 
-// validateEditor checks for editor authentication only
-func validateEditor(c *gin.Context, ctx *tenant.Context) bool {
-	editorCookie, err := c.Cookie("editor_auth")
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Editor authentication required"})
-		return false
-	}
-
-	claims, err := utils.ValidateJWT(editorCookie, ctx.Config.JWTSecret)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication token"})
-		return false
-	}
-
-	role, ok := claims["role"].(string)
-	if !ok || role != "editor" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Editor access required"})
-		return false
-	}
-
-	return true
-}
-
 // validateAdminOrEditor checks for admin OR editor authentication
 func validateAdminOrEditor(c *gin.Context, ctx *tenant.Context) bool {
 	// Try admin first (don't send response on failure)

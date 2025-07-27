@@ -2,13 +2,16 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 
-	"github.com/AtRiskMedia/tractstack-go/analytics"
 	"github.com/AtRiskMedia/tractstack-go/cache"
+	"github.com/AtRiskMedia/tractstack-go/models"
 	"github.com/AtRiskMedia/tractstack-go/models/content"
+	"github.com/AtRiskMedia/tractstack-go/services"
+	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,26 +23,58 @@ func HandleDashboardAnalytics(c *gin.Context) {
 		return
 	}
 
-	// Parse time range parameters
 	startHour, endHour := parseTimeRange(c)
-
-	// Load analytics data for the requested range
-	err = analytics.LoadHourlyEpinetData(ctx, startHour)
-	if err != nil {
-		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
+	epinetIDs, err := getEpinetIDs(ctx)
+	if err != nil || len(epinetIDs) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
 		return
 	}
 
-	// Compute dashboard analytics for the custom range
-	dashboard, err := analytics.ComputeDashboardAnalytics(ctx, startHour, endHour)
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], startHour, endHour)
+
+	if cacheStatus.Action != "proceed" {
+		locker := cache.GetGlobalWarmingLock()
+		lockKey := fmt.Sprintf("warm:hourly:%s:%d", ctx.TenantID, startHour)
+
+		if locker.TryLock(lockKey) {
+			log.Printf("Lock acquired for '%s'. Starting background cache warming.", lockKey)
+			tenantID := ctx.TenantID
+			go func(id string, sh int, lk string) {
+				defer locker.Unlock(lk)
+				bgCtx, err := tenant.NewContextFromID(id)
+				if err != nil {
+					log.Printf("ERROR: Failed to create background context for tenant %s: %v", id, err)
+					return
+				}
+				defer bgCtx.Close()
+				wCache := cache.NewWriteOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+				warmer := services.NewCacheWarmingService(wCache, bgCtx)
+				if err := warmer.WarmHourlyEpinetData(sh); err != nil {
+					log.Printf("ERROR: Background cache warming for key '%s' failed: %v", lk, err)
+				}
+			}(tenantID, startHour, lockKey)
+		} else {
+			log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"dashboard": gin.H{
+				"status":  "loading",
+				"message": "Cache warming in progress, please retry in a few moments",
+			},
+		})
+		return
+	}
+
+	rCache := cache.NewReadOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+	analyticsService := services.NewAnalyticsService(rCache, ctx.TenantID)
+	analyticsService.SetContext(ctx)
+	dashboard, err := analyticsService.ComputeDashboard(startHour, endHour)
 	if err != nil {
-		log.Printf("ERROR: ComputeDashboardAnalytics failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute dashboard analytics"})
 		return
 	}
-
-	c.JSON(http.StatusOK, dashboard)
+	c.JSON(http.StatusOK, gin.H{"dashboard": dashboard})
 }
 
 // HandleEpinetSankey handles GET /api/v1/analytics/epinet/:id
@@ -51,79 +86,77 @@ func HandleEpinetSankey(c *gin.Context) {
 	}
 
 	epinetID := c.Param("id")
-	if epinetID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "epinet ID is required"})
+	startHour, _ := strconv.Atoi(c.DefaultQuery("startHour", "168"))
+	endHour, _ := strconv.Atoi(c.DefaultQuery("endHour", "0"))
+
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetID, startHour, endHour)
+
+	if cacheStatus.Action != "proceed" {
+		locker := cache.GetGlobalWarmingLock()
+		lockKey := fmt.Sprintf("warm:hourly:%s:%d", ctx.TenantID, startHour)
+
+		if locker.TryLock(lockKey) {
+			log.Printf("Lock acquired for '%s'. Starting background cache warming.", lockKey)
+			tenantID := ctx.TenantID
+			go func(id string, sh int, lk string) {
+				defer locker.Unlock(lk)
+				bgCtx, err := tenant.NewContextFromID(id)
+				if err != nil {
+					log.Printf("ERROR: Failed to create background context for tenant %s: %v", id, err)
+					return
+				}
+				defer bgCtx.Close()
+				wCache := cache.NewWriteOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+				warmer := services.NewCacheWarmingService(wCache, bgCtx)
+				if err := warmer.WarmHourlyEpinetData(sh); err != nil {
+					log.Printf("ERROR: Background cache warming for key '%s' failed: %v", lk, err)
+				}
+			}(tenantID, startHour, lockKey)
+		} else {
+			log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"epinet": gin.H{
+				"status":  "loading",
+				"message": "Cache warming in progress, please retry in a few moments",
+			},
+			"userCounts":         []models.UserCount{},
+			"hourlyNodeActivity": models.HourlyActivity{},
+		})
 		return
 	}
 
-	// Parse time range parameters
+	rCache := cache.NewReadOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+	analyticsService := services.NewAnalyticsService(rCache, ctx.TenantID)
+	analyticsService.SetContext(ctx)
+
 	visitorType := c.DefaultQuery("visitorType", "all")
 	selectedUserID := c.Query("userId")
-	startHourStr := c.DefaultQuery("startHour", "168")
-	endHourStr := c.DefaultQuery("endHour", "0")
-
-	startHour, err := strconv.Atoi(startHourStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid startHour parameter"})
-		return
-	}
-
-	endHour, err := strconv.Atoi(endHourStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid endHour parameter"})
-		return
-	}
-
-	// Create pointers for optional parameters
 	var startHourPtr, endHourPtr *int
 	var selectedUserIDPtr *string
-
-	if startHourStr != "" {
-		startHourPtr = &startHour
-	}
-	if endHourStr != "" {
-		endHourPtr = &endHour
-	}
+	startHourPtr = &startHour
+	endHourPtr = &endHour
 	if selectedUserID != "" {
 		selectedUserIDPtr = &selectedUserID
 	}
 
-	// Load analytics data for the requested range
-	err = analytics.LoadHourlyEpinetData(ctx, startHour)
-	if err != nil {
-		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
-		return
-	}
-
-	// Compute epinet sankey diagram
-	epinet, err := analytics.ComputeEpinetSankey(ctx, epinetID, &analytics.SankeyFilters{
-		VisitorType:    visitorType,
-		SelectedUserID: selectedUserIDPtr,
-		StartHour:      startHourPtr,
-		EndHour:        endHourPtr,
+	epinet, err := analyticsService.ComputeEpinetSankey(epinetID, &models.SankeyFilters{
+		VisitorType: visitorType, SelectedUserID: selectedUserIDPtr, StartHour: startHourPtr, EndHour: endHourPtr,
 	})
 	if err != nil {
-		log.Printf("ERROR: ComputeEpinetSankey failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute epinet sankey"})
 		return
 	}
-
-	// Get filtered visitor counts
-	userCounts, err := analytics.GetFilteredVisitorCounts(ctx, epinetID, visitorType, startHourPtr, endHourPtr)
+	userCounts, err := analyticsService.GetFilteredVisitorCounts(epinetID, visitorType, startHourPtr, endHourPtr)
 	if err != nil {
-		log.Printf("ERROR: GetFilteredVisitorCounts failed: %v", err)
-		userCounts = []analytics.UserCount{}
+		userCounts = []models.UserCount{}
+	}
+	hourlyNodeActivity, err := analyticsService.GetHourlyNodeActivity(epinetID, startHourPtr, endHourPtr)
+	if err != nil {
+		hourlyNodeActivity = models.HourlyActivity{}
 	}
 
-	// Get hourly node activity
-	hourlyNodeActivity, err := analytics.GetHourlyNodeActivity(ctx, epinetID, visitorType, startHourPtr, endHourPtr, selectedUserIDPtr)
-	if err != nil {
-		log.Printf("ERROR: GetHourlyNodeActivity failed: %v", err)
-		hourlyNodeActivity = analytics.HourlyActivity{}
-	}
-
-	// Return the combined response matching v1 shape
 	c.JSON(http.StatusOK, gin.H{
 		"epinet":             epinet,
 		"userCounts":         userCounts,
@@ -138,24 +171,19 @@ func HandleStoryfragmentAnalytics(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
-
-	// Load analytics data
-	err = analytics.LoadHourlyEpinetData(ctx, 672) // Load 28 days
-	if err != nil {
-		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
+	epinetIDs, err := getEpinetIDs(ctx)
+	if err != nil || len(epinetIDs) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
 		return
 	}
-
-	// Compute storyfragment analytics
-	storyfragmentAnalytics, err := analytics.ComputeStoryfragmentAnalytics(ctx)
-	if err != nil {
-		log.Printf("ERROR: ComputeStoryfragmentAnalytics failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute storyfragment analytics"})
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], 672, 0)
+	if cacheStatus.Action != "proceed" {
+		c.JSON(http.StatusOK, gin.H{
+			"storyfragments": gin.H{"status": "loading", "message": "Cache warming may be in progress."},
+		})
 		return
 	}
-
-	c.JSON(http.StatusOK, storyfragmentAnalytics)
+	c.JSON(http.StatusOK, gin.H{"storyfragments": []models.StoryfragmentAnalytics{}})
 }
 
 // HandleLeadMetrics handles GET /api/v1/analytics/leads
@@ -165,67 +193,30 @@ func HandleLeadMetrics(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
-
-	// Parse time range parameters
 	startHour, endHour := parseTimeRange(c)
-
-	// Load analytics data for the requested range
-	err = analytics.LoadHourlyEpinetData(ctx, startHour)
-	if err != nil {
-		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
+	epinetIDs, err := getEpinetIDs(ctx)
+	if err != nil || len(epinetIDs) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
 		return
 	}
-
-	// Compute lead metrics for the custom range
-	metrics, err := analytics.ComputeLeadMetrics(ctx, startHour, endHour)
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], startHour, endHour)
+	if cacheStatus.Action != "proceed" {
+		c.JSON(http.StatusOK, gin.H{
+			"leads": gin.H{"status": "loading", "message": "Cache warming may be in progress."},
+		})
+		return
+	}
+	rCache := cache.NewReadOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+	analyticsService := services.NewAnalyticsService(rCache, ctx.TenantID)
+	analyticsService.SetContext(ctx)
+	metrics, err := analyticsService.ComputeLeadMetrics(startHour, endHour)
 	if err != nil {
-		log.Printf("ERROR: ComputeLeadMetrics failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute lead metrics"})
 		return
 	}
-
-	c.JSON(http.StatusOK, metrics)
+	c.JSON(http.StatusOK, gin.H{"leads": metrics})
 }
 
-// parseTimeRange parses duration or startHour/endHour from query parameters
-func parseTimeRange(c *gin.Context) (startHour, endHour int) {
-	// Check for custom range first (priority)
-	startHourStr := c.Query("startHour")
-	endHourStr := c.Query("endHour")
-
-	if startHourStr != "" && endHourStr != "" {
-		var err error
-		startHour, err = strconv.Atoi(startHourStr)
-		if err != nil {
-			// Default to weekly if invalid
-			return 168, 0
-		}
-		endHour, err = strconv.Atoi(endHourStr)
-		if err != nil {
-			// Default to weekly if invalid
-			return 168, 0
-		}
-		return startHour, endHour
-	}
-
-	// Check for duration parameter
-	duration := c.DefaultQuery("duration", "weekly")
-
-	switch duration {
-	case "daily":
-		return 24, 0
-	case "weekly":
-		return 168, 0
-	case "monthly":
-		return 672, 0
-	default:
-		return 168, 0 // Default to weekly
-	}
-}
-
-// HandleAllAnalytics handles GET /api/v1/analytics/all
-// Returns consolidated analytics data: dashboard + leads + epinet + userCounts + hourlyNodeActivity
 func HandleAllAnalytics(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -233,69 +224,92 @@ func HandleAllAnalytics(c *gin.Context) {
 		return
 	}
 
-	// Parse time range parameters (same as other handlers)
 	startHour, endHour := parseTimeRange(c)
-
-	// Parse visitor filtering parameters (for epinet)
 	visitorType := c.DefaultQuery("visitorType", "all")
 	selectedUserID := c.Query("userId")
 
-	// Load analytics data for the requested range (single load, cached)
-	err = analytics.LoadHourlyEpinetData(ctx, startHour)
-	if err != nil {
-		log.Printf("ERROR: LoadHourlyEpinetData failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load analytics data"})
-		return
-	}
-
-	// 1. Compute dashboard analytics (uses cached data)
-	dashboard, err := analytics.ComputeDashboardAnalytics(ctx, startHour, endHour)
-	if err != nil {
-		log.Printf("ERROR: ComputeDashboardAnalytics failed: %v", err)
-		dashboard = nil
-	}
-
-	// 2. Compute lead metrics (uses same cached data)
-	leadMetrics, err := analytics.ComputeLeadMetrics(ctx, startHour, endHour)
-	if err != nil {
-		log.Printf("ERROR: ComputeLeadMetrics failed: %v", err)
-		leadMetrics = nil
-	}
-
-	// 3. Get epinet ID using EXISTING cache-first pattern from GetFullContentMapHandler
 	cacheManager := cache.GetGlobalManager()
 	epinetService := content.NewEpinetService(ctx, cacheManager)
 	epinetIDs, err := epinetService.GetAllIDs()
 	if err != nil {
-		log.Printf("ERROR: GetAllEpinetIDs failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
 		return
 	}
 
 	var epinetID string
 	if len(epinetIDs) > 0 {
-		// Use cache-first GetByIDs (same as GetFullContentMapHandler)
 		epinets, err := epinetService.GetByIDs(epinetIDs)
 		if err == nil {
-			// Find promoted epinet or use first one (same logic as frontend)
 			for _, epinet := range epinets {
 				if epinet != nil && epinet.Promoted {
 					epinetID = epinet.ID
 					break
 				}
 				if epinetID == "" && epinet != nil {
-					epinetID = epinet.ID // Use first epinet as fallback
+					epinetID = epinet.ID
 				}
 			}
 		}
 	}
 
-	var epinet *analytics.SankeyDiagram
-	var userCounts []analytics.UserCount
-	var hourlyNodeActivity analytics.HourlyActivity
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetID, startHour, endHour)
+
+	if cacheStatus.Action != "proceed" {
+		locker := cache.GetGlobalWarmingLock()
+		lockKey := fmt.Sprintf("warm:hourly:%s:%d", ctx.TenantID, startHour)
+
+		if locker.TryLock(lockKey) {
+			log.Printf("Lock acquired for '%s' from /all. Starting background cache warming.", lockKey)
+			tenantID := ctx.TenantID
+			go func(id string, sh int, lk string) {
+				defer locker.Unlock(lk)
+				bgCtx, err := tenant.NewContextFromID(id)
+				if err != nil {
+					log.Printf("ERROR: Failed to create background context for tenant %s: %v", id, err)
+					return
+				}
+				defer bgCtx.Close()
+				wCache := cache.NewWriteOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+				warmer := services.NewCacheWarmingService(wCache, bgCtx)
+				if err := warmer.WarmHourlyEpinetData(sh); err != nil {
+					log.Printf("ERROR: Background cache warming for key '%s' failed: %v", lk, err)
+				}
+			}(tenantID, startHour, lockKey)
+		} else {
+			log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"dashboard":          gin.H{"status": "loading", "message": "Cache warming in progress..."},
+			"leads":              gin.H{"status": "loading", "message": "Cache warming in progress..."},
+			"epinet":             gin.H{"status": "loading", "message": "Cache warming in progress..."},
+			"userCounts":         []models.UserCount{},
+			"hourlyNodeActivity": models.HourlyActivity{},
+		})
+		return
+	}
+
+	rCache := cache.NewReadOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+	analyticsService := services.NewAnalyticsService(rCache, ctx.TenantID)
+	analyticsService.SetContext(ctx)
+
+	dashboard, err := analyticsService.ComputeDashboard(startHour, endHour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute dashboard analytics"})
+		return
+	}
+
+	leadMetrics, err := analyticsService.ComputeLeadMetrics(startHour, endHour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute lead metrics"})
+		return
+	}
+
+	var epinet *models.SankeyDiagram
+	var userCounts []models.UserCount
+	var hourlyNodeActivity models.HourlyActivity
 
 	if epinetID != "" {
-		// Convert parameters for epinet functions
 		var startHourPtr, endHourPtr *int
 		var selectedUserIDPtr *string
 
@@ -305,35 +319,33 @@ func HandleAllAnalytics(c *gin.Context) {
 			selectedUserIDPtr = &selectedUserID
 		}
 
-		// 4. Compute epinet sankey diagram (uses same cached data)
-		epinetResult, err := analytics.ComputeEpinetSankey(ctx, epinetID, &analytics.SankeyFilters{
+		epinet, err = analyticsService.ComputeEpinetSankey(epinetID, &models.SankeyFilters{
 			VisitorType:    visitorType,
 			SelectedUserID: selectedUserIDPtr,
 			StartHour:      startHourPtr,
 			EndHour:        endHourPtr,
 		})
 		if err != nil {
-			log.Printf("ERROR: ComputeEpinetSankey failed: %v", err)
-		} else {
-			epinet = epinetResult
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute epinet sankey"})
+			return
 		}
 
-		// 5. Get filtered visitor counts (uses same cached data)
-		userCounts, err = analytics.GetFilteredVisitorCounts(ctx, epinetID, visitorType, startHourPtr, endHourPtr)
+		userCounts, err = analyticsService.GetFilteredVisitorCounts(epinetID, visitorType, startHourPtr, endHourPtr)
 		if err != nil {
-			log.Printf("ERROR: GetFilteredVisitorCounts failed: %v", err)
-			userCounts = []analytics.UserCount{}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get visitor counts"})
+			return
 		}
 
-		// 6. Get hourly node activity (uses same cached data)
-		hourlyNodeActivity, err = analytics.GetHourlyNodeActivity(ctx, epinetID, visitorType, startHourPtr, endHourPtr, selectedUserIDPtr)
+		hourlyNodeActivity, err = analyticsService.GetHourlyNodeActivity(epinetID, startHourPtr, endHourPtr)
 		if err != nil {
-			log.Printf("ERROR: GetHourlyNodeActivity failed: %v", err)
-			hourlyNodeActivity = analytics.HourlyActivity{}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get hourly node activity"})
+			return
 		}
+	} else {
+		userCounts = []models.UserCount{}
+		hourlyNodeActivity = models.HourlyActivity{}
 	}
 
-	// Return consolidated response
 	c.JSON(http.StatusOK, gin.H{
 		"dashboard":          dashboard,
 		"leads":              leadMetrics,
@@ -341,4 +353,37 @@ func HandleAllAnalytics(c *gin.Context) {
 		"userCounts":         userCounts,
 		"hourlyNodeActivity": hourlyNodeActivity,
 	})
+}
+
+func parseTimeRange(c *gin.Context) (startHour, endHour int) {
+	startHourStr := c.Query("startHour")
+	endHourStr := c.Query("endHour")
+	if startHourStr != "" && endHourStr != "" {
+		var err error
+		startHour, err = strconv.Atoi(startHourStr)
+		if err != nil {
+			return 168, 0
+		}
+		endHour, err = strconv.Atoi(endHourStr)
+		if err != nil {
+			return 168, 0
+		}
+		return startHour, endHour
+	}
+	duration := c.DefaultQuery("duration", "weekly")
+	switch duration {
+	case "daily":
+		return 24, 0
+	case "weekly":
+		return 168, 0
+	case "monthly":
+		return 672, 0
+	default:
+		return 168, 0
+	}
+}
+
+func getEpinetIDs(ctx *tenant.Context) ([]string, error) {
+	epinetService := content.NewEpinetService(ctx, cache.GetGlobalManager())
+	return epinetService.GetAllIDs()
 }
