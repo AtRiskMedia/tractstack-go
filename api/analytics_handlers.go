@@ -37,9 +37,10 @@ func HandleDashboardAnalytics(c *gin.Context) {
 		lockKey := fmt.Sprintf("warm:hourly:%s:%d", ctx.TenantID, startHour)
 
 		if locker.TryLock(lockKey) {
-			log.Printf("Lock acquired for '%s'. Starting background cache warming.", lockKey)
+			log.Printf("Lock acquired for '%s'. Starting cache warming.", lockKey)
 			tenantID := ctx.TenantID
-			go func(id string, sh int, lk string) {
+
+			go func(id string, sh int, lk string, action string, missingHours []string) {
 				defer locker.Unlock(lk)
 				bgCtx, err := tenant.NewContextFromID(id)
 				if err != nil {
@@ -47,12 +48,20 @@ func HandleDashboardAnalytics(c *gin.Context) {
 					return
 				}
 				defer bgCtx.Close()
+
 				wCache := cache.NewWriteOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
 				warmer := services.NewCacheWarmingService(wCache, bgCtx)
-				if err := warmer.WarmHourlyEpinetData(sh); err != nil {
-					log.Printf("ERROR: Background cache warming for key '%s' failed: %v", lk, err)
+
+				if action == "refresh_current" {
+					if err := warmer.WarmRecentHours(missingHours); err != nil {
+						log.Printf("ERROR: Rapid refresh for key '%s' failed: %v", lk, err)
+					}
+				} else {
+					if err := warmer.WarmHourlyEpinetData(sh); err != nil {
+						log.Printf("ERROR: Full warming for key '%s' failed: %v", lk, err)
+					}
 				}
-			}(tenantID, startHour, lockKey)
+			}(tenantID, startHour, lockKey, cacheStatus.Action, cacheStatus.MissingHours)
 		} else {
 			log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
 		}
@@ -77,7 +86,6 @@ func HandleDashboardAnalytics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"dashboard": dashboard})
 }
 
-// HandleEpinetSankey handles GET /api/v1/analytics/epinet/:id
 func HandleEpinetSankey(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -96,9 +104,10 @@ func HandleEpinetSankey(c *gin.Context) {
 		lockKey := fmt.Sprintf("warm:hourly:%s:%d", ctx.TenantID, startHour)
 
 		if locker.TryLock(lockKey) {
-			log.Printf("Lock acquired for '%s'. Starting background cache warming.", lockKey)
+			log.Printf("Lock acquired for '%s'. Starting cache warming.", lockKey)
 			tenantID := ctx.TenantID
-			go func(id string, sh int, lk string) {
+
+			go func(id string, sh int, lk string, action string, missingHours []string) {
 				defer locker.Unlock(lk)
 				bgCtx, err := tenant.NewContextFromID(id)
 				if err != nil {
@@ -106,12 +115,20 @@ func HandleEpinetSankey(c *gin.Context) {
 					return
 				}
 				defer bgCtx.Close()
+
 				wCache := cache.NewWriteOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
 				warmer := services.NewCacheWarmingService(wCache, bgCtx)
-				if err := warmer.WarmHourlyEpinetData(sh); err != nil {
-					log.Printf("ERROR: Background cache warming for key '%s' failed: %v", lk, err)
+
+				if action == "refresh_current" {
+					if err := warmer.WarmRecentHours(missingHours); err != nil {
+						log.Printf("ERROR: Rapid refresh for key '%s' failed: %v", lk, err)
+					}
+				} else {
+					if err := warmer.WarmHourlyEpinetData(sh); err != nil {
+						log.Printf("ERROR: Full warming for key '%s' failed: %v", lk, err)
+					}
 				}
-			}(tenantID, startHour, lockKey)
+			}(tenantID, startHour, lockKey, cacheStatus.Action, cacheStatus.MissingHours)
 		} else {
 			log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
 		}
@@ -164,59 +181,6 @@ func HandleEpinetSankey(c *gin.Context) {
 	})
 }
 
-// HandleStoryfragmentAnalytics handles GET /api/v1/analytics/storyfragments
-func HandleStoryfragmentAnalytics(c *gin.Context) {
-	ctx, err := getTenantContext(c)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-	epinetIDs, err := getEpinetIDs(ctx)
-	if err != nil || len(epinetIDs) == 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
-		return
-	}
-	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], 672, 0)
-	if cacheStatus.Action != "proceed" {
-		c.JSON(http.StatusOK, gin.H{
-			"storyfragments": gin.H{"status": "loading", "message": "Cache warming may be in progress."},
-		})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"storyfragments": []models.StoryfragmentAnalytics{}})
-}
-
-// HandleLeadMetrics handles GET /api/v1/analytics/leads
-func HandleLeadMetrics(c *gin.Context) {
-	ctx, err := getTenantContext(c)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-	startHour, endHour := parseTimeRange(c)
-	epinetIDs, err := getEpinetIDs(ctx)
-	if err != nil || len(epinetIDs) == 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
-		return
-	}
-	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], startHour, endHour)
-	if cacheStatus.Action != "proceed" {
-		c.JSON(http.StatusOK, gin.H{
-			"leads": gin.H{"status": "loading", "message": "Cache warming may be in progress."},
-		})
-		return
-	}
-	rCache := cache.NewReadOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
-	analyticsService := services.NewAnalyticsService(rCache, ctx.TenantID)
-	analyticsService.SetContext(ctx)
-	metrics, err := analyticsService.ComputeLeadMetrics(startHour, endHour)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute lead metrics"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"leads": metrics})
-}
-
 func HandleAllAnalytics(c *gin.Context) {
 	ctx, err := getTenantContext(c)
 	if err != nil {
@@ -259,9 +223,10 @@ func HandleAllAnalytics(c *gin.Context) {
 		lockKey := fmt.Sprintf("warm:hourly:%s:%d", ctx.TenantID, startHour)
 
 		if locker.TryLock(lockKey) {
-			log.Printf("Lock acquired for '%s' from /all. Starting background cache warming.", lockKey)
+			log.Printf("Lock acquired for '%s' from /all. Starting cache warming.", lockKey)
 			tenantID := ctx.TenantID
-			go func(id string, sh int, lk string) {
+
+			go func(id string, sh int, lk string, action string, missingHours []string) {
 				defer locker.Unlock(lk)
 				bgCtx, err := tenant.NewContextFromID(id)
 				if err != nil {
@@ -269,12 +234,20 @@ func HandleAllAnalytics(c *gin.Context) {
 					return
 				}
 				defer bgCtx.Close()
+
 				wCache := cache.NewWriteOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
 				warmer := services.NewCacheWarmingService(wCache, bgCtx)
-				if err := warmer.WarmHourlyEpinetData(sh); err != nil {
-					log.Printf("ERROR: Background cache warming for key '%s' failed: %v", lk, err)
+
+				if action == "refresh_current" {
+					if err := warmer.WarmRecentHours(missingHours); err != nil {
+						log.Printf("ERROR: Rapid refresh for key '%s' failed: %v", lk, err)
+					}
+				} else {
+					if err := warmer.WarmHourlyEpinetData(sh); err != nil {
+						log.Printf("ERROR: Full warming for key '%s' failed: %v", lk, err)
+					}
 				}
-			}(tenantID, startHour, lockKey)
+			}(tenantID, startHour, lockKey, cacheStatus.Action, cacheStatus.MissingHours)
 		} else {
 			log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
 		}
@@ -341,9 +314,6 @@ func HandleAllAnalytics(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get hourly node activity"})
 			return
 		}
-	} else {
-		userCounts = []models.UserCount{}
-		hourlyNodeActivity = models.HourlyActivity{}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -353,6 +323,59 @@ func HandleAllAnalytics(c *gin.Context) {
 		"userCounts":         userCounts,
 		"hourlyNodeActivity": hourlyNodeActivity,
 	})
+}
+
+// HandleStoryfragmentAnalytics handles GET /api/v1/analytics/storyfragments
+func HandleStoryfragmentAnalytics(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+	epinetIDs, err := getEpinetIDs(ctx)
+	if err != nil || len(epinetIDs) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
+		return
+	}
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], 672, 0)
+	if cacheStatus.Action != "proceed" {
+		c.JSON(http.StatusOK, gin.H{
+			"storyfragments": gin.H{"status": "loading", "message": "Cache warming may be in progress."},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"storyfragments": []models.StoryfragmentAnalytics{}})
+}
+
+// HandleLeadMetrics handles GET /api/v1/analytics/leads
+func HandleLeadMetrics(c *gin.Context) {
+	ctx, err := getTenantContext(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+	startHour, endHour := parseTimeRange(c)
+	epinetIDs, err := getEpinetIDs(ctx)
+	if err != nil || len(epinetIDs) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
+		return
+	}
+	cacheStatus := cache.GetRangeCacheStatus(ctx, epinetIDs[0], startHour, endHour)
+	if cacheStatus.Action != "proceed" {
+		c.JSON(http.StatusOK, gin.H{
+			"leads": gin.H{"status": "loading", "message": "Cache warming may be in progress."},
+		})
+		return
+	}
+	rCache := cache.NewReadOnlyAnalyticsCacheAdapter(cache.GetGlobalManager())
+	analyticsService := services.NewAnalyticsService(rCache, ctx.TenantID)
+	analyticsService.SetContext(ctx)
+	metrics, err := analyticsService.ComputeLeadMetrics(startHour, endHour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compute lead metrics"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"leads": metrics})
 }
 
 func parseTimeRange(c *gin.Context) (startHour, endHour int) {

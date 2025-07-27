@@ -174,29 +174,6 @@ func (m *Manager) EnsureTenant(tenantID string) {
 	m.LastAccessed[tenantID] = time.Now().UTC()
 }
 
-// cleanupOldestTenantsUnsafe removes the oldest accessed tenants to make room for new ones
-// INTERNAL USE ONLY: Assumes caller already holds m.Mu.Lock()
-func (m *Manager) cleanupOldestTenantsUnsafe() {
-	var oldestTenant string
-	oldestTime := time.Now().UTC()
-
-	for tenantID, lastAccessed := range m.LastAccessed {
-		if lastAccessed.Before(oldestTime) {
-			oldestTime = lastAccessed
-			oldestTenant = tenantID
-		}
-	}
-
-	if oldestTenant != "" {
-		delete(m.ContentCache, oldestTenant)
-		delete(m.UserStateCache, oldestTenant)
-		delete(m.HTMLChunkCache, oldestTenant)
-		delete(m.AnalyticsCache, oldestTenant)
-		delete(m.LastAccessed, oldestTenant)
-		fmt.Printf("Evicted oldest tenant: %s (last accessed: %v)\n", oldestTenant, oldestTime)
-	}
-}
-
 // InvalidateTenant removes all cached data for a tenant
 func (m *Manager) InvalidateTenant(tenantID string) {
 	m.Mu.Lock()
@@ -205,9 +182,6 @@ func (m *Manager) InvalidateTenant(tenantID string) {
 	delete(m.ContentCache, tenantID)
 	delete(m.UserStateCache, tenantID)
 	delete(m.HTMLChunkCache, tenantID)
-	// CRITICAL FIX: Do not invalidate the analytics cache during a general tenant invalidation.
-	// This prevents the StateHandler from destructively interfering with a running cache warmer process.
-	// delete(m.AnalyticsCache, tenantID)
 	delete(m.LastAccessed, tenantID)
 }
 
