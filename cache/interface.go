@@ -128,7 +128,6 @@ type Cache interface {
 	AnalyticsCache
 
 	// Tenant management
-	EnsureTenant(tenantID string)
 	InvalidateTenant(tenantID string)
 	GetTenantStats(tenantID string) models.CacheStats
 

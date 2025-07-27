@@ -22,9 +22,6 @@ type ReadOnlyAnalyticsCache interface {
 	// Computed metrics operations (read-only)
 	GetLeadMetrics(tenantID string) (*models.LeadMetricsCache, bool)
 	GetDashboardData(tenantID string) (*models.DashboardCache, bool)
-
-	// Tenant management (read-only)
-	EnsureTenant(tenantID string)
 }
 
 // WriteOnlyAnalyticsCache prevents cache warmer from reading during computation
@@ -48,9 +45,6 @@ type WriteOnlyAnalyticsCache interface {
 	// Utility operations (write-only)
 	InvalidateAnalyticsCache(tenantID string)
 	UpdateLastFullHour(tenantID, hourKey string)
-
-	// Tenant management (write-only)
-	EnsureTenant(tenantID string)
 }
 
 // DatabaseOperations defines database access for cache warming

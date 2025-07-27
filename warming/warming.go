@@ -18,77 +18,60 @@ import (
 )
 
 // WarmAllTenants warms critical content for all active tenants after pre-activation.
-// This function ensures that home pages load quickly for first-time visitors by pre-loading
-// and caching all necessary content structures, HTML fragments, and belief registries.
 func WarmAllTenants(tenantManager *tenant.Manager) error {
 	start := time.Now().UTC()
-
-	// Get list of active tenants
 	activeTenants, err := getActiveTenantList()
 	if err != nil {
 		return fmt.Errorf("failed to get active tenant list: %w", err)
 	}
-
 	if len(activeTenants) == 0 {
 		log.Println("No active tenants found - skipping content warming")
 		return nil
 	}
 
-	// Track warming results
-	warmedCount := 0
-	failedTenants := make([]string, 0)
-
-	// Warm critical content for each active tenant
 	for _, tenantID := range activeTenants {
 		log.Printf("Warming content for tenant: '%s'", tenantID)
-
 		if err := warmTenantContent(tenantID); err != nil {
 			log.Printf("ERROR: Failed to warm content for tenant '%s': %v", tenantID, err)
-			failedTenants = append(failedTenants, tenantID)
-			continue
+			continue // Continue to next tenant even if one fails
 		}
-
-		warmedCount++
 		log.Printf("✓ Successfully warmed content for tenant: '%s'", tenantID)
 	}
 
-	// Report results
-	elapsed := time.Since(start)
-	log.Printf("=== Content warming complete in %v ===", elapsed)
-
-	if len(failedTenants) > 0 {
-		log.Printf("Failed tenants: %v", failedTenants)
-		// Non-blocking: return error but don't fail startup
-		return fmt.Errorf("content warming failed for %d tenants: %v", len(failedTenants), failedTenants)
-	}
-
+	log.Printf("=== Content warming complete in %v ===", time.Since(start))
 	return nil
 }
 
-// warmTenantContent performs comprehensive warming for a single tenant, including:
-// - HOME storyfragment loading and caching
-// - All associated panes bulk loading
-// - Menu loading if present
-// - Belief registry generation and caching
-// - HTML fragment pre-generation and caching
-// - Full content map generation using existing API function
+// warmTenantContent performs comprehensive, discovery-first warming for a single tenant.
 func warmTenantContent(tenantID string) error {
 	tenantStart := time.Now().UTC()
+	cacheManager := cache.GetGlobalManager()
+	if cacheManager == nil {
+		return fmt.Errorf("cache manager not available")
+	}
 
-	// Load tenant configuration
+	// Phase 0: Initialize Cache and DB Connection
+	log.Printf("  - Initializing cache structures for tenant '%s'", tenantID)
+	cacheManager.InitializeTenant(tenantID)
+	log.Printf("  - ✅ Cache structures initialized for tenant '%s'", tenantID)
+
 	config, err := tenant.LoadTenantConfig(tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-
-	// Create database connection
 	database, err := tenant.NewDatabase(config)
 	if err != nil {
 		return fmt.Errorf("failed to create database connection: %w", err)
 	}
 	defer database.Close()
 
-	// Create tenant context for all services
+	// Phase 1: Verify & Repair Database State
+	log.Printf("  - Verifying and repairing initial database content for tenant '%s'", tenantID)
+	if err := tenant.EnsureInitialContent(database); err != nil {
+		return fmt.Errorf("failed to ensure initial db content: %w", err)
+	}
+	log.Printf("  - ✅ Initial database content verified for tenant '%s'", tenantID)
+
 	ctx := &tenant.Context{
 		TenantID: tenantID,
 		Config:   config,
@@ -96,160 +79,162 @@ func warmTenantContent(tenantID string) error {
 		Status:   "active",
 	}
 
-	// Initialize cache manager
-	cacheManager := cache.GetGlobalManager()
+	// Phase 2: Authoritative Content Discovery
+	log.Printf("  - Building full content map for tenant '%s'", tenantID)
+	fullContentMap, err := api.BuildFullContentMapFromDB(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to build content map from database: %w", err)
+	}
+	cacheManager.SetFullContentMap(tenantID, fullContentMap)
+	log.Printf("  - ✅ Successfully built and cached content map with %d items.", len(fullContentMap))
 
-	// === Phase 1: Warm HOME StoryFragment ===
+	// Phase 3: Load All Discovered Content into Cache
+	log.Printf("  - Loading all discovered content into cache for tenant '%s'", tenantID)
 	storyFragmentService := content.NewStoryFragmentService(ctx, cacheManager)
+	paneService := content.NewPaneService(ctx, cacheManager)
+	epinetService := content.NewEpinetService(ctx, cacheManager)
+	menuService := content.NewMenuService(ctx, cacheManager)
 
+	var allStoryFragmentIDs, allPaneIDs, allEpinetIDs, allMenuIDs []string
+	for _, item := range fullContentMap {
+		switch item.Type {
+		case "StoryFragment":
+			allStoryFragmentIDs = append(allStoryFragmentIDs, item.ID)
+		case "Pane":
+			allPaneIDs = append(allPaneIDs, item.ID)
+		case "Epinet":
+			allEpinetIDs = append(allEpinetIDs, item.ID)
+		case "Menu":
+			allMenuIDs = append(allMenuIDs, item.ID)
+		}
+	}
+
+	// Bulk load all content types to populate the cache
+	if len(allStoryFragmentIDs) > 0 {
+		if _, err := storyFragmentService.GetByIDs(allStoryFragmentIDs); err != nil {
+			log.Printf("  - Warning: failed to bulk warm StoryFragments: %v", err)
+		}
+	}
+	if len(allPaneIDs) > 0 {
+		if _, err := paneService.GetByIDs(allPaneIDs); err != nil {
+			log.Printf("  - Warning: failed to bulk warm Panes: %v", err)
+		}
+	}
+	if len(allEpinetIDs) > 0 {
+		if _, err := epinetService.GetByIDs(allEpinetIDs); err != nil {
+			log.Printf("  - Warning: failed to bulk warm Epinets: %v", err)
+		}
+	}
+	if len(allMenuIDs) > 0 {
+		if _, err := menuService.GetByIDs(allMenuIDs); err != nil {
+			log.Printf("  - Warning: failed to bulk warm Menus: %v", err)
+		}
+	}
+	log.Printf("  - ✅ All content items loaded into cache.")
+
+	// Phase 4: Enrich StoryFragments with Computed Data
+	// This is the critical logic that was previously deleted.
+	log.Printf("  - Enriching cached StoryFragments with computed data...")
+	for _, sfID := range allStoryFragmentIDs {
+		storyFragment, found := cacheManager.GetStoryFragment(tenantID, sfID)
+		if !found || storyFragment == nil {
+			continue
+		}
+
+		// Enrich with Menu
+		if storyFragment.MenuID != nil {
+			if menu, found := cacheManager.GetMenu(tenantID, *storyFragment.MenuID); found {
+				storyFragment.Menu = menu
+			}
+		}
+
+		// Enrich with CodeHookTargets
+		panes, _ := paneService.GetByIDs(storyFragment.PaneIDs)
+		if len(panes) > 0 {
+			codeHookTargets := make(map[string]string)
+			for _, paneNode := range panes {
+				if paneNode != nil && paneNode.CodeHookTarget != nil && *paneNode.CodeHookTarget != "" {
+					codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
+				}
+			}
+			storyFragment.CodeHookTargets = codeHookTargets
+		}
+
+		// Re-cache the now fully enriched story fragment object.
+		cacheManager.SetStoryFragment(tenantID, storyFragment)
+	}
+	log.Printf("  - ✅ StoryFragments enriched.")
+
+	// Phase 5: Warm High-Priority Dependencies (HOME page HTML)
 	homeSlug := config.HomeSlug
 	if homeSlug == "" {
-		homeSlug = "hello" // Default fallback
+		homeSlug = "hello"
 	}
+	homeStoryFragment, _ := storyFragmentService.GetBySlug(homeSlug)
+	if homeStoryFragment != nil {
+		homePanes, _ := paneService.GetByIDs(homeStoryFragment.PaneIDs)
+		log.Printf("  - ✅ Warmed HOME storyfragment '%s' and its %d panes.", homeSlug, len(homePanes))
 
-	storyFragment, err := storyFragmentService.GetBySlug(homeSlug)
-	if err != nil {
-		return fmt.Errorf("failed to warm HOME storyfragment '%s': %w", homeSlug, err)
-	}
-
-	if storyFragment == nil {
-		log.Printf("  - Warning: HOME storyfragment '%s' not found for tenant '%s'", homeSlug, tenantID)
-		return nil
-	}
-
-	// === Phase 2: Warm All Associated Panes ===
-	var loadedPanes []*models.PaneNode
-	if len(storyFragment.PaneIDs) > 0 {
-		paneService := content.NewPaneService(ctx, cacheManager)
-		loadedPanes, err = paneService.GetByIDs(storyFragment.PaneIDs)
-		if err != nil {
-			return fmt.Errorf("failed to load panes: %w", err)
-		}
-	}
-
-	// === Phase 3: Warm Menu and Attach to StoryFragment ===
-	if storyFragment.MenuID != nil {
-		menuService := content.NewMenuService(ctx, cacheManager)
-		menuData, err := menuService.GetByID(*storyFragment.MenuID)
-		if err != nil {
-			log.Printf("  - Warning: Failed to load menu %s: %v", *storyFragment.MenuID, err)
-		} else if menuData != nil {
-			// ✅ NEW: Attach menu to storyfragment
-			storyFragment.Menu = menuData
-		}
-	}
-
-	// === Phase 4: Warm Belief Registry ===
-	if len(loadedPanes) > 0 {
-		beliefRegistryService := services.NewBeliefRegistryService(ctx)
-		_, err := beliefRegistryService.BuildRegistryFromLoadedPanes(storyFragment.ID, loadedPanes)
-		if err != nil {
-			log.Printf("  - Warning: Failed to build belief registry: %v", err)
-		} // else {
-		// Verify it was actually cached
-		//if _, found := cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyFragment.ID); found {
-		//	log.Printf("  - ✅ Belief registry successfully cached and verified for %s", storyFragment.ID)
-		//} else {
-		//	log.Printf("  - ❌ ERROR: Belief registry failed to cache for %s", storyFragment.ID)
-		//}
-		//}
-	}
-
-	// === Phase 5: Generate and Cache HTML Fragments ===
-	if len(loadedPanes) > 0 {
-		fragmentsGenerated := 0
-		for _, paneNode := range loadedPanes {
-			if paneNode == nil {
-				continue
-			}
-
-			// Extract and parse nodes from optionsPayload
-			nodesData, parentChildMap, err := html.ExtractNodesFromPane(paneNode)
-			if err != nil {
-				log.Printf("  - Warning: Failed to parse pane %s nodes: %v", paneNode.ID, err)
-				continue
-			}
-
-			// Add the pane itself to the nodes data structure
-			paneNodeData := &models.NodeRenderData{
-				ID:       paneNode.ID,
-				NodeType: "Pane",
-				PaneData: &models.PaneRenderData{
-					Title:           paneNode.Title,
-					Slug:            paneNode.Slug,
-					IsDecorative:    paneNode.IsDecorative,
-					BgColour:        extractBgColour(paneNode),
-					HeldBeliefs:     paneNode.HeldBeliefs,
-					WithheldBeliefs: paneNode.WithheldBeliefs,
-					CodeHookTarget:  paneNode.CodeHookTarget,
-					CodeHookPayload: paneNode.CodeHookPayload,
-				},
-			}
-			nodesData[paneNode.ID] = paneNodeData
-
-			// Create render context for warming (no session context needed)
-			renderCtx := &models.RenderContext{
-				AllNodes:         nodesData,
-				ParentNodes:      parentChildMap,
-				TenantID:         ctx.TenantID,
-				SessionID:        "", // No session during warming
-				StoryfragmentID:  storyFragment.ID,
-				ContainingPaneID: paneNode.ID,
-			}
-
-			// Create HTML generator and generate fragment
-			generator := html.NewGenerator(renderCtx)
-			htmlContent := generator.Render(paneNode.ID)
-
-			// Cache the generated HTML fragment
-			variant := models.PaneVariantDefault
-			cacheManager.SetHTMLChunk(tenantID, paneNode.ID, variant, htmlContent, []string{paneNode.ID})
-
-			fragmentsGenerated++
-		}
-	}
-
-	// === Phase 5.5: Extract and Attach CodeHook Targets ===
-	if len(loadedPanes) > 0 {
-		codeHookTargets := make(map[string]string)
-		extractedCount := 0
-
-		for _, paneNode := range loadedPanes {
-			if paneNode != nil && paneNode.CodeHookTarget != nil && *paneNode.CodeHookTarget != "" {
-				codeHookTargets[paneNode.ID] = *paneNode.CodeHookTarget
-				extractedCount++
+		// Build and cache belief registry for home page
+		if len(homePanes) > 0 {
+			beliefRegistryService := services.NewBeliefRegistryService(ctx)
+			if _, err := beliefRegistryService.BuildRegistryFromLoadedPanes(homeStoryFragment.ID, homePanes); err != nil {
+				log.Printf("  - Warning: Failed to build belief registry for HOME: %v", err)
 			}
 		}
-		storyFragment.CodeHookTargets = codeHookTargets
-	}
 
-	// === Phase 5.7: Re-cache the Enriched StoryFragment ===
-	cacheManager.SetStoryFragment(tenantID, storyFragment)
-
-	// === Phase 6: Warm TRACTSTACK_HOME_SLUG if Different ===
-	if config.TractStackHomeSlug != "" && config.TractStackHomeSlug != homeSlug {
-		_, err := storyFragmentService.GetBySlug(config.TractStackHomeSlug)
-		if err != nil {
-			log.Printf("  - Warning: Failed to warm TRACTSTACK HOME storyfragment '%s': %v",
-				config.TractStackHomeSlug, err)
-			//} else if tractStackStoryFragment != nil {
-			//	log.Printf("  - TRACTSTACK HOME storyfragment '%s' warmed (ID: %s, %d panes)",
-			//		config.TractStackHomeSlug, tractStackStoryFragment.ID, len(tractStackStoryFragment.PaneIDs))
+		// Generate HTML fragments for home page
+		for _, paneNode := range homePanes {
+			if paneNode != nil {
+				warmHTMLFragmentForPane(ctx, paneNode, homeStoryFragment.ID)
+			}
 		}
 	}
 
-	// === Phase 7: Warm Full Content Map using existing API function ===
-	contentMap, err := api.BuildFullContentMapFromDB(ctx)
-	if err != nil {
-		log.Printf("  - Warning: Failed to build content map from database: %v", err)
-	} else {
-		// Cache the complete content map
-		cacheManager.SetFullContentMap(tenantID, contentMap)
-	}
-
-	elapsed := time.Since(tenantStart)
-	log.Printf("  - Tenant '%s' content warmed in %v", tenantID, elapsed)
+	log.Printf("  - Tenant '%s' content warmed in %v", tenantID, time.Since(tenantStart))
 	return nil
+}
+
+// warmHTMLFragmentForPane is a helper to generate and cache HTML for a single pane.
+func warmHTMLFragmentForPane(ctx *tenant.Context, paneNode *models.PaneNode, storyFragmentID string) {
+	cacheManager := cache.GetGlobalManager()
+
+	nodesData, parentChildMap, err := html.ExtractNodesFromPane(paneNode)
+	if err != nil {
+		log.Printf("  - Warning: Failed to parse pane %s nodes: %v", paneNode.ID, err)
+		return
+	}
+
+	paneNodeData := &models.NodeRenderData{
+		ID:       paneNode.ID,
+		NodeType: "Pane",
+		PaneData: &models.PaneRenderData{
+			Title:           paneNode.Title,
+			Slug:            paneNode.Slug,
+			IsDecorative:    paneNode.IsDecorative,
+			BgColour:        extractBgColour(paneNode),
+			HeldBeliefs:     paneNode.HeldBeliefs,
+			WithheldBeliefs: paneNode.WithheldBeliefs,
+			CodeHookTarget:  paneNode.CodeHookTarget,
+			CodeHookPayload: paneNode.CodeHookPayload,
+		},
+	}
+	nodesData[paneNode.ID] = paneNodeData
+
+	renderCtx := &models.RenderContext{
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         ctx.TenantID,
+		SessionID:        "", // No session during warming
+		StoryfragmentID:  storyFragmentID,
+		ContainingPaneID: paneNode.ID,
+	}
+
+	generator := html.NewGenerator(renderCtx)
+	htmlContent := generator.Render(paneNode.ID)
+
+	variant := models.PaneVariantDefault
+	cacheManager.SetHTMLChunk(ctx.TenantID, paneNode.ID, variant, htmlContent, []string{paneNode.ID})
 }
 
 // extractBgColour extracts background colour from pane options payload.
@@ -271,12 +256,11 @@ func getActiveTenantList() ([]string, error) {
 		return nil, fmt.Errorf("failed to load tenant registry: %w", err)
 	}
 
-	activeTenants := make([]string, 0)
+	var activeTenants []string
 	for tenantID, tenantInfo := range registry.Tenants {
 		if tenantInfo.Status == "active" {
 			activeTenants = append(activeTenants, tenantID)
 		}
 	}
-
 	return activeTenants, nil
 }
