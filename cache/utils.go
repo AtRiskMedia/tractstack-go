@@ -3,41 +3,18 @@ package cache
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 /*
 =============================================================================
 CACHE UTILITIES LOCKING DOCUMENTATION
-=============================================================================
-
-This utilities file contains helper functions for cache management that MUST
-follow the locking hierarchy established in manager.go:
-
-LOCKING HIERARCHY:
-1. Manager.Mu (highest priority)
-2. Individual cache mutexes (lowest priority)
-
-UTILITY FUNCTION GUIDELINES:
-- Functions that accept *Manager parameter should NOT acquire Manager.Mu
-- They assume the caller has already acquired appropriate locks
-- Always document locking requirements in function comments
-- Utility functions should be "lock-neutral" - not acquiring manager-level locks
-
-SAFE PATTERNS:
-- cleanupTenantExpiredEntries: Only acquires individual cache locks
-- cleanupExpiredSessions: Only acquires individual cache locks
-- Time/TTL functions: No locking required (pure computation)
-
-UNSAFE PATTERNS (AVOIDED):
-- Utility functions calling manager.GetTenantStats() (would cause deadlock)
-- Utility functions acquiring Manager.Mu while caller holds it
-- Cross-tenant operations that could create lock ordering issues
-
 =============================================================================
 */
 
@@ -125,19 +102,32 @@ func IsExpired(cachedAt time.Time, ttl time.Duration) bool {
 	return time.Since(cachedAt) > ttl
 }
 
-// IsAnalyticsBinExpired checks if an analytics bin has expired
+// IsAnalyticsBinExpired checks if an analytics bin has expired using context-aware logic.
+// It correctly applies a shorter TTL for the current hour.
 // LOCKING: None required (pure computation)
-func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin) bool {
+func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin, hourKey string) bool {
 	if bin == nil {
 		return true
 	}
 
-	// Current hour bins expire faster
-	// currentHour := GetCurrentHourKey()
+	now := time.Now().UTC()
+	currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 
-	// Extract hour from bin's implied time (would need hour key context)
-	// For now, use the TTL from the bin itself
-	return IsExpired(bin.ComputedAt, bin.TTL)
+	// Determine the correct TTL based on whether the bin is for the current hour
+	var effectiveTTL time.Duration
+	if hourKey == currentHour {
+		effectiveTTL = CurrentHourTTL
+	} else {
+		effectiveTTL = AnalyticsBinTTL
+	}
+
+	// Use the greater of the bin's own TTL and the dynamically determined TTL.
+	// This respects the bin's intended TTL while ensuring the current hour expires quickly.
+	if bin.TTL > effectiveTTL {
+		effectiveTTL = bin.TTL
+	}
+
+	return IsExpired(bin.ComputedAt, effectiveTTL)
 }
 
 // IsContentCacheExpired checks if content cache has expired
@@ -159,46 +149,36 @@ func IsUserStateCacheExpired(cache *models.TenantUserStateCache) bool {
 }
 
 // SetDatabasePoolCleanup sets the database pool cleanup function
-// This allows the cache package to trigger database pool cleanup without import cycles
 func SetDatabasePoolCleanup(cleanup DatabasePoolCleanupFunc) {
 	databasePoolCleanup = cleanup
 }
 
 // cleanupDatabasePools performs database connection pool cleanup
-// This function calls the database package's cleanup function if available
 func cleanupDatabasePools() {
 	if databasePoolCleanup != nil {
 		databasePoolCleanup()
 	}
 }
 
-// StartCleanupRoutine starts a background goroutine for cache cleanup
-// LOCKING: Creates independent goroutine that acquires manager locks safely
+// StartCleanupRoutine starts background goroutines for cache cleanup.
 func StartCleanupRoutine(manager *Manager) {
 	go func() {
 		ticker := time.NewTicker(CleanupInterval)
 		defer ticker.Stop()
-
 		for range ticker.C {
 			cleanupExpiredEntries(manager)
 		}
 	}()
-
-	// Start SSE cleanup routine
 	go func() {
 		sseTicker := time.NewTicker(SSECleanupInterval)
 		defer sseTicker.Stop()
-
 		for range sseTicker.C {
 			cleanupSSEConnections()
 		}
 	}()
-
-	// Start separate database pool cleanup routine
 	go func() {
 		dbTicker := time.NewTicker(DBPoolCleanupInterval)
 		defer dbTicker.Stop()
-
 		for range dbTicker.C {
 			cleanupDatabasePools()
 		}
@@ -206,9 +186,7 @@ func StartCleanupRoutine(manager *Manager) {
 }
 
 // cleanupExpiredEntries removes expired cache entries
-// LOCKING: Acquires manager.Mu.RLock() to get tenant list, then releases before processing
 func cleanupExpiredEntries(manager *Manager) {
-	// Get snapshot of tenant IDs while holding read lock
 	manager.Mu.RLock()
 	tenantIDs := make([]string, 0, len(manager.ContentCache))
 	for tenantID := range manager.ContentCache {
@@ -216,17 +194,13 @@ func cleanupExpiredEntries(manager *Manager) {
 	}
 	manager.Mu.RUnlock()
 
-	// Process each tenant without holding manager lock
 	for _, tenantID := range tenantIDs {
 		cleanupTenantExpiredEntries(manager, tenantID)
 	}
 }
 
 // cleanupExpiredSessions removes expired sessions from user state cache
-// LOCKING: Only acquires individual cache mutex (userCache.Mu)
-// ASSUMES: Manager locks NOT held by caller
 func cleanupExpiredSessions(manager *Manager, tenantID string) {
-	// Get cache reference safely
 	manager.Mu.RLock()
 	userCache, exists := manager.UserStateCache[tenantID]
 	manager.Mu.RUnlock()
@@ -235,7 +209,6 @@ func cleanupExpiredSessions(manager *Manager, tenantID string) {
 		return
 	}
 
-	// Only acquire the individual cache lock
 	userCache.Mu.Lock()
 	defer userCache.Mu.Unlock()
 
@@ -248,14 +221,11 @@ func cleanupExpiredSessions(manager *Manager, tenantID string) {
 }
 
 // cleanupTenantExpiredEntries cleans up expired entries for a specific tenant
-// LOCKING: Only acquires individual cache mutexes (NOT manager.Mu)
-// ASSUMES: Manager locks NOT held by caller
 func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 	// Clean up HTML chunks
 	manager.Mu.RLock()
 	htmlCache, htmlExists := manager.HTMLChunkCache[tenantID]
 	manager.Mu.RUnlock()
-
 	if htmlExists && htmlCache != nil {
 		htmlCache.Mu.Lock()
 		for key, chunk := range htmlCache.Chunks {
@@ -266,74 +236,63 @@ func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 		htmlCache.Mu.Unlock()
 	}
 
-	// Clean up expired sessions
 	cleanupExpiredSessions(manager, tenantID)
 
-	// Clean up analytics bins
 	manager.Mu.RLock()
 	analyticsCache, analyticsExists := manager.AnalyticsCache[tenantID]
 	manager.Mu.RUnlock()
-
 	if analyticsExists && analyticsCache != nil {
 		analyticsCache.Mu.Lock()
 
-		// Clean up epinet bins
-		for key, bin := range analyticsCache.EpinetBins {
-			if IsAnalyticsBinExpired(bin) {
-				delete(analyticsCache.EpinetBins, key)
+		// Clean up epinet bins with corrected, context-aware logic
+		for binKey, bin := range analyticsCache.EpinetBins {
+			// CORRECT: Parse the hourKey from the binKey to provide context
+			lastColonIndex := strings.LastIndex(binKey, ":")
+			if lastColonIndex == -1 {
+				continue // Skip malformed keys
+			}
+			hourKey := binKey[lastColonIndex+1:]
+
+			if IsAnalyticsBinExpired(bin, hourKey) {
+				delete(analyticsCache.EpinetBins, binKey)
 			}
 		}
 
-		// Clean up content bins
+		// Clean up other bins
 		for key, bin := range analyticsCache.ContentBins {
 			if IsExpired(bin.ComputedAt, bin.TTL) {
 				delete(analyticsCache.ContentBins, key)
 			}
 		}
-
-		// Clean up site bins
 		for key, bin := range analyticsCache.SiteBins {
 			if IsExpired(bin.ComputedAt, bin.TTL) {
 				delete(analyticsCache.SiteBins, key)
 			}
 		}
-
-		// Clean up computed metrics
 		if analyticsCache.LeadMetrics != nil && IsExpired(analyticsCache.LeadMetrics.ComputedAt, analyticsCache.LeadMetrics.TTL) {
 			analyticsCache.LeadMetrics = nil
 		}
-
 		if analyticsCache.DashboardData != nil && IsExpired(analyticsCache.DashboardData.ComputedAt, analyticsCache.DashboardData.TTL) {
 			analyticsCache.DashboardData = nil
 		}
-
 		analyticsCache.Mu.Unlock()
 	}
 }
 
 // cleanupSSEConnections performs periodic cleanup of dead SSE connections
 func cleanupSSEConnections() {
-	// Get all tenant IDs that have active SSE connections
-	// We'll need to expose this from the SSEBroadcaster
 	tenantIDs := models.Broadcaster.GetActiveTenantIDs()
-
 	totalCleaned := 0
 	totalActive := 0
-
 	for _, tenantID := range tenantIDs {
-		// Get dead channels for this tenant (need new method)
 		deadChannels := models.Broadcaster.GetDeadChannelsForTenant(tenantID)
-
 		if len(deadChannels) > 0 {
 			models.Broadcaster.CleanupDeadChannels(tenantID, deadChannels)
 			totalCleaned += len(deadChannels)
 		}
-
 		totalActive += models.Broadcaster.GetActiveConnectionCount(tenantID)
 	}
-
 	if totalCleaned > 0 {
-		log.Printf("SSE cleanup: removed %d dead connections across all tenants, %d active remaining",
-			totalCleaned, totalActive)
+		log.Printf("SSE cleanup: removed %d dead connections across all tenants, %d active remaining", totalCleaned, totalActive)
 	}
 }
