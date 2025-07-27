@@ -46,8 +46,8 @@ func ActivateTenant(ctx *Context) error {
 		return fmt.Errorf("tables creation failed - not all tables exist")
 	}
 
-	// Insert initial content
-	if err := insertInitialContent(ctx.Database); err != nil {
+	// Insert initial content using the new reusable function
+	if err := EnsureInitialContent(ctx.Database); err != nil {
 		return fmt.Errorf("failed to insert initial content: %w", err)
 	}
 
@@ -91,8 +91,9 @@ func CheckTablesExist(db *Database) (bool, error) {
 	return true, nil
 }
 
-// insertInitialContent creates the default tractstack and hello storyfragment
-func insertInitialContent(db *Database) error {
+// EnsureInitialContent idempotently creates the default tractstack, storyfragment, and epinet.
+// This is safe to run on every startup to verify and repair the database state.
+func EnsureInitialContent(db *Database) error {
 	// Check if tractstack already exists
 	var tractStackExists bool
 	err := db.Conn.QueryRow("SELECT EXISTS(SELECT 1 FROM tractstacks WHERE slug = 'HELLO')").Scan(&tractStackExists)
@@ -103,7 +104,7 @@ func insertInitialContent(db *Database) error {
 	if !tractStackExists {
 		tractStackID := utils.GenerateULID()
 		_, err = db.Conn.Exec(`
-			INSERT INTO tractstacks (id, title, slug, social_image_path) 
+			INSERT INTO tractstacks (id, title, slug, social_image_path)
 			VALUES (?, ?, ?, ?)`,
 			tractStackID, "Tract Stack", "HELLO", "")
 		if err != nil {
@@ -130,7 +131,7 @@ func insertInitialContent(db *Database) error {
 		now := time.Now().UTC()
 		_, err = db.Conn.Exec(`
 			INSERT INTO storyfragments (
-				id, title, slug, tractstack_id, created, changed, 
+				id, title, slug, tractstack_id, created, changed,
 				menu_id, social_image_path, tailwind_background_colour
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			storyFragmentID, "", "hello", tractStackID, now, now, nil, nil, nil)
@@ -150,7 +151,7 @@ func insertInitialContent(db *Database) error {
 		epinetID := utils.GenerateULID()
 		epinetPayload := `{"promoted": true, "steps": [{"title": "Entered Site", "gateType": "commitmentAction", "objectType": "StoryFragment", "values": ["ENTERED"]}, {"title": "Experienced Site", "gateType": "commitmentAction", "objectType": "StoryFragment", "values": ["PAGEVIEWED"]}, {"title": "Experienced Content", "gateType": "commitmentAction", "objectType": "Pane", "values": ["READ", "GLOSSED", "CLICKED", "WATCHED"]}]}`
 		_, err = db.Conn.Exec(`
-			INSERT INTO epinets (id, title, options_payload) 
+			INSERT INTO epinets (id, title, options_payload)
 			VALUES (?, ?, ?)`,
 			epinetID, "My Tract Stack", epinetPayload)
 		if err != nil {

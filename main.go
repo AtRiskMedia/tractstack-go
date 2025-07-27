@@ -52,11 +52,7 @@ func main() {
 		log.Fatal("Failed to create cache manager")
 	}
 
-	cache.GlobalInstance = GlobalCacheManager
-	log.Printf("Cache GlobalInstance set to: %p", cache.GlobalInstance)
-	if cache.GlobalInstance == nil {
-		log.Fatal("Failed to set global cache instance")
-	}
+	cache.SetGlobalManager(GlobalCacheManager)
 	log.Println("Global cache manager initialized")
 
 	// Start cleanup routine

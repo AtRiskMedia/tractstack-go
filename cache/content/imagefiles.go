@@ -1,7 +1,8 @@
-// Package content provides imagefile cache operations
+// Package content provides imagefiles helpers
 package content
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -48,19 +49,25 @@ func (ifco *ImageFileCacheOperations) GetFile(tenantID, id string) (*models.Imag
 	return file, true
 }
 
-// SetFile stores an imagefile in cache
-func (ifco *ImageFileCacheOperations) SetFile(tenantID string, node *models.ImageFileNode) {
-	ifco.ensureTenantCache(tenantID)
-
+// SetFile stores an imagefile in cache using safe lookup
+func (ifco *ImageFileCacheOperations) SetFile(tenantID string, node *models.ImageFileNode) error {
+	// Use safe cache lookup instead of ensureTenantCache
 	ifco.manager.Mu.RLock()
-	tenantCache := ifco.manager.ContentCache[tenantID]
+	tenantCache, exists := ifco.manager.ContentCache[tenantID]
 	ifco.manager.Mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+	}
 
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
 
 	// Store the imagefile
 	tenantCache.Files[node.ID] = node
+
+	// Note: ImageFiles don't typically have slugs in the current system,
+	// so no slug lookup needed
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
@@ -69,6 +76,8 @@ func (ifco *ImageFileCacheOperations) SetFile(tenantID string, node *models.Imag
 	ifco.manager.Mu.Lock()
 	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	ifco.manager.Mu.Unlock()
+
+	return nil
 }
 
 // GetAllFileIDs retrieves all imagefile IDs from cache
@@ -89,14 +98,10 @@ func (ifco *ImageFileCacheOperations) GetAllFileIDs(tenantID string) ([]string, 
 		return nil, false
 	}
 
-	// Extract IDs from cached files
-	var ids []string
+	// Collect all file IDs
+	ids := make([]string, 0, len(tenantCache.Files))
 	for id := range tenantCache.Files {
 		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		return nil, false
 	}
 
 	// Update last accessed
@@ -120,11 +125,16 @@ func (ifco *ImageFileCacheOperations) InvalidateFile(tenantID, id string) {
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
 
-	// Remove imagefile
+	// Remove imagefile (no slug lookup to clean up for imagefiles)
 	delete(tenantCache.Files, id)
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
+
+	// Update last accessed
+	ifco.manager.Mu.Lock()
+	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
+	ifco.manager.Mu.Unlock()
 }
 
 // InvalidateAllFiles clears all imagefile cache for a tenant
@@ -140,34 +150,9 @@ func (ifco *ImageFileCacheOperations) InvalidateAllFiles(tenantID string) {
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
 
-	// Clear imagefiles
+	// Clear imagefiles (no slug lookups to clean up)
 	tenantCache.Files = make(map[string]*models.ImageFileNode)
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
-}
-
-// ensureTenantCache creates tenant cache if it doesn't exist
-func (ifco *ImageFileCacheOperations) ensureTenantCache(tenantID string) {
-	ifco.manager.Mu.Lock()
-	defer ifco.manager.Mu.Unlock()
-
-	if _, exists := ifco.manager.ContentCache[tenantID]; !exists {
-		ifco.manager.ContentCache[tenantID] = &models.TenantContentCache{
-			TractStacks:    make(map[string]*models.TractStackNode),
-			StoryFragments: make(map[string]*models.StoryFragmentNode),
-			Panes:          make(map[string]*models.PaneNode),
-			Menus:          make(map[string]*models.MenuNode),
-			Resources:      make(map[string]*models.ResourceNode),
-			Epinets:        make(map[string]*models.EpinetNode),
-			Beliefs:        make(map[string]*models.BeliefNode),
-			Files:          make(map[string]*models.ImageFileNode),
-			SlugToID:       make(map[string]string),
-			CategoryToIDs:  make(map[string][]string),
-			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now().UTC(),
-		}
-	}
-
-	ifco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

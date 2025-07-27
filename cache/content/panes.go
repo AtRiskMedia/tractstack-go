@@ -2,6 +2,7 @@
 package content
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -48,13 +49,16 @@ func (pco *PaneCacheOperations) GetPane(tenantID, id string) (*models.PaneNode, 
 	return pane, true
 }
 
-// SetPane stores a pane in cache
-func (pco *PaneCacheOperations) SetPane(tenantID string, node *models.PaneNode) {
-	pco.ensureTenantCache(tenantID)
-
+// SetPane stores a pane in cache using safe lookup
+func (pco *PaneCacheOperations) SetPane(tenantID string, node *models.PaneNode) error {
+	// Use safe cache lookup instead of ensureTenantCache
 	pco.manager.Mu.RLock()
-	tenantCache := pco.manager.ContentCache[tenantID]
+	tenantCache, exists := pco.manager.ContentCache[tenantID]
 	pco.manager.Mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+	}
 
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
@@ -72,6 +76,8 @@ func (pco *PaneCacheOperations) SetPane(tenantID string, node *models.PaneNode) 
 	pco.manager.Mu.Lock()
 	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
+
+	return nil
 }
 
 // GetPaneBySlug retrieves a pane by slug from cache
@@ -147,13 +153,16 @@ func (pco *PaneCacheOperations) GetAllPaneIDs(tenantID string) ([]string, bool) 
 	return ids, true
 }
 
-// SetAllPaneIDs stores all pane IDs in cache
-func (pco *PaneCacheOperations) SetAllPaneIDs(tenantID string, ids []string) {
-	pco.ensureTenantCache(tenantID)
-
+// SetAllPaneIDs stores all pane IDs in cache using safe lookup
+func (pco *PaneCacheOperations) SetAllPaneIDs(tenantID string, ids []string) error {
+	// Use safe cache lookup instead of ensureTenantCache
 	pco.manager.Mu.RLock()
-	tenantCache := pco.manager.ContentCache[tenantID]
+	tenantCache, exists := pco.manager.ContentCache[tenantID]
 	pco.manager.Mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+	}
 
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
@@ -169,6 +178,8 @@ func (pco *PaneCacheOperations) SetAllPaneIDs(tenantID string, ids []string) {
 	pco.manager.Mu.Lock()
 	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	pco.manager.Mu.Unlock()
+
+	return nil
 }
 
 // InvalidatePane removes a specific pane from cache
@@ -202,6 +213,11 @@ func (pco *PaneCacheOperations) InvalidatePane(tenantID, id string) {
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
+
+	// Update last accessed
+	pco.manager.Mu.Lock()
+	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
+	pco.manager.Mu.Unlock()
 }
 
 // InvalidateAllPanes clears all pane cache for a tenant
@@ -228,29 +244,4 @@ func (pco *PaneCacheOperations) InvalidateAllPanes(tenantID string) {
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
-}
-
-// ensureTenantCache creates tenant cache if it doesn't exist
-func (pco *PaneCacheOperations) ensureTenantCache(tenantID string) {
-	pco.manager.Mu.Lock()
-	defer pco.manager.Mu.Unlock()
-
-	if _, exists := pco.manager.ContentCache[tenantID]; !exists {
-		pco.manager.ContentCache[tenantID] = &models.TenantContentCache{
-			TractStacks:    make(map[string]*models.TractStackNode),
-			StoryFragments: make(map[string]*models.StoryFragmentNode),
-			Panes:          make(map[string]*models.PaneNode),
-			Menus:          make(map[string]*models.MenuNode),
-			Resources:      make(map[string]*models.ResourceNode),
-			Epinets:        make(map[string]*models.EpinetNode),
-			Beliefs:        make(map[string]*models.BeliefNode),
-			Files:          make(map[string]*models.ImageFileNode),
-			SlugToID:       make(map[string]string),
-			CategoryToIDs:  make(map[string][]string),
-			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now().UTC(),
-		}
-	}
-
-	pco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }

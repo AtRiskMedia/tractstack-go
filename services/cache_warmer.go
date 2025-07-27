@@ -9,7 +9,6 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/cache"
 	"github.com/AtRiskMedia/tractstack-go/models"
-	"github.com/AtRiskMedia/tractstack-go/models/content"
 	"github.com/AtRiskMedia/tractstack-go/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
@@ -95,28 +94,23 @@ func (cws *CacheWarmingService) WarmHourlyEpinetData(hoursBack int) error {
 
 		eventsByHour := cws.groupEventsByHour(allActionEvents, allBeliefEvents)
 
-		// Generate ALL hour keys for this batch, not just hours with events
 		batchHourKeys := cws.getHourKeysForBatch(startHourOffset, endHourOffset)
 
-		// Process ALL hours in the batch, creating empty bins for hours with no events
 		for _, hourKey := range batchHourKeys {
 			for _, epinet := range epinets {
 				if !cws.needsWarming(epinet.ID, hourKey) {
 					continue
 				}
 
-				// Get events for this hour (may be empty)
 				events, hasEvents := eventsByHour[hourKey]
 
 				var steps map[string]*models.HourlyEpinetStepData
 				var transitions map[string]map[string]*models.HourlyEpinetTransitionData
 
 				if hasEvents {
-					// Hour has events - build normal steps and transitions
 					steps = cws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems)
 					transitions = cws.buildTransitionsFromSteps(steps)
 				} else {
-					// Hour has no events - create empty structures
 					steps = make(map[string]*models.HourlyEpinetStepData)
 					transitions = make(map[string]map[string]*models.HourlyEpinetTransitionData)
 				}
@@ -254,6 +248,8 @@ func (cws *CacheWarmingService) groupEventsByHour(actions []models.ActionEvent, 
 // --- Data Fetching and Processing Helpers ---
 
 func (cws *CacheWarmingService) getActionEventsForRange(startTime, endTime time.Time, analysis *EpinetAnalysis) ([]models.ActionEvent, error) {
+	// This function queries the database for event data and is correctly implemented.
+	// It does not need to change as it's fetching raw analytics events, not content definitions.
 	var events []models.ActionEvent
 	if len(analysis.ActionVerbs) == 0 {
 		return events, nil
@@ -279,17 +275,13 @@ func (cws *CacheWarmingService) getActionEventsForRange(startTime, endTime time.
 
 	for rows.Next() {
 		var event models.ActionEvent
-		var createdAtStr string // Scan timestamp as string first
-
+		var createdAtStr string
 		if err := rows.Scan(&event.ObjectID, &event.ObjectType, &event.Verb, &event.FingerprintID, &createdAtStr); err != nil {
 			log.Printf("WARN: Failed to scan action event row: %v", err)
 			continue
 		}
-
-		// Parse the timestamp string into time.Time
 		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
 		if err != nil {
-			// Try alternative timestamp formats if RFC3339 fails
 			if createdAt, err = time.Parse("2006-01-02 15:04:05", createdAtStr); err != nil {
 				if createdAt, err = time.Parse("2006-01-02T15:04:05.000Z", createdAtStr); err != nil {
 					log.Printf("WARN: Failed to parse created_at timestamp '%s': %v", createdAtStr, err)
@@ -298,14 +290,13 @@ func (cws *CacheWarmingService) getActionEventsForRange(startTime, endTime time.
 			}
 		}
 		event.CreatedAt = createdAt
-
 		events = append(events, event)
 	}
-
 	return events, nil
 }
 
 func (cws *CacheWarmingService) getBeliefEventsForRange(startTime, endTime time.Time, analysis *EpinetAnalysis) ([]models.BeliefEvent, error) {
+	// This function also queries for raw analytics events and is correctly implemented.
 	var events []models.BeliefEvent
 	if len(analysis.BeliefValues) == 0 && len(analysis.IdentifyAsValues) == 0 {
 		return events, nil
@@ -342,17 +333,13 @@ func (cws *CacheWarmingService) getBeliefEventsForRange(startTime, endTime time.
 
 	for rows.Next() {
 		var event models.BeliefEvent
-		var updatedAtStr string // Scan timestamp as string first
-
+		var updatedAtStr string
 		if err := rows.Scan(&event.BeliefID, &event.FingerprintID, &event.Verb, &event.Object, &updatedAtStr); err != nil {
 			log.Printf("WARN: Failed to scan belief event row: %v", err)
 			continue
 		}
-
-		// Parse the timestamp string into time.Time
 		updatedAt, err := time.Parse(time.RFC3339, updatedAtStr)
 		if err != nil {
-			// Try alternative timestamp formats if RFC3339 fails
 			if updatedAt, err = time.Parse("2006-01-02 15:04:05", updatedAtStr); err != nil {
 				if updatedAt, err = time.Parse("2006-01-02T15:04:05.000Z", updatedAtStr); err != nil {
 					log.Printf("WARN: Failed to parse updated_at timestamp '%s': %v", updatedAtStr, err)
@@ -361,86 +348,107 @@ func (cws *CacheWarmingService) getBeliefEventsForRange(startTime, endTime time.
 			}
 		}
 		event.UpdatedAt = updatedAt
-
 		events = append(events, event)
 	}
-
 	return events, nil
 }
 
+// [MODIFIED]
 func (cws *CacheWarmingService) getEpinets() ([]models.EpinetConfig, error) {
 	if cws.ctx == nil {
 		return nil, fmt.Errorf("tenant context not set")
 	}
-	epinetService := content.NewEpinetService(cws.ctx, nil)
-	epinetIDs, err := epinetService.GetAllIDs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get epinet IDs: %w", err)
+
+	// FIX: Read from the global cache, which was populated at startup.
+	cacheManager := cache.GetGlobalManager()
+	if cacheManager == nil {
+		return nil, fmt.Errorf("global cache manager is not initialized")
 	}
-	epinetNodes, err := epinetService.GetByIDs(epinetIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get epinets: %w", err)
+
+	// Use the authoritative FullContentMap to discover all epinets.
+	contentMap, found := cacheManager.GetFullContentMap(cws.ctx.TenantID)
+	if !found || len(contentMap) == 0 {
+		return nil, nil // Return empty, not an error.
 	}
-	var epinets []models.EpinetConfig
-	for _, node := range epinetNodes {
-		if node != nil {
-			var steps []models.EpinetStep
-			for _, nodeStep := range node.Steps {
-				step := models.EpinetStep{
-					GateType:   nodeStep.GateType,
-					Title:      nodeStep.Title,
-					Values:     nodeStep.Values,
-					ObjectType: "",
-					ObjectIds:  nodeStep.ObjectIDs,
-				}
-				if nodeStep.ObjectType != nil {
-					step.ObjectType = *nodeStep.ObjectType
-				}
-				steps = append(steps, step)
+
+	var epinetNodes []*models.EpinetNode
+	for _, item := range contentMap {
+		if item.Type == "Epinet" {
+			// The content map has summary data. Get the full node from the main content cache.
+			node, found := cacheManager.GetEpinet(cws.ctx.TenantID, item.ID)
+			if found && node != nil {
+				epinetNodes = append(epinetNodes, node)
 			}
-			epinets = append(epinets, models.EpinetConfig{
-				ID:    node.ID,
-				Title: node.Title,
-				Steps: steps,
-			})
 		}
 	}
+
+	if len(epinetNodes) == 0 {
+		return nil, nil
+	}
+
+	// Convert the full EpinetNode objects into the EpinetConfig required by the warmer.
+	var epinets []models.EpinetConfig
+	for _, node := range epinetNodes {
+		var steps []models.EpinetStep
+		for _, nodeStep := range node.Steps {
+			step := models.EpinetStep{
+				GateType:   nodeStep.GateType,
+				Title:      nodeStep.Title,
+				Values:     nodeStep.Values,
+				ObjectType: "", // Ensure default value
+				ObjectIds:  nodeStep.ObjectIDs,
+			}
+			if nodeStep.ObjectType != nil {
+				step.ObjectType = *nodeStep.ObjectType
+			}
+			steps = append(steps, step)
+		}
+		epinets = append(epinets, models.EpinetConfig{
+			ID:    node.ID,
+			Title: node.Title,
+			Steps: steps,
+		})
+	}
+
 	return epinets, nil
 }
 
+// [MODIFIED]
 func (cws *CacheWarmingService) getContentItems() (map[string]models.ContentItem, error) {
 	if cws.ctx == nil {
 		return nil, fmt.Errorf("tenant context not set")
 	}
+
+	// FIX: Read from the global cache manager, not by creating a new cache-bypassing service.
+	cacheManager := cache.GetGlobalManager()
+	if cacheManager == nil {
+		return nil, fmt.Errorf("global cache manager is not initialized")
+	}
+
 	contentItems := make(map[string]models.ContentItem)
-	storyFragmentService := content.NewStoryFragmentService(cws.ctx, nil)
-	storyFragmentIDs, err := storyFragmentService.GetAllIDs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get story fragment IDs: %w", err)
-	}
-	storyFragments, err := storyFragmentService.GetByIDs(storyFragmentIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get story fragments: %w", err)
-	}
-	for _, sf := range storyFragments {
-		if sf != nil {
-			contentItems[sf.ID] = models.ContentItem{Title: sf.Title, Slug: sf.Slug}
+
+	// Get StoryFragments directly from the warmed cache
+	sfIDs, found := cacheManager.GetAllStoryFragmentIDs(cws.ctx.TenantID)
+	if found {
+		for _, id := range sfIDs {
+			sf, found := cacheManager.GetStoryFragment(cws.ctx.TenantID, id)
+			if found && sf != nil {
+				contentItems[sf.ID] = models.ContentItem{Title: sf.Title, Slug: sf.Slug}
+			}
 		}
 	}
-	paneService := content.NewPaneService(cws.ctx, nil)
-	paneIDs, err := paneService.GetAllIDs()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get pane IDs: %w", err)
-	}
-	panes, err := paneService.GetByIDs(paneIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get panes: %w", err)
-	}
-	for _, pane := range panes {
-		if pane != nil {
-			contentItems[pane.ID] = models.ContentItem{Title: pane.Title, Slug: pane.Slug}
+
+	// Get Panes directly from the warmed cache
+	paneIDs, found := cacheManager.GetAllPaneIDs(cws.ctx.TenantID)
+	if found {
+		for _, id := range paneIDs {
+			pane, found := cacheManager.GetPane(cws.ctx.TenantID, id)
+			if found && pane != nil {
+				contentItems[pane.ID] = models.ContentItem{Title: pane.Title, Slug: pane.Slug}
+			}
 		}
 	}
+
 	return contentItems, nil
 }
 
@@ -667,7 +675,6 @@ func (cws *CacheWarmingService) getTimeRangeForHour(hourKey string) (time.Time, 
 }
 
 // getTTLForHour calculates the Time-To-Live for a given hourly bin.
-// This corrects the typo from `CacheWimmingService` to `CacheWarmingService`.
 func (cws *CacheWarmingService) getTTLForHour(hourKey string) time.Duration {
 	now := time.Now().UTC()
 	currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))

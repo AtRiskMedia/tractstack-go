@@ -1,7 +1,8 @@
-// Package content provides tractstack cache operations
+// Package content provides tractstacks helpers
 package content
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/models"
@@ -48,13 +49,16 @@ func (tsco *TractStackCacheOperations) GetTractStack(tenantID, id string) (*mode
 	return tractStack, true
 }
 
-// SetTractStack stores a tractstack in cache
-func (tsco *TractStackCacheOperations) SetTractStack(tenantID string, node *models.TractStackNode) {
-	tsco.ensureTenantCache(tenantID)
-
+// SetTractStack stores a tractstack in cache using safe lookup
+func (tsco *TractStackCacheOperations) SetTractStack(tenantID string, node *models.TractStackNode) error {
+	// Use safe cache lookup instead of ensureTenantCache
 	tsco.manager.Mu.RLock()
-	tenantCache := tsco.manager.ContentCache[tenantID]
+	tenantCache, exists := tsco.manager.ContentCache[tenantID]
 	tsco.manager.Mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+	}
 
 	tenantCache.Mu.Lock()
 	defer tenantCache.Mu.Unlock()
@@ -62,7 +66,7 @@ func (tsco *TractStackCacheOperations) SetTractStack(tenantID string, node *mode
 	// Store the tractstack
 	tenantCache.TractStacks[node.ID] = node
 
-	// Update slug lookup
+	// Update slug lookup with prefix
 	tenantCache.SlugToID["tractstack:"+node.Slug] = node.ID
 
 	// Update last modified
@@ -72,6 +76,8 @@ func (tsco *TractStackCacheOperations) SetTractStack(tenantID string, node *mode
 	tsco.manager.Mu.Lock()
 	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 	tsco.manager.Mu.Unlock()
+
+	return nil
 }
 
 // GetTractStackBySlug retrieves a tractstack by slug from cache
@@ -92,7 +98,7 @@ func (tsco *TractStackCacheOperations) GetTractStackBySlug(tenantID, slug string
 		return nil, false
 	}
 
-	// Get ID from slug lookup (prefixed to avoid conflicts)
+	// Get ID from slug lookup with prefix
 	id, exists := tenantCache.SlugToID["tractstack:"+slug]
 	if !exists {
 		return nil, false
@@ -110,42 +116,6 @@ func (tsco *TractStackCacheOperations) GetTractStackBySlug(tenantID, slug string
 	tsco.manager.Mu.Unlock()
 
 	return tractStack, true
-}
-
-// GetAllTractStackIDs retrieves all tractstack IDs from cache
-func (tsco *TractStackCacheOperations) GetAllTractStackIDs(tenantID string) ([]string, bool) {
-	tsco.manager.Mu.RLock()
-	tenantCache, exists := tsco.manager.ContentCache[tenantID]
-	tsco.manager.Mu.RUnlock()
-
-	if !exists {
-		return nil, false
-	}
-
-	tenantCache.Mu.RLock()
-	defer tenantCache.Mu.RUnlock()
-
-	// Check if cache is expired
-	if time.Since(tenantCache.LastUpdated) > models.TTL24Hours.Duration() {
-		return nil, false
-	}
-
-	// Extract IDs from cached tractstacks
-	var ids []string
-	for id := range tenantCache.TractStacks {
-		ids = append(ids, id)
-	}
-
-	if len(ids) == 0 {
-		return nil, false
-	}
-
-	// Update last accessed
-	tsco.manager.Mu.Lock()
-	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
-	tsco.manager.Mu.Unlock()
-
-	return ids, true
 }
 
 // InvalidateTractStack removes a specific tractstack from cache
@@ -171,6 +141,11 @@ func (tsco *TractStackCacheOperations) InvalidateTractStack(tenantID, id string)
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
+
+	// Update last accessed
+	tsco.manager.Mu.Lock()
+	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
+	tsco.manager.Mu.Unlock()
 }
 
 // InvalidateAllTractStacks clears all tractstack cache for a tenant
@@ -196,29 +171,4 @@ func (tsco *TractStackCacheOperations) InvalidateAllTractStacks(tenantID string)
 
 	// Update last modified
 	tenantCache.LastUpdated = time.Now().UTC()
-}
-
-// ensureTenantCache creates tenant cache if it doesn't exist
-func (tsco *TractStackCacheOperations) ensureTenantCache(tenantID string) {
-	tsco.manager.Mu.Lock()
-	defer tsco.manager.Mu.Unlock()
-
-	if _, exists := tsco.manager.ContentCache[tenantID]; !exists {
-		tsco.manager.ContentCache[tenantID] = &models.TenantContentCache{
-			TractStacks:    make(map[string]*models.TractStackNode),
-			StoryFragments: make(map[string]*models.StoryFragmentNode),
-			Panes:          make(map[string]*models.PaneNode),
-			Menus:          make(map[string]*models.MenuNode),
-			Resources:      make(map[string]*models.ResourceNode),
-			Epinets:        make(map[string]*models.EpinetNode),
-			Beliefs:        make(map[string]*models.BeliefNode),
-			Files:          make(map[string]*models.ImageFileNode),
-			SlugToID:       make(map[string]string),
-			CategoryToIDs:  make(map[string][]string),
-			AllPaneIDs:     []string{},
-			LastUpdated:    time.Now().UTC(),
-		}
-	}
-
-	tsco.manager.LastAccessed[tenantID] = time.Now().UTC()
 }
