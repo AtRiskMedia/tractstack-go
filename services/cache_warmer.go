@@ -680,3 +680,71 @@ func (cws *CacheWarmingService) getTTLForHour(hourKey string) time.Duration {
 func (cws *CacheWarmingService) getHourKeysForTimeRange(hoursBack int) []string {
 	return utils.GetHourKeysForTimeRange(hoursBack)
 }
+
+func (cws *CacheWarmingService) WarmRecentHours(missingHourKeys []string) error {
+	if len(missingHourKeys) == 0 {
+		return nil
+	}
+
+	log.Printf("Rapid catch-up refresh for tenant '%s' - %d hours", cws.ctx.TenantID, len(missingHourKeys))
+
+	epinets, err := cws.getEpinets()
+	if err != nil || len(epinets) == 0 {
+		return nil
+	}
+
+	contentItems, err := cws.getContentItems()
+	if err != nil {
+		return fmt.Errorf("failed to get content items: %w", err)
+	}
+
+	now := time.Now().UTC()
+	oldestHour, err := utils.ParseHourKeyToDate(missingHourKeys[len(missingHourKeys)-1])
+	if err != nil {
+		return fmt.Errorf("invalid hour key: %w", err)
+	}
+
+	analysis := cws.analyzeEpinet(epinets[0])
+	allActionEvents, err := cws.getActionEventsForRange(oldestHour, now, analysis)
+	if err != nil {
+		return fmt.Errorf("failed to get action events: %w", err)
+	}
+
+	allBeliefEvents, err := cws.getBeliefEventsForRange(oldestHour, now, analysis)
+	if err != nil {
+		return fmt.Errorf("failed to get belief events: %w", err)
+	}
+
+	eventsByHour := cws.groupEventsByHour(allActionEvents, allBeliefEvents)
+
+	for _, hourKey := range missingHourKeys {
+		for _, epinet := range epinets {
+			events, hasEvents := eventsByHour[hourKey]
+
+			var steps map[string]*models.HourlyEpinetStepData
+			var transitions map[string]map[string]*models.HourlyEpinetTransitionData
+
+			if hasEvents {
+				steps = cws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems)
+				transitions = cws.buildTransitionsFromSteps(steps)
+			} else {
+				steps = make(map[string]*models.HourlyEpinetStepData)
+				transitions = make(map[string]map[string]*models.HourlyEpinetTransitionData)
+			}
+
+			bin := &models.HourlyEpinetBin{
+				Data: &models.HourlyEpinetData{
+					Steps:       steps,
+					Transitions: transitions,
+				},
+				ComputedAt: time.Now().UTC(),
+				TTL:        cws.getTTLForHour(hourKey),
+			}
+
+			cws.cache.SetHourlyEpinetBin(cws.ctx.TenantID, epinet.ID, hourKey, bin)
+		}
+	}
+
+	log.Printf("Rapid catch-up completed for tenant '%s'", cws.ctx.TenantID)
+	return nil
+}

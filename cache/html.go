@@ -214,8 +214,5 @@ func (hco *HTMLCacheOperations) beliefsMatch(userBelief []string, requirement []
 
 // getPaneBeliefs gets separated belief data from renderer context
 func (hco *HTMLCacheOperations) getPaneBeliefs(nodeID string) (map[string][]string, map[string][]string) {
-	// This assumes HTMLCacheOperations has access to render context
-	// If not, this method needs to be moved or context needs to be passed
-	// For now, return empty maps - this will be refined when integrating with actual renderer context
 	return make(map[string][]string), make(map[string][]string)
 }
