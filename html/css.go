@@ -64,7 +64,7 @@ func (cp *CSSProcessorImpl) ExtractParentCSSClasses(optionsPayload map[string]an
 	return parentCSSClasses
 }
 
-// getNodeRenderData retrieves node data - FIXED TO USE REAL DATA
+// getNodeRenderData retrieves node data
 func (cp *CSSProcessorImpl) getNodeRenderData(nodeID string) *models.NodeRenderData {
 	if cp.ctx.AllNodes == nil {
 		return nil

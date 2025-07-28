@@ -23,24 +23,9 @@ func (bee *BeliefEvaluationEngine) EvaluatePaneVisibility(
 	paneBeliefs models.PaneBeliefData,
 	userBeliefs map[string][]string,
 ) string {
-	//fmt.Printf("🔍 EVAL DEBUG: Pane has %d held beliefs, %d withheld beliefs\n",
-	//	len(paneBeliefs.HeldBeliefs), len(paneBeliefs.WithheldBeliefs))
-	//for key, values := range paneBeliefs.HeldBeliefs {
-	//	fmt.Printf("🔍 EVAL DEBUG: Held belief requirement: %s = %v\n", key, values)
-	//}
-	//for key, values := range paneBeliefs.WithheldBeliefs {
-	//	fmt.Printf("🔍 EVAL DEBUG: Withheld belief requirement: %s = %v\n", key, values)
-	//}
-	//fmt.Printf("🔍 EVAL DEBUG: User has beliefs: %v\n", userBeliefs)
-
 	heldResult := bee.processHeldBeliefs(paneBeliefs, userBeliefs)
 	withheldResult := bee.processWithheldBeliefs(paneBeliefs, userBeliefs)
-
-	// fmt.Printf("🔍 EVAL DEBUG: Held result: %t, Withheld result: %t\n", heldResult, withheldResult)
-
 	visibility := bee.calculateVisibility(paneBeliefs, heldResult, withheldResult)
-	// fmt.Printf("🔍 EVAL DEBUG: Final visibility: %s\n", visibility)
-
 	return visibility
 }
 
@@ -149,8 +134,6 @@ func (bee *BeliefEvaluationEngine) calculateVisibility(
 	// Check if pane has any belief requirements
 	hasHeldRequirements := len(paneBeliefs.HeldBeliefs) > 0 || len(paneBeliefs.MatchAcross) > 0
 	hasWithheldRequirements := len(paneBeliefs.WithheldBeliefs) > 0
-
-	// FIXED LOGIC: Matches V1 UseFilterPane.ts exactly
 
 	// If pane has held belief requirements, user must satisfy them to be visible
 	if hasHeldRequirements {

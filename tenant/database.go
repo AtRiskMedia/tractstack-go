@@ -33,12 +33,13 @@ type Database struct {
 func NewDatabase(config *Config) (*Database, error) {
 	poolKey := getPoolKey(config)
 
-	// Phase 1: Read-only check
-	poolMutex.RLock()
-	pooledConn, exists := connectionPools[poolKey]
-	poolMutex.RUnlock()
+	// FIX: Use a single, exclusive lock to make the entire check-and-act sequence atomic.
+	// This completely eliminates the TOCTOU (Time-of-check-time-of-use) race condition.
+	poolMutex.Lock()
+	defer poolMutex.Unlock()
 
-	if exists {
+	// Phase 1: Check for existing connection within the locked section
+	if pooledConn, exists := connectionPools[poolKey]; exists {
 		// Test the pooled connection
 		if err := pooledConn.Ping(); err == nil {
 			// Connection is good, return it
@@ -49,19 +50,12 @@ func NewDatabase(config *Config) (*Database, error) {
 				isPooled: true,
 			}, nil
 		}
-
-		// Phase 2: Stale connection removal (requires write lock)
-		// Connection is bad, remove it from the pool
-		poolMutex.Lock()
-		// Double-check that the connection is still the same one we initially tested
-		if currentConn, stillExists := connectionPools[poolKey]; stillExists && currentConn == pooledConn {
-			delete(connectionPools, poolKey)
-			currentConn.Close() // Ensure the bad connection is properly closed
-		}
-		poolMutex.Unlock()
+		// Connection is bad, remove it from the pool before creating a new one
+		pooledConn.Close()
+		delete(connectionPools, poolKey)
 	}
 
-	// Create new connection
+	// Phase 2: Create a new connection if none exists or the existing one was bad
 	var conn *sql.DB
 	var err error
 	var useTurso bool
@@ -75,16 +69,16 @@ func NewDatabase(config *Config) (*Database, error) {
 				useTurso = true
 			} else {
 				conn.Close()
-				conn = nil
+				conn = nil // Mark for fallback
 			}
 		}
 	}
 
 	// Fallback to SQLite if Turso failed or not configured
 	if conn == nil {
-		// Ensure directory exists
 		dbDir := filepath.Dir(config.SQLitePath)
 		if err := os.MkdirAll(dbDir, 0755); err != nil {
+			// Unlock is deferred, so it will run even on early return
 			return nil, fmt.Errorf("failed to create database directory: %w", err)
 		}
 
@@ -100,16 +94,13 @@ func NewDatabase(config *Config) (*Database, error) {
 		useTurso = false
 	}
 
-	// Configure connection for production use with environment variables
+	// Configure and add the new connection to the pool
 	conn.SetMaxOpenConns(defaults.DBMaxOpenConns)
 	conn.SetMaxIdleConns(defaults.DBMaxIdleConns)
 	conn.SetConnMaxLifetime(time.Duration(defaults.DBConnMaxLifetimeMinutes) * time.Minute)
 	conn.SetConnMaxIdleTime(time.Duration(defaults.DBConnMaxIdleMinutes) * time.Minute)
 
-	// Add to pool
-	poolMutex.Lock()
 	connectionPools[poolKey] = conn
-	poolMutex.Unlock()
 
 	return &Database{
 		Conn:     conn,

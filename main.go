@@ -81,7 +81,9 @@ func main() {
 		log.Println("Critical content warmed successfully!")
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(api.FilteredLogger())
+	r.Use(gin.Recovery())
 	r.SetTrustedProxies([]string{"127.0.0.1", "::1"}) // Add IPv6 support
 
 	// Configure CORS to allow localhost origins (including IPv6)

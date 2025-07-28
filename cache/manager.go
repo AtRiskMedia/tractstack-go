@@ -3,9 +3,11 @@ package cache
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/config"
 	"github.com/AtRiskMedia/tractstack-go/models"
 )
 
@@ -368,9 +370,21 @@ func (m *Manager) SetSession(tenantID string, sessionData *models.SessionData) {
 	}
 
 	cache.Mu.Lock()
-	cache.SessionStates[sessionData.SessionID] = sessionData
-	cache.Mu.Unlock()
+	defer cache.Mu.Unlock()
 
+	// Enforce a maximum number of sessions per tenant to prevent memory leaks under high load.
+	// Check the limit before adding a new session if it doesn't already exist.
+	if _, exists := cache.SessionStates[sessionData.SessionID]; !exists {
+		if len(cache.SessionStates) >= config.MaxSessionsPerTenant {
+			log.Printf("WARN: Session cache for tenant %s is full (limit: %d). Rejecting new session.", tenantID, config.MaxSessionsPerTenant)
+			return // Reject the new session
+		}
+	}
+
+	cache.SessionStates[sessionData.SessionID] = sessionData
+
+	// The original implementation only updated access time on Set* functions that returned data.
+	// We defer the unlock so this needs to be called explicitly before the function returns.
 	m.updateTenantAccessTime(tenantID)
 }
 

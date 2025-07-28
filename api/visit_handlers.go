@@ -158,7 +158,6 @@ func VisitHandler(c *gin.Context) {
 		hasProfile = true
 	} else {
 		finalFpID = utils.GenerateULID()
-		// ✅ FIXED: Removed the "check-then-act" race condition by attempting the insert directly.
 		if err := visitService.CreateFingerprint(finalFpID, nil); err != nil {
 			// The only acceptable error here is a UNIQUE constraint violation, which means
 			// a concurrent request created the fingerprint between ULID generation and here.
@@ -294,7 +293,8 @@ func SseHandler(c *gin.Context) {
 		models.Broadcaster.RemoveClientWithSession(conn.ch, ctx.TenantID, sessionID)
 
 		if conn.SafeClose() {
-			log.Printf("SSE connection closed for session %s in tenant %s", sessionID, ctx.TenantID)
+			// This log is fine as it only appears once when the connection is truly closed.
+			log.Printf("SSE connection handler terminated for session %s in tenant %s", sessionID, ctx.TenantID)
 		}
 
 		if r := recover(); r != nil {
@@ -329,7 +329,7 @@ func SseHandler(c *gin.Context) {
 		select {
 		case msg, ok := <-conn.ch:
 			if !ok {
-				return
+				return // Channel closed, connection is finished.
 			}
 
 			if !inactivityTimeout.Stop() {
@@ -342,42 +342,44 @@ func SseHandler(c *gin.Context) {
 
 			_, err := fmt.Fprint(w, msg)
 			if err != nil {
-				log.Printf("SSE write error for session %s in tenant %s: %v", sessionID, ctx.TenantID, err)
+				if !isClientDisconnectError(err) {
+					// If it's not a broken pipe, it's an unexpected error that we should log.
+					log.Printf("Unexpected SSE write error for session %s: %v", sessionID, err)
+				}
+				// In either case, the connection is dead, so we exit.
 				return
 			}
 			flusher.Flush()
 
 		case <-heartbeat.C:
-			_, err := fmt.Fprint(w, "event: heartbeat\ndata: {\"timestamp\":")
-			if err != nil {
-				log.Printf("SSE heartbeat failed for session %s in tenant %s: %v", sessionID, ctx.TenantID, err)
-				return
+			if !inactivityTimeout.Stop() {
+				select {
+				case <-inactivityTimeout.C:
+				default:
+				}
 			}
-			_, err = fmt.Fprintf(w, "%d,\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n",
-				time.Now().UTC().Unix(), sessionID, ctx.TenantID)
+			inactivityTimeout.Reset(time.Duration(defaults.SSEInactivityTimeoutMinutes) * time.Minute)
+
+			// We construct the message before writing to avoid partial writes.
+			heartbeatMsg := fmt.Sprintf("event: heartbeat\ndata: {\"timestamp\":%d,\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n", time.Now().UTC().Unix(), sessionID, ctx.TenantID)
+			_, err := fmt.Fprint(w, heartbeatMsg)
 			if err != nil {
-				log.Printf("SSE heartbeat failed for session %s in tenant %s: %v", sessionID, ctx.TenantID, err)
+				if !isClientDisconnectError(err) {
+					log.Printf("Unexpected SSE heartbeat write error for session %s: %v", sessionID, err)
+				}
 				return
 			}
 			flusher.Flush()
 
 		case <-inactivityTimeout.C:
-			log.Printf("SSE connection closed due to inactivity for session %s in tenant %s", sessionID, ctx.TenantID)
-			fmt.Fprintf(w, "event: timeout\ndata: {\"reason\":\"inactivity\",\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n",
-				sessionID, ctx.TenantID)
+			log.Printf("SSE connection closed due to inactivity for session %s", sessionID)
+			fmt.Fprintf(w, "event: timeout\ndata: {\"reason\":\"inactivity\",\"sessionId\":\"%s\"}\n\n", sessionID)
 			flusher.Flush()
 			return
 
 		case <-sseCtx.Done():
-			switch sseCtx.Err() {
-			case context.DeadlineExceeded:
-				log.Printf("SSE connection closed due to 30-minute timeout for session %s in tenant %s - client should reconnect",
-					sessionID, ctx.TenantID)
-				fmt.Fprintf(w, "event: timeout\ndata: {\"reason\":\"max_duration\",\"action\":\"reconnect\",\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n",
-					sessionID, ctx.TenantID)
-			default:
-			}
-			flusher.Flush()
+			// This case handles both the 30-minute max duration and client disconnects detected by the context.
+			// It's a clean way to terminate the connection. No error logging is needed here.
 			return
 		}
 	}

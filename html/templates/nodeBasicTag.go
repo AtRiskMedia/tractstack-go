@@ -106,7 +106,7 @@ func (nbtr *NodeBasicTagRenderer) Render(nodeID string) string {
 	return html.String()
 }
 
-// getNodeData retrieves node data - FIXED TO USE REAL DATA
+// getNodeData retrieves node data
 func (nbtr *NodeBasicTagRenderer) getNodeData(nodeID string) *models.NodeRenderData {
 	if nbtr.ctx.AllNodes == nil {
 		return nil
