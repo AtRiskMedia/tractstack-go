@@ -136,13 +136,13 @@ func (b *SSEBroadcaster) RemoveClientWithSession(ch chan string, tenantID, sessi
 	// Remove from tenant session clients
 	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
 		if sessionClients, exists := tenantSessions[sessionID]; exists {
-			for i, client := range sessionClients {
-				if client == ch {
-					// Remove channel from slice
-					tenantSessions[sessionID] = append(sessionClients[:i], sessionClients[i+1:]...)
-					break
+			newClients := make([]chan string, 0, len(sessionClients)-1)
+			for _, client := range sessionClients {
+				if client != ch {
+					newClients = append(newClients, client)
 				}
 			}
+			tenantSessions[sessionID] = newClients
 
 			// Clean up empty session
 			if len(tenantSessions[sessionID]) == 0 {
@@ -184,61 +184,6 @@ func (b *SSEBroadcaster) GetActiveConnectionCount(tenantID string) int {
 	return count
 }
 
-// BroadcastToAffectedPanes sends updates to all sessions within tenant (client filters by storyfragmentId)
-func (b *SSEBroadcaster) BroadcastToAffectedPanes(tenantID, storyfragmentID string, paneIDs []string) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Printf("🔊 BROADCAST PANIC: %v", r)
-		}
-	}()
-
-	log.Printf("🔊 BROADCAST: Starting broadcast to tenant %s, storyfragment %s, panes: %v", tenantID, storyfragmentID, paneIDs)
-
-	// Build message payload
-	message := fmt.Sprintf("event: panes_updated\ndata: %s\n\n",
-		func() string {
-			data := map[string]interface{}{
-				"storyfragmentId": storyfragmentID,
-				"affectedPanes":   paneIDs,
-			}
-			jsonData, _ := json.Marshal(data)
-			return string(jsonData)
-		}())
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	var sentCount, failedCount, deadChannelCount int
-	var deadChannels []chan string
-
-	// Send to ALL sessions in tenant (client will filter by storyfragmentId)
-	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
-		for sessionID, sessionClients := range tenantSessions {
-			log.Printf("🔊 BROADCAST: Sending to session %s (%d channels)", sessionID, len(sessionClients))
-
-			for i, ch := range sessionClients {
-				select {
-				case ch <- message:
-					sentCount++
-				case <-time.After(100 * time.Millisecond):
-					log.Printf("🔊 BROADCAST: ❌ Timeout sending to session %s channel %d", sessionID, i)
-					failedCount++
-					deadChannels = append(deadChannels, ch)
-				}
-			}
-		}
-	} else {
-		log.Printf("🔊 BROADCAST: ❌ No tenant sessions found for tenant %s", tenantID)
-	}
-
-	log.Printf("🔊 BROADCAST: Broadcast complete - sent: %d, failed: %d, dead channels: %d", sentCount, failedCount, deadChannelCount)
-
-	// Clean up dead channels
-	if len(deadChannels) > 0 {
-		b.cleanupDeadChannels(tenantID, deadChannels)
-	}
-}
-
 // BroadcastToSpecificSession sends updates to a specific session within tenant
 func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string) {
 	defer func() {
@@ -263,41 +208,48 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Send to specific session only
 	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
 		if sessionClients, exists := tenantSessions[sessionID]; exists {
 			var deadChannels []chan string
 			sentCount := 0
-			failedCount := 0
 
 			for i, ch := range sessionClients {
 				select {
 				case ch <- message:
-					// Success - channel is alive
 					sentCount++
 				default:
-					// Channel is blocked/closed - mark for removal
 					deadChannels = append(deadChannels, ch)
-					failedCount++
 					log.Printf("🔊 SESSION BROADCAST: ❌ Failed to send to session %s channel %d (dead channel)", sessionID, i)
 				}
 			}
 
-			log.Printf("🔊 SESSION BROADCAST: Broadcast complete - sent: %d, failed: %d, dead channels: %d", sentCount, failedCount, len(deadChannels))
+			log.Printf("🔊 SESSION BROADCAST: Broadcast complete - sent: %d, failed: %d, dead channels: %d", sentCount, len(deadChannels), len(deadChannels))
 
-			// Clean up dead channels immediately
+			// ✅ FIXED: Clean up dead channels immediately using a safe method
 			if len(deadChannels) > 0 {
-				for _, deadCh := range deadChannels {
-					for j, ch := range sessionClients {
+				newClients := make([]chan string, 0, len(sessionClients))
+				isDead := false
+				for _, ch := range sessionClients {
+					isDead = false
+					for _, deadCh := range deadChannels {
 						if ch == deadCh {
-							// Remove this channel from the session
-							tenantSessions[sessionID] = append(sessionClients[:j], sessionClients[j+1:]...)
-							close(ch)
-							log.Printf("🔊 SESSION BROADCAST: Removed dead channel from session %s", sessionID)
+							isDead = true
 							break
 						}
 					}
+					if isDead {
+						// Safely close the dead channel
+						select {
+						case <-ch: // already closed
+						default:
+							close(ch)
+						}
+						log.Printf("🔊 SESSION BROADCAST: Removed dead channel from session %s", sessionID)
+					} else {
+						newClients = append(newClients, ch)
+					}
 				}
+				tenantSessions[sessionID] = newClients
 			}
 		} else {
 			log.Printf("🔊 SESSION BROADCAST: ❌ Session %s not found in tenant %s", sessionID, tenantID)
@@ -309,7 +261,7 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 	log.Printf("🔊 SESSION BROADCAST: Broadcast operation completed")
 }
 
-// CleanupDeadChannels removes and closes dead channels within tenant context
+// CleanupDeadChannels is a public wrapper for the internal cleanup logic
 func (b *SSEBroadcaster) CleanupDeadChannels(tenantID string, deadChannels []chan string) {
 	b.cleanupDeadChannels(tenantID, deadChannels)
 }
@@ -327,7 +279,7 @@ func (b *SSEBroadcaster) cleanupDeadChannels(tenantID string, deadChannels []cha
 						isDead = true
 						// Close dead channel safely
 						select {
-						case <-ch:
+						case <-ch: // Already closed
 						default:
 							close(ch)
 						}

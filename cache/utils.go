@@ -76,11 +76,14 @@ func (cl *CacheLock) Lock(key string) {
 // Unlock releases a lock for the given cache key
 func (cl *CacheLock) Unlock(key string) {
 	cl.mu.Lock()
+	defer cl.mu.Unlock()
 	if lock, exists := cl.locks[key]; exists {
 		lock.Unlock()
+		// ✅ FIXED: Remove the lock and timestamp from the maps upon unlocking
+		// to prevent memory leaks.
+		delete(cl.locks, key)
 		delete(cl.lockTimes, key)
 	}
-	cl.mu.Unlock()
 }
 
 // GetLockInfo returns information about current locks
@@ -97,14 +100,11 @@ func (cl *CacheLock) GetLockInfo() map[string]time.Duration {
 }
 
 // IsExpired checks if a cached item has exceeded its TTL
-// LOCKING: None required (pure computation)
 func IsExpired(cachedAt time.Time, ttl time.Duration) bool {
 	return time.Since(cachedAt) > ttl
 }
 
 // IsAnalyticsBinExpired checks if an analytics bin has expired using context-aware logic.
-// It correctly applies a shorter TTL for the current hour.
-// LOCKING: None required (pure computation)
 func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin, hourKey string) bool {
 	if bin == nil {
 		return true
@@ -113,7 +113,6 @@ func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin, hourKey string) bool {
 	now := time.Now().UTC()
 	currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 
-	// Determine the correct TTL based on whether the bin is for the current hour
 	var effectiveTTL time.Duration
 	if hourKey == currentHour {
 		effectiveTTL = CurrentHourTTL
@@ -121,8 +120,6 @@ func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin, hourKey string) bool {
 		effectiveTTL = AnalyticsBinTTL
 	}
 
-	// Use the greater of the bin's own TTL and the dynamically determined TTL.
-	// This respects the bin's intended TTL while ensuring the current hour expires quickly.
 	if bin.TTL > effectiveTTL {
 		effectiveTTL = bin.TTL
 	}
@@ -131,7 +128,6 @@ func IsAnalyticsBinExpired(bin *models.HourlyEpinetBin, hourKey string) bool {
 }
 
 // IsContentCacheExpired checks if content cache has expired
-// LOCKING: None required (pure computation)
 func IsContentCacheExpired(cache *models.TenantContentCache) bool {
 	if cache == nil {
 		return true
@@ -140,7 +136,6 @@ func IsContentCacheExpired(cache *models.TenantContentCache) bool {
 }
 
 // IsUserStateCacheExpired checks if user state cache has expired
-// LOCKING: None required (pure computation)
 func IsUserStateCacheExpired(cache *models.TenantUserStateCache) bool {
 	if cache == nil {
 		return true
@@ -222,7 +217,6 @@ func cleanupExpiredSessions(manager *Manager, tenantID string) {
 
 // cleanupTenantExpiredEntries cleans up expired entries for a specific tenant
 func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
-	// Clean up HTML chunks
 	manager.Mu.RLock()
 	htmlCache, htmlExists := manager.HTMLChunkCache[tenantID]
 	manager.Mu.RUnlock()
@@ -244,12 +238,10 @@ func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 	if analyticsExists && analyticsCache != nil {
 		analyticsCache.Mu.Lock()
 
-		// Clean up epinet bins with corrected, context-aware logic
 		for binKey, bin := range analyticsCache.EpinetBins {
-			// CORRECT: Parse the hourKey from the binKey to provide context
 			lastColonIndex := strings.LastIndex(binKey, ":")
 			if lastColonIndex == -1 {
-				continue // Skip malformed keys
+				continue
 			}
 			hourKey := binKey[lastColonIndex+1:]
 
@@ -258,7 +250,6 @@ func cleanupTenantExpiredEntries(manager *Manager, tenantID string) {
 			}
 		}
 
-		// Clean up other bins
 		for key, bin := range analyticsCache.ContentBins {
 			if IsExpired(bin.ComputedAt, bin.TTL) {
 				delete(analyticsCache.ContentBins, key)

@@ -31,29 +31,34 @@ type Database struct {
 
 // NewDatabase creates or reuses a database connection for the specified tenant
 func NewDatabase(config *Config) (*Database, error) {
-	// Check if we have a pooled connection for this tenant
 	poolKey := getPoolKey(config)
 
+	// Phase 1: Read-only check
 	poolMutex.RLock()
-	if pooledConn, exists := connectionPools[poolKey]; exists {
-		poolMutex.RUnlock()
+	pooledConn, exists := connectionPools[poolKey]
+	poolMutex.RUnlock()
 
+	if exists {
 		// Test the pooled connection
 		if err := pooledConn.Ping(); err == nil {
+			// Connection is good, return it
 			return &Database{
 				Conn:     pooledConn,
 				TenantID: config.TenantID,
 				UseTurso: config.TursoDatabase != "",
 				isPooled: true,
 			}, nil
-		} else {
-			// Remove bad connection from pool
-			poolMutex.Lock()
-			delete(connectionPools, poolKey)
-			poolMutex.Unlock()
 		}
-	} else {
-		poolMutex.RUnlock()
+
+		// Phase 2: Stale connection removal (requires write lock)
+		// Connection is bad, remove it from the pool
+		poolMutex.Lock()
+		// Double-check that the connection is still the same one we initially tested
+		if currentConn, stillExists := connectionPools[poolKey]; stillExists && currentConn == pooledConn {
+			delete(connectionPools, poolKey)
+			currentConn.Close() // Ensure the bad connection is properly closed
+		}
+		poolMutex.Unlock()
 	}
 
 	// Create new connection
@@ -95,7 +100,6 @@ func NewDatabase(config *Config) (*Database, error) {
 		useTurso = false
 	}
 
-	// Configure connection for production use with environment variables
 	// Configure connection for production use with environment variables
 	conn.SetMaxOpenConns(defaults.DBMaxOpenConns)
 	conn.SetMaxIdleConns(defaults.DBMaxIdleConns)
@@ -180,7 +184,7 @@ func CleanupStaleConnections() {
 		shouldRemove := false
 		reason := ""
 
-		// Check if connection is dead (existing logic)
+		// Check if connection is dead
 		if err := conn.Ping(); err != nil {
 			shouldRemove = true
 			reason = "dead"
@@ -189,11 +193,8 @@ func CleanupStaleConnections() {
 			stats := conn.Stats()
 
 			// Estimate connection age based on open connections
-			// If we have long-lived connections, they're likely old
 			if stats.OpenConnections > 0 {
 				// Close connections that have been in pool too long
-				// We use a heuristic: if connection has been idle and we can't track exact age,
-				// close it if it has many accumulated connections (indicates age)
 				if stats.Idle > 3 && stats.OpenConnections > 10 {
 					shouldRemove = true
 					reason = "aged"
