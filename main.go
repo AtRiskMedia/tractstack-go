@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/api"
 	"github.com/AtRiskMedia/tractstack-go/cache"
@@ -41,6 +46,10 @@ func main() {
 		log.Println("No .env file found -- config defaults will be used")
 	}
 
+	// Create a context that listens for OS shutdown signals (SIGINT, SIGTERM).
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// Set Gin mode based on environment
 	if os.Getenv("ENV") == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -55,8 +64,8 @@ func main() {
 	cache.SetGlobalManager(GlobalCacheManager)
 	log.Println("Global cache manager initialized")
 
-	// Start cleanup routine
-	cache.StartCleanupRoutine(GlobalCacheManager)
+	// Start cleanup routine with the cancellable context.
+	cache.StartCleanupRoutine(ctx, GlobalCacheManager)
 
 	// Initialize tenant manager
 	tenantManager, err := tenant.NewManager()
@@ -331,9 +340,36 @@ func main() {
 		}
 	}
 
+	// Replace r.Run() with a graceful shutdown mechanism.
 	serverAddress := ":" + defaults.Port
-	log.Printf("Starting server on %s", serverAddress)
-	if err := r.Run(serverAddress); err != nil {
-		log.Fatal("Failed to start server:", err)
+	srv := &http.Server{
+		Addr:    serverAddress,
+		Handler: r,
 	}
+
+	// Start the server in a new goroutine so it doesn't block.
+	go func() {
+		log.Printf("Starting server on %s", serverAddress)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
+
+	// Wait for the shutdown signal from the context.
+	<-ctx.Done()
+
+	// The context is cancelled. Log the shutdown and stop the signal listener.
+	log.Println("Shutting down gracefully, press Ctrl+C again to force")
+	stop()
+
+	// Create a new context with a timeout for the shutdown process.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Attempt to gracefully shut down the server.
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatal("Server forced to shutdown:", err)
+	}
+
+	log.Println("Server exiting")
 }

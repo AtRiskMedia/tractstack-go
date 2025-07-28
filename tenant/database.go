@@ -33,7 +33,7 @@ type Database struct {
 func NewDatabase(config *Config) (*Database, error) {
 	poolKey := getPoolKey(config)
 
-	// FIX: Use a single, exclusive lock to make the entire check-and-act sequence atomic.
+	// Use a single, exclusive lock to make the entire check-and-act sequence atomic.
 	// This completely eliminates the TOCTOU (Time-of-check-time-of-use) race condition.
 	poolMutex.Lock()
 	defer poolMutex.Unlock()

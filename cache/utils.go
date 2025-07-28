@@ -2,6 +2,7 @@
 package cache
 
 import (
+	"context"
 	"log"
 	"strings"
 	"sync"
@@ -54,10 +55,34 @@ type CacheLock struct {
 
 // NewCacheLock creates a new cache lock manager
 func NewCacheLock() *CacheLock {
-	return &CacheLock{
+	cl := &CacheLock{
 		locks:     make(map[string]*sync.Mutex),
 		lockTimes: make(map[string]time.Time),
 	}
+
+	// Launch a background goroutine to periodically clean up stale locks.
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute) // Check for stale locks every 10 minutes
+		defer ticker.Stop()
+
+		for range ticker.C {
+			cl.mu.Lock()
+			now := time.Now().UTC()
+			// Define a stale threshold, e.g., a lock held for more than 5 minutes is considered stale.
+			staleThreshold := 5 * time.Minute
+
+			for key, lockTime := range cl.lockTimes {
+				if now.Sub(lockTime) > staleThreshold {
+					log.Printf("WARN: Stale lock detected for key '%s'. Held for over %v. Forcibly removing.", key, staleThreshold)
+					delete(cl.locks, key)
+					delete(cl.lockTimes, key)
+				}
+			}
+			cl.mu.Unlock()
+		}
+	}()
+
+	return cl
 }
 
 // Lock acquires a lock for the given cache key
@@ -154,26 +179,50 @@ func cleanupDatabasePools() {
 }
 
 // StartCleanupRoutine starts background goroutines for cache cleanup.
-func StartCleanupRoutine(manager *Manager) {
+// It now accepts a context to allow for graceful shutdown.
+func StartCleanupRoutine(ctx context.Context, manager *Manager) {
+	// Goroutine for general cache entry cleanup
 	go func() {
 		ticker := time.NewTicker(CleanupInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			cleanupExpiredEntries(manager)
+		for {
+			select {
+			case <-ticker.C:
+				cleanupExpiredEntries(manager)
+			case <-ctx.Done():
+				log.Println("Shutting down cache cleanup routine.")
+				return
+			}
 		}
 	}()
+
+	// Goroutine for SSE connection cleanup
 	go func() {
 		sseTicker := time.NewTicker(SSECleanupInterval)
 		defer sseTicker.Stop()
-		for range sseTicker.C {
-			cleanupSSEConnections()
+		for {
+			select {
+			case <-sseTicker.C:
+				cleanupSSEConnections()
+			case <-ctx.Done():
+				log.Println("Shutting down SSE cleanup routine.")
+				return
+			}
 		}
 	}()
+
+	// Goroutine for database connection pool cleanup
 	go func() {
 		dbTicker := time.NewTicker(DBPoolCleanupInterval)
 		defer dbTicker.Stop()
-		for range dbTicker.C {
-			cleanupDatabasePools()
+		for {
+			select {
+			case <-dbTicker.C:
+				cleanupDatabasePools()
+			case <-ctx.Done():
+				log.Println("Shutting down database pool cleanup routine.")
+				return
+			}
 		}
 	}()
 }

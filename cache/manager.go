@@ -52,7 +52,7 @@ func GetGlobalManager() *Manager {
 }
 
 // =============================================================================
-// Safe Cache Lookup Methods (ARCHITECTURAL FIX)
+// Safe Cache Lookup Methods
 // =============================================================================
 
 // GetTenantContentCache safely retrieves a tenant's content cache
@@ -372,19 +372,38 @@ func (m *Manager) SetSession(tenantID string, sessionData *models.SessionData) {
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 
-	// Enforce a maximum number of sessions per tenant to prevent memory leaks under high load.
-	// Check the limit before adding a new session if it doesn't already exist.
-	if _, exists := cache.SessionStates[sessionData.SessionID]; !exists {
+	// Check if the session already exists. If so, we're just updating it.
+	if _, exists := cache.SessionStates[sessionData.SessionID]; exists {
+		cache.SessionStates[sessionData.SessionID] = sessionData
+		m.updateTenantAccessTime(tenantID)
+		return
+	}
+
+	// This is a new session. Check if we are at capacity.
+	if len(cache.SessionStates) >= config.MaxSessionsPerTenant {
+		// Instead of immediately rejecting, first try to evict expired sessions to make room.
+		now := time.Now().UTC()
+		evictedCount := 0
+		for sessionID, session := range cache.SessionStates {
+			if session.IsExpired() || now.Sub(session.LastActivity) > config.UserStateTTL {
+				delete(cache.SessionStates, sessionID)
+				evictedCount++
+			}
+		}
+
+		if evictedCount > 0 {
+			log.Printf("INFO: Session cache for tenant %s was full. Evicted %d expired sessions to make space.", tenantID, evictedCount)
+		}
+
+		// After eviction, check the limit again.
 		if len(cache.SessionStates) >= config.MaxSessionsPerTenant {
-			log.Printf("WARN: Session cache for tenant %s is full (limit: %d). Rejecting new session.", tenantID, config.MaxSessionsPerTenant)
+			log.Printf("WARN: Session cache for tenant %s is still full after cleanup (limit: %d). Rejecting new session.", tenantID, config.MaxSessionsPerTenant)
 			return // Reject the new session
 		}
 	}
 
+	// Add the new session.
 	cache.SessionStates[sessionData.SessionID] = sessionData
-
-	// The original implementation only updated access time on Set* functions that returned data.
-	// We defer the unlock so this needs to be called explicitly before the function returns.
 	m.updateTenantAccessTime(tenantID)
 }
 
