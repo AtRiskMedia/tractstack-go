@@ -20,6 +20,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type safeSSEConnection struct {
+	ch     chan string
+	closed int32
+}
+
+func (sc *safeSSEConnection) SafeClose() bool {
+	if atomic.CompareAndSwapInt32(&sc.closed, 0, 1) {
+		close(sc.ch)
+		return true
+	}
+	return false
+}
+
 type VisitRowData struct {
 	ID            string    `json:"id"`
 	FingerprintID string    `json:"fingerprint_id"`
@@ -37,7 +50,6 @@ type VisitService struct {
 	ctx *tenant.Context
 }
 
-// Global SSE connection tracking
 var (
 	activeSSEConnections int64
 	maxSSEConnections    = int64(defaults.MaxSessionsPerClient)
@@ -56,9 +68,7 @@ func VisitHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	// log.Printf("DEBUG: VisitHandler - got tenant context for tenant: %s", ctx.TenantID)
 
-	// Log the raw request for debugging
 	body, err := c.GetRawData()
 	if err != nil {
 		log.Printf("DEBUG: VisitHandler - failed to get raw data: %v", err)
@@ -66,43 +76,30 @@ func VisitHandler(c *gin.Context) {
 		return
 	}
 
-	// Reset the body for binding
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
-	// Parse form data
 	var req models.VisitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("DEBUG: VisitHandler - JSON binding failed: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
 		return
 	}
-	// log.Printf("DEBUG: VisitHandler - JSON binding success")
 
 	visitService := NewVisitService(ctx, nil)
 
-	// Determine if we're handling profile/auth or anonymous visit
 	var finalFpID, finalVisitID string
 	var hasProfile bool
 	var profile *models.Profile
 
-	// log.Printf("DEBUG: VisitHandler - checking request type (encrypted email: %v, session ID: %v)",
-	//	req.EncryptedEmail != nil, req.SessionID != nil)
-
-	// Require session ID for all requests
 	if req.SessionID == nil {
 		log.Printf("DEBUG: VisitHandler - session ID required but missing")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session ID required"})
 		return
 	}
 
-	// PATH 1: Check session cache FIRST (always, regardless of auth status)
 	if existingSession, exists := cache.GetGlobalManager().GetSession(ctx.TenantID, *req.SessionID); exists {
 		finalFpID = existingSession.FingerprintID
-		// log.Printf("DEBUG: VisitHandler - PATH 1: Using existing session fingerprint %s", finalFpID)
-
-		// Check if this session already has profile info
 		if existingSession.LeadID != nil {
-			// Load existing lead profile
 			if lead, err := GetLeadByID(*existingSession.LeadID, ctx); err == nil && lead != nil {
 				profile = &models.Profile{
 					Fingerprint:    finalFpID,
@@ -113,23 +110,15 @@ func VisitHandler(c *gin.Context) {
 					ShortBio:       lead.ShortBio,
 				}
 				hasProfile = true
-				// log.Printf("DEBUG: VisitHandler - PATH 1: Loaded existing profile for lead %s", lead.ID)
 			}
 		}
-		// Session found and fingerprint assigned - skip to visit creation
-
 	} else if req.EncryptedEmail != nil && req.EncryptedCode != nil {
-		// PATH 2: No session cache, but have lead credentials - look up lead fingerprint
-		// log.Printf("DEBUG: VisitHandler - PATH 2: handling encrypted email/code scenario")
-
-		// Handle encrypted email/code scenario
 		decryptedEmail, err := utils.Decrypt(*req.EncryptedEmail, ctx.Config.AESKey)
 		if err != nil {
 			log.Printf("DEBUG: VisitHandler - failed to decrypt email: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to decrypt email"})
 			return
 		}
-
 		decryptedCode, err := utils.Decrypt(*req.EncryptedCode, ctx.Config.AESKey)
 		if err != nil {
 			log.Printf("DEBUG: VisitHandler - failed to decrypt code: %v", err)
@@ -137,37 +126,27 @@ func VisitHandler(c *gin.Context) {
 			return
 		}
 
-		// Verify lead exists
 		lead, err := ValidateLeadCredentials(decryptedEmail, decryptedCode, ctx)
 		if err != nil || lead == nil {
 			log.Printf("DEBUG: VisitHandler - lead validation failed: %v", err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 			return
 		}
-		// log.Printf("DEBUG: VisitHandler - lead validation successful for lead %s", lead.ID)
 
-		// Use existing fingerprint for this lead OR generate new
 		if existingFpID := visitService.FindFingerprintByLeadID(lead.ID); existingFpID != nil {
 			finalFpID = *existingFpID
-			// log.Printf("DEBUG: VisitHandler - PATH 2: Using existing lead fingerprint %s for lead %s", finalFpID, lead.ID)
 		} else {
 			finalFpID = utils.GenerateULID()
-			// log.Printf("DEBUG: VisitHandler - PATH 2: Generated new fingerprint %s for lead %s", finalFpID, lead.ID)
 		}
 
-		// Create fingerprint if it doesn't exist
 		if err := visitService.CreateFingerprint(finalFpID, &lead.ID); err != nil {
-			// Check if it's a UNIQUE constraint error (race condition)
-			if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				// log.Printf("DEBUG: VisitHandler - fingerprint %s already created by concurrent request, continuing", finalFpID)
-			} else {
+			if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
 				log.Printf("DEBUG: VisitHandler - failed to create fingerprint: %v", err)
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
 				return
 			}
 		}
 
-		// Create profile
 		profile = &models.Profile{
 			Fingerprint:    finalFpID,
 			LeadID:         lead.ID,
@@ -176,53 +155,30 @@ func VisitHandler(c *gin.Context) {
 			ContactPersona: lead.ContactPersona,
 			ShortBio:       lead.ShortBio,
 		}
-
 		hasProfile = true
-		// log.Printf("DEBUG: VisitHandler - PATH 2: created profile for authenticated user with fingerprint %s", finalFpID)
-
 	} else {
-		// PATH 3: No session cache AND no lead credentials - generate new anonymous fingerprint
-		// log.Printf("DEBUG: VisitHandler - PATH 3: generating new anonymous fingerprint")
-
 		finalFpID = utils.GenerateULID()
-		// log.Printf("DEBUG: VisitHandler - PATH 3: generated fingerprint %s for anonymous visit", finalFpID)
-
-		// Check if fingerprint exists, create if not
-		exists, err := visitService.FingerprintExists(finalFpID)
-		if err != nil {
-			// log.Printf("DEBUG: VisitHandler - failed to check fingerprint existence: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check fingerprint"})
-			return
-		}
-
-		if !exists {
-			if err := visitService.CreateFingerprint(finalFpID, nil); err != nil {
-				// Check if it's a UNIQUE constraint error (race condition)
-				if strings.Contains(err.Error(), "UNIQUE constraint failed") {
-					// log.Printf("DEBUG: VisitHandler - fingerprint already created by concurrent request, continuing")
-				} else {
-					log.Printf("DEBUG: VisitHandler - failed to create fingerprint: %v", err)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
-					return
-				}
+		// ✅ FIXED: Removed the "check-then-act" race condition by attempting the insert directly.
+		if err := visitService.CreateFingerprint(finalFpID, nil); err != nil {
+			// The only acceptable error here is a UNIQUE constraint violation, which means
+			// a concurrent request created the fingerprint between ULID generation and here.
+			// Any other error is a real problem.
+			if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				log.Printf("DEBUG: VisitHandler - failed to create anonymous fingerprint: %v", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create fingerprint"})
+				return
 			}
 		}
-
 		hasProfile = false
 	}
 
-	// log.Printf("DEBUG: VisitHandler - final fingerprint: %s", finalFpID)
-
-	// Handle visit creation
 	finalVisitID, err = visitService.HandleVisitCreation(finalFpID, hasProfile)
 	if err != nil {
 		log.Printf("DEBUG: VisitHandler - failed to create visit: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create visit"})
 		return
 	}
-	// log.Printf("DEBUG: VisitHandler - visit creation successful, ID: %s", finalVisitID)
 
-	// Determine consent value
 	var consentValue string
 	if req.Consent != nil {
 		consentValue = *req.Consent
@@ -230,9 +186,7 @@ func VisitHandler(c *gin.Context) {
 		consentValue = "unknown"
 	}
 
-	// Cache user state
 	if cache.GetGlobalManager() != nil {
-		// Create visit state
 		visitState := &models.VisitState{
 			VisitID:       finalVisitID,
 			FingerprintID: finalFpID,
@@ -242,10 +196,9 @@ func VisitHandler(c *gin.Context) {
 		}
 		cache.GetGlobalManager().SetVisitState(ctx.TenantID, visitState)
 
-		// Create session state
 		sessionData := &models.SessionData{
-			SessionID:     *req.SessionID, // Use actual session ID
-			FingerprintID: finalFpID,      // Use proper fingerprint ID
+			SessionID:     *req.SessionID,
+			FingerprintID: finalFpID,
 			VisitID:       finalVisitID,
 			LastActivity:  time.Now().UTC(),
 			CreatedAt:     time.Now().UTC(),
@@ -254,33 +207,26 @@ func VisitHandler(c *gin.Context) {
 			sessionData.LeadID = &profile.LeadID
 		}
 		cache.GetGlobalManager().SetSession(ctx.TenantID, sessionData)
-		// log.Printf("DEBUG: VisitHandler - cached session data: session=%s, fingerprint=%s", *req.SessionID, finalFpID)
 	} else {
 		log.Printf("ERROR: Global cache manager is nil")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "cache not available"})
 		return
 	}
 
-	// Update fingerprint state cache - preserve existing beliefs if fingerprint already exists
 	var fingerprintState *models.FingerprintState
 	if existingFpState, exists := cache.GetGlobalManager().GetFingerprintState(ctx.TenantID, finalFpID); exists {
-		// Preserve existing beliefs and badges, just update activity
 		fingerprintState = existingFpState
 		fingerprintState.LastActivity = time.Now().UTC()
-		// log.Printf("DEBUG: VisitHandler - preserving existing fingerprint state with %d beliefs", len(existingFpState.HeldBeliefs))
 	} else {
-		// Create new fingerprint state with empty beliefs
 		fingerprintState = &models.FingerprintState{
 			FingerprintID: finalFpID,
 			HeldBeliefs:   make(map[string][]string),
 			HeldBadges:    make(map[string]string),
 			LastActivity:  time.Now().UTC(),
 		}
-		// log.Printf("DEBUG: VisitHandler - creating new fingerprint state")
 	}
 	cache.GetGlobalManager().SetFingerprintState(ctx.TenantID, fingerprintState)
 
-	// Build response
 	response := gin.H{
 		"fingerprint": finalFpID,
 		"visitId":     finalVisitID,
@@ -299,7 +245,6 @@ func VisitHandler(c *gin.Context) {
 		response["profile"] = profile
 	}
 
-	// log.Printf("DEBUG: VisitHandler - sending successful response with fingerprint %s", finalFpID)
 	c.JSON(http.StatusOK, response)
 }
 
@@ -315,9 +260,6 @@ func SseHandler(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID required for SSE connection"})
 		return
 	}
-
-	// Remove storyfragmentID parameter handling
-	// storyfragmentID := c.Query("storyfragment")
 
 	currentConnections := atomic.LoadInt64(&activeSSEConnections)
 	if currentConnections >= maxSSEConnections {
@@ -341,25 +283,18 @@ func SseHandler(c *gin.Context) {
 	atomic.AddInt64(&activeSSEConnections, 1)
 	sseCtx, cancel := context.WithTimeout(c.Request.Context(),
 		time.Duration(defaults.SSEConnectionTimeoutMinutes)*time.Minute)
-	ch := models.Broadcaster.AddClientWithSession(ctx.TenantID, sessionID)
 
-	// Remove all storyfragment subscription logic
-	// if storyfragmentID != "" {
-	//     models.Broadcaster.RegisterStoryfragmentSubscription(ctx.TenantID, sessionID, storyfragmentID)
-	//     log.Printf("SSE connected for %s+%s+%s - ready for immediate state check", ctx.TenantID, storyfragmentID, sessionID)
-	//     checkImmediateStateUpdate(ctx, sessionID, storyfragmentID)
-	// }
+	conn := &safeSSEConnection{
+		ch: models.Broadcaster.AddClientWithSession(ctx.TenantID, sessionID),
+	}
 
 	defer func() {
 		atomic.AddInt64(&activeSSEConnections, -1)
 		cancel()
-		models.Broadcaster.RemoveClientWithSession(ch, ctx.TenantID, sessionID)
-		// Remove: models.Broadcaster.UnregisterStoryfragmentSubscription(ctx.TenantID, sessionID)
+		models.Broadcaster.RemoveClientWithSession(conn.ch, ctx.TenantID, sessionID)
 
-		select {
-		case <-ch:
-		default:
-			close(ch)
+		if conn.SafeClose() {
+			log.Printf("SSE connection closed for session %s in tenant %s", sessionID, ctx.TenantID)
 		}
 
 		if r := recover(); r != nil {
@@ -380,7 +315,6 @@ func SseHandler(c *gin.Context) {
 		return
 	}
 
-	// Remove storyfragmentID from connected message
 	fmt.Fprintf(w, "event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"tenantId\":\"%s\",\"connectionCount\":%d}\n\n",
 		sessionID, ctx.TenantID, models.Broadcaster.GetSessionConnectionCount(ctx.TenantID, sessionID))
 	flusher.Flush()
@@ -393,7 +327,11 @@ func SseHandler(c *gin.Context) {
 
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-conn.ch:
+			if !ok {
+				return
+			}
+
 			if !inactivityTimeout.Stop() {
 				select {
 				case <-inactivityTimeout.C:
@@ -446,10 +384,10 @@ func SseHandler(c *gin.Context) {
 }
 
 func (vs *VisitService) GetLatestVisitByFingerprint(fingerprintID string) (*VisitRowData, error) {
-	query := `SELECT id, fingerprint_id, campaign_id, created_at 
-              FROM visits 
-              WHERE fingerprint_id = ? 
-              ORDER BY created_at DESC 
+	query := `SELECT id, fingerprint_id, campaign_id, created_at
+              FROM visits
+              WHERE fingerprint_id = ?
+              ORDER BY created_at DESC
               LIMIT 1`
 
 	row := vs.ctx.Database.Conn.QueryRow(query, fingerprintID)
@@ -473,7 +411,7 @@ func (vs *VisitService) GetLatestVisitByFingerprint(fingerprintID string) (*Visi
 }
 
 func (vs *VisitService) CreateVisit(visitID, fingerprintID string, campaignID *string) error {
-	query := `INSERT INTO visits (id, fingerprint_id, campaign_id, created_at) 
+	query := `INSERT INTO visits (id, fingerprint_id, campaign_id, created_at)
               VALUES (?, ?, ?, ?)`
 
 	_, err := vs.ctx.Database.Conn.Exec(query, visitID, fingerprintID, campaignID, time.Now().UTC())
@@ -500,7 +438,7 @@ func (vs *VisitService) FingerprintExists(fingerprintID string) (bool, error) {
 }
 
 func (vs *VisitService) CreateFingerprint(fingerprintID string, leadID *string) error {
-	query := `INSERT INTO fingerprints (id, lead_id, created_at) 
+	query := `INSERT INTO fingerprints (id, lead_id, created_at)
               VALUES (?, ?, ?)`
 
 	_, err := vs.ctx.Database.Conn.Exec(query, fingerprintID, leadID, time.Now().UTC())
@@ -527,7 +465,6 @@ func (vs *VisitService) GetFingerprintLeadID(fingerprintID string) (*string, err
 	return nil, nil
 }
 
-// FindFingerprintByLeadID finds existing fingerprint for a lead
 func (vs *VisitService) FindFingerprintByLeadID(leadID string) *string {
 	query := `SELECT id FROM fingerprints WHERE lead_id = ? LIMIT 1`
 
@@ -543,17 +480,13 @@ func (vs *VisitService) FindFingerprintByLeadID(leadID string) *string {
 	return &fingerprintID
 }
 
-// HandleVisitCreation creates or reuses visits based on recency
 func (vs *VisitService) HandleVisitCreation(fingerprintID string, hasProfile bool) (string, error) {
-	// Check for recent visit (< 2 hours)
 	if latestVisit, err := vs.GetLatestVisitByFingerprint(fingerprintID); err == nil && latestVisit != nil {
 		if time.Since(latestVisit.CreatedAt) < 2*time.Hour {
-			// Reuse existing recent visit
 			return latestVisit.ID, nil
 		}
 	}
 
-	// Create new visit (this will automatically invalidate previous ones)
 	visitID := utils.GenerateULID()
 	if err := vs.CreateVisit(visitID, fingerprintID, nil); err != nil {
 		return "", fmt.Errorf("failed to create visit: %w", err)

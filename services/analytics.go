@@ -402,14 +402,6 @@ func (as *AnalyticsService) getNodeIndex(nodeID string, indexMap *map[string]int
 
 // generateOriginalNodeName correctly generates node names with proper fallbacks and specific overrides.
 func (as *AnalyticsService) generateOriginalNodeName(nodeID string, contentItems map[string]models.ContentItem) string {
-	// Handle specific overrides first to guarantee a perfect match with the known good source
-	if nodeID == "commitmentAction-StoryFragment-PAGEVIEWED-01JY77FNWB674P66AKDXGANHQT" {
-		return "PAGEVIEWED: Gallery | Sites powered by Tract Stack"
-	}
-	if nodeID == "commitmentAction-StoryFragment-PAGEVIEWED-placeholder-id" {
-		return "PAGEVIEWED: Unknown Content"
-	}
-
 	parts := strings.Split(nodeID, "-")
 	if len(parts) < 2 {
 		return "Unknown Node"
