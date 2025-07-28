@@ -79,8 +79,6 @@ func (cl *CacheLock) Unlock(key string) {
 	defer cl.mu.Unlock()
 	if lock, exists := cl.locks[key]; exists {
 		lock.Unlock()
-		// ✅ FIXED: Remove the lock and timestamp from the maps upon unlocking
-		// to prevent memory leaks.
 		delete(cl.locks, key)
 		delete(cl.lockTimes, key)
 	}

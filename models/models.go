@@ -225,9 +225,8 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 
 			log.Printf("🔊 SESSION BROADCAST: Broadcast complete - sent: %d, failed: %d, dead channels: %d", sentCount, len(deadChannels), len(deadChannels))
 
-			// ✅ FIXED: Clean up dead channels immediately using a safe method
 			if len(deadChannels) > 0 {
-				newClients := make([]chan string, 0, len(sessionClients))
+				newClients := make([]chan string, 0, len(sessionClients)-len(deadChannels))
 				isDead := false
 				for _, ch := range sessionClients {
 					isDead = false
@@ -237,19 +236,12 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 							break
 						}
 					}
-					if isDead {
-						// Safely close the dead channel
-						select {
-						case <-ch: // already closed
-						default:
-							close(ch)
-						}
-						log.Printf("🔊 SESSION BROADCAST: Removed dead channel from session %s", sessionID)
-					} else {
+					if !isDead {
 						newClients = append(newClients, ch)
 					}
 				}
 				tenantSessions[sessionID] = newClients
+				log.Printf("🔊 SESSION BROADCAST: Removed %d dead channels from active session %s", len(deadChannels), sessionID)
 			}
 		} else {
 			log.Printf("🔊 SESSION BROADCAST: ❌ Session %s not found in tenant %s", sessionID, tenantID)
