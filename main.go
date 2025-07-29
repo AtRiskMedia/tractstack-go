@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -50,9 +51,26 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Set Gin mode based on environment
 	if os.Getenv("ENV") == "production" {
 		gin.SetMode(gin.ReleaseMode)
+
+		// Set up production file logging
+		logDir := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "log")
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			log.Fatalf("Failed to create log directory: %v", err)
+		}
+
+		logFile, err := os.OpenFile(
+			filepath.Join(logDir, "tractstack.log"),
+			os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+			0644,
+		)
+		if err != nil {
+			log.Fatalf("Failed to open log file: %v", err)
+		}
+
+		log.SetOutput(logFile)
+		log.Println("Production logging initialized - tractstack starting")
 	}
 
 	// Initialize global cache manager
