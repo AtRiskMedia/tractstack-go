@@ -5,36 +5,33 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
-// ContentMapHandler handles content map HTTP requests
-type ContentMapHandler struct {
-	contentMapService *services.ContentMapService
-}
-
-// NewContentMapHandler creates a new content map handler
-func NewContentMapHandler(contentMapService *services.ContentMapService) *ContentMapHandler {
-	return &ContentMapHandler{
-		contentMapService: contentMapService,
-	}
-}
-
 // GetContentMapHandler handles GET /api/v1/content/full-map
-func (h *ContentMapHandler) GetContentMapHandler(c *gin.Context) {
+func GetContentMapHandler(c *gin.Context) {
 	// Get tenant context from middleware
-	tenantCtx, ok := middleware.GetTenantContext(c)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context required"})
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	// Create bulk repository for this request
+	db := &database.DB{DB: tenantCtx.Database.Conn}
+	bulkRepo := bulk.NewRepository(db)
+
+	// Create service per-request with tenant's cache manager
+	contentMapService := services.NewContentMapService(bulkRepo)
 
 	// Get client's lastUpdated parameter for timestamp comparison
 	clientLastUpdated := c.Query("lastUpdated")
 
-	// Get content map with caching logic
-	response, notModified, err := h.contentMapService.GetContentMap(tenantCtx.TenantID, clientLastUpdated)
+	// Get content map with caching logic using tenant's cache manager
+	response, notModified, err := contentMapService.GetContentMap(tenantCtx.TenantID, clientLastUpdated, tenantCtx.CacheManager)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

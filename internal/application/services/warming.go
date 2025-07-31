@@ -109,9 +109,10 @@ func (ws *WarmingService) WarmTenant(tenantID string) error {
 
 // warmContentMap builds and caches the full content map
 func (ws *WarmingService) warmContentMap(tenantID string) error {
-	_, _, err := ws.contentMapSvc.GetContentMap(tenantID, "")
+	// Pass the global cache manager to the warming method
+	err := ws.contentMapSvc.WarmContentMap(tenantID, ws.cache)
 	if err != nil {
-		return fmt.Errorf("failed to build content map: %w", err)
+		return fmt.Errorf("failed to warm content map: %w", err)
 	}
 	return nil
 }

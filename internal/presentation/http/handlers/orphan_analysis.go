@@ -6,40 +6,37 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
-// OrphanAnalysisHandler handles orphan analysis HTTP requests
-type OrphanAnalysisHandler struct {
-	orphanAnalysisService *services.OrphanAnalysisService
-}
-
-// NewOrphanAnalysisHandler creates a new orphan analysis handler
-func NewOrphanAnalysisHandler(orphanAnalysisService *services.OrphanAnalysisService) *OrphanAnalysisHandler {
-	return &OrphanAnalysisHandler{
-		orphanAnalysisService: orphanAnalysisService,
-	}
-}
-
 // GetOrphanAnalysisHandler handles GET /api/v1/admin/orphan-analysis
-func (h *OrphanAnalysisHandler) GetOrphanAnalysisHandler(c *gin.Context) {
+func GetOrphanAnalysisHandler(c *gin.Context) {
 	// ************** WARNING --> ROUTE NEEDS TO BE PROTECTED
 	// TODO: Add admin authentication middleware to protect this route
 	log.Println("************** WARNING --> ROUTE NEEDS TO BE PROTECTED")
 
 	// Get tenant context from middleware
-	tenantCtx, ok := middleware.GetTenantContext(c)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context required"})
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	// Create bulk repository for this request
+	db := &database.DB{DB: tenantCtx.Database.Conn}
+	bulkRepo := bulk.NewRepository(db)
+
+	// Create service per-request with tenant's cache manager
+	orphanAnalysisService := services.NewOrphanAnalysisService(bulkRepo)
 
 	// Get client's ETag for cache validation
 	clientETag := c.GetHeader("If-None-Match")
 
-	// Get orphan analysis with async pattern
-	payload, etag, err := h.orphanAnalysisService.GetOrphanAnalysis(tenantCtx.TenantID, clientETag)
+	// Get orphan analysis with async pattern using tenant's cache manager
+	payload, etag, err := orphanAnalysisService.GetOrphanAnalysis(tenantCtx.TenantID, clientETag, tenantCtx.CacheManager)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

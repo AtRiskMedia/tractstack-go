@@ -99,8 +99,7 @@ func Initialize() error {
 
 	bootstrapDB := &database.DB{DB: defaultCtx.Database.Conn}
 	bulkRepo := bulk.NewRepository(bootstrapDB)
-	contentMapService := services.NewContentMapService(bulkRepo, cacheManager)
-	_ = services.NewOrphanAnalysisService(bulkRepo, cacheManager)
+	contentMapService := services.NewContentMapService(bulkRepo)
 
 	// Instantiate the BeliefRepository
 	beliefRepo := content.NewBeliefRepository(bootstrapDB.DB, cacheManager)
@@ -125,7 +124,7 @@ func Initialize() error {
 
 	// Step 10: Setup and start HTTP server
 	log.Println("Setting up HTTP server...")
-	httpServer := server.New(config.Port)
+	httpServer := server.New(config.Port, tenantManager)
 
 	elapsed := time.Since(start)
 	log.Printf("=== Application startup complete in %v ===", elapsed)

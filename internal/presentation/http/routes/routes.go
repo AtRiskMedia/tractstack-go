@@ -2,6 +2,7 @@
 package routes
 
 import (
+	tenantpkg "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/handlers"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-contrib/cors"
@@ -9,7 +10,7 @@ import (
 )
 
 // SetupRoutes configures all HTTP routes and middleware
-func SetupRoutes() *gin.Engine {
+func SetupRoutes(tenantManager *tenantpkg.Manager) *gin.Engine {
 	// Create Gin router
 	r := gin.Default()
 
@@ -23,7 +24,7 @@ func SetupRoutes() *gin.Engine {
 
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
-	api.Use(middleware.TenantMiddleware())
+	api.Use(middleware.TenantMiddleware(tenantManager))
 	{
 		// Config endpoints
 		api.GET("/config/brand", handlers.GetBrandConfigHandler)
@@ -36,6 +37,13 @@ func SetupRoutes() *gin.Engine {
 				"tenantId": tenantCtx.TenantID,
 			})
 		})
+
+		// Content endpoints
+		api.GET("/content/full-map", handlers.GetContentMapHandler)
+
+		// Admin endpoints
+		// TODO: must protect
+		api.GET("/admin/orphan-analysis", handlers.GetOrphanAnalysisHandler)
 	}
 
 	return r

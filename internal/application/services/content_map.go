@@ -15,14 +15,12 @@ import (
 // ContentMapService orchestrates content map building and caching
 type ContentMapService struct {
 	bulkRepo bulk.BulkQueryRepository
-	cache    interfaces.ContentCache
 }
 
 // NewContentMapService creates a new content map service
-func NewContentMapService(bulkRepo bulk.BulkQueryRepository, cache interfaces.ContentCache) *ContentMapService {
+func NewContentMapService(bulkRepo bulk.BulkQueryRepository) *ContentMapService {
 	return &ContentMapService{
 		bulkRepo: bulkRepo,
-		cache:    cache,
 	}
 }
 
@@ -33,9 +31,9 @@ type ContentMapResponse struct {
 }
 
 // GetContentMap returns content map with timestamp-based caching
-func (cms *ContentMapService) GetContentMap(tenantID, clientLastUpdated string) (*ContentMapResponse, bool, error) {
+func (cms *ContentMapService) GetContentMap(tenantID, clientLastUpdated string, cache interfaces.ContentCache) (*ContentMapResponse, bool, error) {
 	// Check cache first
-	if cachedItems, exists := cms.cache.GetFullContentMap(tenantID); exists {
+	if cachedItems, exists := cache.GetFullContentMap(tenantID); exists {
 		convertedItems := make([]*content.ContentMapItem, len(cachedItems))
 		for i, item := range cachedItems {
 			convertedItems[i] = &content.ContentMapItem{
@@ -78,14 +76,13 @@ func (cms *ContentMapService) GetContentMap(tenantID, clientLastUpdated string) 
 	convertedItems := make([]types.FullContentMapItem, len(contentMap))
 	for i, item := range contentMap {
 		convertedItems[i] = types.FullContentMapItem{
-			ID:          item.ID,
-			Title:       item.Title,
-			Slug:        item.Slug,
-			Type:        item.Type,
-			IsDiscovery: false, // Default value since content.ContentMapItem doesn't have this field
+			ID:    item.ID,
+			Title: item.Title,
+			Slug:  item.Slug,
+			Type:  item.Type,
 		}
 	}
-	cms.cache.SetFullContentMap(tenantID, convertedItems)
+	cache.SetFullContentMap(tenantID, convertedItems)
 
 	return &ContentMapResponse{
 		Data:        contentMap,
@@ -94,7 +91,7 @@ func (cms *ContentMapService) GetContentMap(tenantID, clientLastUpdated string) 
 }
 
 // WarmContentMap builds and caches content map during tenant activation
-func (cms *ContentMapService) WarmContentMap(tenantID string) error {
+func (cms *ContentMapService) WarmContentMap(tenantID string, cache interfaces.ContentCache) error {
 	contentMap, err := cms.bulkRepo.BuildContentMap(tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to warm content map for tenant %s: %w", tenantID, err)
@@ -104,14 +101,13 @@ func (cms *ContentMapService) WarmContentMap(tenantID string) error {
 	convertedItems := make([]types.FullContentMapItem, len(contentMap))
 	for i, item := range contentMap {
 		convertedItems[i] = types.FullContentMapItem{
-			ID:          item.ID,
-			Title:       item.Title,
-			Slug:        item.Slug,
-			Type:        item.Type,
-			IsDiscovery: false, // Default value
+			ID:    item.ID,
+			Title: item.Title,
+			Slug:  item.Slug,
+			Type:  item.Type,
 		}
 	}
-	cms.cache.SetFullContentMap(tenantID, convertedItems)
+	cache.SetFullContentMap(tenantID, convertedItems)
 
 	return nil
 }

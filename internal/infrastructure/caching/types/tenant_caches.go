@@ -83,11 +83,10 @@ type TenantAnalyticsCache struct {
 }
 
 type FullContentMapItem struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Slug        string `json:"slug"`
-	IsDiscovery bool   `json:"isDiscovery"`
+	ID    string `json:"id"`
+	Type  string `json:"type"`
+	Title string `json:"title"`
+	Slug  string `json:"slug"`
 }
 
 type OrphanAnalysisCache struct {
