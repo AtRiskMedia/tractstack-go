@@ -51,49 +51,28 @@ func (r *TractStackRepository) FindBySlug(tenantID, slug string) (*content.Tract
 	return r.FindByID(tenantID, id)
 }
 
+// FindAll retrieves all tractstacks for a tenant, employing a cache-first strategy.
 func (r *TractStackRepository) FindAll(tenantID string) ([]*content.TractStackNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllTractStackIDs(tenantID); found {
-		var tractStacks []*content.TractStackNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if tractStack, found := r.cache.GetTractStack(tenantID, id); found {
-				tractStacks = append(tractStacks, tractStack)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, ts := range missing {
-				r.cache.SetTractStack(tenantID, ts)
-				tractStacks = append(tractStacks, ts)
-			}
-		}
-
-		return tractStacks, nil
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	tractStacks, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.TractStackNode{}, nil
 	}
 
-	for _, ts := range tractStacks {
-		r.cache.SetTractStack(tenantID, ts)
-	}
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllTractStackIDs(tenantID, ids)
 
-	return tractStacks, nil
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
 }
 
 func (r *TractStackRepository) FindByIDs(tenantID string, ids []string) ([]*content.TractStackNode, error) {
@@ -177,13 +156,10 @@ func (r *TractStackRepository) loadAllIDsFromDB() ([]string, error) {
 		tractStackIDs = append(tractStackIDs, id)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return tractStackIDs, nil
+	return tractStackIDs, rows.Err()
 }
 
+// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *TractStackRepository) loadFromDB(id string) (*content.TractStackNode, error) {
 	query := `SELECT id, title, slug, social_image_path FROM tractstacks WHERE id = ?`
 

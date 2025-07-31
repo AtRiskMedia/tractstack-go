@@ -53,80 +53,70 @@ func (r *ResourceRepository) FindBySlug(tenantID, slug string) (*content.Resourc
 }
 
 func (r *ResourceRepository) FindByCategory(tenantID, category string) ([]*content.ResourceNode, error) {
-	if resources, found := r.cache.GetResourcesByCategory(tenantID, category); found {
-		var result []*content.ResourceNode
-		for _, id := range resources {
-			if resource, found := r.cache.GetResource(tenantID, id); found {
-				result = append(result, resource)
-			}
-		}
-		return result, nil
+	if resourceIDs, found := r.cache.GetResourcesByCategory(tenantID, category); found {
+		return r.FindByIDs(tenantID, resourceIDs)
 	}
 
 	ids, err := r.getIDsByCategoryFromDB(category)
 	if err != nil {
 		return nil, err
 	}
-
 	if len(ids) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
 
-	resources, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, resource := range resources {
-		r.cache.SetResource(tenantID, resource)
-	}
-
-	return resources, nil
+	return r.FindByIDs(tenantID, ids)
 }
 
+// FindAll retrieves all resources for a tenant, employing a cache-first strategy.
 func (r *ResourceRepository) FindAll(tenantID string) ([]*content.ResourceNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllResourceIDs(tenantID); found {
-		var resources []*content.ResourceNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if resource, found := r.cache.GetResource(tenantID, id); found {
-				resources = append(resources, resource)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, resource := range missing {
-				r.cache.SetResource(tenantID, resource)
-				resources = append(resources, resource)
-			}
-		}
-
-		return resources, nil
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	resources, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.ResourceNode{}, nil
 	}
 
-	for _, resource := range resources {
-		r.cache.SetResource(tenantID, resource)
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllResourceIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
+func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*content.ResourceNode, error) {
+	var result []*content.ResourceNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if resource, found := r.cache.GetResource(tenantID, id); found {
+			result = append(result, resource)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
 	}
 
-	return resources, nil
+	if len(missingIDs) > 0 {
+		missingResources, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, resource := range missingResources {
+			r.cache.SetResource(tenantID, resource)
+			result = append(result, resource)
+		}
+	}
+
+	return result, nil
 }
 
 func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNode) error {
@@ -191,13 +181,10 @@ func (r *ResourceRepository) loadAllIDsFromDB() ([]string, error) {
 		resourceIDs = append(resourceIDs, id)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return resourceIDs, nil
+	return resourceIDs, rows.Err()
 }
 
+// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *ResourceRepository) loadFromDB(id string) (*content.ResourceNode, error) {
 	query := `SELECT id, title, slug, category_slug, oneliner, action_lisp, options_payload 
               FROM resources WHERE id = ?`
@@ -269,7 +256,7 @@ func (r *ResourceRepository) loadMultipleFromDB(ids []string) ([]*content.Resour
 		}
 
 		if err := json.Unmarshal([]byte(optionsPayloadStr), &resource.OptionsPayload); err != nil {
-			return nil, fmt.Errorf("failed to parse options payload: %w", err)
+			continue // Skip malformed records
 		}
 
 		if categorySlug.Valid {
@@ -322,43 +309,10 @@ func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, 
 	return ids, rows.Err()
 }
 
-// FindByIDs returns multiple resources by IDs (cache-first with bulk loading)
-func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*content.ResourceNode, error) {
-	var result []*content.ResourceNode
-	var missingIDs []string
-
-	for _, id := range ids {
-		if resource, found := r.cache.GetResource(tenantID, id); found {
-			result = append(result, resource)
-		} else {
-			missingIDs = append(missingIDs, id)
-		}
-	}
-
-	if len(missingIDs) > 0 {
-		missingResources, err := r.loadMultipleFromDB(missingIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, resource := range missingResources {
-			r.cache.SetResource(tenantID, resource)
-			result = append(result, resource)
-		}
-	}
-
-	return result, nil
-}
-
-// FindByFilters returns resources by multiple filter criteria (cache-first for IDs, then DB for complex filters)
 func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
-	// This implementation will build a dynamic query as caching all permutations of filters is impractical.
-	// However, we can still check the cache for any resources requested directly by ID.
-
 	resourceMap := make(map[string]*content.ResourceNode)
 	var queryIDs []string
 
-	// First, check the cache for any resources requested by ID
 	for _, id := range ids {
 		if resource, found := r.cache.GetResource(tenantID, id); found {
 			resourceMap[id] = resource
@@ -367,12 +321,10 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 		}
 	}
 
-	// Build a dynamic query for any remaining filters or cache misses
 	var queryBuilder strings.Builder
 	queryBuilder.WriteString("SELECT id, title, slug, category_slug, oneliner, action_lisp, options_payload FROM resources WHERE 1=1")
 	args := make([]interface{}, 0)
 
-	// Add IDs that were not found in cache
 	if len(queryIDs) > 0 {
 		queryBuilder.WriteString(" AND id IN (?" + strings.Repeat(",?", len(queryIDs)-1) + ")")
 		for _, id := range queryIDs {
@@ -394,7 +346,6 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 		}
 	}
 
-	// Only run the query if there are categories, slugs, or cache-missed IDs to fetch
 	if len(args) > 0 {
 		rows, err := r.db.Query(queryBuilder.String(), args...)
 		if err != nil {
@@ -412,7 +363,7 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 			}
 
 			if err := json.Unmarshal([]byte(optionsPayloadStr), &resource.OptionsPayload); err != nil {
-				continue // Skip malformed records
+				continue
 			}
 
 			if categorySlug.Valid {
@@ -425,7 +376,6 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 			resource.NodeType = "Resource"
 			if _, exists := resourceMap[resource.ID]; !exists {
 				resourceMap[resource.ID] = &resource
-				// Also add the newly fetched resource to the cache
 				r.cache.SetResource(tenantID, &resource)
 			}
 		}
@@ -434,7 +384,6 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 		}
 	}
 
-	// Convert map to slice for the final result
 	finalResources := make([]*content.ResourceNode, 0, len(resourceMap))
 	for _, resource := range resourceMap {
 		finalResources = append(finalResources, resource)

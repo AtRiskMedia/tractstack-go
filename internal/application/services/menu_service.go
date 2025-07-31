@@ -19,15 +19,18 @@ func NewMenuService() *MenuService {
 	return &MenuService{}
 }
 
-// GetAllIDs returns all menu IDs for a tenant (cache-first)
+// GetAllIDs returns all menu IDs for a tenant by leveraging the robust repository.
 func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	menuRepo := tenantCtx.MenuRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
+	// It will handle the full cache-miss-fallback-and-set logic.
 	menus, err := menuRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all menus: %w", err)
+		return nil, fmt.Errorf("failed to get all menus from repository: %w", err)
 	}
 
+	// We just need to extract the IDs from the full objects.
 	ids := make([]string, len(menus))
 	for i, menu := range menus {
 		ids[i] = menu.ID
@@ -36,7 +39,7 @@ func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	return ids, nil
 }
 
-// GetByID returns a menu by ID (cache-first)
+// GetByID returns a menu by ID (cache-first via repository)
 func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.MenuNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("menu ID cannot be empty")
@@ -51,7 +54,7 @@ func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.Me
 	return menu, nil
 }
 
-// GetByIDs returns multiple menus by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple menus by IDs (cache-first with bulk loading via repository)
 func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.MenuNode, error) {
 	if len(ids) == 0 {
 		return []*content.MenuNode{}, nil
@@ -60,7 +63,7 @@ func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*cont
 	menuRepo := tenantCtx.MenuRepo()
 	menus, err := menuRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get menus by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get menus by IDs from repository: %w", err)
 	}
 
 	return menus, nil

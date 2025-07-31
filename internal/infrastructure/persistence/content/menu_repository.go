@@ -40,49 +40,56 @@ func (r *MenuRepository) FindByID(tenantID, id string) (*content.MenuNode, error
 	return menu, nil
 }
 
+// FindAll retrieves all menus for a tenant, employing a cache-first strategy.
 func (r *MenuRepository) FindAll(tenantID string) ([]*content.MenuNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllMenuIDs(tenantID); found {
-		var menus []*content.MenuNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if menu, found := r.cache.GetMenu(tenantID, id); found {
-				menus = append(menus, menu)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, menu := range missing {
-				r.cache.SetMenu(tenantID, menu)
-				menus = append(menus, menu)
-			}
-		}
-
-		return menus, nil
+		// If the list exists, bulk-load the menus themselves (this is also cache-first).
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. The master ID list is not in the cache. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	menus, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.MenuNode{}, nil
 	}
 
-	for _, menu := range menus {
-		r.cache.SetMenu(tenantID, menu)
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllMenuIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
+func (r *MenuRepository) FindByIDs(tenantID string, ids []string) ([]*content.MenuNode, error) {
+	var result []*content.MenuNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if menu, found := r.cache.GetMenu(tenantID, id); found {
+			result = append(result, menu)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
 	}
 
-	return menus, nil
+	if len(missingIDs) > 0 {
+		missingMenus, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, menu := range missingMenus {
+			r.cache.SetMenu(tenantID, menu)
+			result = append(result, menu)
+		}
+	}
+
+	return result, nil
 }
 
 func (r *MenuRepository) Store(tenantID string, menu *content.MenuNode) error {
@@ -143,11 +150,7 @@ func (r *MenuRepository) loadAllIDsFromDB() ([]string, error) {
 		menuIDs = append(menuIDs, id)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return menuIDs, nil
+	return menuIDs, rows.Err()
 }
 
 func (r *MenuRepository) loadFromDB(id string) (*content.MenuNode, error) {
@@ -209,7 +212,8 @@ func (r *MenuRepository) loadMultipleFromDB(ids []string) ([]*content.MenuNode, 
 		}
 
 		if err := json.Unmarshal([]byte(optionsPayloadStr), &menu.OptionsPayload); err != nil {
-			return nil, fmt.Errorf("failed to parse options payload: %w", err)
+			// Skip malformed records but continue processing others
+			continue
 		}
 
 		menu.NodeType = "Menu"
@@ -217,35 +221,4 @@ func (r *MenuRepository) loadMultipleFromDB(ids []string) ([]*content.MenuNode, 
 	}
 
 	return menus, rows.Err()
-}
-
-// FindByIDs returns multiple menus by IDs (cache-first with bulk loading)
-func (r *MenuRepository) FindByIDs(tenantID string, ids []string) ([]*content.MenuNode, error) {
-	var result []*content.MenuNode
-	var missingIDs []string
-
-	// Check cache for each requested ID
-	for _, id := range ids {
-		if menu, found := r.cache.GetMenu(tenantID, id); found {
-			result = append(result, menu)
-		} else {
-			missingIDs = append(missingIDs, id)
-		}
-	}
-
-	// If any IDs were not found in the cache, load them from the database
-	if len(missingIDs) > 0 {
-		missingMenus, err := r.loadMultipleFromDB(missingIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		// Add the newly loaded menus to the cache and the final result set
-		for _, menu := range missingMenus {
-			r.cache.SetMenu(tenantID, menu)
-			result = append(result, menu)
-		}
-	}
-
-	return result, nil
 }

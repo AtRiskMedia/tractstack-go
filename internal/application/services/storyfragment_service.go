@@ -27,15 +27,17 @@ func NewStoryFragmentService() *StoryFragmentService {
 	return &StoryFragmentService{}
 }
 
-// GetAllIDs returns all storyfragment IDs for a tenant (cache-first)
+// GetAllIDs returns all storyfragment IDs for a tenant by leveraging the robust repository.
 func (s *StoryFragmentService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
 	storyFragments, err := storyFragmentRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all storyfragments: %w", err)
+		return nil, fmt.Errorf("failed to get all storyfragments from repository: %w", err)
 	}
 
+	// Extract IDs from the full objects.
 	ids := make([]string, len(storyFragments))
 	for i, storyFragment := range storyFragments {
 		ids[i] = storyFragment.ID
@@ -44,7 +46,7 @@ func (s *StoryFragmentService) GetAllIDs(tenantCtx *tenant.Context) ([]string, e
 	return ids, nil
 }
 
-// GetByID returns a storyfragment by ID (cache-first)
+// GetByID returns a storyfragment by ID (cache-first via repository)
 func (s *StoryFragmentService) GetByID(tenantCtx *tenant.Context, id string) (*content.StoryFragmentNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("storyfragment ID cannot be empty")
@@ -59,7 +61,7 @@ func (s *StoryFragmentService) GetByID(tenantCtx *tenant.Context, id string) (*c
 	return storyFragment, nil
 }
 
-// GetByIDs returns multiple storyfragments by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple storyfragments by IDs (cache-first with bulk loading via repository)
 func (s *StoryFragmentService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.StoryFragmentNode, error) {
 	if len(ids) == 0 {
 		return []*content.StoryFragmentNode{}, nil
@@ -68,13 +70,13 @@ func (s *StoryFragmentService) GetByIDs(tenantCtx *tenant.Context, ids []string)
 	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
 	storyFragments, err := storyFragmentRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get storyfragments by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get storyfragments by IDs from repository: %w", err)
 	}
 
 	return storyFragments, nil
 }
 
-// GetBySlug returns a storyfragment by slug (cache-first)
+// GetBySlug returns a storyfragment by slug (cache-first via repository)
 func (s *StoryFragmentService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.StoryFragmentNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("storyfragment slug cannot be empty")
@@ -150,7 +152,6 @@ func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.Stor
 		return nil, fmt.Errorf("tenant context or configuration is not available")
 	}
 
-	// Get the configured home slug, with a safe fallback
 	homeSlug := tenantCtx.Config.BrandConfig.HomeSlug
 	if homeSlug == "" {
 		homeSlug = "hello" // Fallback to the default

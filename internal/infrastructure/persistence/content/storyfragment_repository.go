@@ -57,66 +57,61 @@ func (r *StoryFragmentRepository) FindByTractStackID(tenantID, tractStackID stri
 	if err != nil {
 		return nil, err
 	}
-
 	if len(ids) == 0 {
 		return []*content.StoryFragmentNode{}, nil
 	}
-
-	storyFragments, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, sf := range storyFragments {
-		r.cache.SetStoryFragment(tenantID, sf)
-	}
-
-	return storyFragments, nil
+	return r.FindByIDs(tenantID, ids)
 }
 
+// FindAll retrieves all storyfragments for a tenant, employing a cache-first strategy.
 func (r *StoryFragmentRepository) FindAll(tenantID string) ([]*content.StoryFragmentNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllStoryFragmentIDs(tenantID); found {
-		var storyFragments []*content.StoryFragmentNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if sf, found := r.cache.GetStoryFragment(tenantID, id); found {
-				storyFragments = append(storyFragments, sf)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, sf := range missing {
-				r.cache.SetStoryFragment(tenantID, sf)
-				storyFragments = append(storyFragments, sf)
-			}
-		}
-
-		return storyFragments, nil
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	storyFragments, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.StoryFragmentNode{}, nil
 	}
 
-	for _, sf := range storyFragments {
-		r.cache.SetStoryFragment(tenantID, sf)
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllStoryFragmentIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
+func (r *StoryFragmentRepository) FindByIDs(tenantID string, ids []string) ([]*content.StoryFragmentNode, error) {
+	var result []*content.StoryFragmentNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if storyFragment, found := r.cache.GetStoryFragment(tenantID, id); found {
+			result = append(result, storyFragment)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
 	}
 
-	return storyFragments, nil
+	if len(missingIDs) > 0 {
+		missingStoryFragments, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, storyFragment := range missingStoryFragments {
+			r.cache.SetStoryFragment(tenantID, storyFragment)
+			result = append(result, storyFragment)
+		}
+	}
+
+	return result, nil
 }
 
 func (r *StoryFragmentRepository) Store(tenantID string, storyFragment *content.StoryFragmentNode) error {
@@ -182,6 +177,7 @@ func (r *StoryFragmentRepository) loadAllIDsFromDB() ([]string, error) {
 	return storyFragmentIDs, rows.Err()
 }
 
+// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *StoryFragmentRepository) loadFromDB(id string) (*content.StoryFragmentNode, error) {
 	query := `SELECT id, title, slug, tractstack_id, menu_id, tailwind_background_colour, 
               social_image_path, created, changed 
@@ -397,35 +393,4 @@ func (r *StoryFragmentRepository) getAllPaneRelationships(storyFragmentIDs []str
 	}
 
 	return relationships, rows.Err()
-}
-
-// FindByIDs returns multiple storyfragments by IDs (cache-first with bulk loading)
-func (r *StoryFragmentRepository) FindByIDs(tenantID string, ids []string) ([]*content.StoryFragmentNode, error) {
-	var result []*content.StoryFragmentNode
-	var missingIDs []string
-
-	// Check cache for each requested ID
-	for _, id := range ids {
-		if storyFragment, found := r.cache.GetStoryFragment(tenantID, id); found {
-			result = append(result, storyFragment)
-		} else {
-			missingIDs = append(missingIDs, id)
-		}
-	}
-
-	// If any IDs were not found in the cache, load them from the database
-	if len(missingIDs) > 0 {
-		missingStoryFragments, err := r.loadMultipleFromDB(missingIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		// Add the newly loaded story fragments to the cache and the final result set
-		for _, storyFragment := range missingStoryFragments {
-			r.cache.SetStoryFragment(tenantID, storyFragment)
-			result = append(result, storyFragment)
-		}
-	}
-
-	return result, nil
 }

@@ -24,6 +24,7 @@ func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache) *PaneRepositor
 	}
 }
 
+// FindByID retrieves a pane by ID using a cache-first strategy.
 func (r *PaneRepository) FindByID(tenantID, id string) (*content.PaneNode, error) {
 	if pane, found := r.cache.GetPane(tenantID, id); found {
 		return pane, nil
@@ -34,25 +35,28 @@ func (r *PaneRepository) FindByID(tenantID, id string) (*content.PaneNode, error
 		return nil, err
 	}
 	if pane == nil {
-		return nil, nil
+		return nil, nil // Not found
 	}
 
 	r.cache.SetPane(tenantID, pane)
 	return pane, nil
 }
 
+// FindBySlug retrieves a pane by slug using a cache-first strategy.
 func (r *PaneRepository) FindBySlug(tenantID, slug string) (*content.PaneNode, error) {
-	id, err := r.getIDBySlugFromDB(slug)
+	id, err := r.getIDBySlugFromDB(slug) // Always check DB for slug to ensure uniqueness
 	if err != nil {
 		return nil, err
 	}
 	if id == "" {
-		return nil, nil
+		return nil, nil // Not found
 	}
 
 	return r.FindByID(tenantID, id)
 }
 
+// FindByIDs retrieves multiple panes by their IDs, using the cache for found items
+// and performing a bulk database query for any missing items.
 func (r *PaneRepository) FindByIDs(tenantID string, ids []string) ([]*content.PaneNode, error) {
 	var result []*content.PaneNode
 	var missingIDs []string
@@ -80,49 +84,31 @@ func (r *PaneRepository) FindByIDs(tenantID string, ids []string) ([]*content.Pa
 	return result, nil
 }
 
+// FindAll retrieves all panes for a tenant, employing a cache-first strategy
+// for the master list of pane IDs.
 func (r *PaneRepository) FindAll(tenantID string) ([]*content.PaneNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllPaneIDs(tenantID); found {
-		var panes []*content.PaneNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if pane, found := r.cache.GetPane(tenantID, id); found {
-				panes = append(panes, pane)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, pane := range missing {
-				r.cache.SetPane(tenantID, pane)
-				panes = append(panes, pane)
-			}
-		}
-
-		return panes, nil
+		// If the list exists, bulk-load the panes themselves (this is also cache-first).
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. The master ID list is not in the cache. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	panes, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.PaneNode{}, nil
 	}
 
-	for _, pane := range panes {
-		r.cache.SetPane(tenantID, pane)
-	}
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllPaneIDs(tenantID, ids)
 
-	return panes, nil
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	// This will load them from the DB and populate the individual object cache.
+	return r.FindByIDs(tenantID, ids)
 }
 
 func (r *PaneRepository) Store(tenantID string, pane *content.PaneNode) error {
@@ -458,13 +444,13 @@ func (r *PaneRepository) extractPaneDataFromOptions(pane *content.PaneNode) {
 }
 
 func (r *PaneRepository) FindContext(tenantID string) ([]*content.PaneNode, error) {
-	// Get all panes first
+	// Get all panes first, relying on the now-robust FindAll method.
 	allPanes, err := r.FindAll(tenantID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter for context panes
+	// Filter for context panes in-memory.
 	var contextPanes []*content.PaneNode
 	for _, pane := range allPanes {
 		if pane.IsContextPane {

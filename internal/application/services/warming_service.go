@@ -3,6 +3,7 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/cleanup"
@@ -21,7 +22,7 @@ func NewWarmingService() *WarmingService {
 }
 
 // WarmAllTenants performs startup warming for all active tenants
-func (ws *WarmingService) WarmAllTenants(tenantCtx *tenant.Context, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
+func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 
 	tenants, err := ws.getActiveTenants()
@@ -29,19 +30,26 @@ func (ws *WarmingService) WarmAllTenants(tenantCtx *tenant.Context, cache interf
 		return fmt.Errorf("failed to get active tenants: %w", err)
 	}
 
-	reporter.LogHeader(fmt.Sprintf("Cache Warming for %d Tenants", len(tenants)))
+	reporter.LogHeader(fmt.Sprintf("Strategic Cache Warming for %d Tenants", len(tenants)))
 
 	var successCount int
 	for _, tenantID := range tenants {
+		tenantCtx, err := tenantManager.NewContextFromID(tenantID)
+		if err != nil {
+			reporter.LogError(fmt.Sprintf("Failed to create context for tenant %s", tenantID), err)
+			continue
+		}
+
 		if err := ws.WarmTenant(tenantCtx, tenantID, cache, contentMapSvc, beliefRegistrySvc, reporter); err != nil {
 			reporter.LogError(fmt.Sprintf("Failed to warm tenant %s", tenantID), err)
 		} else {
 			successCount++
 		}
+		tenantCtx.Close()
 	}
 
 	duration := time.Since(start)
-	reporter.LogSubHeader(fmt.Sprintf("Cache Warming Completed in %v", duration))
+	reporter.LogSubHeader(fmt.Sprintf("Strategic Warming Completed in %v", duration))
 	reporter.LogSuccess("%d/%d tenants warmed successfully", successCount, len(tenants))
 
 	if successCount < len(tenants) {
@@ -51,41 +59,43 @@ func (ws *WarmingService) WarmAllTenants(tenantCtx *tenant.Context, cache interf
 	return nil
 }
 
-// WarmTenant performs complete warming sequence for a single tenant
+// WarmTenant performs a focused warming sequence for a single tenant.
 func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
 
-	// FIXED: Use the passed tenant context instead of creating a new one
-	// The tenantCtx already has the proper cache manager and database connection
-
+	// Step 1: Warm the content map for content discovery. This is essential.
 	reporter.LogStage("Warming Content Map")
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
 	reporter.LogSuccess("Content Map Warmed")
 
+	// Step 2: Warm all Beliefs. They are small, foundational, and needed for personalization logic.
 	reporter.LogStage("Warming All Beliefs")
 	if err := ws.warmAllBeliefs(tenantCtx); err != nil {
-		return fmt.Errorf("beliefs warming failed: %w", err)
+		return fmt.Errorf("critical failure: beliefs warming failed: %w", err)
 	}
 	reporter.LogSuccess("Beliefs Warmed")
 
-	reporter.LogStage("Warming Home StoryFragment and Dependencies")
-	if err := ws.warmHomeStoryfragment(tenantCtx); err != nil {
-		return fmt.Errorf("home storyfragment warming failed: %w", err)
+	// Step 3: Strategically warm ONLY the home page and its direct dependencies.
+	// This ensures the first page load is fast.
+	reporter.LogStage("Warming Home StoryFragment and its direct dependencies (Panes, Menu, etc.)")
+	if err := ws.warmHomeStoryfragmentAndDeps(tenantCtx); err != nil {
+		// This is not a fatal error, as the robust services can lazy-load them later.
+		reporter.LogWarning("Home storyfragment dependency warming failed: %v", err)
+	} else {
+		reporter.LogSuccess("Home StoryFragment and its dependencies Warmed")
 	}
-	reporter.LogSuccess("Home StoryFragment Warmed")
 
 	duration := time.Since(start)
-	reporter.LogSuccess("Tenant %s warmed in %v", tenantID, duration)
+	reporter.LogSuccess("Tenant %s strategically warmed in %v", tenantID, duration)
 
 	return nil
 }
 
-// warmContentMap builds and caches the full content map
+// warmContentMap builds and caches the full content map.
 func (ws *WarmingService) warmContentMap(tenantCtx *tenant.Context, contentMapSvc *ContentMapService, cache interfaces.Cache) error {
-	// Use content map service to build and cache content map
 	_, _, err := contentMapSvc.GetContentMap(tenantCtx, "", cache)
 	if err != nil {
 		return fmt.Errorf("failed to warm content map: %w", err)
@@ -93,34 +103,40 @@ func (ws *WarmingService) warmContentMap(tenantCtx *tenant.Context, contentMapSv
 	return nil
 }
 
-// warmAllBeliefs loads all beliefs into cache (foundation for belief registry)
+// warmAllBeliefs loads all beliefs into the cache.
 func (ws *WarmingService) warmAllBeliefs(tenantCtx *tenant.Context) error {
-	beliefRepo := tenantCtx.BeliefRepo()
-	_, err := beliefRepo.FindAll(tenantCtx.TenantID)
-	if err != nil {
-		return err
-	}
-	return nil
+	beliefService := NewBeliefService()
+	_, err := beliefService.GetAllIDs(tenantCtx)
+	return err
 }
 
-// warmHomeStoryfragment loads home storyfragment and all its dependencies
-func (ws *WarmingService) warmHomeStoryfragment(tenantCtx *tenant.Context) error {
-	homeSlug := ws.getHomeSlug(tenantCtx)
-	// TODO: Implementation depends on StoryFragmentService being available
-	// This would use tenantCtx.StoryFragmentRepo() to load home content
-	_ = homeSlug
-	return nil
-}
+// warmHomeStoryfragmentAndDeps finds the home page and uses the GetFullPayload method
+// to trigger the cache-first loading of the StoryFragment, its Panes, Menu, and TractStack.
+func (ws *WarmingService) warmHomeStoryfragmentAndDeps(tenantCtx *tenant.Context) error {
+	storyFragmentService := NewStoryFragmentService()
 
-// getHomeSlug extracts home slug from tenant context (defaults to "hello")
-func (ws *WarmingService) getHomeSlug(tenantCtx *tenant.Context) string {
+	// Determine the home slug from the tenant's configuration.
+	homeSlug := "hello" // Default fallback
 	if tenantCtx.Config != nil && tenantCtx.Config.BrandConfig != nil && tenantCtx.Config.BrandConfig.HomeSlug != "" {
-		return tenantCtx.Config.BrandConfig.HomeSlug
+		homeSlug = tenantCtx.Config.BrandConfig.HomeSlug
 	}
-	return "hello" // Default
+
+	// Calling GetFullPayloadBySlug is the most efficient way to warm all dependencies.
+	// The service method itself uses the robust, cache-first repositories.
+	payload, err := storyFragmentService.GetFullPayloadBySlug(tenantCtx, homeSlug)
+	if err != nil {
+		return fmt.Errorf("failed to get home storyfragment full payload for warming ('%s'): %w", homeSlug, err)
+	}
+	if payload == nil || payload.StoryFragment == nil {
+		log.Printf("WARN: No home storyfragment found for tenant %s with slug '%s'.", tenantCtx.TenantID, homeSlug)
+		return nil
+	}
+
+	log.Printf("  - Warmed Home Page ('%s') and its %d panes.", homeSlug, len(payload.Panes))
+	return nil
 }
 
-// getActiveTenants loads tenant registry and returns active tenant IDs
+// getActiveTenants loads the tenant registry and returns active tenant IDs.
 func (ws *WarmingService) getActiveTenants() ([]string, error) {
 	registry, err := tenant.LoadTenantRegistry()
 	if err != nil {

@@ -19,15 +19,17 @@ func NewBeliefService() *BeliefService {
 	return &BeliefService{}
 }
 
-// GetAllIDs returns all belief IDs for a tenant (cache-first)
+// GetAllIDs returns all belief IDs for a tenant by leveraging the robust repository.
 func (s *BeliefService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	beliefRepo := tenantCtx.BeliefRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
 	beliefs, err := beliefRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all beliefs: %w", err)
+		return nil, fmt.Errorf("failed to get all beliefs from repository: %w", err)
 	}
 
+	// Extract IDs from the full objects.
 	ids := make([]string, len(beliefs))
 	for i, belief := range beliefs {
 		ids[i] = belief.ID
@@ -36,7 +38,7 @@ func (s *BeliefService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	return ids, nil
 }
 
-// GetByID returns a belief by ID (cache-first)
+// GetByID returns a belief by ID (cache-first via repository)
 func (s *BeliefService) GetByID(tenantCtx *tenant.Context, id string) (*content.BeliefNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("belief ID cannot be empty")
@@ -51,7 +53,7 @@ func (s *BeliefService) GetByID(tenantCtx *tenant.Context, id string) (*content.
 	return belief, nil
 }
 
-// GetByIDs returns multiple beliefs by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple beliefs by IDs (cache-first with bulk loading via repository)
 func (s *BeliefService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.BeliefNode, error) {
 	if len(ids) == 0 {
 		return []*content.BeliefNode{}, nil
@@ -60,13 +62,13 @@ func (s *BeliefService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*co
 	beliefRepo := tenantCtx.BeliefRepo()
 	beliefs, err := beliefRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get beliefs by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get beliefs by IDs from repository: %w", err)
 	}
 
 	return beliefs, nil
 }
 
-// GetBySlug returns a belief by slug (cache-first)
+// GetBySlug returns a belief by slug (cache-first via repository)
 func (s *BeliefService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.BeliefNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("belief slug cannot be empty")
@@ -128,7 +130,6 @@ func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.Belief
 
 	beliefRepo := tenantCtx.BeliefRepo()
 
-	// Verify belief exists before updating
 	existing, err := beliefRepo.FindByID(tenantCtx.TenantID, belief.ID)
 	if err != nil {
 		return fmt.Errorf("failed to verify belief %s exists: %w", belief.ID, err)
@@ -153,7 +154,6 @@ func (s *BeliefService) Delete(tenantCtx *tenant.Context, id string) error {
 
 	beliefRepo := tenantCtx.BeliefRepo()
 
-	// Verify belief exists before deleting
 	existing, err := beliefRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to verify belief %s exists: %w", id, err)
