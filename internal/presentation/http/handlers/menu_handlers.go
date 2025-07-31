@@ -6,7 +6,6 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	persistence "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -16,18 +15,27 @@ type MenuIDsRequest struct {
 	MenuIDs []string `json:"menuIds" binding:"required"`
 }
 
-// GetAllMenuIDsHandler returns all menu IDs using cache-first pattern
-func GetAllMenuIDsHandler(c *gin.Context) {
+// MenuHandlers contains all menu-related HTTP handlers
+type MenuHandlers struct {
+	menuService *services.MenuService
+}
+
+// NewMenuHandlers creates menu handlers with injected dependencies
+func NewMenuHandlers(menuService *services.MenuService) *MenuHandlers {
+	return &MenuHandlers{
+		menuService: menuService,
+	}
+}
+
+// GetAllMenuIDs returns all menu IDs using cache-first pattern
+func (h *MenuHandlers) GetAllMenuIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	menuRepo := persistence.NewMenuRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	menuService := services.NewMenuService(menuRepo)
-
-	menuIDs, err := menuService.GetAllIDs(tenantCtx.TenantID)
+	menuIDs, err := h.menuService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -39,8 +47,8 @@ func GetAllMenuIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetMenusByIDsHandler returns multiple menus by IDs using cache-first pattern
-func GetMenusByIDsHandler(c *gin.Context) {
+// GetMenusByIDs returns multiple menus by IDs using cache-first pattern
+func (h *MenuHandlers) GetMenusByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -58,10 +66,7 @@ func GetMenusByIDsHandler(c *gin.Context) {
 		return
 	}
 
-	menuRepo := persistence.NewMenuRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	menuService := services.NewMenuService(menuRepo)
-
-	menus, err := menuService.GetByIDs(tenantCtx.TenantID, req.MenuIDs)
+	menus, err := h.menuService.GetByIDs(tenantCtx, req.MenuIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -73,8 +78,8 @@ func GetMenusByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetMenuByIDHandler returns a specific menu by ID using cache-first pattern
-func GetMenuByIDHandler(c *gin.Context) {
+// GetMenuByID returns a specific menu by ID using cache-first pattern
+func (h *MenuHandlers) GetMenuByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -87,10 +92,7 @@ func GetMenuByIDHandler(c *gin.Context) {
 		return
 	}
 
-	menuRepo := persistence.NewMenuRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	menuService := services.NewMenuService(menuRepo)
-
-	menuNode, err := menuService.GetByID(tenantCtx.TenantID, menuID)
+	menuNode, err := h.menuService.GetByID(tenantCtx, menuID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -104,8 +106,8 @@ func GetMenuByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, menuNode)
 }
 
-// CreateMenuHandler creates a new menu
-func CreateMenuHandler(c *gin.Context) {
+// CreateMenu creates a new menu
+func (h *MenuHandlers) CreateMenu(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -118,10 +120,7 @@ func CreateMenuHandler(c *gin.Context) {
 		return
 	}
 
-	menuRepo := persistence.NewMenuRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	menuService := services.NewMenuService(menuRepo)
-
-	err := menuService.Create(tenantCtx.TenantID, &menu)
+	err := h.menuService.Create(tenantCtx, &menu)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -133,8 +132,8 @@ func CreateMenuHandler(c *gin.Context) {
 	})
 }
 
-// UpdateMenuHandler updates an existing menu
-func UpdateMenuHandler(c *gin.Context) {
+// UpdateMenu updates an existing menu
+func (h *MenuHandlers) UpdateMenu(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -156,10 +155,7 @@ func UpdateMenuHandler(c *gin.Context) {
 	// Ensure ID matches URL parameter
 	menu.ID = menuID
 
-	menuRepo := persistence.NewMenuRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	menuService := services.NewMenuService(menuRepo)
-
-	err := menuService.Update(tenantCtx.TenantID, &menu)
+	err := h.menuService.Update(tenantCtx, &menu)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -171,8 +167,8 @@ func UpdateMenuHandler(c *gin.Context) {
 	})
 }
 
-// DeleteMenuHandler deletes a menu
-func DeleteMenuHandler(c *gin.Context) {
+// DeleteMenu deletes a menu
+func (h *MenuHandlers) DeleteMenu(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -185,10 +181,7 @@ func DeleteMenuHandler(c *gin.Context) {
 		return
 	}
 
-	menuRepo := persistence.NewMenuRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	menuService := services.NewMenuService(menuRepo)
-
-	err := menuService.Delete(tenantCtx.TenantID, menuID)
+	err := h.menuService.Delete(tenantCtx, menuID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

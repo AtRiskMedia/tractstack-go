@@ -6,7 +6,6 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	persistence "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -16,18 +15,27 @@ type BeliefIDsRequest struct {
 	BeliefIDs []string `json:"beliefIds" binding:"required"`
 }
 
-// GetAllBeliefIDsHandler returns all belief IDs using cache-first pattern
-func GetAllBeliefIDsHandler(c *gin.Context) {
+// BeliefHandlers contains all belief-related HTTP handlers
+type BeliefHandlers struct {
+	beliefService *services.BeliefService
+}
+
+// NewBeliefHandlers creates belief handlers with injected dependencies
+func NewBeliefHandlers(beliefService *services.BeliefService) *BeliefHandlers {
+	return &BeliefHandlers{
+		beliefService: beliefService,
+	}
+}
+
+// GetAllBeliefIDs returns all belief IDs using cache-first pattern
+func (h *BeliefHandlers) GetAllBeliefIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	beliefIDs, err := beliefService.GetAllIDs(tenantCtx.TenantID)
+	beliefIDs, err := h.beliefService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -39,8 +47,8 @@ func GetAllBeliefIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetBeliefsByIDsHandler returns multiple beliefs by IDs using cache-first pattern
-func GetBeliefsByIDsHandler(c *gin.Context) {
+// GetBeliefsByIDs returns multiple beliefs by IDs using cache-first pattern
+func (h *BeliefHandlers) GetBeliefsByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -58,10 +66,7 @@ func GetBeliefsByIDsHandler(c *gin.Context) {
 		return
 	}
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	beliefs, err := beliefService.GetByIDs(tenantCtx.TenantID, req.BeliefIDs)
+	beliefs, err := h.beliefService.GetByIDs(tenantCtx, req.BeliefIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -73,8 +78,8 @@ func GetBeliefsByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetBeliefByIDHandler returns a specific belief by ID using cache-first pattern
-func GetBeliefByIDHandler(c *gin.Context) {
+// GetBeliefByID returns a specific belief by ID using cache-first pattern
+func (h *BeliefHandlers) GetBeliefByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -87,10 +92,7 @@ func GetBeliefByIDHandler(c *gin.Context) {
 		return
 	}
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	beliefNode, err := beliefService.GetByID(tenantCtx.TenantID, beliefID)
+	beliefNode, err := h.beliefService.GetByID(tenantCtx, beliefID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -104,8 +106,8 @@ func GetBeliefByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, beliefNode)
 }
 
-// GetBeliefBySlugHandler returns a specific belief by slug using cache-first pattern
-func GetBeliefBySlugHandler(c *gin.Context) {
+// GetBeliefBySlug returns a specific belief by slug using cache-first pattern
+func (h *BeliefHandlers) GetBeliefBySlug(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -118,10 +120,7 @@ func GetBeliefBySlugHandler(c *gin.Context) {
 		return
 	}
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	beliefNode, err := beliefService.GetBySlug(tenantCtx.TenantID, slug)
+	beliefNode, err := h.beliefService.GetBySlug(tenantCtx, slug)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -135,8 +134,8 @@ func GetBeliefBySlugHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, beliefNode)
 }
 
-// CreateBeliefHandler creates a new belief
-func CreateBeliefHandler(c *gin.Context) {
+// CreateBelief creates a new belief
+func (h *BeliefHandlers) CreateBelief(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -149,10 +148,7 @@ func CreateBeliefHandler(c *gin.Context) {
 		return
 	}
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	err := beliefService.Create(tenantCtx.TenantID, &belief)
+	err := h.beliefService.Create(tenantCtx, &belief)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -164,8 +160,8 @@ func CreateBeliefHandler(c *gin.Context) {
 	})
 }
 
-// UpdateBeliefHandler updates an existing belief
-func UpdateBeliefHandler(c *gin.Context) {
+// UpdateBelief updates an existing belief
+func (h *BeliefHandlers) UpdateBelief(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -187,10 +183,7 @@ func UpdateBeliefHandler(c *gin.Context) {
 	// Ensure ID matches URL parameter
 	belief.ID = beliefID
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	err := beliefService.Update(tenantCtx.TenantID, &belief)
+	err := h.beliefService.Update(tenantCtx, &belief)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -202,8 +195,8 @@ func UpdateBeliefHandler(c *gin.Context) {
 	})
 }
 
-// DeleteBeliefHandler deletes a belief
-func DeleteBeliefHandler(c *gin.Context) {
+// DeleteBelief deletes a belief
+func (h *BeliefHandlers) DeleteBelief(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -216,10 +209,7 @@ func DeleteBeliefHandler(c *gin.Context) {
 		return
 	}
 
-	beliefRepo := persistence.NewBeliefRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	beliefService := services.NewBeliefService(beliefRepo)
-
-	err := beliefService.Delete(tenantCtx.TenantID, beliefID)
+	err := h.beliefService.Delete(tenantCtx, beliefID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

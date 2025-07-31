@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
-	persistence "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -15,18 +14,27 @@ type ImageFileIDsRequest struct {
 	FileIDs []string `json:"fileIds" binding:"required"`
 }
 
-// GetAllFileIDsHandler returns all imagefile IDs using cache-first pattern
-func GetAllFileIDsHandler(c *gin.Context) {
+// ImageFileHandlers contains all imagefile-related HTTP handlers
+type ImageFileHandlers struct {
+	imageFileService *services.ImageFileService
+}
+
+// NewImageFileHandlers creates imagefile handlers with injected dependencies
+func NewImageFileHandlers(imageFileService *services.ImageFileService) *ImageFileHandlers {
+	return &ImageFileHandlers{
+		imageFileService: imageFileService,
+	}
+}
+
+// GetAllFileIDs returns all imagefile IDs using cache-first pattern
+func (h *ImageFileHandlers) GetAllFileIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	imageFileRepo := persistence.NewImageFileRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	imageFileService := services.NewImageFileService(imageFileRepo)
-
-	fileIDs, err := imageFileService.GetAllIDs(tenantCtx.TenantID)
+	fileIDs, err := h.imageFileService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -38,8 +46,8 @@ func GetAllFileIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetFilesByIDsHandler returns multiple imagefiles by IDs using cache-first pattern
-func GetFilesByIDsHandler(c *gin.Context) {
+// GetFilesByIDs returns multiple imagefiles by IDs using cache-first pattern
+func (h *ImageFileHandlers) GetFilesByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -57,10 +65,7 @@ func GetFilesByIDsHandler(c *gin.Context) {
 		return
 	}
 
-	imageFileRepo := persistence.NewImageFileRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	imageFileService := services.NewImageFileService(imageFileRepo)
-
-	files, err := imageFileService.GetByIDs(tenantCtx.TenantID, req.FileIDs)
+	files, err := h.imageFileService.GetByIDs(tenantCtx, req.FileIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -72,8 +77,8 @@ func GetFilesByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetFileByIDHandler returns a specific imagefile by ID using cache-first pattern
-func GetFileByIDHandler(c *gin.Context) {
+// GetFileByID returns a specific imagefile by ID using cache-first pattern
+func (h *ImageFileHandlers) GetFileByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -86,10 +91,7 @@ func GetFileByIDHandler(c *gin.Context) {
 		return
 	}
 
-	imageFileRepo := persistence.NewImageFileRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	imageFileService := services.NewImageFileService(imageFileRepo)
-
-	fileNode, err := imageFileService.GetByID(tenantCtx.TenantID, fileID)
+	fileNode, err := h.imageFileService.GetByID(tenantCtx, fileID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

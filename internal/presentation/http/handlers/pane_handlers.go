@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -15,18 +14,27 @@ type PaneIDsRequest struct {
 	PaneIDs []string `json:"paneIds" binding:"required"`
 }
 
-// GetAllPaneIDsHandler returns all pane IDs using cache-first pattern
-func GetAllPaneIDsHandler(c *gin.Context) {
+// PaneHandlers contains all pane-related HTTP handlers
+type PaneHandlers struct {
+	paneService *services.PaneService
+}
+
+// NewPaneHandlers creates pane handlers with injected dependencies
+func NewPaneHandlers(paneService *services.PaneService) *PaneHandlers {
+	return &PaneHandlers{
+		paneService: paneService,
+	}
+}
+
+// GetAllPaneIDs returns all pane IDs using cache-first pattern
+func (h *PaneHandlers) GetAllPaneIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	paneRepo := content.NewPaneRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	paneService := services.NewPaneService(paneRepo)
-
-	paneIDs, err := paneService.GetAllIDs(tenantCtx.TenantID)
+	paneIDs, err := h.paneService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -38,8 +46,8 @@ func GetAllPaneIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetPanesByIDsHandler returns multiple panes by IDs using cache-first pattern
-func GetPanesByIDsHandler(c *gin.Context) {
+// GetPanesByIDs returns multiple panes by IDs using cache-first pattern
+func (h *PaneHandlers) GetPanesByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -57,10 +65,7 @@ func GetPanesByIDsHandler(c *gin.Context) {
 		return
 	}
 
-	paneRepo := content.NewPaneRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	paneService := services.NewPaneService(paneRepo)
-
-	panes, err := paneService.GetByIDs(tenantCtx.TenantID, req.PaneIDs)
+	panes, err := h.paneService.GetByIDs(tenantCtx, req.PaneIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -72,8 +77,8 @@ func GetPanesByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetPaneByIDHandler returns a specific pane by ID using cache-first pattern
-func GetPaneByIDHandler(c *gin.Context) {
+// GetPaneByID returns a specific pane by ID using cache-first pattern
+func (h *PaneHandlers) GetPaneByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -86,10 +91,7 @@ func GetPaneByIDHandler(c *gin.Context) {
 		return
 	}
 
-	paneRepo := content.NewPaneRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	paneService := services.NewPaneService(paneRepo)
-
-	paneNode, err := paneService.GetByID(tenantCtx.TenantID, paneID)
+	paneNode, err := h.paneService.GetByID(tenantCtx, paneID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -103,8 +105,8 @@ func GetPaneByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, paneNode)
 }
 
-// GetPaneBySlugHandler returns a specific pane by slug using cache-first pattern
-func GetPaneBySlugHandler(c *gin.Context) {
+// GetPaneBySlug returns a specific pane by slug using cache-first pattern
+func (h *PaneHandlers) GetPaneBySlug(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -117,10 +119,7 @@ func GetPaneBySlugHandler(c *gin.Context) {
 		return
 	}
 
-	paneRepo := content.NewPaneRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	paneService := services.NewPaneService(paneRepo)
-
-	paneNode, err := paneService.GetBySlug(tenantCtx.TenantID, slug)
+	paneNode, err := h.paneService.GetBySlug(tenantCtx, slug)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -134,18 +133,15 @@ func GetPaneBySlugHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, paneNode)
 }
 
-// GetContextPanesHandler returns all context panes using cache-first pattern
-func GetContextPanesHandler(c *gin.Context) {
+// GetContextPanes returns all context panes using cache-first pattern
+func (h *PaneHandlers) GetContextPanes(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	paneRepo := content.NewPaneRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	paneService := services.NewPaneService(paneRepo)
-
-	contextPanes, err := paneService.GetContextPanes(tenantCtx.TenantID)
+	contextPanes, err := h.paneService.GetContextPanes(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

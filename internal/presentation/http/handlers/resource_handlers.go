@@ -6,7 +6,6 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	persistence "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -18,18 +17,27 @@ type ResourceIDsRequest struct {
 	Slugs       []string `json:"slugs,omitempty"`
 }
 
-// GetAllResourceIDsHandler returns all resource IDs using cache-first pattern
-func GetAllResourceIDsHandler(c *gin.Context) {
+// ResourceHandlers contains all resource-related HTTP handlers
+type ResourceHandlers struct {
+	resourceService *services.ResourceService
+}
+
+// NewResourceHandlers creates resource handlers with injected dependencies
+func NewResourceHandlers(resourceService *services.ResourceService) *ResourceHandlers {
+	return &ResourceHandlers{
+		resourceService: resourceService,
+	}
+}
+
+// GetAllResourceIDs returns all resource IDs using cache-first pattern
+func (h *ResourceHandlers) GetAllResourceIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
-	resourceIDs, err := resourceService.GetAllIDs(tenantCtx.TenantID)
+	resourceIDs, err := h.resourceService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -41,8 +49,8 @@ func GetAllResourceIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetResourcesByIDsHandler returns multiple resources by IDs/filters using cache-first pattern
-func GetResourcesByIDsHandler(c *gin.Context) {
+// GetResourcesByIDs returns multiple resources by IDs/filters using cache-first pattern
+func (h *ResourceHandlers) GetResourcesByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -59,12 +67,9 @@ func GetResourcesByIDsHandler(c *gin.Context) {
 	var resources []*content.ResourceNode
 	var err error
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
 	if len(req.ResourceIDs) > 0 || len(req.Categories) > 0 || len(req.Slugs) > 0 {
 		// Multi-filter request
-		resources, err = resourceService.GetByFilters(tenantCtx.TenantID, req.ResourceIDs, req.Categories, req.Slugs)
+		resources, err = h.resourceService.GetByFilters(tenantCtx, req.ResourceIDs, req.Categories, req.Slugs)
 	} else {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one filter (resourceIds, categories, or slugs) must be provided"})
 		return
@@ -81,8 +86,8 @@ func GetResourcesByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetResourceByIDHandler returns a specific resource by ID using cache-first pattern
-func GetResourceByIDHandler(c *gin.Context) {
+// GetResourceByID returns a specific resource by ID using cache-first pattern
+func (h *ResourceHandlers) GetResourceByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -95,10 +100,7 @@ func GetResourceByIDHandler(c *gin.Context) {
 		return
 	}
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
-	resourceNode, err := resourceService.GetByID(tenantCtx.TenantID, resourceID)
+	resourceNode, err := h.resourceService.GetByID(tenantCtx, resourceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -112,8 +114,8 @@ func GetResourceByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resourceNode)
 }
 
-// GetResourceBySlugHandler returns a specific resource by slug using cache-first pattern
-func GetResourceBySlugHandler(c *gin.Context) {
+// GetResourceBySlug returns a specific resource by slug using cache-first pattern
+func (h *ResourceHandlers) GetResourceBySlug(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -126,10 +128,7 @@ func GetResourceBySlugHandler(c *gin.Context) {
 		return
 	}
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
-	resourceNode, err := resourceService.GetBySlug(tenantCtx.TenantID, slug)
+	resourceNode, err := h.resourceService.GetBySlug(tenantCtx, slug)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -143,8 +142,8 @@ func GetResourceBySlugHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resourceNode)
 }
 
-// CreateResourceHandler creates a new resource
-func CreateResourceHandler(c *gin.Context) {
+// CreateResource creates a new resource
+func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -157,10 +156,7 @@ func CreateResourceHandler(c *gin.Context) {
 		return
 	}
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
-	err := resourceService.Create(tenantCtx.TenantID, &resource)
+	err := h.resourceService.Create(tenantCtx, &resource)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -172,8 +168,8 @@ func CreateResourceHandler(c *gin.Context) {
 	})
 }
 
-// UpdateResourceHandler updates an existing resource
-func UpdateResourceHandler(c *gin.Context) {
+// UpdateResource updates an existing resource
+func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -195,10 +191,7 @@ func UpdateResourceHandler(c *gin.Context) {
 	// Ensure ID matches URL parameter
 	resource.ID = resourceID
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
-	err := resourceService.Update(tenantCtx.TenantID, &resource)
+	err := h.resourceService.Update(tenantCtx, &resource)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -210,8 +203,8 @@ func UpdateResourceHandler(c *gin.Context) {
 	})
 }
 
-// DeleteResourceHandler deletes a resource
-func DeleteResourceHandler(c *gin.Context) {
+// DeleteResource deletes a resource
+func (h *ResourceHandlers) DeleteResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -224,10 +217,7 @@ func DeleteResourceHandler(c *gin.Context) {
 		return
 	}
 
-	resourceRepo := persistence.NewResourceRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	resourceService := services.NewResourceService(resourceRepo)
-
-	err := resourceService.Delete(tenantCtx.TenantID, resourceID)
+	err := h.resourceService.Delete(tenantCtx, resourceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

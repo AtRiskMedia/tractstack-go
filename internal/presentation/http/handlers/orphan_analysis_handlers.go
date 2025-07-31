@@ -6,14 +6,24 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
-// GetOrphanAnalysisHandler handles GET /api/v1/admin/orphan-analysis
-func GetOrphanAnalysisHandler(c *gin.Context) {
+// OrphanAnalysisHandlers contains all orphan analysis-related HTTP handlers
+type OrphanAnalysisHandlers struct {
+	orphanAnalysisService *services.OrphanAnalysisService
+}
+
+// NewOrphanAnalysisHandlers creates orphan analysis handlers with injected dependencies
+func NewOrphanAnalysisHandlers(orphanAnalysisService *services.OrphanAnalysisService) *OrphanAnalysisHandlers {
+	return &OrphanAnalysisHandlers{
+		orphanAnalysisService: orphanAnalysisService,
+	}
+}
+
+// GetOrphanAnalysis handles GET /api/v1/admin/orphan-analysis
+func (h *OrphanAnalysisHandlers) GetOrphanAnalysis(c *gin.Context) {
 	// ************** WARNING --> ROUTE NEEDS TO BE PROTECTED
 	// TODO: Add admin authentication middleware to protect this route
 	log.Println("************** WARNING --> ROUTE NEEDS TO BE PROTECTED")
@@ -25,18 +35,11 @@ func GetOrphanAnalysisHandler(c *gin.Context) {
 		return
 	}
 
-	// Create bulk repository for this request
-	db := &database.DB{DB: tenantCtx.Database.Conn}
-	bulkRepo := bulk.NewRepository(db)
-
-	// Create service per-request with tenant's cache manager
-	orphanAnalysisService := services.NewOrphanAnalysisService(bulkRepo)
-
 	// Get client's ETag for cache validation
 	clientETag := c.GetHeader("If-None-Match")
 
-	// Get orphan analysis with async pattern using tenant's cache manager
-	payload, etag, err := orphanAnalysisService.GetOrphanAnalysis(tenantCtx.TenantID, clientETag, tenantCtx.CacheManager)
+	// FIXED: Pass cache manager as 3rd parameter
+	payload, etag, err := h.orphanAnalysisService.GetOrphanAnalysis(tenantCtx, clientETag, tenantCtx.CacheManager)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
