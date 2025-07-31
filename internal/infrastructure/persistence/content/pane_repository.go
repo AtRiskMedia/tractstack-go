@@ -456,3 +456,21 @@ func (r *PaneRepository) extractPaneDataFromOptions(pane *content.PaneNode) {
 		}
 	}
 }
+
+func (r *PaneRepository) FindContext(tenantID string) ([]*content.PaneNode, error) {
+	// Get all panes first
+	allPanes, err := r.FindAll(tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter for context panes
+	var contextPanes []*content.PaneNode
+	for _, pane := range allPanes {
+		if pane.IsContextPane {
+			contextPanes = append(contextPanes, pane)
+		}
+	}
+
+	return contextPanes, nil
+}

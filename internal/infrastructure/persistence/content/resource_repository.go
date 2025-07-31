@@ -321,3 +321,124 @@ func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, 
 
 	return ids, rows.Err()
 }
+
+// FindByIDs returns multiple resources by IDs (cache-first with bulk loading)
+func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*content.ResourceNode, error) {
+	var result []*content.ResourceNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if resource, found := r.cache.GetResource(tenantID, id); found {
+			result = append(result, resource)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	if len(missingIDs) > 0 {
+		missingResources, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, resource := range missingResources {
+			r.cache.SetResource(tenantID, resource)
+			result = append(result, resource)
+		}
+	}
+
+	return result, nil
+}
+
+// FindByFilters returns resources by multiple filter criteria (cache-first for IDs, then DB for complex filters)
+func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
+	// This implementation will build a dynamic query as caching all permutations of filters is impractical.
+	// However, we can still check the cache for any resources requested directly by ID.
+
+	resourceMap := make(map[string]*content.ResourceNode)
+	var queryIDs []string
+
+	// First, check the cache for any resources requested by ID
+	for _, id := range ids {
+		if resource, found := r.cache.GetResource(tenantID, id); found {
+			resourceMap[id] = resource
+		} else {
+			queryIDs = append(queryIDs, id)
+		}
+	}
+
+	// Build a dynamic query for any remaining filters or cache misses
+	var queryBuilder strings.Builder
+	queryBuilder.WriteString("SELECT id, title, slug, category_slug, oneliner, action_lisp, options_payload FROM resources WHERE 1=1")
+	args := make([]interface{}, 0)
+
+	// Add IDs that were not found in cache
+	if len(queryIDs) > 0 {
+		queryBuilder.WriteString(" AND id IN (?" + strings.Repeat(",?", len(queryIDs)-1) + ")")
+		for _, id := range queryIDs {
+			args = append(args, id)
+		}
+	}
+
+	if len(categories) > 0 {
+		queryBuilder.WriteString(" AND category_slug IN (?" + strings.Repeat(",?", len(categories)-1) + ")")
+		for _, category := range categories {
+			args = append(args, category)
+		}
+	}
+
+	if len(slugs) > 0 {
+		queryBuilder.WriteString(" AND slug IN (?" + strings.Repeat(",?", len(slugs)-1) + ")")
+		for _, slug := range slugs {
+			args = append(args, slug)
+		}
+	}
+
+	// Only run the query if there are categories, slugs, or cache-missed IDs to fetch
+	if len(args) > 0 {
+		rows, err := r.db.Query(queryBuilder.String(), args...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to query resources by filters: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var resource content.ResourceNode
+			var categorySlug, actionLisp sql.NullString
+			var optionsPayloadStr string
+
+			if err := rows.Scan(&resource.ID, &resource.Title, &resource.Slug, &categorySlug, &resource.OneLiner, &actionLisp, &optionsPayloadStr); err != nil {
+				return nil, fmt.Errorf("failed to scan filtered resource: %w", err)
+			}
+
+			if err := json.Unmarshal([]byte(optionsPayloadStr), &resource.OptionsPayload); err != nil {
+				continue // Skip malformed records
+			}
+
+			if categorySlug.Valid {
+				resource.CategorySlug = &categorySlug.String
+			}
+			if actionLisp.Valid {
+				resource.ActionLisp = actionLisp.String
+			}
+
+			resource.NodeType = "Resource"
+			if _, exists := resourceMap[resource.ID]; !exists {
+				resourceMap[resource.ID] = &resource
+				// Also add the newly fetched resource to the cache
+				r.cache.SetResource(tenantID, &resource)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Convert map to slice for the final result
+	finalResources := make([]*content.ResourceNode, 0, len(resourceMap))
+	for _, resource := range resourceMap {
+		finalResources = append(finalResources, resource)
+	}
+
+	return finalResources, nil
+}
