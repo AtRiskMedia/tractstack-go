@@ -90,7 +90,7 @@ func (ws *WarmingService) WarmTenant(tenantID string) error {
 	ws.reporter.LogSuccess("Content Map Warmed")
 
 	ws.reporter.LogStage("Warming All Beliefs")
-	if err := ws.warmAllBeliefs(tenantID, ctx); err != nil {
+	if err := ws.warmAllBeliefs(tenantID); err != nil {
 		return fmt.Errorf("beliefs warming failed: %w", err)
 	}
 	ws.reporter.LogSuccess("Beliefs Warmed")
@@ -118,7 +118,7 @@ func (ws *WarmingService) warmContentMap(tenantID string) error {
 }
 
 // warmAllBeliefs loads all beliefs into cache (foundation for belief registry)
-func (ws *WarmingService) warmAllBeliefs(tenantID string, ctx *tenant.Context) error {
+func (ws *WarmingService) warmAllBeliefs(tenantID string) error {
 	// The call is now valid because ws.beliefRepo is the concrete type
 	_, err := ws.beliefRepo.FindAll(tenantID)
 	if err != nil {
@@ -131,6 +131,7 @@ func (ws *WarmingService) warmAllBeliefs(tenantID string, ctx *tenant.Context) e
 func (ws *WarmingService) warmHomeStoryfragment(tenantID string, ctx *tenant.Context) error {
 	homeSlug := ws.getHomeSlug(ctx)
 	ws.reporter.LogInfo("Home slug identified as '%s'", homeSlug)
+	// TODO: not yet implemented
 	ws.reporter.LogWarning("Home storyfragment warming not yet implemented")
 	return nil
 }

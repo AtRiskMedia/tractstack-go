@@ -398,3 +398,34 @@ func (r *StoryFragmentRepository) getAllPaneRelationships(storyFragmentIDs []str
 
 	return relationships, rows.Err()
 }
+
+// FindByIDs returns multiple storyfragments by IDs (cache-first with bulk loading)
+func (r *StoryFragmentRepository) FindByIDs(tenantID string, ids []string) ([]*content.StoryFragmentNode, error) {
+	var result []*content.StoryFragmentNode
+	var missingIDs []string
+
+	// Check cache for each requested ID
+	for _, id := range ids {
+		if storyFragment, found := r.cache.GetStoryFragment(tenantID, id); found {
+			result = append(result, storyFragment)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	// If any IDs were not found in the cache, load them from the database
+	if len(missingIDs) > 0 {
+		missingStoryFragments, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add the newly loaded story fragments to the cache and the final result set
+		for _, storyFragment := range missingStoryFragments {
+			r.cache.SetStoryFragment(tenantID, storyFragment)
+			result = append(result, storyFragment)
+		}
+	}
+
+	return result, nil
+}

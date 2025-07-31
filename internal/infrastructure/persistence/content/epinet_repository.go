@@ -304,3 +304,31 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 
 	return nil
 }
+
+// FindByIDs returns multiple epinets by IDs (cache-first with bulk loading)
+func (r *EpinetRepository) FindByIDs(tenantID string, ids []string) ([]*content.EpinetNode, error) {
+	var result []*content.EpinetNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if epinet, found := r.cache.GetEpinet(tenantID, id); found {
+			result = append(result, epinet)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	if len(missingIDs) > 0 {
+		missingEpinets, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, epinet := range missingEpinets {
+			r.cache.SetEpinet(tenantID, epinet)
+			result = append(result, epinet)
+		}
+	}
+
+	return result, nil
+}

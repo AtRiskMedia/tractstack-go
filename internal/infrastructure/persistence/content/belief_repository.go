@@ -248,3 +248,64 @@ func (r *BeliefRepository) getIDBySlugFromDB(slug string) (string, error) {
 
 	return id, nil
 }
+
+// ./internal/infrastructure/persistence/content/belief_repository.go
+
+// FindByIDs returns multiple beliefs by IDs (cache-first with bulk loading)
+func (r *BeliefRepository) FindByIDs(tenantID string, ids []string) ([]*content.BeliefNode, error) {
+	var result []*content.BeliefNode
+	var missingIDs []string
+
+	// Check cache for each requested ID
+	for _, id := range ids {
+		if belief, found := r.cache.GetBelief(tenantID, id); found {
+			result = append(result, belief)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	// If any IDs were not found in the cache, load them from the database
+	if len(missingIDs) > 0 {
+		missingBeliefs, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add the newly loaded beliefs to the cache and the final result set
+		for _, belief := range missingBeliefs {
+			r.cache.SetBelief(tenantID, belief)
+			result = append(result, belief)
+		}
+	}
+
+	return result, nil
+}
+
+// FindIDBySlug returns a belief ID by its slug (cache-first)
+func (r *BeliefRepository) FindIDBySlug(tenantID, slug string) (string, error) {
+	// Check cache's slug-to-ID map first
+	if id, found := r.cache.GetContentBySlug(tenantID, "belief:"+slug); found {
+		return id, nil
+	}
+
+	// Cache miss, query the database
+	id, err := r.getIDBySlugFromDB(slug)
+	if err != nil {
+		return "", err
+	}
+	if id == "" {
+		return "", nil // Not found in DB either
+	}
+
+	// To ensure the main object cache is populated for future GetByID calls,
+	// we can trigger a full load here.
+	_, err = r.FindByID(tenantID, id)
+	if err != nil {
+		// Log the error but still return the ID since we successfully found it.
+		// The service layer can decide how to handle a cache-warming failure.
+		return id, fmt.Errorf("found ID '%s' but failed to warm belief object in cache: %w", id, err)
+	}
+
+	return id, nil
+}

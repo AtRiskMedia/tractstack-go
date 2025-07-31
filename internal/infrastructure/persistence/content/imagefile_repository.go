@@ -216,3 +216,34 @@ func (r *ImageFileRepository) loadMultipleFromDB(ids []string) ([]*content.Image
 
 	return imageFiles, rows.Err()
 }
+
+// FindByIDs returns multiple image files by IDs (cache-first with bulk loading)
+func (r *ImageFileRepository) FindByIDs(tenantID string, ids []string) ([]*content.ImageFileNode, error) {
+	var result []*content.ImageFileNode
+	var missingIDs []string
+
+	// Check cache for each requested ID
+	for _, id := range ids {
+		if imageFile, found := r.cache.GetFile(tenantID, id); found {
+			result = append(result, imageFile)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	// If any IDs were not found in the cache, load them from the database
+	if len(missingIDs) > 0 {
+		missingFiles, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add the newly loaded files to the cache and the final result set
+		for _, imageFile := range missingFiles {
+			r.cache.SetFile(tenantID, imageFile)
+			result = append(result, imageFile)
+		}
+	}
+
+	return result, nil
+}

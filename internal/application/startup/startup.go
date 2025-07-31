@@ -27,14 +27,24 @@ import (
 func Initialize() error {
 	setupLogging()
 
-	log.Println("=== TractStack Go Application Startup ===")
 	start := time.Now().UTC()
 
 	ctx, cancelBackgroundTasks := context.WithCancel(context.Background())
 	defer cancelBackgroundTasks()
 
+	log.Println("\033[32m" + `
+
+ ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄
+  ██  ██ ██ ▀▀ ██ ██ ▀▀ ██ ██ ▀▀ ██ ▀▀ ██ ██ ▀▀ ██ ██
+  ██  ██▀█▄ ██▀██ ██ ▄▄ ██ ▀▀▀██ ██ ██▀██ ██ ▄▄ ██▀█▄
+  ██  ██ ██ ██▄██ ██▄██ ██ ██▄██ ██ ██▄██ ██▄██ ██ ██
+   ▀▀                   ▀▀       ▀▀             ▀▀ ▀▀▀
+` + "\033[97m" + `
+  made by At Risk Media
+` + "\033[0m")
+
 	// Step 1: Initialize tenant system
-	log.Println("Initializing tenant system...")
+	log.Println("Initializing...")
 	tenantManager := tenant.NewManager()
 
 	// Step 2: Load tenant registry to discover all tenants
@@ -89,8 +99,8 @@ func Initialize() error {
 		}
 	}
 
-	// Step 7: Initialize application services
-	log.Println("Initializing application services...")
+	// Step 7: Initialize application services THAT ARE TRUE SINGLETONS
+	log.Println("Initializing singleton application services...")
 	defaultCtx, err := tenantManager.NewContextFromID("default")
 	if err != nil {
 		return fmt.Errorf("failed to create bootstrap context for default tenant: %w", err)
@@ -101,16 +111,14 @@ func Initialize() error {
 	bulkRepo := bulk.NewRepository(bootstrapDB)
 	contentMapService := services.NewContentMapService(bulkRepo)
 
-	// Instantiate the BeliefRepository
-	beliefRepo := content.NewBeliefRepository(bootstrapDB.DB, cacheManager)
-
-	log.Println("✓ Application services initialized.")
+	log.Println("✓ Singleton application services initialized.")
 
 	// Step 8: Initialize cache warming
 	log.Println("Initializing cache warming...")
 	reporter := cleanup.NewReporter(cacheManager)
-	// Pass the concrete beliefRepo to the WarmingService constructor
-	warmingService := services.NewWarmingService(cacheManager, bulkRepo, contentMapService, nil, beliefRepo, reporter)
+	// Warming service creates its own tenant contexts, but needs one repo instance for initialization.
+	beliefRepoForWarming := content.NewBeliefRepository(bootstrapDB.DB, cacheManager)
+	warmingService := services.NewWarmingService(cacheManager, bulkRepo, contentMapService, nil, beliefRepoForWarming, reporter)
 	if err := warmingService.WarmAllTenants(); err != nil {
 		log.Printf("WARNING: Cache warming failed: %v", err)
 	}

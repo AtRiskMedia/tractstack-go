@@ -218,3 +218,34 @@ func (r *MenuRepository) loadMultipleFromDB(ids []string) ([]*content.MenuNode, 
 
 	return menus, rows.Err()
 }
+
+// FindByIDs returns multiple menus by IDs (cache-first with bulk loading)
+func (r *MenuRepository) FindByIDs(tenantID string, ids []string) ([]*content.MenuNode, error) {
+	var result []*content.MenuNode
+	var missingIDs []string
+
+	// Check cache for each requested ID
+	for _, id := range ids {
+		if menu, found := r.cache.GetMenu(tenantID, id); found {
+			result = append(result, menu)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	// If any IDs were not found in the cache, load them from the database
+	if len(missingIDs) > 0 {
+		missingMenus, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Add the newly loaded menus to the cache and the final result set
+		for _, menu := range missingMenus {
+			r.cache.SetMenu(tenantID, menu)
+			result = append(result, menu)
+		}
+	}
+
+	return result, nil
+}
