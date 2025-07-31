@@ -11,9 +11,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/container"
-	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/cleanup"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/server"
 	"github.com/gin-gonic/gin"
@@ -65,7 +63,6 @@ func Initialize() error {
 
 	// Step 3: Pre-activate inactive tenants only
 	log.Println("Starting tenant pre-activation...")
-	// FIXED: Use tenantManager method instead of undefined function
 	if err := tenantManager.PreActivateAllTenants(); err != nil {
 		return fmt.Errorf("tenant pre-activation failed: %w", err)
 	}
@@ -86,7 +83,6 @@ func Initialize() error {
 
 	// Step 6: Initialize cache system
 	log.Println("Initializing cache system...")
-	// FIXED: Use tenant manager's cache manager instead of creating a separate one
 	cacheManager := tenantManager.GetCacheManager()
 
 	for tenantID, tenantInfo := range registry.Tenants {
@@ -101,35 +97,33 @@ func Initialize() error {
 	appContainer := container.NewContainer(tenantManager, cacheManager)
 	log.Println("✓ Dependency injection container created with singleton services.")
 
-	// Step 8: Initialize application services (SIMPLIFIED - no extra service creation)
+	// Step 8: Initialize application services (handled by container)
 	log.Println("Initializing singleton application services...")
-	// FIXED: Services are created in container, no need to create separately
 	log.Println("✓ Singleton application services initialized via container.")
 
-	// Step 9: Initialize cache warming (SIMPLIFIED)
+	// Step 9: Initialize cache warming
 	log.Println("Initializing cache warming...")
 	reporter := cleanup.NewReporter(cacheManager)
 
-	// FIXED: Use container services with correct signatures
 	warmingService := appContainer.WarmingService
 	contentMapService := appContainer.ContentMapService
 	beliefRegistryService := appContainer.BeliefRegistryService
 
-	// FIXED: Create a simple method that uses tenant manager contexts
-	if err := warmAllTenantsWithManager(warmingService, tenantManager, cacheManager, contentMapService, beliefRegistryService, reporter); err != nil {
+	if err := warmingService.WarmAllTenants(tenantManager, cacheManager, contentMapService, beliefRegistryService, reporter); err != nil {
 		log.Printf("WARNING: Cache warming failed: %v", err)
 	}
 
 	// Step 10: Start background cleanup worker
 	log.Println("Starting background cleanup worker...")
+	// CORRECT: Create the config struct from the central config package.
 	cleanupConfig := cleanup.NewConfig()
+	// CORRECT: Inject the config into the worker's constructor.
 	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig)
 	go cleanupWorker.Start(ctx)
 	log.Println("✓ Background cleanup worker started.")
 
 	// Step 11: Start HTTP server
 	log.Println("Starting HTTP server...")
-	// FIXED: Use os.Getenv instead of undefined config.GetEnv
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -154,7 +148,6 @@ func Initialize() error {
 	cancelBackgroundTasks()
 
 	// Stop server
-	// FIXED: Pass context to Stop method (it requires context.Context parameter)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := httpServer.Stop(shutdownCtx); err != nil {
@@ -175,60 +168,8 @@ func Initialize() error {
 
 // setupLogging configures application logging
 func setupLogging() {
-	// FIXED: Use os.Getenv instead of undefined config.GetEnv
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-
-	// Configure log output
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
-}
-
-// warmAllTenantsWithManager is a helper to warm all tenants using tenant manager contexts
-func warmAllTenantsWithManager(warmingService *services.WarmingService, tenantManager *tenant.Manager, cacheManager *manager.Manager, contentMapService *services.ContentMapService, beliefRegistryService *services.BeliefRegistryService, reporter *cleanup.Reporter) error {
-	start := time.Now()
-
-	// Get active tenants
-	registry, err := tenant.LoadTenantRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to load tenant registry: %w", err)
-	}
-
-	activeTenants := make([]string, 0)
-	for tenantID, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status == "active" {
-			activeTenants = append(activeTenants, tenantID)
-		}
-	}
-
-	reporter.LogHeader(fmt.Sprintf("Cache Warming for %d Tenants", len(activeTenants)))
-
-	var successCount int
-	for _, tenantID := range activeTenants {
-		// Create proper tenant context using tenant manager
-		tenantCtx, err := tenantManager.NewContextFromID(tenantID)
-		if err != nil {
-			reporter.LogError(fmt.Sprintf("Failed to create context for tenant %s", tenantID), err)
-			continue
-		}
-
-		if err := warmingService.WarmTenant(tenantCtx, tenantID, cacheManager, contentMapService, beliefRegistryService, reporter); err != nil {
-			reporter.LogError(fmt.Sprintf("Failed to warm tenant %s", tenantID), err)
-			tenantCtx.Close()
-			continue
-		}
-
-		tenantCtx.Close()
-		successCount++
-	}
-
-	duration := time.Since(start)
-	reporter.LogSubHeader(fmt.Sprintf("Cache Warming Completed in %v", duration))
-	reporter.LogSuccess("%d/%d tenants warmed successfully", successCount, len(activeTenants))
-
-	if successCount < len(activeTenants) {
-		return fmt.Errorf("warming failed for %d tenants", len(activeTenants)-successCount)
-	}
-
-	return nil
 }

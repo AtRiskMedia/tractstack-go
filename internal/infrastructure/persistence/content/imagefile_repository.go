@@ -39,49 +39,55 @@ func (r *ImageFileRepository) FindByID(tenantID, id string) (*content.ImageFileN
 	return imageFile, nil
 }
 
+// FindAll retrieves all imagefiles for a tenant, employing a cache-first strategy.
 func (r *ImageFileRepository) FindAll(tenantID string) ([]*content.ImageFileNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllFileIDs(tenantID); found {
-		var imageFiles []*content.ImageFileNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if imageFile, found := r.cache.GetFile(tenantID, id); found {
-				imageFiles = append(imageFiles, imageFile)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, imageFile := range missing {
-				r.cache.SetFile(tenantID, imageFile)
-				imageFiles = append(imageFiles, imageFile)
-			}
-		}
-
-		return imageFiles, nil
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	imageFiles, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.ImageFileNode{}, nil
 	}
 
-	for _, imageFile := range imageFiles {
-		r.cache.SetFile(tenantID, imageFile)
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllFileIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
+func (r *ImageFileRepository) FindByIDs(tenantID string, ids []string) ([]*content.ImageFileNode, error) {
+	var result []*content.ImageFileNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if imageFile, found := r.cache.GetFile(tenantID, id); found {
+			result = append(result, imageFile)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
 	}
 
-	return imageFiles, nil
+	if len(missingIDs) > 0 {
+		missingFiles, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, imageFile := range missingFiles {
+			r.cache.SetFile(tenantID, imageFile)
+			result = append(result, imageFile)
+		}
+	}
+
+	return result, nil
 }
 
 func (r *ImageFileRepository) Store(tenantID string, imageFile *content.ImageFileNode) error {
@@ -140,11 +146,7 @@ func (r *ImageFileRepository) loadAllIDsFromDB() ([]string, error) {
 		fileIDs = append(fileIDs, id)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return fileIDs, nil
+	return fileIDs, rows.Err()
 }
 
 func (r *ImageFileRepository) loadFromDB(id string) (*content.ImageFileNode, error) {
@@ -215,35 +217,4 @@ func (r *ImageFileRepository) loadMultipleFromDB(ids []string) ([]*content.Image
 	}
 
 	return imageFiles, rows.Err()
-}
-
-// FindByIDs returns multiple image files by IDs (cache-first with bulk loading)
-func (r *ImageFileRepository) FindByIDs(tenantID string, ids []string) ([]*content.ImageFileNode, error) {
-	var result []*content.ImageFileNode
-	var missingIDs []string
-
-	// Check cache for each requested ID
-	for _, id := range ids {
-		if imageFile, found := r.cache.GetFile(tenantID, id); found {
-			result = append(result, imageFile)
-		} else {
-			missingIDs = append(missingIDs, id)
-		}
-	}
-
-	// If any IDs were not found in the cache, load them from the database
-	if len(missingIDs) > 0 {
-		missingFiles, err := r.loadMultipleFromDB(missingIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		// Add the newly loaded files to the cache and the final result set
-		for _, imageFile := range missingFiles {
-			r.cache.SetFile(tenantID, imageFile)
-			result = append(result, imageFile)
-		}
-	}
-
-	return result, nil
 }

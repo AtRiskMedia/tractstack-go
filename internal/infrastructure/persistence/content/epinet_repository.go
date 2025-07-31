@@ -40,49 +40,55 @@ func (r *EpinetRepository) FindByID(tenantID, id string) (*content.EpinetNode, e
 	return epinet, nil
 }
 
+// FindAll retrieves all epinets for a tenant, employing a cache-first strategy.
 func (r *EpinetRepository) FindAll(tenantID string) ([]*content.EpinetNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllEpinetIDs(tenantID); found {
-		var epinets []*content.EpinetNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if epinet, found := r.cache.GetEpinet(tenantID, id); found {
-				epinets = append(epinets, epinet)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, epinet := range missing {
-				r.cache.SetEpinet(tenantID, epinet)
-				epinets = append(epinets, epinet)
-			}
-		}
-
-		return epinets, nil
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
-
-	epinets, err := r.loadMultipleFromDB(ids)
-	if err != nil {
-		return nil, err
+	if len(ids) == 0 {
+		return []*content.EpinetNode{}, nil
 	}
 
-	for _, epinet := range epinets {
-		r.cache.SetEpinet(tenantID, epinet)
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllEpinetIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
+func (r *EpinetRepository) FindByIDs(tenantID string, ids []string) ([]*content.EpinetNode, error) {
+	var result []*content.EpinetNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if epinet, found := r.cache.GetEpinet(tenantID, id); found {
+			result = append(result, epinet)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
 	}
 
-	return epinets, nil
+	if len(missingIDs) > 0 {
+		missingEpinets, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, epinet := range missingEpinets {
+			r.cache.SetEpinet(tenantID, epinet)
+			result = append(result, epinet)
+		}
+	}
+
+	return result, nil
 }
 
 func (r *EpinetRepository) Store(tenantID string, epinet *content.EpinetNode) error {
@@ -143,9 +149,10 @@ func (r *EpinetRepository) loadAllIDsFromDB() ([]string, error) {
 		ids = append(ids, id)
 	}
 
-	return ids, nil
+	return ids, rows.Err()
 }
 
+// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *EpinetRepository) loadFromDB(id string) (*content.EpinetNode, error) {
 	query := `SELECT id, title, options_payload FROM epinets WHERE id = ?`
 
@@ -210,7 +217,7 @@ func (r *EpinetRepository) loadMultipleFromDB(ids []string) ([]*content.EpinetNo
 		epinets = append(epinets, &epinet)
 	}
 
-	return epinets, nil
+	return epinets, rows.Err()
 }
 
 func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optionsPayloadStr string) error {
@@ -303,32 +310,4 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 	}
 
 	return nil
-}
-
-// FindByIDs returns multiple epinets by IDs (cache-first with bulk loading)
-func (r *EpinetRepository) FindByIDs(tenantID string, ids []string) ([]*content.EpinetNode, error) {
-	var result []*content.EpinetNode
-	var missingIDs []string
-
-	for _, id := range ids {
-		if epinet, found := r.cache.GetEpinet(tenantID, id); found {
-			result = append(result, epinet)
-		} else {
-			missingIDs = append(missingIDs, id)
-		}
-	}
-
-	if len(missingIDs) > 0 {
-		missingEpinets, err := r.loadMultipleFromDB(missingIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, epinet := range missingEpinets {
-			r.cache.SetEpinet(tenantID, epinet)
-			result = append(result, epinet)
-		}
-	}
-
-	return result, nil
 }

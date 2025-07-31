@@ -19,15 +19,17 @@ func NewEpinetService() *EpinetService {
 	return &EpinetService{}
 }
 
-// GetAllIDs returns all epinet IDs for a tenant (cache-first)
+// GetAllIDs returns all epinet IDs for a tenant by leveraging the robust repository.
 func (s *EpinetService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	epinetRepo := tenantCtx.EpinetRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
 	epinets, err := epinetRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all epinets: %w", err)
+		return nil, fmt.Errorf("failed to get all epinets from repository: %w", err)
 	}
 
+	// Extract IDs from the full objects.
 	ids := make([]string, len(epinets))
 	for i, epinet := range epinets {
 		ids[i] = epinet.ID
@@ -36,7 +38,7 @@ func (s *EpinetService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	return ids, nil
 }
 
-// GetByID returns an epinet by ID (cache-first)
+// GetByID returns an epinet by ID (cache-first via repository)
 func (s *EpinetService) GetByID(tenantCtx *tenant.Context, id string) (*content.EpinetNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("epinet ID cannot be empty")
@@ -51,7 +53,7 @@ func (s *EpinetService) GetByID(tenantCtx *tenant.Context, id string) (*content.
 	return epinet, nil
 }
 
-// GetByIDs returns multiple epinets by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple epinets by IDs (cache-first with bulk loading via repository)
 func (s *EpinetService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.EpinetNode, error) {
 	if len(ids) == 0 {
 		return []*content.EpinetNode{}, nil
@@ -60,7 +62,7 @@ func (s *EpinetService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*co
 	epinetRepo := tenantCtx.EpinetRepo()
 	epinets, err := epinetRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get epinets by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get epinets by IDs from repository: %w", err)
 	}
 
 	return epinets, nil

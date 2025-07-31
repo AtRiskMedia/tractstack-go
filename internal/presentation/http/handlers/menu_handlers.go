@@ -15,6 +15,22 @@ type MenuIDsRequest struct {
 	MenuIDs []string `json:"menuIds" binding:"required"`
 }
 
+// CreateMenuRequest defines the structure for creating a new menu.
+// CORRECTED: OptionsPayload is now a slice of MenuLink pointers.
+type CreateMenuRequest struct {
+	Title          string              `json:"title" binding:"required"`
+	Theme          string              `json:"theme" binding:"required"`
+	OptionsPayload []*content.MenuLink `json:"optionsPayload" binding:"required"`
+}
+
+// UpdateMenuRequest defines the structure for updating an existing menu.
+// CORRECTED: OptionsPayload is now a slice of MenuLink pointers.
+type UpdateMenuRequest struct {
+	Title          string              `json:"title" binding:"required"`
+	Theme          string              `json:"theme" binding:"required"`
+	OptionsPayload []*content.MenuLink `json:"optionsPayload" binding:"required"`
+}
+
 // MenuHandlers contains all menu-related HTTP handlers
 type MenuHandlers struct {
 	menuService *services.MenuService
@@ -114,14 +130,19 @@ func (h *MenuHandlers) CreateMenu(c *gin.Context) {
 		return
 	}
 
-	var menu content.MenuNode
-	if err := c.ShouldBindJSON(&menu); err != nil {
+	var req CreateMenuRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
 
-	err := h.menuService.Create(tenantCtx, &menu)
-	if err != nil {
+	menu := &content.MenuNode{
+		Title:          req.Title,
+		Theme:          req.Theme,
+		OptionsPayload: req.OptionsPayload,
+	}
+
+	if err := h.menuService.Create(tenantCtx, menu); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -146,17 +167,20 @@ func (h *MenuHandlers) UpdateMenu(c *gin.Context) {
 		return
 	}
 
-	var menu content.MenuNode
-	if err := c.ShouldBindJSON(&menu); err != nil {
+	var req UpdateMenuRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
 
-	// Ensure ID matches URL parameter
-	menu.ID = menuID
+	menu := &content.MenuNode{
+		ID:             menuID,
+		Title:          req.Title,
+		Theme:          req.Theme,
+		OptionsPayload: req.OptionsPayload,
+	}
 
-	err := h.menuService.Update(tenantCtx, &menu)
-	if err != nil {
+	if err := h.menuService.Update(tenantCtx, menu); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -181,8 +205,7 @@ func (h *MenuHandlers) DeleteMenu(c *gin.Context) {
 		return
 	}
 
-	err := h.menuService.Delete(tenantCtx, menuID)
-	if err != nil {
+	if err := h.menuService.Delete(tenantCtx, menuID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

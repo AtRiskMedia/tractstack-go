@@ -19,15 +19,17 @@ func NewTractStackService() *TractStackService {
 	return &TractStackService{}
 }
 
-// GetAllIDs returns all tractstack IDs for a tenant (cache-first)
+// GetAllIDs returns all tractstack IDs for a tenant by leveraging the robust repository.
 func (s *TractStackService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	tractStackRepo := tenantCtx.TractStackRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
 	tractStacks, err := tractStackRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all tractstacks: %w", err)
+		return nil, fmt.Errorf("failed to get all tractstacks from repository: %w", err)
 	}
 
+	// Extract IDs from the full objects.
 	ids := make([]string, len(tractStacks))
 	for i, tractStack := range tractStacks {
 		ids[i] = tractStack.ID
@@ -36,7 +38,7 @@ func (s *TractStackService) GetAllIDs(tenantCtx *tenant.Context) ([]string, erro
 	return ids, nil
 }
 
-// GetByID returns a tractstack by ID (cache-first)
+// GetByID returns a tractstack by ID (cache-first via repository)
 func (s *TractStackService) GetByID(tenantCtx *tenant.Context, id string) (*content.TractStackNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("tractstack ID cannot be empty")
@@ -51,7 +53,7 @@ func (s *TractStackService) GetByID(tenantCtx *tenant.Context, id string) (*cont
 	return tractStack, nil
 }
 
-// GetByIDs returns multiple tractstacks by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple tractstacks by IDs (cache-first with bulk loading via repository)
 func (s *TractStackService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.TractStackNode, error) {
 	if len(ids) == 0 {
 		return []*content.TractStackNode{}, nil
@@ -60,13 +62,13 @@ func (s *TractStackService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([
 	tractStackRepo := tenantCtx.TractStackRepo()
 	tractStacks, err := tractStackRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get tractstacks by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get tractstacks by IDs from repository: %w", err)
 	}
 
 	return tractStacks, nil
 }
 
-// GetBySlug returns a tractstack by slug (cache-first)
+// GetBySlug returns a tractstack by slug (cache-first via repository)
 func (s *TractStackService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.TractStackNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("tractstack slug cannot be empty")

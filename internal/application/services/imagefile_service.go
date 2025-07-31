@@ -19,15 +19,17 @@ func NewImageFileService() *ImageFileService {
 	return &ImageFileService{}
 }
 
-// GetAllIDs returns all imagefile IDs for a tenant (cache-first)
+// GetAllIDs returns all imagefile IDs for a tenant by leveraging the robust repository.
 func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	imageFileRepo := tenantCtx.ImageFileRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
 	imageFiles, err := imageFileRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all imagefiles: %w", err)
+		return nil, fmt.Errorf("failed to get all imagefiles from repository: %w", err)
 	}
 
+	// Extract IDs from the full objects.
 	ids := make([]string, len(imageFiles))
 	for i, imageFile := range imageFiles {
 		ids[i] = imageFile.ID
@@ -36,7 +38,7 @@ func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error
 	return ids, nil
 }
 
-// GetByID returns an imagefile by ID (cache-first)
+// GetByID returns an imagefile by ID (cache-first via repository)
 func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*content.ImageFileNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("imagefile ID cannot be empty")
@@ -51,7 +53,7 @@ func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*conte
 	return imageFile, nil
 }
 
-// GetByIDs returns multiple imagefiles by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple imagefiles by IDs (cache-first with bulk loading via repository)
 func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ImageFileNode, error) {
 	if len(ids) == 0 {
 		return []*content.ImageFileNode{}, nil
@@ -60,7 +62,7 @@ func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]
 	imageFileRepo := tenantCtx.ImageFileRepo()
 	imageFiles, err := imageFileRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get imagefiles by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get imagefiles by IDs from repository: %w", err)
 	}
 
 	return imageFiles, nil

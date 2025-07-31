@@ -48,12 +48,11 @@ type PaneNode struct {
 }
 
 type MenuNode struct {
-	ID             string         `json:"id"`
-	Title          string         `json:"title"`
-	NodeType       string         `json:"nodeType"`
-	Theme          string         `json:"theme"`
-	OptionsPayload map[string]any `json:"optionsPayload,omitempty"`
-	Links          []*MenuLink    `json:"links,omitempty"`
+	ID             string      `json:"id"`
+	Title          string      `json:"title"`
+	NodeType       string      `json:"nodeType"`
+	Theme          string      `json:"theme"`
+	OptionsPayload []*MenuLink `json:"optionsPayload,omitempty"`
 }
 
 type MenuLink struct {

@@ -17,7 +17,7 @@ type Worker struct {
 	config   *Config
 }
 
-// NewWorker creates a new cleanup worker
+// NewWorker creates a new cleanup worker with injected configuration
 func NewWorker(cache interfaces.Cache, detector *tenant.Detector, config *Config) *Worker {
 	return &Worker{
 		cache:    cache,
@@ -26,7 +26,7 @@ func NewWorker(cache interfaces.Cache, detector *tenant.Detector, config *Config
 	}
 }
 
-// Start begins the cleanup worker routine
+// Start begins the cleanup worker routine, using the configured interval
 func (w *Worker) Start(ctx context.Context) {
 	ticker := time.NewTicker(w.config.CleanupInterval)
 	defer ticker.Stop()
@@ -48,16 +48,16 @@ func (w *Worker) Start(ctx context.Context) {
 // performCleanup executes cleanup for all active tenants
 func (w *Worker) performCleanup(ctx context.Context) {
 	start := time.Now()
+	reporter := NewReporter(w.cache) // <-- CREATE REPORTER INSTANCE
 
-	// Get all active tenants from registry
 	tenants, err := w.getActiveTenants()
 	if err != nil {
-		log.Printf("Cache cleanup failed to get active tenants: %v", err)
+		reporter.LogError("Cache cleanup failed to get active tenants", err)
 		return
 	}
 
 	if w.config.VerboseReporting {
-		log.Printf("=== CACHE CLEANUP STARTING (%d tenants) ===", len(tenants))
+		reporter.LogHeader("PERIODIC CACHE CLEANUP")
 	}
 
 	var totalCleaned int
@@ -72,10 +72,9 @@ func (w *Worker) performCleanup(ctx context.Context) {
 	}
 
 	duration := time.Since(start)
-	if w.config.VerboseReporting {
-		log.Printf("=== CACHE CLEANUP COMPLETED: %d items cleaned in %v ===", totalCleaned, duration)
-	} else {
-		log.Printf("Cache cleanup: %d items cleaned from %d tenants in %v",
+	if totalCleaned > 0 {
+		// Use the reporter for consistent logging
+		reporter.LogSuccess("Cache cleanup finished: %d items cleaned from %d tenants in %v",
 			totalCleaned, len(tenants), duration)
 	}
 }
@@ -83,69 +82,13 @@ func (w *Worker) performCleanup(ctx context.Context) {
 // cleanupTenant performs TTL-based cleanup for a single tenant
 func (w *Worker) cleanupTenant(tenantID string) int {
 	var cleaned int
-
-	if w.config.VerboseReporting {
-		// Generate pre-cleanup report
-		reporter := NewReporter(w.cache)
-		report := reporter.GenerateTenantReport(tenantID)
-		log.Printf("TENANT %s BEFORE CLEANUP:\n%s", tenantID, report)
-	}
-
-	// Clean content cache (24 hour TTL)
-	cleaned += w.cleanContentCache(tenantID)
-
-	// Clean analytics cache (varies by type - current vs historic hours)
-	cleaned += w.cleanAnalyticsCache(tenantID)
-
-	// Clean session cache (shorter TTL)
-	cleaned += w.cleanSessionCache(tenantID)
-
-	// Clean HTML fragment cache (24 hour TTL)
-	cleaned += w.cleanFragmentCache(tenantID)
-
-	if w.config.VerboseReporting && cleaned > 0 {
-		// Generate post-cleanup report
-		reporter := NewReporter(w.cache)
-		report := reporter.GenerateTenantReport(tenantID)
-		log.Printf("TENANT %s AFTER CLEANUP (%d items removed):\n%s", tenantID, cleaned, report)
-	}
-
+	// The actual cleanup logic would go here, using w.config.ContentCacheTTL, etc.
+	// For example:
+	// cleaned += w.cache.PurgeExpiredContent(tenantID, w.config.ContentCacheTTL)
 	return cleaned
 }
 
-// cleanContentCache removes expired content cache entries
-func (w *Worker) cleanContentCache(tenantID string) int {
-	// TODO: Implement content cache TTL cleanup
-	// Check LastUpdated timestamps against ContentCacheTTL
-	// Remove expired entries but preserve content map and belief registries during startup
-	return 0
-}
-
-// cleanAnalyticsCache removes expired analytics entries
-func (w *Worker) cleanAnalyticsCache(tenantID string) int {
-	// TODO: Implement analytics cache cleanup
-	// Current hour bins: keep fresh
-	// Historic hour bins: longer TTL
-	// Computed metrics: shorter TTL
-	return 0
-}
-
-// cleanSessionCache removes expired session data
-func (w *Worker) cleanSessionCache(tenantID string) int {
-	// TODO: Implement session cache cleanup
-	// Session data, fingerprint states, belief contexts
-	// Use session-specific TTLs
-	return 0
-}
-
-// cleanFragmentCache removes expired HTML fragments
-func (w *Worker) cleanFragmentCache(tenantID string) int {
-	// TODO: Implement fragment cache cleanup
-	// Remove expired HTML chunks and clean up dependency mappings
-	return 0
-}
-
-// getActiveTenants loads tenant registry and returns active tenant IDs
+// getActiveTenants loads the tenant registry and returns active tenant IDs
 func (w *Worker) getActiveTenants() ([]string, error) {
 	registry, err := tenant.LoadTenantRegistry()
 	if err != nil {

@@ -19,15 +19,17 @@ func NewResourceService() *ResourceService {
 	return &ResourceService{}
 }
 
-// GetAllIDs returns all resource IDs for a tenant (cache-first)
+// GetAllIDs returns all resource IDs for a tenant by leveraging the robust repository.
 func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	resourceRepo := tenantCtx.ResourceRepo()
 
+	// The repository's FindAll method is now the cache-aware entry point.
 	resources, err := resourceRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get all resources: %w", err)
+		return nil, fmt.Errorf("failed to get all resources from repository: %w", err)
 	}
 
+	// Extract IDs from the full objects.
 	ids := make([]string, len(resources))
 	for i, resource := range resources {
 		ids[i] = resource.ID
@@ -36,7 +38,7 @@ func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error)
 	return ids, nil
 }
 
-// GetByID returns a resource by ID (cache-first)
+// GetByID returns a resource by ID (cache-first via repository)
 func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*content.ResourceNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("resource ID cannot be empty")
@@ -51,7 +53,7 @@ func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*conten
 	return resource, nil
 }
 
-// GetByIDs returns multiple resources by IDs (cache-first with bulk loading)
+// GetByIDs returns multiple resources by IDs (cache-first with bulk loading via repository)
 func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ResourceNode, error) {
 	if len(ids) == 0 {
 		return []*content.ResourceNode{}, nil
@@ -60,13 +62,13 @@ func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*
 	resourceRepo := tenantCtx.ResourceRepo()
 	resources, err := resourceRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resources by IDs: %w", err)
+		return nil, fmt.Errorf("failed to get resources by IDs from repository: %w", err)
 	}
 
 	return resources, nil
 }
 
-// GetBySlug returns a resource by slug (cache-first)
+// GetBySlug returns a resource by slug (cache-first via repository)
 func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.ResourceNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("resource slug cannot be empty")
@@ -81,9 +83,8 @@ func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*co
 	return resource, nil
 }
 
-// GetByFilters returns resources by multiple filter criteria (cache-first)
+// GetByFilters returns resources by multiple filter criteria (cache-first via repository)
 func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
-	// If no filters provided, return empty result
 	if len(ids) == 0 && len(categories) == 0 && len(slugs) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
@@ -91,7 +92,7 @@ func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, 
 	resourceRepo := tenantCtx.ResourceRepo()
 	resources, err := resourceRepo.FindByFilters(tenantCtx.TenantID, ids, categories, slugs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resources by filters: %w", err)
+		return nil, fmt.Errorf("failed to get resources by filters from repository: %w", err)
 	}
 
 	return resources, nil
@@ -138,7 +139,6 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 
 	resourceRepo := tenantCtx.ResourceRepo()
 
-	// Verify resource exists before updating
 	existing, err := resourceRepo.FindByID(tenantCtx.TenantID, resource.ID)
 	if err != nil {
 		return fmt.Errorf("failed to verify resource %s exists: %w", resource.ID, err)
@@ -163,7 +163,6 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 
 	resourceRepo := tenantCtx.ResourceRepo()
 
-	// Verify resource exists before deleting
 	existing, err := resourceRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to verify resource %s exists: %w", id, err)

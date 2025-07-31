@@ -52,49 +52,71 @@ func (r *BeliefRepository) FindBySlug(tenantID, slug string) (*content.BeliefNod
 	return r.FindByID(tenantID, id)
 }
 
+// FindAll retrieves all beliefs for a tenant, employing a cache-first strategy.
 func (r *BeliefRepository) FindAll(tenantID string) ([]*content.BeliefNode, error) {
+	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllBeliefIDs(tenantID); found {
-		var beliefs []*content.BeliefNode
-		var missingIDs []string
-
-		for _, id := range ids {
-			if belief, found := r.cache.GetBelief(tenantID, id); found {
-				beliefs = append(beliefs, belief)
-			} else {
-				missingIDs = append(missingIDs, id)
-			}
-		}
-
-		if len(missingIDs) > 0 {
-			missing, err := r.loadMultipleFromDB(missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			for _, belief := range missing {
-				r.cache.SetBelief(tenantID, belief)
-				beliefs = append(beliefs, belief)
-			}
-		}
-
-		return beliefs, nil
+		return r.FindByIDs(tenantID, ids)
 	}
 
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
 	}
+	if len(ids) == 0 {
+		return []*content.BeliefNode{}, nil
+	}
 
-	beliefs, err := r.loadMultipleFromDB(ids)
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllBeliefIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
+func (r *BeliefRepository) FindByIDs(tenantID string, ids []string) ([]*content.BeliefNode, error) {
+	var result []*content.BeliefNode
+	var missingIDs []string
+
+	for _, id := range ids {
+		if belief, found := r.cache.GetBelief(tenantID, id); found {
+			result = append(result, belief)
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
+	}
+
+	if len(missingIDs) > 0 {
+		missingBeliefs, err := r.loadMultipleFromDB(missingIDs)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, belief := range missingBeliefs {
+			r.cache.SetBelief(tenantID, belief)
+			result = append(result, belief)
+		}
+	}
+
+	return result, nil
+}
+
+func (r *BeliefRepository) FindIDBySlug(tenantID, slug string) (string, error) {
+	if id, found := r.cache.GetContentBySlug(tenantID, "belief:"+slug); found {
+		return id, nil
+	}
+	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	for _, belief := range beliefs {
-		r.cache.SetBelief(tenantID, belief)
+	if id == "" {
+		return "", nil
 	}
-
-	return beliefs, nil
+	// Trigger a full load to populate the main object cache for future GetByID calls.
+	_, _ = r.FindByID(tenantID, id)
+	return id, nil
 }
 
 func (r *BeliefRepository) Store(tenantID string, belief *content.BeliefNode) error {
@@ -155,13 +177,10 @@ func (r *BeliefRepository) loadAllIDsFromDB() ([]string, error) {
 		beliefIDs = append(beliefIDs, id)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("row iteration error: %w", err)
-	}
-
-	return beliefIDs, nil
+	return beliefIDs, rows.Err()
 }
 
+// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *BeliefRepository) loadFromDB(id string) (*content.BeliefNode, error) {
 	query := `SELECT id, title, slug, scale, custom_values FROM beliefs WHERE id = ?`
 
@@ -181,7 +200,8 @@ func (r *BeliefRepository) loadFromDB(id string) (*content.BeliefNode, error) {
 
 	if customValuesStr.Valid && customValuesStr.String != "" {
 		if err := json.Unmarshal([]byte(customValuesStr.String), &belief.CustomValues); err != nil {
-			return nil, fmt.Errorf("failed to parse custom values: %w", err)
+			// Try to parse as a simple comma-separated string as a fallback
+			belief.CustomValues = strings.Split(customValuesStr.String, ",")
 		}
 	}
 
@@ -223,7 +243,7 @@ func (r *BeliefRepository) loadMultipleFromDB(ids []string) ([]*content.BeliefNo
 
 		if customValuesStr.Valid && customValuesStr.String != "" {
 			if err := json.Unmarshal([]byte(customValuesStr.String), &belief.CustomValues); err != nil {
-				continue // Skip malformed records
+				belief.CustomValues = strings.Split(customValuesStr.String, ",")
 			}
 		}
 
@@ -244,67 +264,6 @@ func (r *BeliefRepository) getIDBySlugFromDB(slug string) (string, error) {
 	}
 	if err != nil {
 		return "", fmt.Errorf("failed to query belief by slug: %w", err)
-	}
-
-	return id, nil
-}
-
-// ./internal/infrastructure/persistence/content/belief_repository.go
-
-// FindByIDs returns multiple beliefs by IDs (cache-first with bulk loading)
-func (r *BeliefRepository) FindByIDs(tenantID string, ids []string) ([]*content.BeliefNode, error) {
-	var result []*content.BeliefNode
-	var missingIDs []string
-
-	// Check cache for each requested ID
-	for _, id := range ids {
-		if belief, found := r.cache.GetBelief(tenantID, id); found {
-			result = append(result, belief)
-		} else {
-			missingIDs = append(missingIDs, id)
-		}
-	}
-
-	// If any IDs were not found in the cache, load them from the database
-	if len(missingIDs) > 0 {
-		missingBeliefs, err := r.loadMultipleFromDB(missingIDs)
-		if err != nil {
-			return nil, err
-		}
-
-		// Add the newly loaded beliefs to the cache and the final result set
-		for _, belief := range missingBeliefs {
-			r.cache.SetBelief(tenantID, belief)
-			result = append(result, belief)
-		}
-	}
-
-	return result, nil
-}
-
-// FindIDBySlug returns a belief ID by its slug (cache-first)
-func (r *BeliefRepository) FindIDBySlug(tenantID, slug string) (string, error) {
-	// Check cache's slug-to-ID map first
-	if id, found := r.cache.GetContentBySlug(tenantID, "belief:"+slug); found {
-		return id, nil
-	}
-
-	// Cache miss, query the database
-	id, err := r.getIDBySlugFromDB(slug)
-	if err != nil {
-		return "", err
-	}
-	if id == "" {
-		return "", nil // Not found in DB either
-	}
-
-	// To ensure the main object cache is populated for future GetByID calls,
-	// we can trigger a full load here.
-	_, err = r.FindByID(tenantID, id)
-	if err != nil {
-		// Log the error but still return the ID since we successfully found it.
-		// The service layer can decide how to handle a cache-warming failure.
-		return id, fmt.Errorf("found ID '%s' but failed to warm belief object in cache: %w", id, err)
 	}
 
 	return id, nil

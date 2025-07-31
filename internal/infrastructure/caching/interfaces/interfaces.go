@@ -14,52 +14,60 @@ type ContentCache interface {
 	GetTractStack(tenantID, id string) (*content.TractStackNode, bool)
 	SetTractStack(tenantID string, tractStack *content.TractStackNode)
 	GetAllTractStackIDs(tenantID string) ([]string, bool)
+	SetAllTractStackIDs(tenantID string, ids []string)
 
 	// StoryFragment operations
 	GetStoryFragment(tenantID, id string) (*content.StoryFragmentNode, bool)
 	SetStoryFragment(tenantID string, storyFragment *content.StoryFragmentNode)
 	GetAllStoryFragmentIDs(tenantID string) ([]string, bool)
+	SetAllStoryFragmentIDs(tenantID string, ids []string)
 
 	// Pane operations
 	GetPane(tenantID, id string) (*content.PaneNode, bool)
 	SetPane(tenantID string, pane *content.PaneNode)
 	GetAllPaneIDs(tenantID string) ([]string, bool)
+	SetAllPaneIDs(tenantID string, ids []string)
 
 	// Menu operations
 	GetMenu(tenantID, id string) (*content.MenuNode, bool)
 	SetMenu(tenantID string, menu *content.MenuNode)
 	GetAllMenuIDs(tenantID string) ([]string, bool)
+	SetAllMenuIDs(tenantID string, ids []string)
 
 	// Resource operations
 	GetResource(tenantID, id string) (*content.ResourceNode, bool)
 	SetResource(tenantID string, resource *content.ResourceNode)
 	GetAllResourceIDs(tenantID string) ([]string, bool)
+	SetAllResourceIDs(tenantID string, ids []string)
 
 	// Belief operations
 	GetBelief(tenantID, id string) (*content.BeliefNode, bool)
 	SetBelief(tenantID string, belief *content.BeliefNode)
 	GetAllBeliefIDs(tenantID string) ([]string, bool)
+	SetAllBeliefIDs(tenantID string, ids []string)
 
 	// Epinet operations
 	GetEpinet(tenantID, id string) (*content.EpinetNode, bool)
 	SetEpinet(tenantID string, epinet *content.EpinetNode)
 	GetAllEpinetIDs(tenantID string) ([]string, bool)
+	SetAllEpinetIDs(tenantID string, ids []string)
 
 	// ImageFile operations
 	GetFile(tenantID, id string) (*content.ImageFileNode, bool)
 	SetFile(tenantID string, file *content.ImageFileNode)
 	GetAllFileIDs(tenantID string) ([]string, bool)
+	SetAllFileIDs(tenantID string, ids []string)
 
 	// Lookup operations
-	GetContentBySlug(tenantID, slug string) (string, bool)             // returns ID
-	GetResourcesByCategory(tenantID, category string) ([]string, bool) // returns IDs
+	GetContentBySlug(tenantID, slug string) (string, bool)
+	GetResourcesByCategory(tenantID, category string) ([]string, bool)
 
 	// Content map operations
 	GetFullContentMap(tenantID string) ([]types.FullContentMapItem, bool)
 	SetFullContentMap(tenantID string, contentMap []types.FullContentMapItem)
 
 	// Orphan analysis operations
-	GetOrphanAnalysis(tenantID string) (*types.OrphanAnalysisPayload, string, bool) // payload, etag, exists
+	GetOrphanAnalysis(tenantID string) (*types.OrphanAnalysisPayload, string, bool)
 	SetOrphanAnalysis(tenantID string, payload *types.OrphanAnalysisPayload, etag string)
 
 	// Cache management
