@@ -6,24 +6,24 @@ import (
 	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ResourceService orchestrates resource operations with cache-first repository pattern
 type ResourceService struct {
-	resourceRepo repositories.ResourceRepository
+	// No stored dependencies - all passed via tenant context
 }
 
-// NewResourceService creates a new resource application service
-func NewResourceService(resourceRepo repositories.ResourceRepository) *ResourceService {
-	return &ResourceService{
-		resourceRepo: resourceRepo,
-	}
+// NewResourceService creates a new resource service singleton
+func NewResourceService() *ResourceService {
+	return &ResourceService{}
 }
 
 // GetAllIDs returns all resource IDs for a tenant (cache-first)
-func (s *ResourceService) GetAllIDs(tenantID string) ([]string, error) {
-	resources, err := s.resourceRepo.FindAll(tenantID)
+func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	resourceRepo := tenantCtx.ResourceRepo()
+
+	resources, err := resourceRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all resources: %w", err)
 	}
@@ -37,12 +37,13 @@ func (s *ResourceService) GetAllIDs(tenantID string) ([]string, error) {
 }
 
 // GetByID returns a resource by ID (cache-first)
-func (s *ResourceService) GetByID(tenantID, id string) (*content.ResourceNode, error) {
+func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*content.ResourceNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("resource ID cannot be empty")
 	}
 
-	resource, err := s.resourceRepo.FindByID(tenantID, id)
+	resourceRepo := tenantCtx.ResourceRepo()
+	resource, err := resourceRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource %s: %w", id, err)
 	}
@@ -51,12 +52,13 @@ func (s *ResourceService) GetByID(tenantID, id string) (*content.ResourceNode, e
 }
 
 // GetByIDs returns multiple resources by IDs (cache-first with bulk loading)
-func (s *ResourceService) GetByIDs(tenantID string, ids []string) ([]*content.ResourceNode, error) {
+func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ResourceNode, error) {
 	if len(ids) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
 
-	resources, err := s.resourceRepo.FindByIDs(tenantID, ids)
+	resourceRepo := tenantCtx.ResourceRepo()
+	resources, err := resourceRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resources by IDs: %w", err)
 	}
@@ -65,12 +67,13 @@ func (s *ResourceService) GetByIDs(tenantID string, ids []string) ([]*content.Re
 }
 
 // GetBySlug returns a resource by slug (cache-first)
-func (s *ResourceService) GetBySlug(tenantID, slug string) (*content.ResourceNode, error) {
+func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.ResourceNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("resource slug cannot be empty")
 	}
 
-	resource, err := s.resourceRepo.FindBySlug(tenantID, slug)
+	resourceRepo := tenantCtx.ResourceRepo()
+	resource, err := resourceRepo.FindBySlug(tenantCtx.TenantID, slug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource by slug %s: %w", slug, err)
 	}
@@ -79,13 +82,14 @@ func (s *ResourceService) GetBySlug(tenantID, slug string) (*content.ResourceNod
 }
 
 // GetByFilters returns resources by multiple filter criteria (cache-first)
-func (s *ResourceService) GetByFilters(tenantID string, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
+func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
 	// If no filters provided, return empty result
 	if len(ids) == 0 && len(categories) == 0 && len(slugs) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
 
-	resources, err := s.resourceRepo.FindByFilters(tenantID, ids, categories, slugs)
+	resourceRepo := tenantCtx.ResourceRepo()
+	resources, err := resourceRepo.FindByFilters(tenantCtx.TenantID, ids, categories, slugs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resources by filters: %w", err)
 	}
@@ -94,7 +98,7 @@ func (s *ResourceService) GetByFilters(tenantID string, ids []string, categories
 }
 
 // Create creates a new resource
-func (s *ResourceService) Create(tenantID string, resource *content.ResourceNode) error {
+func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
 	}
@@ -108,7 +112,8 @@ func (s *ResourceService) Create(tenantID string, resource *content.ResourceNode
 		return fmt.Errorf("resource slug cannot be empty")
 	}
 
-	err := s.resourceRepo.Store(tenantID, resource)
+	resourceRepo := tenantCtx.ResourceRepo()
+	err := resourceRepo.Store(tenantCtx.TenantID, resource)
 	if err != nil {
 		return fmt.Errorf("failed to create resource %s: %w", resource.ID, err)
 	}
@@ -117,7 +122,7 @@ func (s *ResourceService) Create(tenantID string, resource *content.ResourceNode
 }
 
 // Update updates an existing resource
-func (s *ResourceService) Update(tenantID string, resource *content.ResourceNode) error {
+func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
 	}
@@ -131,8 +136,10 @@ func (s *ResourceService) Update(tenantID string, resource *content.ResourceNode
 		return fmt.Errorf("resource slug cannot be empty")
 	}
 
+	resourceRepo := tenantCtx.ResourceRepo()
+
 	// Verify resource exists before updating
-	existing, err := s.resourceRepo.FindByID(tenantID, resource.ID)
+	existing, err := resourceRepo.FindByID(tenantCtx.TenantID, resource.ID)
 	if err != nil {
 		return fmt.Errorf("failed to verify resource %s exists: %w", resource.ID, err)
 	}
@@ -140,7 +147,7 @@ func (s *ResourceService) Update(tenantID string, resource *content.ResourceNode
 		return fmt.Errorf("resource %s not found", resource.ID)
 	}
 
-	err = s.resourceRepo.Update(tenantID, resource)
+	err = resourceRepo.Update(tenantCtx.TenantID, resource)
 	if err != nil {
 		return fmt.Errorf("failed to update resource %s: %w", resource.ID, err)
 	}
@@ -149,13 +156,15 @@ func (s *ResourceService) Update(tenantID string, resource *content.ResourceNode
 }
 
 // Delete deletes a resource
-func (s *ResourceService) Delete(tenantID, id string) error {
+func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("resource ID cannot be empty")
 	}
 
+	resourceRepo := tenantCtx.ResourceRepo()
+
 	// Verify resource exists before deleting
-	existing, err := s.resourceRepo.FindByID(tenantID, id)
+	existing, err := resourceRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to verify resource %s exists: %w", id, err)
 	}
@@ -163,7 +172,7 @@ func (s *ResourceService) Delete(tenantID, id string) error {
 		return fmt.Errorf("resource %s not found", id)
 	}
 
-	err = s.resourceRepo.Delete(tenantID, id)
+	err = resourceRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete resource %s: %w", id, err)
 	}

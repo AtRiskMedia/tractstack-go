@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -15,18 +14,27 @@ type TractStackIDsRequest struct {
 	TractStackIDs []string `json:"tractStackIds" binding:"required"`
 }
 
-// GetAllTractStackIDsHandler returns all tractstack IDs using cache-first pattern
-func GetAllTractStackIDsHandler(c *gin.Context) {
+// TractStackHandlers contains all tractstack-related HTTP handlers
+type TractStackHandlers struct {
+	tractStackService *services.TractStackService
+}
+
+// NewTractStackHandlers creates tractstack handlers with injected dependencies
+func NewTractStackHandlers(tractStackService *services.TractStackService) *TractStackHandlers {
+	return &TractStackHandlers{
+		tractStackService: tractStackService,
+	}
+}
+
+// GetAllTractStackIDs returns all tractstack IDs using cache-first pattern
+func (h *TractStackHandlers) GetAllTractStackIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	tractStackRepo := content.NewTractStackRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	tractStackService := services.NewTractStackService(tractStackRepo)
-
-	tractStackIDs, err := tractStackService.GetAllIDs(tenantCtx.TenantID)
+	tractStackIDs, err := h.tractStackService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -38,8 +46,8 @@ func GetAllTractStackIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetTractStacksByIDsHandler returns multiple tractstacks by IDs using cache-first pattern
-func GetTractStacksByIDsHandler(c *gin.Context) {
+// GetTractStacksByIDs returns multiple tractstacks by IDs using cache-first pattern
+func (h *TractStackHandlers) GetTractStacksByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -57,10 +65,7 @@ func GetTractStacksByIDsHandler(c *gin.Context) {
 		return
 	}
 
-	tractStackRepo := content.NewTractStackRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	tractStackService := services.NewTractStackService(tractStackRepo)
-
-	tractStacks, err := tractStackService.GetByIDs(tenantCtx.TenantID, req.TractStackIDs)
+	tractStacks, err := h.tractStackService.GetByIDs(tenantCtx, req.TractStackIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -72,8 +77,8 @@ func GetTractStacksByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetTractStackByIDHandler returns a specific tractstack by ID using cache-first pattern
-func GetTractStackByIDHandler(c *gin.Context) {
+// GetTractStackByID returns a specific tractstack by ID using cache-first pattern
+func (h *TractStackHandlers) GetTractStackByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -86,10 +91,7 @@ func GetTractStackByIDHandler(c *gin.Context) {
 		return
 	}
 
-	tractStackRepo := content.NewTractStackRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	tractStackService := services.NewTractStackService(tractStackRepo)
-
-	tractStackNode, err := tractStackService.GetByID(tenantCtx.TenantID, tractStackID)
+	tractStackNode, err := h.tractStackService.GetByID(tenantCtx, tractStackID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -103,8 +105,8 @@ func GetTractStackByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, tractStackNode)
 }
 
-// GetTractStackBySlugHandler returns a specific tractstack by slug using cache-first pattern
-func GetTractStackBySlugHandler(c *gin.Context) {
+// GetTractStackBySlug returns a specific tractstack by slug using cache-first pattern
+func (h *TractStackHandlers) GetTractStackBySlug(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -117,10 +119,7 @@ func GetTractStackBySlugHandler(c *gin.Context) {
 		return
 	}
 
-	tractStackRepo := content.NewTractStackRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	tractStackService := services.NewTractStackService(tractStackRepo)
-
-	tractStackNode, err := tractStackService.GetBySlug(tenantCtx.TenantID, slug)
+	tractStackNode, err := h.tractStackService.GetBySlug(tenantCtx, slug)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

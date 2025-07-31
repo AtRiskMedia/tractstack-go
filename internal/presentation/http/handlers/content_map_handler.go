@@ -5,14 +5,24 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
-// GetContentMapHandler handles GET /api/v1/content/full-map
-func GetContentMapHandler(c *gin.Context) {
+// ContentMapHandlers contains all content map-related HTTP handlers
+type ContentMapHandlers struct {
+	contentMapService *services.ContentMapService
+}
+
+// NewContentMapHandlers creates content map handlers with injected dependencies
+func NewContentMapHandlers(contentMapService *services.ContentMapService) *ContentMapHandlers {
+	return &ContentMapHandlers{
+		contentMapService: contentMapService,
+	}
+}
+
+// GetContentMap handles GET /api/v1/content/full-map
+func (h *ContentMapHandlers) GetContentMap(c *gin.Context) {
 	// Get tenant context from middleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -20,18 +30,11 @@ func GetContentMapHandler(c *gin.Context) {
 		return
 	}
 
-	// Create bulk repository for this request
-	db := &database.DB{DB: tenantCtx.Database.Conn}
-	bulkRepo := bulk.NewRepository(db)
-
-	// Create service per-request with tenant's cache manager
-	contentMapService := services.NewContentMapService(bulkRepo)
-
 	// Get client's lastUpdated parameter for timestamp comparison
 	clientLastUpdated := c.Query("lastUpdated")
 
-	// Get content map with caching logic using tenant's cache manager
-	response, notModified, err := contentMapService.GetContentMap(tenantCtx.TenantID, clientLastUpdated, tenantCtx.CacheManager)
+	// FIXED: Pass cache manager as 3rd parameter
+	response, notModified, err := h.contentMapService.GetContentMap(tenantCtx, clientLastUpdated, tenantCtx.CacheManager)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

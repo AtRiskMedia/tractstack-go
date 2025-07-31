@@ -4,6 +4,7 @@ package tenant
 
 import (
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
@@ -156,6 +157,72 @@ func (m *Manager) preActivateSingleTenant(tenantID string) error {
 	m.detector.UpdateTenantStatus(tenantID, "active", dbType)
 
 	return nil
+}
+
+// ValidatePreActivation verifies all tenants are active after pre-activation
+func (m *Manager) ValidatePreActivation() error {
+	log.Println("=== Validating pre-activation results ===")
+
+	registry, err := LoadTenantRegistry()
+	if err != nil {
+		return fmt.Errorf("failed to load registry for validation: %w", err)
+	}
+
+	if len(registry.Tenants) == 0 {
+		log.Println("No tenants to validate")
+		return nil
+	}
+
+	inactiveTenants := make([]string, 0)
+	activeTenants := make([]string, 0)
+	reservedTenants := make([]string, 0)
+
+	for tenantID, tenantInfo := range registry.Tenants {
+		switch tenantInfo.Status {
+		case "active":
+			activeTenants = append(activeTenants, tenantID)
+		case "reserved":
+			reservedTenants = append(reservedTenants, tenantID)
+		default:
+			inactiveTenants = append(inactiveTenants, tenantID)
+		}
+	}
+
+	log.Printf("Active tenants: %v", activeTenants)
+	if len(reservedTenants) > 0 {
+		log.Printf("Reserved tenants (awaiting activation): %v", reservedTenants)
+	}
+
+	if len(inactiveTenants) > 0 {
+		log.Printf("Inactive tenants: %v", inactiveTenants)
+		return fmt.Errorf("validation failed - %d tenants still inactive: %v",
+			len(inactiveTenants), inactiveTenants)
+	}
+
+	log.Printf("✓ Validation passed - %d tenants active, %d reserved", len(activeTenants), len(reservedTenants))
+	return nil
+}
+
+// GetActiveTenantCount returns the number of active tenants
+func (m *Manager) GetActiveTenantCount() (int, error) {
+	registry, err := LoadTenantRegistry()
+	if err != nil {
+		return 0, fmt.Errorf("failed to load tenant registry: %w", err)
+	}
+
+	activeCount := 0
+	for _, tenantInfo := range registry.Tenants {
+		if tenantInfo.Status == "active" {
+			activeCount++
+		}
+	}
+
+	return activeCount, nil
+}
+
+// GetCacheManager returns the cache manager for external access
+func (m *Manager) GetCacheManager() *manager.Manager {
+	return m.cacheManager
 }
 
 // GetDetector returns the detector for external access (needed by startup code)

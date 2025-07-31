@@ -7,19 +7,20 @@ import (
 	"log"
 	"net/http"
 
-	tenantpkg "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/internal/application/container"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/routes"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
-// Server wraps the HTTP server with configuration
+// Server wraps the HTTP server with configuration and dependency injection
 type Server struct {
 	httpServer *http.Server
+	container  *container.Container
 }
 
-// New creates a new HTTP server instance
-func New(port string, tenantManager *tenantpkg.Manager) *Server {
-	router := routes.SetupRoutes(tenantManager)
+// New creates a new HTTP server instance with dependency injection
+func New(port string, container *container.Container) *Server {
+	router := routes.SetupRoutes(container)
 
 	httpServer := &http.Server{
 		Addr:         ":" + port,
@@ -31,6 +32,7 @@ func New(port string, tenantManager *tenantpkg.Manager) *Server {
 
 	return &Server{
 		httpServer: httpServer,
+		container:  container,
 	}
 }
 

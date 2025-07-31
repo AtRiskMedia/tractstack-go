@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
-	persistence "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -15,18 +14,27 @@ type EpinetIDsRequest struct {
 	EpinetIDs []string `json:"epinetIds" binding:"required"`
 }
 
-// GetAllEpinetIDsHandler returns all epinet IDs using cache-first pattern
-func GetAllEpinetIDsHandler(c *gin.Context) {
+// EpinetHandlers contains all epinet-related HTTP handlers
+type EpinetHandlers struct {
+	epinetService *services.EpinetService
+}
+
+// NewEpinetHandlers creates epinet handlers with injected dependencies
+func NewEpinetHandlers(epinetService *services.EpinetService) *EpinetHandlers {
+	return &EpinetHandlers{
+		epinetService: epinetService,
+	}
+}
+
+// GetAllEpinetIDs returns all epinet IDs using cache-first pattern
+func (h *EpinetHandlers) GetAllEpinetIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
 
-	epinetRepo := persistence.NewEpinetRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	epinetService := services.NewEpinetService(epinetRepo)
-
-	epinetIDs, err := epinetService.GetAllIDs(tenantCtx.TenantID)
+	epinetIDs, err := h.epinetService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -38,8 +46,8 @@ func GetAllEpinetIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetEpinetsByIDsHandler returns multiple epinets by IDs using cache-first pattern
-func GetEpinetsByIDsHandler(c *gin.Context) {
+// GetEpinetsByIDs returns multiple epinets by IDs using cache-first pattern
+func (h *EpinetHandlers) GetEpinetsByIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -57,10 +65,7 @@ func GetEpinetsByIDsHandler(c *gin.Context) {
 		return
 	}
 
-	epinetRepo := persistence.NewEpinetRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	epinetService := services.NewEpinetService(epinetRepo)
-
-	epinets, err := epinetService.GetByIDs(tenantCtx.TenantID, req.EpinetIDs)
+	epinets, err := h.epinetService.GetByIDs(tenantCtx, req.EpinetIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -72,8 +77,8 @@ func GetEpinetsByIDsHandler(c *gin.Context) {
 	})
 }
 
-// GetEpinetByIDHandler returns a specific epinet by ID using cache-first pattern
-func GetEpinetByIDHandler(c *gin.Context) {
+// GetEpinetByID returns a specific epinet by ID using cache-first pattern
+func (h *EpinetHandlers) GetEpinetByID(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -86,10 +91,7 @@ func GetEpinetByIDHandler(c *gin.Context) {
 		return
 	}
 
-	epinetRepo := persistence.NewEpinetRepository(tenantCtx.Database.Conn, tenantCtx.CacheManager)
-	epinetService := services.NewEpinetService(epinetRepo)
-
-	epinetNode, err := epinetService.GetByID(tenantCtx.TenantID, epinetID)
+	epinetNode, err := h.epinetService.GetByID(tenantCtx, epinetID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

@@ -6,24 +6,24 @@ import (
 	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ImageFileService orchestrates imagefile operations with cache-first repository pattern
 type ImageFileService struct {
-	imageFileRepo repositories.ImageFileRepository
+	// No stored dependencies - all passed via tenant context
 }
 
-// NewImageFileService creates a new imagefile application service
-func NewImageFileService(imageFileRepo repositories.ImageFileRepository) *ImageFileService {
-	return &ImageFileService{
-		imageFileRepo: imageFileRepo,
-	}
+// NewImageFileService creates a new imagefile service singleton
+func NewImageFileService() *ImageFileService {
+	return &ImageFileService{}
 }
 
 // GetAllIDs returns all imagefile IDs for a tenant (cache-first)
-func (s *ImageFileService) GetAllIDs(tenantID string) ([]string, error) {
-	imageFiles, err := s.imageFileRepo.FindAll(tenantID)
+func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	imageFileRepo := tenantCtx.ImageFileRepo()
+
+	imageFiles, err := imageFileRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all imagefiles: %w", err)
 	}
@@ -37,12 +37,13 @@ func (s *ImageFileService) GetAllIDs(tenantID string) ([]string, error) {
 }
 
 // GetByID returns an imagefile by ID (cache-first)
-func (s *ImageFileService) GetByID(tenantID, id string) (*content.ImageFileNode, error) {
+func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*content.ImageFileNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("imagefile ID cannot be empty")
 	}
 
-	imageFile, err := s.imageFileRepo.FindByID(tenantID, id)
+	imageFileRepo := tenantCtx.ImageFileRepo()
+	imageFile, err := imageFileRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get imagefile %s: %w", id, err)
 	}
@@ -51,12 +52,13 @@ func (s *ImageFileService) GetByID(tenantID, id string) (*content.ImageFileNode,
 }
 
 // GetByIDs returns multiple imagefiles by IDs (cache-first with bulk loading)
-func (s *ImageFileService) GetByIDs(tenantID string, ids []string) ([]*content.ImageFileNode, error) {
+func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ImageFileNode, error) {
 	if len(ids) == 0 {
 		return []*content.ImageFileNode{}, nil
 	}
 
-	imageFiles, err := s.imageFileRepo.FindByIDs(tenantID, ids)
+	imageFileRepo := tenantCtx.ImageFileRepo()
+	imageFiles, err := imageFileRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get imagefiles by IDs: %w", err)
 	}

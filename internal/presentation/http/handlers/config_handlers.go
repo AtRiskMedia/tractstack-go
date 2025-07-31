@@ -8,8 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetBrandConfigHandler returns tenant brand configuration
-func GetBrandConfigHandler(c *gin.Context) {
+// ConfigHandlers contains all configuration-related HTTP handlers
+type ConfigHandlers struct {
+	// No service injection needed - config comes from tenant context
+}
+
+// NewConfigHandlers creates config handlers
+func NewConfigHandlers() *ConfigHandlers {
+	return &ConfigHandlers{}
+}
+
+// GetBrandConfig returns tenant brand configuration
+func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 	// Get tenant context from middleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {

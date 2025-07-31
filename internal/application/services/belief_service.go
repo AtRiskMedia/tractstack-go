@@ -6,24 +6,24 @@ import (
 	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // BeliefService orchestrates belief operations with cache-first repository pattern
 type BeliefService struct {
-	beliefRepo repositories.BeliefRepository
+	// No stored dependencies - all passed via tenant context
 }
 
-// NewBeliefService creates a new belief application service
-func NewBeliefService(beliefRepo repositories.BeliefRepository) *BeliefService {
-	return &BeliefService{
-		beliefRepo: beliefRepo,
-	}
+// NewBeliefService creates a new belief service singleton
+func NewBeliefService() *BeliefService {
+	return &BeliefService{}
 }
 
 // GetAllIDs returns all belief IDs for a tenant (cache-first)
-func (s *BeliefService) GetAllIDs(tenantID string) ([]string, error) {
-	beliefs, err := s.beliefRepo.FindAll(tenantID)
+func (s *BeliefService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	beliefRepo := tenantCtx.BeliefRepo()
+
+	beliefs, err := beliefRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all beliefs: %w", err)
 	}
@@ -37,12 +37,13 @@ func (s *BeliefService) GetAllIDs(tenantID string) ([]string, error) {
 }
 
 // GetByID returns a belief by ID (cache-first)
-func (s *BeliefService) GetByID(tenantID, id string) (*content.BeliefNode, error) {
+func (s *BeliefService) GetByID(tenantCtx *tenant.Context, id string) (*content.BeliefNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("belief ID cannot be empty")
 	}
 
-	belief, err := s.beliefRepo.FindByID(tenantID, id)
+	beliefRepo := tenantCtx.BeliefRepo()
+	belief, err := beliefRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get belief %s: %w", id, err)
 	}
@@ -51,12 +52,13 @@ func (s *BeliefService) GetByID(tenantID, id string) (*content.BeliefNode, error
 }
 
 // GetByIDs returns multiple beliefs by IDs (cache-first with bulk loading)
-func (s *BeliefService) GetByIDs(tenantID string, ids []string) ([]*content.BeliefNode, error) {
+func (s *BeliefService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.BeliefNode, error) {
 	if len(ids) == 0 {
 		return []*content.BeliefNode{}, nil
 	}
 
-	beliefs, err := s.beliefRepo.FindByIDs(tenantID, ids)
+	beliefRepo := tenantCtx.BeliefRepo()
+	beliefs, err := beliefRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get beliefs by IDs: %w", err)
 	}
@@ -65,12 +67,13 @@ func (s *BeliefService) GetByIDs(tenantID string, ids []string) ([]*content.Beli
 }
 
 // GetBySlug returns a belief by slug (cache-first)
-func (s *BeliefService) GetBySlug(tenantID, slug string) (*content.BeliefNode, error) {
+func (s *BeliefService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.BeliefNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("belief slug cannot be empty")
 	}
 
-	belief, err := s.beliefRepo.FindBySlug(tenantID, slug)
+	beliefRepo := tenantCtx.BeliefRepo()
+	belief, err := beliefRepo.FindBySlug(tenantCtx.TenantID, slug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get belief by slug %s: %w", slug, err)
 	}
@@ -79,7 +82,7 @@ func (s *BeliefService) GetBySlug(tenantID, slug string) (*content.BeliefNode, e
 }
 
 // Create creates a new belief
-func (s *BeliefService) Create(tenantID string, belief *content.BeliefNode) error {
+func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.BeliefNode) error {
 	if belief == nil {
 		return fmt.Errorf("belief cannot be nil")
 	}
@@ -96,7 +99,8 @@ func (s *BeliefService) Create(tenantID string, belief *content.BeliefNode) erro
 		return fmt.Errorf("belief scale cannot be empty")
 	}
 
-	err := s.beliefRepo.Store(tenantID, belief)
+	beliefRepo := tenantCtx.BeliefRepo()
+	err := beliefRepo.Store(tenantCtx.TenantID, belief)
 	if err != nil {
 		return fmt.Errorf("failed to create belief %s: %w", belief.ID, err)
 	}
@@ -105,7 +109,7 @@ func (s *BeliefService) Create(tenantID string, belief *content.BeliefNode) erro
 }
 
 // Update updates an existing belief
-func (s *BeliefService) Update(tenantID string, belief *content.BeliefNode) error {
+func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.BeliefNode) error {
 	if belief == nil {
 		return fmt.Errorf("belief cannot be nil")
 	}
@@ -122,8 +126,10 @@ func (s *BeliefService) Update(tenantID string, belief *content.BeliefNode) erro
 		return fmt.Errorf("belief scale cannot be empty")
 	}
 
+	beliefRepo := tenantCtx.BeliefRepo()
+
 	// Verify belief exists before updating
-	existing, err := s.beliefRepo.FindByID(tenantID, belief.ID)
+	existing, err := beliefRepo.FindByID(tenantCtx.TenantID, belief.ID)
 	if err != nil {
 		return fmt.Errorf("failed to verify belief %s exists: %w", belief.ID, err)
 	}
@@ -131,7 +137,7 @@ func (s *BeliefService) Update(tenantID string, belief *content.BeliefNode) erro
 		return fmt.Errorf("belief %s not found", belief.ID)
 	}
 
-	err = s.beliefRepo.Update(tenantID, belief)
+	err = beliefRepo.Update(tenantCtx.TenantID, belief)
 	if err != nil {
 		return fmt.Errorf("failed to update belief %s: %w", belief.ID, err)
 	}
@@ -140,13 +146,15 @@ func (s *BeliefService) Update(tenantID string, belief *content.BeliefNode) erro
 }
 
 // Delete deletes a belief
-func (s *BeliefService) Delete(tenantID, id string) error {
+func (s *BeliefService) Delete(tenantCtx *tenant.Context, id string) error {
 	if id == "" {
 		return fmt.Errorf("belief ID cannot be empty")
 	}
 
+	beliefRepo := tenantCtx.BeliefRepo()
+
 	// Verify belief exists before deleting
-	existing, err := s.beliefRepo.FindByID(tenantID, id)
+	existing, err := beliefRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to verify belief %s exists: %w", id, err)
 	}
@@ -154,7 +162,7 @@ func (s *BeliefService) Delete(tenantID, id string) error {
 		return fmt.Errorf("belief %s not found", id)
 	}
 
-	err = s.beliefRepo.Delete(tenantID, id)
+	err = beliefRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete belief %s: %w", id, err)
 	}

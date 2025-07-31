@@ -6,24 +6,24 @@ import (
 	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
-	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // PaneService orchestrates pane operations with cache-first repository pattern
 type PaneService struct {
-	paneRepo repositories.PaneRepository
+	// No stored dependencies - all passed via tenant context
 }
 
-// NewPaneService creates a new pane application service
-func NewPaneService(paneRepo repositories.PaneRepository) *PaneService {
-	return &PaneService{
-		paneRepo: paneRepo,
-	}
+// NewPaneService creates a new pane service singleton
+func NewPaneService() *PaneService {
+	return &PaneService{}
 }
 
 // GetAllIDs returns all pane IDs for a tenant (cache-first)
-func (s *PaneService) GetAllIDs(tenantID string) ([]string, error) {
-	panes, err := s.paneRepo.FindAll(tenantID)
+func (s *PaneService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	paneRepo := tenantCtx.PaneRepo()
+
+	panes, err := paneRepo.FindAll(tenantCtx.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all panes: %w", err)
 	}
@@ -37,12 +37,13 @@ func (s *PaneService) GetAllIDs(tenantID string) ([]string, error) {
 }
 
 // GetByID returns a pane by ID (cache-first)
-func (s *PaneService) GetByID(tenantID, id string) (*content.PaneNode, error) {
+func (s *PaneService) GetByID(tenantCtx *tenant.Context, id string) (*content.PaneNode, error) {
 	if id == "" {
 		return nil, fmt.Errorf("pane ID cannot be empty")
 	}
 
-	pane, err := s.paneRepo.FindByID(tenantID, id)
+	paneRepo := tenantCtx.PaneRepo()
+	pane, err := paneRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pane %s: %w", id, err)
 	}
@@ -51,12 +52,13 @@ func (s *PaneService) GetByID(tenantID, id string) (*content.PaneNode, error) {
 }
 
 // GetByIDs returns multiple panes by IDs (cache-first with bulk loading)
-func (s *PaneService) GetByIDs(tenantID string, ids []string) ([]*content.PaneNode, error) {
+func (s *PaneService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.PaneNode, error) {
 	if len(ids) == 0 {
 		return []*content.PaneNode{}, nil
 	}
 
-	panes, err := s.paneRepo.FindByIDs(tenantID, ids)
+	paneRepo := tenantCtx.PaneRepo()
+	panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get panes by IDs: %w", err)
 	}
@@ -65,12 +67,13 @@ func (s *PaneService) GetByIDs(tenantID string, ids []string) ([]*content.PaneNo
 }
 
 // GetBySlug returns a pane by slug (cache-first)
-func (s *PaneService) GetBySlug(tenantID, slug string) (*content.PaneNode, error) {
+func (s *PaneService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.PaneNode, error) {
 	if slug == "" {
 		return nil, fmt.Errorf("pane slug cannot be empty")
 	}
 
-	pane, err := s.paneRepo.FindBySlug(tenantID, slug)
+	paneRepo := tenantCtx.PaneRepo()
+	pane, err := paneRepo.FindBySlug(tenantCtx.TenantID, slug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pane by slug %s: %w", slug, err)
 	}
@@ -79,8 +82,9 @@ func (s *PaneService) GetBySlug(tenantID, slug string) (*content.PaneNode, error
 }
 
 // GetContextPanes returns all context panes (cache-first with filtering)
-func (s *PaneService) GetContextPanes(tenantID string) ([]*content.PaneNode, error) {
-	contextPanes, err := s.paneRepo.FindContext(tenantID)
+func (s *PaneService) GetContextPanes(tenantCtx *tenant.Context) ([]*content.PaneNode, error) {
+	paneRepo := tenantCtx.PaneRepo()
+	contextPanes, err := paneRepo.FindContext(tenantCtx.TenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get context panes: %w", err)
 	}
