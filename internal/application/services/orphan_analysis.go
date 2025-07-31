@@ -16,21 +16,19 @@ import (
 // OrphanAnalysisService orchestrates async orphan analysis computation
 type OrphanAnalysisService struct {
 	bulkRepo bulk.BulkQueryRepository
-	cache    interfaces.ContentCache
 }
 
 // NewOrphanAnalysisService creates a new orphan analysis service
-func NewOrphanAnalysisService(bulkRepo bulk.BulkQueryRepository, cache interfaces.ContentCache) *OrphanAnalysisService {
+func NewOrphanAnalysisService(bulkRepo bulk.BulkQueryRepository) *OrphanAnalysisService {
 	return &OrphanAnalysisService{
 		bulkRepo: bulkRepo,
-		cache:    cache,
 	}
 }
 
 // GetOrphanAnalysis returns cached results or starts background computation
-func (oas *OrphanAnalysisService) GetOrphanAnalysis(tenantID, clientETag string) (*admin.OrphanAnalysisPayload, string, error) {
+func (oas *OrphanAnalysisService) GetOrphanAnalysis(tenantID, clientETag string, cache interfaces.ContentCache) (*admin.OrphanAnalysisPayload, string, error) {
 	// Check cache first
-	if cachedPayload, etag, exists := oas.cache.GetOrphanAnalysis(tenantID); exists {
+	if cachedPayload, etag, exists := cache.GetOrphanAnalysis(tenantID); exists {
 		// Convert from types.OrphanAnalysisPayload to admin.OrphanAnalysisPayload
 		convertedPayload := &admin.OrphanAnalysisPayload{
 			StoryFragments: cachedPayload.StoryFragments,
@@ -61,14 +59,14 @@ func (oas *OrphanAnalysisService) GetOrphanAnalysis(tenantID, clientETag string)
 
 	// Start background computation
 	go func() {
-		oas.computeOrphanAnalysisAsync(tenantID)
+		oas.computeOrphanAnalysisAsync(tenantID, cache)
 	}()
 
 	return loadingPayload, "", nil
 }
 
 // computeOrphanAnalysisAsync performs expensive computation in background
-func (oas *OrphanAnalysisService) computeOrphanAnalysisAsync(tenantID string) {
+func (oas *OrphanAnalysisService) computeOrphanAnalysisAsync(tenantID string, cache interfaces.ContentCache) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Orphan analysis computation failed for tenant %s: %v", tenantID, r)
@@ -94,7 +92,7 @@ func (oas *OrphanAnalysisService) computeOrphanAnalysisAsync(tenantID string) {
 		Beliefs:        payload.Beliefs,
 		Status:         payload.Status,
 	}
-	oas.cache.SetOrphanAnalysis(tenantID, convertedPayload, etag)
+	cache.SetOrphanAnalysis(tenantID, convertedPayload, etag)
 
 	log.Printf("Orphan analysis completed for tenant %s", tenantID)
 }
@@ -108,60 +106,109 @@ func (oas *OrphanAnalysisService) computeOrphanAnalysis(tenantID string) (*admin
 	}
 
 	payload := &admin.OrphanAnalysisPayload{
-		StoryFragments: contentIDs.StoryFragments,
-		Panes:          contentIDs.Panes,
-		Menus:          contentIDs.Menus,
-		Files:          contentIDs.Files,
-		Beliefs:        contentIDs.Beliefs,
+		StoryFragments: make(map[string][]string),
+		Panes:          make(map[string][]string),
+		Menus:          make(map[string][]string),
+		Files:          make(map[string][]string),
+		Beliefs:        make(map[string][]string),
 		Status:         "complete",
 	}
 
-	// Compute story fragment dependencies
-	sfDeps, err := oas.bulkRepo.ScanStoryFragmentDependencies(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan story fragment dependencies: %w", err)
+	// Initialize all content IDs with empty dependencies
+	for _, id := range contentIDs.StoryFragments["all"] {
+		payload.StoryFragments[id] = []string{}
 	}
-	for id, deps := range sfDeps {
-		payload.StoryFragments[id] = deps
+	for _, id := range contentIDs.Panes["all"] {
+		payload.Panes[id] = []string{}
 	}
-
-	// Compute pane dependencies
-	paneDeps, err := oas.bulkRepo.ScanPaneDependencies(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan pane dependencies: %w", err)
+	for _, id := range contentIDs.Menus["all"] {
+		payload.Menus[id] = []string{}
 	}
-	for id, deps := range paneDeps {
-		payload.Panes[id] = deps
+	for _, id := range contentIDs.Files["all"] {
+		payload.Files[id] = []string{}
 	}
-
-	// Compute menu dependencies
-	menuDeps, err := oas.bulkRepo.ScanMenuDependencies(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan menu dependencies: %w", err)
-	}
-	for id, deps := range menuDeps {
-		payload.Menus[id] = deps
+	for _, id := range contentIDs.Beliefs["all"] {
+		payload.Beliefs[id] = []string{}
 	}
 
-	// Compute file dependencies
-	fileDeps, err := oas.bulkRepo.ScanFileDependencies(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan file dependencies: %w", err)
+	// Compute dependencies
+	if err := oas.computeStoryFragmentDependencies(tenantID, payload); err != nil {
+		return nil, err
 	}
-	for id, deps := range fileDeps {
-		payload.Files[id] = deps
+	if err := oas.computePaneDependencies(tenantID, payload); err != nil {
+		return nil, err
 	}
-
-	// Compute belief dependencies
-	beliefDeps, err := oas.bulkRepo.ScanBeliefDependencies(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan belief dependencies: %w", err)
+	if err := oas.computeMenuDependencies(tenantID, payload); err != nil {
+		return nil, err
 	}
-	for id, deps := range beliefDeps {
-		payload.Beliefs[id] = deps
+	if err := oas.computeFileDependencies(tenantID, payload); err != nil {
+		return nil, err
+	}
+	if err := oas.computeBeliefDependencies(tenantID, payload); err != nil {
+		return nil, err
 	}
 
 	return payload, nil
+}
+
+// computeStoryFragmentDependencies maps storyfragment dependencies
+func (oas *OrphanAnalysisService) computeStoryFragmentDependencies(tenantID string, payload *admin.OrphanAnalysisPayload) error {
+	dependencies, err := oas.bulkRepo.ScanStoryFragmentDependencies(tenantID)
+	if err != nil {
+		return err
+	}
+	for id, deps := range dependencies {
+		payload.StoryFragments[id] = deps
+	}
+	return nil
+}
+
+// computePaneDependencies maps pane dependencies
+func (oas *OrphanAnalysisService) computePaneDependencies(tenantID string, payload *admin.OrphanAnalysisPayload) error {
+	dependencies, err := oas.bulkRepo.ScanPaneDependencies(tenantID)
+	if err != nil {
+		return err
+	}
+	for id, deps := range dependencies {
+		payload.Panes[id] = deps
+	}
+	return nil
+}
+
+// computeMenuDependencies maps menu dependencies
+func (oas *OrphanAnalysisService) computeMenuDependencies(tenantID string, payload *admin.OrphanAnalysisPayload) error {
+	dependencies, err := oas.bulkRepo.ScanMenuDependencies(tenantID)
+	if err != nil {
+		return err
+	}
+	for id, deps := range dependencies {
+		payload.Menus[id] = deps
+	}
+	return nil
+}
+
+// computeFileDependencies maps file dependencies
+func (oas *OrphanAnalysisService) computeFileDependencies(tenantID string, payload *admin.OrphanAnalysisPayload) error {
+	dependencies, err := oas.bulkRepo.ScanFileDependencies(tenantID)
+	if err != nil {
+		return err
+	}
+	for id, deps := range dependencies {
+		payload.Files[id] = deps
+	}
+	return nil
+}
+
+// computeBeliefDependencies maps belief dependencies
+func (oas *OrphanAnalysisService) computeBeliefDependencies(tenantID string, payload *admin.OrphanAnalysisPayload) error {
+	dependencies, err := oas.bulkRepo.ScanBeliefDependencies(tenantID)
+	if err != nil {
+		return err
+	}
+	for id, deps := range dependencies {
+		payload.Beliefs[id] = deps
+	}
+	return nil
 }
 
 // generateOrphanETag creates ETag based on tenant and timestamp

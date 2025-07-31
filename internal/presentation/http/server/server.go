@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	tenantpkg "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/routes"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
@@ -17,8 +18,8 @@ type Server struct {
 }
 
 // New creates a new HTTP server instance
-func New(port string) *Server {
-	router := routes.SetupRoutes()
+func New(port string, tenantManager *tenantpkg.Manager) *Server {
+	router := routes.SetupRoutes(tenantManager)
 
 	httpServer := &http.Server{
 		Addr:         ":" + port,
