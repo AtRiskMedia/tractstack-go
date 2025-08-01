@@ -23,6 +23,11 @@ type Container struct {
 	BeliefRegistryService *services.BeliefRegistryService
 	WarmingService        *services.WarmingService
 
+	// Fragment Services (NEW)
+	SessionBeliefService *services.SessionBeliefService
+	WidgetContextService *services.WidgetContextService
+	FragmentService      *services.FragmentService
+
 	// Analytics Services (stateless singletons)
 	AnalyticsService          *services.AnalyticsService
 	DashboardAnalyticsService *services.DashboardAnalyticsService
@@ -37,6 +42,11 @@ type Container struct {
 
 // NewContainer creates and wires all singleton services
 func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) *Container {
+	// Initialize fragment services with proper dependency injection
+	sessionBeliefService := services.NewSessionBeliefService()
+	widgetContextService := services.NewWidgetContextService(sessionBeliefService)
+	fragmentService := services.NewFragmentService(widgetContextService, sessionBeliefService)
+
 	return &Container{
 		// Content Services (stateless singletons - no repository dependencies stored)
 		MenuService:           services.NewMenuService(),
@@ -51,6 +61,11 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		OrphanAnalysisService: services.NewOrphanAnalysisService(),
 		BeliefRegistryService: services.NewBeliefRegistryService(),
 		WarmingService:        services.NewWarmingService(),
+
+		// Fragment Services
+		SessionBeliefService: sessionBeliefService,
+		WidgetContextService: widgetContextService,
+		FragmentService:      fragmentService,
 
 		// Analytics Services (stateless singletons)
 		AnalyticsService:          services.NewAnalyticsService(),
