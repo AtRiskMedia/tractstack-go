@@ -41,6 +41,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.LeadAnalyticsService,
 		container.ContentAnalyticsService,
 		container.WarmingService,
+		container.TenantManager,
 	)
 
 	// API routes with tenant middleware
@@ -59,13 +60,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			})
 		})
 
-		// Analytics endpoints (simplified until services are migrated)
+		// Analytics endpoints
 		analytics := api.Group("/analytics")
 		{
 			analytics.GET("/dashboard", analyticsHandlers.HandleDashboardAnalytics)
 			analytics.GET("/epinet/:id", analyticsHandlers.HandleEpinetSankey)
 			analytics.GET("/storyfragments", analyticsHandlers.HandleStoryfragmentAnalytics)
 			analytics.GET("/leads", analyticsHandlers.HandleLeadMetrics)
+			analytics.GET("/all", analyticsHandlers.HandleAllAnalytics)
 		}
 
 		// Content endpoints
@@ -130,14 +132,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
 			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
 			nodes.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
-
-			// Fragment rendering endpoints
-			//fragments := api.Group("/fragments")
-			//{
-			//	fragments.GET("/panes/:id", handlers.GetPaneFragmentHandler)    // TODO: implement
-			//	fragments.POST("/panes", handlers.GetPaneFragmentsBatchHandler) // TODO: implement
-			//}
-
 		}
 	}
 

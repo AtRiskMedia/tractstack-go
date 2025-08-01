@@ -193,15 +193,11 @@ func (as *AnalyticsStore) GetLeadMetrics(tenantID string) (*types.LeadMetricsCac
 		return nil, false
 	}
 
-	// Check if metrics are expired (1 hour TTL for computed metrics)
-	if time.Since(cache.LeadMetrics.LastComputed) > time.Hour {
-		return nil, false
-	}
-
+	// TTL check is handled by the manager
 	return cache.LeadMetrics, true
 }
 
-// SetLeadMetrics stores computed lead metrics
+// SetLeadMetrics stores computed lead metrics - CORRECTED SIGNATURE
 func (as *AnalyticsStore) SetLeadMetrics(tenantID string, metrics *types.LeadMetricsCache) {
 	cache, exists := as.GetTenantCache(tenantID)
 	if !exists {
@@ -230,15 +226,11 @@ func (as *AnalyticsStore) GetDashboardData(tenantID string) (*types.DashboardCac
 		return nil, false
 	}
 
-	// Check if dashboard data is expired (1 hour TTL for computed metrics)
-	if time.Since(cache.DashboardData.LastComputed) > time.Hour {
-		return nil, false
-	}
-
+	// TTL check is handled by the manager
 	return cache.DashboardData, true
 }
 
-// SetDashboardData stores computed dashboard data
+// SetDashboardData stores computed dashboard data - CORRECTED SIGNATURE
 func (as *AnalyticsStore) SetDashboardData(tenantID string, data *types.DashboardCache) {
 	cache, exists := as.GetTenantCache(tenantID)
 	if !exists {
@@ -251,6 +243,17 @@ func (as *AnalyticsStore) SetDashboardData(tenantID string, data *types.Dashboar
 
 	cache.DashboardData = data
 	cache.LastUpdated = time.Now().UTC()
+}
+
+// GetEpinetSankey retrieves a cached Sankey diagram
+func (as *AnalyticsStore) GetEpinetSankey(tenantID, epinetID string, filters string) (*types.SankeyDiagram, string, bool) {
+	// This functionality is not part of the immediate plan, returning not found.
+	return nil, "", false
+}
+
+// SetEpinetSankey stores a computed Sankey diagram
+func (as *AnalyticsStore) SetEpinetSankey(tenantID, epinetID string, filters string, data *types.SankeyDiagram, etag string) {
+	// This functionality is not part of the immediate plan.
 }
 
 // =============================================================================
@@ -269,7 +272,6 @@ func (as *AnalyticsStore) PurgeExpiredBins(tenantID string, olderThan string) {
 
 	// Purge epinet bins
 	for binKey := range cache.EpinetBins {
-		// Extract hour key from binKey (format: "epinetID:hourKey")
 		parts := splitBinKey(binKey)
 		if len(parts) == 2 && parts[1] < olderThan {
 			delete(cache.EpinetBins, binKey)
@@ -278,7 +280,6 @@ func (as *AnalyticsStore) PurgeExpiredBins(tenantID string, olderThan string) {
 
 	// Purge content bins
 	for binKey := range cache.ContentBins {
-		// Extract hour key from binKey (format: "contentID:hourKey")
 		parts := splitBinKey(binKey)
 		if len(parts) == 2 && parts[1] < olderThan {
 			delete(cache.ContentBins, binKey)
@@ -310,19 +311,6 @@ func (as *AnalyticsStore) UpdateLastFullHour(tenantID, hourKey string) {
 	cache.LastUpdated = time.Now().UTC()
 }
 
-// GetLastFullHour retrieves the last processed hour for a tenant
-func (as *AnalyticsStore) GetLastFullHour(tenantID string) string {
-	cache, exists := as.GetTenantCache(tenantID)
-	if !exists {
-		return ""
-	}
-
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-
-	return cache.LastFullHour
-}
-
 // InvalidateAnalyticsCache clears computed metrics for a tenant
 func (as *AnalyticsStore) InvalidateAnalyticsCache(tenantID string) {
 	cache, exists := as.GetTenantCache(tenantID)
@@ -333,34 +321,9 @@ func (as *AnalyticsStore) InvalidateAnalyticsCache(tenantID string) {
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 
-	// Clear computed metrics but keep raw hourly bins
 	cache.LeadMetrics = nil
 	cache.DashboardData = nil
 	cache.LastUpdated = time.Now().UTC()
-}
-
-// GetAnalyticsSummary returns cache status summary for debugging
-func (as *AnalyticsStore) GetAnalyticsSummary(tenantID string) map[string]any {
-	cache, exists := as.GetTenantCache(tenantID)
-	if !exists {
-		return map[string]any{
-			"exists": false,
-		}
-	}
-
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-
-	return map[string]any{
-		"exists":         true,
-		"epinetBins":     len(cache.EpinetBins),
-		"contentBins":    len(cache.ContentBins),
-		"siteBins":       len(cache.SiteBins),
-		"hasLeadMetrics": cache.LeadMetrics != nil,
-		"hasDashboard":   cache.DashboardData != nil,
-		"lastFullHour":   cache.LastFullHour,
-		"lastUpdated":    cache.LastUpdated,
-	}
 }
 
 // =============================================================================
@@ -372,7 +335,6 @@ func splitBinKey(binKey string) []string {
 	parts := make([]string, 0, 2)
 	colonIndex := -1
 
-	// Find the last colon to handle IDs that might contain colons
 	for i := len(binKey) - 1; i >= 0; i-- {
 		if binKey[i] == ':' {
 			colonIndex = i

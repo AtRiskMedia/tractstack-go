@@ -20,7 +20,6 @@ type Container struct {
 	EpinetService         *services.EpinetService
 	ContentMapService     *services.ContentMapService
 	OrphanAnalysisService *services.OrphanAnalysisService
-	CacheWarmerService    *services.CacheWarmerService
 	BeliefRegistryService *services.BeliefRegistryService
 	WarmingService        *services.WarmingService
 
@@ -50,7 +49,6 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		EpinetService:         services.NewEpinetService(),
 		ContentMapService:     services.NewContentMapService(),
 		OrphanAnalysisService: services.NewOrphanAnalysisService(),
-		CacheWarmerService:    services.NewCacheWarmerService(),
 		BeliefRegistryService: services.NewBeliefRegistryService(),
 		WarmingService:        services.NewWarmingService(),
 
