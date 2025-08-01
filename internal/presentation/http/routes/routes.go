@@ -34,8 +34,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService)
 	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService)
 	configHandlers := handlers.NewConfigHandlers()
-	// TODO: Analytics handlers with only WarmingService (analytics services not yet migrated)
-	analyticsHandlers := handlers.NewAnalyticsHandlers(container.WarmingService)
+	analyticsHandlers := handlers.NewAnalyticsHandlers(
+		container.AnalyticsService,
+		container.DashboardAnalyticsService,
+		container.EpinetAnalyticsService,
+		container.LeadAnalyticsService,
+		container.ContentAnalyticsService,
+		container.WarmingService,
+	)
 
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
@@ -57,7 +63,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		analytics := api.Group("/analytics")
 		{
 			analytics.GET("/dashboard", analyticsHandlers.HandleDashboardAnalytics)
-			analytics.GET("/epinets/:id", analyticsHandlers.HandleEpinetSankey)
+			analytics.GET("/epinet/:id", analyticsHandlers.HandleEpinetSankey)
 			analytics.GET("/storyfragments", analyticsHandlers.HandleStoryfragmentAnalytics)
 			analytics.GET("/leads", analyticsHandlers.HandleLeadMetrics)
 		}
