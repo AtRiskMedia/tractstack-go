@@ -24,13 +24,12 @@ type Container struct {
 	BeliefRegistryService *services.BeliefRegistryService
 	WarmingService        *services.WarmingService
 
-	// REMOVED: Analytics services (not yet migrated to clean architecture)
-	// TODO: Add analytics services when they're migrated from legacy /services to /internal/application/services
-	// DashboardAnalyticsService    *services.DashboardAnalyticsService
-	// EpinetAnalyticsService       *services.EpinetAnalyticsService
-	// LeadAnalyticsService         *services.LeadAnalyticsService
-	// ContentAnalyticsService      *services.ContentAnalyticsService
-	// AnalyticsOrchestratorService *services.AnalyticsOrchestratorService
+	// Analytics Services (stateless singletons)
+	AnalyticsService          *services.AnalyticsService
+	DashboardAnalyticsService *services.DashboardAnalyticsService
+	EpinetAnalyticsService    *services.EpinetAnalyticsService
+	LeadAnalyticsService      *services.LeadAnalyticsService
+	ContentAnalyticsService   *services.ContentAnalyticsService
 
 	// Infrastructure Dependencies
 	TenantManager *tenant.Manager
@@ -55,13 +54,12 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		BeliefRegistryService: services.NewBeliefRegistryService(),
 		WarmingService:        services.NewWarmingService(),
 
-		// REMOVED: Analytics service constructors (not yet migrated)
-		// TODO: Add when analytics services are migrated to clean architecture
-		// DashboardAnalyticsService:    services.NewDashboardAnalyticsService(cacheManager),
-		// EpinetAnalyticsService:       services.NewEpinetAnalyticsService(cacheManager),
-		// LeadAnalyticsService:         services.NewLeadAnalyticsService(cacheManager),
-		// ContentAnalyticsService:      services.NewContentAnalyticsService(cacheManager),
-		// AnalyticsOrchestratorService: services.NewAnalyticsOrchestratorService(),
+		// Analytics Services (stateless singletons)
+		AnalyticsService:          services.NewAnalyticsService(),
+		DashboardAnalyticsService: services.NewDashboardAnalyticsService(),
+		EpinetAnalyticsService:    services.NewEpinetAnalyticsService(),
+		LeadAnalyticsService:      services.NewLeadAnalyticsService(),
+		ContentAnalyticsService:   services.NewContentAnalyticsService(),
 
 		// Infrastructure
 		TenantManager: tenantManager,
