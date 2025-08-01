@@ -34,6 +34,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService)
 	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService)
 	configHandlers := handlers.NewConfigHandlers()
+	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService)
 	analyticsHandlers := handlers.NewAnalyticsHandlers(
 		container.AnalyticsService,
 		container.DashboardAnalyticsService,
@@ -77,6 +78,13 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		admin := api.Group("/admin")
 		{
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
+		}
+
+		// Fragment rendering endpoints (MATCHES LEGACY main.go EXACTLY)
+		fragments := api.Group("/fragments")
+		{
+			fragments.GET("/panes/:id", fragmentHandlers.GetPaneFragment)
+			fragments.POST("/panes", fragmentHandlers.GetPaneFragmentBatch)
 		}
 
 		// Content nodes
