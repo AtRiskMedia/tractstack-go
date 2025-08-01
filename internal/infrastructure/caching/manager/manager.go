@@ -11,16 +11,18 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/stores"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // Interface assertions to ensure Manager implements all required interfaces.
 var (
-	_ interfaces.Cache = (*Manager)(nil)
+	_ interfaces.Cache                   = (*Manager)(nil)
+	_ interfaces.WriteOnlyAnalyticsCache = (*Manager)(nil)
+	_ interfaces.ReadOnlyAnalyticsCache  = (*Manager)(nil)
 )
 
 // Manager provides centralized cache operations with proper tenant isolation
 type Manager struct {
-	// ... (existing fields)
 	ContentCache   map[string]*types.TenantContentCache
 	UserStateCache map[string]*types.TenantUserStateCache
 	HTMLChunkCache map[string]*types.TenantHTMLChunkCache
@@ -54,7 +56,6 @@ func NewManager() *Manager {
 func (m *Manager) GetTenantContentCache(tenantID string) (*types.TenantContentCache, error) {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
-
 	cache, exists := m.ContentCache[tenantID]
 	if !exists {
 		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
@@ -65,7 +66,6 @@ func (m *Manager) GetTenantContentCache(tenantID string) (*types.TenantContentCa
 func (m *Manager) GetTenantUserStateCache(tenantID string) (*types.TenantUserStateCache, error) {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
-
 	cache, exists := m.UserStateCache[tenantID]
 	if !exists {
 		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
@@ -76,7 +76,6 @@ func (m *Manager) GetTenantUserStateCache(tenantID string) (*types.TenantUserSta
 func (m *Manager) GetTenantHTMLChunkCache(tenantID string) (*types.TenantHTMLChunkCache, error) {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
-
 	cache, exists := m.HTMLChunkCache[tenantID]
 	if !exists {
 		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
@@ -87,7 +86,6 @@ func (m *Manager) GetTenantHTMLChunkCache(tenantID string) (*types.TenantHTMLChu
 func (m *Manager) GetTenantAnalyticsCache(tenantID string) (*types.TenantAnalyticsCache, error) {
 	m.Mu.RLock()
 	defer m.Mu.RUnlock()
-
 	cache, exists := m.AnalyticsCache[tenantID]
 	if !exists {
 		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
@@ -164,419 +162,62 @@ func (m *Manager) InitializeTenant(tenantID string) {
 	m.LastAccessed[tenantID] = time.Now().UTC()
 }
 
-// =============================================================================
-// ContentCache Interface Implementation
-// =============================================================================
+func (m *Manager) GetRangeCacheStatus(tenantID, epinetID string, startHour, endHour int) types.RangeCacheStatus {
+	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
 
-// --- Methods for GetAll...IDs and SetAll...IDs ---
+	now := time.Now().UTC()
+	currentHourKey := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 
-func (m *Manager) GetAllTractStackIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
+	var missingHours []string
+	currentHourExpired := false
+	historicalMissing := false
+
+	foundBins, missingKeys := m.GetHourlyEpinetRange(tenantID, epinetID, hourKeys)
+
+	for _, missingKey := range missingKeys {
+		missingHours = append(missingHours, missingKey)
+		if missingKey == currentHourKey {
+			currentHourExpired = true
+		} else {
+			historicalMissing = true
+		}
 	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	// This content type does not have a master ID list, so we build it from the map.
-	// This is less efficient but correct for the current structure.
-	if len(cache.TractStacks) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
+
+	for hourKey, bin := range foundBins {
+		isExpired := false
+		ttl := config.AnalyticsBinTTL
+		if hourKey == currentHourKey {
+			ttl = config.CurrentHourTTL
+		}
+		if time.Since(bin.ComputedAt) > ttl {
+			isExpired = true
+		}
+
+		if isExpired {
+			missingHours = append(missingHours, hourKey)
+			if hourKey == currentHourKey {
+				currentHourExpired = true
+			} else {
+				historicalMissing = true
+			}
+		}
 	}
-	ids := make([]string, 0, len(cache.TractStacks))
-	for id := range cache.TractStacks {
-		ids = append(ids, id)
+
+	var action string
+	if len(missingHours) == 0 {
+		action = "proceed"
+	} else if currentHourExpired && !historicalMissing {
+		action = "refresh_current"
+	} else {
+		action = "load_range"
 	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
 
-func (m *Manager) SetAllTractStackIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllTractStackIDs slice in the cache struct
-}
-
-func (m *Manager) GetAllStoryFragmentIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
+	return types.RangeCacheStatus{
+		Action:             action,
+		CurrentHourExpired: currentHourExpired,
+		HistoricalComplete: !historicalMissing,
+		MissingHours:       missingHours,
 	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.StoryFragments) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, 0, len(cache.StoryFragments))
-	for id := range cache.StoryFragments {
-		ids = append(ids, id)
-	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllStoryFragmentIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllStoryFragmentIDs slice in the cache struct
-}
-
-func (m *Manager) GetAllPaneIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.AllPaneIDs) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, len(cache.AllPaneIDs))
-	copy(ids, cache.AllPaneIDs)
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllPaneIDs(tenantID string, ids []string) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return
-	}
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-	cache.AllPaneIDs = ids
-	cache.LastUpdated = time.Now().UTC()
-}
-
-func (m *Manager) GetAllMenuIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.Menus) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, 0, len(cache.Menus))
-	for id := range cache.Menus {
-		ids = append(ids, id)
-	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllMenuIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllMenuIDs slice in the cache struct
-}
-
-func (m *Manager) GetAllResourceIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.Resources) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, 0, len(cache.Resources))
-	for id := range cache.Resources {
-		ids = append(ids, id)
-	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllResourceIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllResourceIDs slice in the cache struct
-}
-
-func (m *Manager) GetAllBeliefIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.Beliefs) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, 0, len(cache.Beliefs))
-	for id := range cache.Beliefs {
-		ids = append(ids, id)
-	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllBeliefIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllBeliefIDs slice in the cache struct
-}
-
-func (m *Manager) GetAllEpinetIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.Epinets) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, 0, len(cache.Epinets))
-	for id := range cache.Epinets {
-		ids = append(ids, id)
-	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllEpinetIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllEpinetIDs slice in the cache struct
-}
-
-func (m *Manager) GetAllFileIDs(tenantID string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	if len(cache.Files) == 0 || time.Since(cache.LastUpdated) > config.ContentCacheTTL {
-		return nil, false
-	}
-	ids := make([]string, 0, len(cache.Files))
-	for id := range cache.Files {
-		ids = append(ids, id)
-	}
-	m.updateTenantAccessTime(tenantID)
-	return ids, true
-}
-
-func (m *Manager) SetAllFileIDs(tenantID string, ids []string) {
-	// Not implemented as there is no AllFileIDs slice in the cache struct
-}
-
-func (m *Manager) GetTractStack(tenantID, id string) (*content.TractStackNode, bool) {
-	return m.contentStore.GetTractStack(tenantID, id)
-}
-
-func (m *Manager) SetTractStack(tenantID string, node *content.TractStackNode) {
-	m.contentStore.SetTractStack(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetStoryFragment(tenantID, id string) (*content.StoryFragmentNode, bool) {
-	return m.contentStore.GetStoryFragment(tenantID, id)
-}
-
-func (m *Manager) SetStoryFragment(tenantID string, node *content.StoryFragmentNode) {
-	m.contentStore.SetStoryFragment(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetPane(tenantID, id string) (*content.PaneNode, bool) {
-	return m.contentStore.GetPane(tenantID, id)
-}
-
-func (m *Manager) SetPane(tenantID string, node *content.PaneNode) {
-	m.contentStore.SetPane(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetMenu(tenantID, id string) (*content.MenuNode, bool) {
-	return m.contentStore.GetMenu(tenantID, id)
-}
-
-func (m *Manager) SetMenu(tenantID string, node *content.MenuNode) {
-	m.contentStore.SetMenu(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetResource(tenantID, id string) (*content.ResourceNode, bool) {
-	return m.contentStore.GetResource(tenantID, id)
-}
-
-func (m *Manager) SetResource(tenantID string, node *content.ResourceNode) {
-	m.contentStore.SetResource(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetBelief(tenantID, id string) (*content.BeliefNode, bool) {
-	return m.contentStore.GetBelief(tenantID, id)
-}
-
-func (m *Manager) SetBelief(tenantID string, node *content.BeliefNode) {
-	m.contentStore.SetBelief(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetEpinet(tenantID, id string) (*content.EpinetNode, bool) {
-	return m.contentStore.GetEpinet(tenantID, id)
-}
-
-func (m *Manager) SetEpinet(tenantID string, node *content.EpinetNode) {
-	m.contentStore.SetEpinet(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetFile(tenantID, id string) (*content.ImageFileNode, bool) {
-	return m.contentStore.GetImageFile(tenantID, id)
-}
-
-func (m *Manager) SetFile(tenantID string, node *content.ImageFileNode) {
-	m.contentStore.SetImageFile(tenantID, node)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetContentBySlug(tenantID, slug string) (string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return "", false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	id, exists := cache.SlugToID[slug]
-	return id, exists
-}
-
-func (m *Manager) GetResourcesByCategory(tenantID, category string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	ids, exists := cache.CategoryToIDs[category]
-	return ids, exists
-}
-
-func (m *Manager) GetFullContentMap(tenantID string) ([]types.FullContentMapItem, bool) {
-	return m.contentStore.GetFullContentMap(tenantID)
-}
-
-func (m *Manager) SetFullContentMap(tenantID string, contentMap []types.FullContentMapItem) {
-	m.contentStore.SetFullContentMap(tenantID, contentMap)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetOrphanAnalysis(tenantID string) (*types.OrphanAnalysisPayload, string, bool) {
-	return m.contentStore.GetOrphanAnalysis(tenantID)
-}
-
-func (m *Manager) SetOrphanAnalysis(tenantID string, payload *types.OrphanAnalysisPayload, etag string) {
-	m.contentStore.SetOrphanAnalysis(tenantID, payload, etag)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) InvalidateContentCache(tenantID string) {
-	m.contentStore.InvalidateContentCache(tenantID)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetVisitState(tenantID, visitID string) (*types.VisitState, bool) {
-	return m.sessionsStore.GetVisitState(tenantID, visitID)
-}
-
-func (m *Manager) SetVisitState(tenantID string, state *types.VisitState) {
-	m.sessionsStore.SetVisitState(tenantID, state)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetFingerprintState(tenantID, fingerprintID string) (*types.FingerprintState, bool) {
-	return m.sessionsStore.GetFingerprintState(tenantID, fingerprintID)
-}
-
-func (m *Manager) SetFingerprintState(tenantID string, state *types.FingerprintState) {
-	m.sessionsStore.SetFingerprintState(tenantID, state)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) IsKnownFingerprint(tenantID, fingerprintID string) bool {
-	return m.sessionsStore.IsKnownFingerprint(tenantID, fingerprintID)
-}
-
-func (m *Manager) SetKnownFingerprint(tenantID, fingerprintID string, isKnown bool) {
-	m.sessionsStore.SetKnownFingerprint(tenantID, fingerprintID, isKnown)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) LoadKnownFingerprints(tenantID string, fingerprints map[string]bool) {
-	m.sessionsStore.LoadKnownFingerprints(tenantID, fingerprints)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetSession(tenantID, sessionID string) (*types.SessionData, bool) {
-	return m.sessionsStore.GetSession(tenantID, sessionID)
-}
-
-func (m *Manager) SetSession(tenantID string, sessionData *types.SessionData) {
-	m.sessionsStore.SetSession(tenantID, sessionData)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*types.StoryfragmentBeliefRegistry, bool) {
-	return m.sessionsStore.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
-}
-
-func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *types.StoryfragmentBeliefRegistry) {
-	m.sessionsStore.SetStoryfragmentBeliefRegistry(tenantID, registry)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) {
-	m.sessionsStore.InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*types.SessionBeliefContext, bool) {
-	return m.sessionsStore.GetSessionBeliefContext(tenantID, sessionID, storyfragmentID)
-}
-
-func (m *Manager) SetSessionBeliefContext(tenantID string, context *types.SessionBeliefContext) {
-	m.sessionsStore.SetSessionBeliefContext(tenantID, context)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string) {
-	m.sessionsStore.InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) InvalidateUserStateCache(tenantID string) {
-	m.sessionsStore.InvalidateUserStateCache(tenantID)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetHTMLChunk(tenantID, paneID string, variant types.PaneVariant) (*types.HTMLChunk, bool) {
-	return m.fragmentsStore.GetHTMLChunk(tenantID, paneID, variant)
-}
-
-func (m *Manager) SetHTMLChunk(tenantID, paneID string, variant types.PaneVariant, html string, dependsOn []string) {
-	m.fragmentsStore.SetHTMLChunk(tenantID, paneID, variant, html, dependsOn)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) GetChunkDependencies(tenantID, nodeID string) ([]string, bool) {
-	cache, err := m.GetTenantHTMLChunkCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	deps, exists := cache.Deps[nodeID]
-	return deps, exists
-}
-
-func (m *Manager) InvalidateByDependency(tenantID, dependencyID string) {
-	m.fragmentsStore.InvalidateByDependency(tenantID, dependencyID)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) InvalidateHTMLChunkCache(tenantID string) {
-	m.fragmentsStore.InvalidateHTMLChunkCache(tenantID)
-	m.updateTenantAccessTime(tenantID)
-}
-
-func (m *Manager) InvalidateHTMLChunk(tenantID, paneID string, variant types.PaneVariant) {
-	m.fragmentsStore.InvalidateByPattern(tenantID, m.fragmentsStore.BuildChunkKey(paneID, variant))
-	m.updateTenantAccessTime(tenantID)
 }
 
 func (m *Manager) GetHourlyEpinetBin(tenantID, epinetID, hourKey string) (*types.HourlyEpinetBin, bool) {
@@ -615,12 +256,46 @@ func (m *Manager) SetLeadMetrics(tenantID string, metrics *types.LeadMetricsCach
 	m.updateTenantAccessTime(tenantID)
 }
 
+func (m *Manager) GetLeadMetricsWithETag(tenantID, cacheKey string) (*types.LeadMetricsData, string, bool) {
+	dataCache, found := m.analyticsStore.GetLeadMetrics(tenantID)
+	if !found || dataCache == nil {
+		return nil, "", false
+	}
+	return dataCache.Data, "", true
+}
+
+func (m *Manager) SetLeadMetricsWithETag(tenantID, cacheKey string, data *types.LeadMetricsData, etag string) {
+	cacheEntry := &types.LeadMetricsCache{
+		Data:         data,
+		LastComputed: time.Now().UTC(),
+	}
+	m.analyticsStore.SetLeadMetrics(tenantID, cacheEntry)
+	m.updateTenantAccessTime(tenantID)
+}
+
 func (m *Manager) GetDashboardData(tenantID string) (*types.DashboardCache, bool) {
 	return m.analyticsStore.GetDashboardData(tenantID)
 }
 
 func (m *Manager) SetDashboardData(tenantID string, data *types.DashboardCache) {
 	m.analyticsStore.SetDashboardData(tenantID, data)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) GetDashboardDataWithETag(tenantID, cacheKey string) (*types.DashboardData, string, bool) {
+	dataCache, found := m.analyticsStore.GetDashboardData(tenantID)
+	if !found || dataCache == nil {
+		return nil, "", false
+	}
+	return dataCache.Data, "", true
+}
+
+func (m *Manager) SetDashboardDataWithETag(tenantID, cacheKey string, data *types.DashboardData, etag string) {
+	cacheEntry := &types.DashboardCache{
+		Data:         data,
+		LastComputed: time.Now().UTC(),
+	}
+	m.analyticsStore.SetDashboardData(tenantID, cacheEntry)
 	m.updateTenantAccessTime(tenantID)
 }
 
@@ -641,6 +316,354 @@ func (m *Manager) InvalidateAnalyticsCache(tenantID string) {
 func (m *Manager) UpdateLastFullHour(tenantID, hourKey string) {
 	m.analyticsStore.UpdateLastFullHour(tenantID, hourKey)
 	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) GetTractStack(tenantID, id string) (*content.TractStackNode, bool) {
+	return m.contentStore.GetTractStack(tenantID, id)
+}
+
+func (m *Manager) SetTractStack(tenantID string, node *content.TractStackNode) {
+	m.contentStore.SetTractStack(tenantID, node)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) GetAllTractStackIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.TractStacks) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.TractStacks))
+	for id := range cache.TractStacks {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllTractStackIDs(tenantID string, ids []string) {}
+func (m *Manager) GetStoryFragment(tenantID, id string) (*content.StoryFragmentNode, bool) {
+	return m.contentStore.GetStoryFragment(tenantID, id)
+}
+
+func (m *Manager) SetStoryFragment(tenantID string, node *content.StoryFragmentNode) {
+	m.contentStore.SetStoryFragment(tenantID, node)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) GetAllStoryFragmentIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.StoryFragments) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.StoryFragments))
+	for id := range cache.StoryFragments {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllStoryFragmentIDs(tenantID string, ids []string) {}
+func (m *Manager) GetPane(tenantID, id string) (*content.PaneNode, bool) {
+	return m.contentStore.GetPane(tenantID, id)
+}
+
+func (m *Manager) SetPane(tenantID string, node *content.PaneNode) {
+	m.contentStore.SetPane(tenantID, node)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) GetAllPaneIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.AllPaneIDs) == 0 {
+		return nil, false
+	}
+	ids := make([]string, len(cache.AllPaneIDs))
+	copy(ids, cache.AllPaneIDs)
+	return ids, true
+}
+
+func (m *Manager) SetAllPaneIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllPaneIDs = ids
+}
+
+func (m *Manager) GetMenu(tenantID, id string) (*content.MenuNode, bool) {
+	return m.contentStore.GetMenu(tenantID, id)
+}
+
+func (m *Manager) SetMenu(tenantID string, node *content.MenuNode) {
+	m.contentStore.SetMenu(tenantID, node)
+}
+
+func (m *Manager) GetAllMenuIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.Menus) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.Menus))
+	for id := range cache.Menus {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllMenuIDs(tenantID string, ids []string) {}
+func (m *Manager) GetResource(tenantID, id string) (*content.ResourceNode, bool) {
+	return m.contentStore.GetResource(tenantID, id)
+}
+
+func (m *Manager) SetResource(tenantID string, node *content.ResourceNode) {
+	m.contentStore.SetResource(tenantID, node)
+}
+
+func (m *Manager) GetAllResourceIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.Resources) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.Resources))
+	for id := range cache.Resources {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllResourceIDs(tenantID string, ids []string) {}
+func (m *Manager) GetBelief(tenantID, id string) (*content.BeliefNode, bool) {
+	return m.contentStore.GetBelief(tenantID, id)
+}
+
+func (m *Manager) SetBelief(tenantID string, node *content.BeliefNode) {
+	m.contentStore.SetBelief(tenantID, node)
+}
+
+func (m *Manager) GetAllBeliefIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.Beliefs) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.Beliefs))
+	for id := range cache.Beliefs {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllBeliefIDs(tenantID string, ids []string) {}
+func (m *Manager) GetEpinet(tenantID, id string) (*content.EpinetNode, bool) {
+	return m.contentStore.GetEpinet(tenantID, id)
+}
+
+func (m *Manager) SetEpinet(tenantID string, node *content.EpinetNode) {
+	m.contentStore.SetEpinet(tenantID, node)
+}
+
+func (m *Manager) GetAllEpinetIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.Epinets) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.Epinets))
+	for id := range cache.Epinets {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllEpinetIDs(tenantID string, ids []string) {}
+func (m *Manager) GetFile(tenantID, id string) (*content.ImageFileNode, bool) {
+	return m.contentStore.GetImageFile(tenantID, id)
+}
+
+func (m *Manager) SetFile(tenantID string, node *content.ImageFileNode) {
+	m.contentStore.SetImageFile(tenantID, node)
+}
+
+func (m *Manager) GetAllFileIDs(tenantID string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if len(cache.Files) == 0 {
+		return nil, false
+	}
+	ids := make([]string, 0, len(cache.Files))
+	for id := range cache.Files {
+		ids = append(ids, id)
+	}
+	return ids, true
+}
+func (m *Manager) SetAllFileIDs(tenantID string, ids []string) {}
+func (m *Manager) GetContentBySlug(tenantID, slug string) (string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return "", false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	id, exists := cache.SlugToID[slug]
+	return id, exists
+}
+
+func (m *Manager) GetResourcesByCategory(tenantID, category string) ([]string, bool) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	ids, exists := cache.CategoryToIDs[category]
+	return ids, exists
+}
+
+func (m *Manager) GetFullContentMap(tenantID string) ([]types.FullContentMapItem, bool) {
+	return m.contentStore.GetFullContentMap(tenantID)
+}
+
+func (m *Manager) SetFullContentMap(tenantID string, contentMap []types.FullContentMapItem) {
+	m.contentStore.SetFullContentMap(tenantID, contentMap)
+}
+
+func (m *Manager) GetOrphanAnalysis(tenantID string) (*types.OrphanAnalysisPayload, string, bool) {
+	return m.contentStore.GetOrphanAnalysis(tenantID)
+}
+
+func (m *Manager) SetOrphanAnalysis(tenantID string, payload *types.OrphanAnalysisPayload, etag string) {
+	m.contentStore.SetOrphanAnalysis(tenantID, payload, etag)
+}
+
+func (m *Manager) InvalidateContentCache(tenantID string) {
+	m.contentStore.InvalidateContentCache(tenantID)
+}
+
+func (m *Manager) GetVisitState(tenantID, visitID string) (*types.VisitState, bool) {
+	return m.sessionsStore.GetVisitState(tenantID, visitID)
+}
+
+func (m *Manager) SetVisitState(tenantID string, state *types.VisitState) {
+	m.sessionsStore.SetVisitState(tenantID, state)
+}
+
+func (m *Manager) GetFingerprintState(tenantID, fingerprintID string) (*types.FingerprintState, bool) {
+	return m.sessionsStore.GetFingerprintState(tenantID, fingerprintID)
+}
+
+func (m *Manager) SetFingerprintState(tenantID string, state *types.FingerprintState) {
+	m.sessionsStore.SetFingerprintState(tenantID, state)
+}
+
+func (m *Manager) IsKnownFingerprint(tenantID, fingerprintID string) bool {
+	return m.sessionsStore.IsKnownFingerprint(tenantID, fingerprintID)
+}
+
+func (m *Manager) SetKnownFingerprint(tenantID, fingerprintID string, isKnown bool) {
+	m.sessionsStore.SetKnownFingerprint(tenantID, fingerprintID, isKnown)
+}
+
+func (m *Manager) LoadKnownFingerprints(tenantID string, fingerprints map[string]bool) {
+	m.sessionsStore.LoadKnownFingerprints(tenantID, fingerprints)
+}
+
+func (m *Manager) GetSession(tenantID, sessionID string) (*types.SessionData, bool) {
+	return m.sessionsStore.GetSession(tenantID, sessionID)
+}
+
+func (m *Manager) SetSession(tenantID string, sessionData *types.SessionData) {
+	m.sessionsStore.SetSession(tenantID, sessionData)
+}
+
+func (m *Manager) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*types.StoryfragmentBeliefRegistry, bool) {
+	return m.sessionsStore.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+}
+
+func (m *Manager) SetStoryfragmentBeliefRegistry(tenantID string, registry *types.StoryfragmentBeliefRegistry) {
+	m.sessionsStore.SetStoryfragmentBeliefRegistry(tenantID, registry)
+}
+
+func (m *Manager) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) {
+	m.sessionsStore.InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+}
+
+func (m *Manager) GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*types.SessionBeliefContext, bool) {
+	return m.sessionsStore.GetSessionBeliefContext(tenantID, sessionID, storyfragmentID)
+}
+
+func (m *Manager) SetSessionBeliefContext(tenantID string, context *types.SessionBeliefContext) {
+	m.sessionsStore.SetSessionBeliefContext(tenantID, context)
+}
+
+func (m *Manager) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string) {
+	m.sessionsStore.InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID)
+}
+
+func (m *Manager) InvalidateUserStateCache(tenantID string) {
+	m.sessionsStore.InvalidateUserStateCache(tenantID)
+}
+
+func (m *Manager) GetHTMLChunk(tenantID, paneID string, variant types.PaneVariant) (*types.HTMLChunk, bool) {
+	return m.fragmentsStore.GetHTMLChunk(tenantID, paneID, variant)
+}
+
+func (m *Manager) SetHTMLChunk(tenantID, paneID string, variant types.PaneVariant, html string, dependsOn []string) {
+	m.fragmentsStore.SetHTMLChunk(tenantID, paneID, variant, html, dependsOn)
+}
+
+func (m *Manager) GetChunkDependencies(tenantID, nodeID string) ([]string, bool) {
+	cache, err := m.GetTenantHTMLChunkCache(tenantID)
+	if err != nil {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	deps, exists := cache.Deps[nodeID]
+	return deps, exists
+}
+
+func (m *Manager) InvalidateByDependency(tenantID, nodeID string) {
+	m.fragmentsStore.InvalidateByDependency(tenantID, nodeID)
+}
+
+func (m *Manager) InvalidateHTMLChunkCache(tenantID string) {
+	m.fragmentsStore.InvalidateHTMLChunkCache(tenantID)
+}
+
+func (m *Manager) InvalidateHTMLChunk(tenantID, paneID string, variant types.PaneVariant) {
+	m.fragmentsStore.InvalidateByPattern(tenantID, m.fragmentsStore.BuildChunkKey(paneID, variant))
 }
 
 func (m *Manager) InvalidateTenant(tenantID string) {
