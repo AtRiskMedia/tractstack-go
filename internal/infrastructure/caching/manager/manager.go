@@ -21,12 +21,8 @@ var (
 	_ interfaces.ReadOnlyAnalyticsCache  = (*Manager)(nil)
 )
 
-// Manager provides centralized cache operations with proper tenant isolation
+// Manager provides centralized cache operations with proper tenant isolation by delegating to specialized stores.
 type Manager struct {
-	ContentCache   map[string]*types.TenantContentCache
-	UserStateCache map[string]*types.TenantUserStateCache
-	HTMLChunkCache map[string]*types.TenantHTMLChunkCache
-	AnalyticsCache map[string]*types.TenantAnalyticsCache
 	Mu             sync.RWMutex
 	LastAccessed   map[string]time.Time
 	contentStore   *stores.ContentStore
@@ -36,15 +32,10 @@ type Manager struct {
 	fragmentsStore *stores.FragmentsStore
 }
 
-// NewManager creates a new cache manager instance
+// NewManager creates a new cache manager instance.
 func NewManager() *Manager {
 	return &Manager{
-		ContentCache:   make(map[string]*types.TenantContentCache),
-		UserStateCache: make(map[string]*types.TenantUserStateCache),
-		HTMLChunkCache: make(map[string]*types.TenantHTMLChunkCache),
-		AnalyticsCache: make(map[string]*types.TenantAnalyticsCache),
 		LastAccessed:   make(map[string]time.Time),
-
 		contentStore:   stores.NewContentStore(),
 		analyticsStore: stores.NewAnalyticsStore(),
 		configStore:    stores.NewConfigStore(),
@@ -54,41 +45,33 @@ func NewManager() *Manager {
 }
 
 func (m *Manager) GetTenantContentCache(tenantID string) (*types.TenantContentCache, error) {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
-	cache, exists := m.ContentCache[tenantID]
+	cache, exists := m.contentStore.GetTenantCache(tenantID)
 	if !exists {
-		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+		return nil, fmt.Errorf("tenant %s content cache not initialized", tenantID)
 	}
 	return cache, nil
 }
 
 func (m *Manager) GetTenantUserStateCache(tenantID string) (*types.TenantUserStateCache, error) {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
-	cache, exists := m.UserStateCache[tenantID]
+	cache, exists := m.sessionsStore.GetTenantCache(tenantID)
 	if !exists {
-		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+		return nil, fmt.Errorf("tenant %s user state cache not initialized", tenantID)
 	}
 	return cache, nil
 }
 
 func (m *Manager) GetTenantHTMLChunkCache(tenantID string) (*types.TenantHTMLChunkCache, error) {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
-	cache, exists := m.HTMLChunkCache[tenantID]
+	cache, exists := m.fragmentsStore.GetTenantCache(tenantID)
 	if !exists {
-		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+		return nil, fmt.Errorf("tenant %s HTML chunk cache not initialized", tenantID)
 	}
 	return cache, nil
 }
 
 func (m *Manager) GetTenantAnalyticsCache(tenantID string) (*types.TenantAnalyticsCache, error) {
-	m.Mu.RLock()
-	defer m.Mu.RUnlock()
-	cache, exists := m.AnalyticsCache[tenantID]
+	cache, exists := m.analyticsStore.GetTenantCache(tenantID)
 	if !exists {
-		return nil, fmt.Errorf("tenant %s not initialized - server startup issue", tenantID)
+		return nil, fmt.Errorf("tenant %s analytics cache not initialized", tenantID)
 	}
 	return cache, nil
 }
@@ -100,66 +83,12 @@ func (m *Manager) updateTenantAccessTime(tenantID string) {
 }
 
 func (m *Manager) InitializeTenant(tenantID string) {
-	m.Mu.Lock()
-	defer m.Mu.Unlock()
-
-	if m.ContentCache[tenantID] == nil {
-		m.ContentCache[tenantID] = &types.TenantContentCache{
-			TractStacks:                   make(map[string]*content.TractStackNode),
-			StoryFragments:                make(map[string]*content.StoryFragmentNode),
-			Panes:                         make(map[string]*content.PaneNode),
-			Menus:                         make(map[string]*content.MenuNode),
-			Resources:                     make(map[string]*content.ResourceNode),
-			Epinets:                       make(map[string]*content.EpinetNode),
-			Beliefs:                       make(map[string]*content.BeliefNode),
-			Files:                         make(map[string]*content.ImageFileNode),
-			StoryfragmentBeliefRegistries: make(map[string]*types.StoryfragmentBeliefRegistry),
-			SlugToID:                      make(map[string]string),
-			CategoryToIDs:                 make(map[string][]string),
-			AllPaneIDs:                    make([]string, 0),
-			FullContentMap:                make([]types.FullContentMapItem, 0),
-			ContentMapLastUpdated:         time.Now().UTC(),
-			LastUpdated:                   time.Now().UTC(),
-			Mu:                            sync.RWMutex{},
-			OrphanAnalysis:                nil,
-		}
-	}
-	if m.UserStateCache[tenantID] == nil {
-		m.UserStateCache[tenantID] = &types.TenantUserStateCache{
-			FingerprintStates:     make(map[string]*types.FingerprintState),
-			VisitStates:           make(map[string]*types.VisitState),
-			KnownFingerprints:     make(map[string]bool),
-			SessionStates:         make(map[string]*types.SessionData),
-			SessionBeliefContexts: make(map[string]*types.SessionBeliefContext),
-			LastLoaded:            time.Now().UTC(),
-			Mu:                    sync.RWMutex{},
-		}
-	}
-	if m.HTMLChunkCache[tenantID] == nil {
-		m.HTMLChunkCache[tenantID] = &types.TenantHTMLChunkCache{
-			Chunks: make(map[string]*types.HTMLChunk),
-			Deps:   make(map[string][]string),
-			Mu:     sync.RWMutex{},
-		}
-	}
-	if m.AnalyticsCache[tenantID] == nil {
-		m.AnalyticsCache[tenantID] = &types.TenantAnalyticsCache{
-			EpinetBins:    make(map[string]*types.HourlyEpinetBin),
-			ContentBins:   make(map[string]*types.HourlyContentBin),
-			SiteBins:      make(map[string]*types.HourlySiteBin),
-			LeadMetrics:   nil,
-			DashboardData: nil,
-			LastFullHour:  "",
-			LastUpdated:   time.Now().UTC(),
-			Mu:            sync.RWMutex{},
-		}
-	}
 	m.contentStore.InitializeTenant(tenantID)
 	m.analyticsStore.InitializeTenant(tenantID)
 	m.configStore.InitializeTenant(tenantID)
 	m.sessionsStore.InitializeTenant(tenantID)
 	m.fragmentsStore.InitializeTenant(tenantID)
-	m.LastAccessed[tenantID] = time.Now().UTC()
+	m.updateTenantAccessTime(tenantID)
 }
 
 func (m *Manager) GetRangeCacheStatus(tenantID, epinetID string, startHour, endHour int) types.RangeCacheStatus {
@@ -743,7 +672,7 @@ func (m *Manager) GetMemoryStats() map[string]any {
 func (m *Manager) InvalidateAll() {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
-	for tenantID := range m.ContentCache {
+	for _, tenantID := range m.contentStore.GetAllTenantIDs() {
 		m.InvalidateTenant(tenantID)
 	}
 }

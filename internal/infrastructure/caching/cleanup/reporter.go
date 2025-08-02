@@ -1,4 +1,4 @@
-// Package cleanup provides a color-coded, compact cache status reporter for logging.
+// Package cleanup provides ascii reporter
 package cleanup
 
 import (
@@ -10,15 +10,16 @@ import (
 )
 
 const (
-	cyan       = "\033[38;2;86;182;194m"
-	cyanBright = "\033[38;2;120;220;232m"
-	grey       = "\033[38;2;167;177;183m" // #a7b1b7
-	dimGrey    = "\033[38;2;92;99;112m"
-	success    = "\033[38;2;152;195;121m"
-	warning    = "\033[38;2;229;192;123m"
-	errorRed   = "\033[38;2;224;108;117m"
-	white      = "\033[38;2;255;255;255m"
-	purple     = "\033[38;2;198;120;221m"
+	cyan       = "\033[38;2;86;182;194m"  // One Dark Cyan: #56B6C2
+	cyanBright = "\033[38;2;97;228;240m"  // Brighter Cyan: #61E4F0
+	dimCyan    = "\033[38;2;47;91;102m"   // Dim Cyan: #2F5B66
+	grey       = "\033[38;2;110;118;129m" // Brighter Grey: #6E7681
+	dimGrey    = "\033[38;2;75;82;99m"    // Darker Grey: #4B5263
+	success    = "\033[38;2;62;130;144m"  // Dim Cyan: #3E8290
+	warning    = "\033[38;2;229;192;123m" // One Dark Yellow: #E5C07B
+	errorRed   = "\033[38;2;224;108;117m" // One Dark Red: #E06C75
+	white      = "\033[38;2;171;178;191m" // One Dark Foreground: #ABB2BF
+	purple     = "\033[38;2;198;120;221m" // One Dark Purple: #C678DD
 	reset      = "\033[0m"
 	bold       = "\033[1m"
 )
@@ -36,15 +37,15 @@ func (r *Reporter) LogHeader(title string) {
 }
 
 func (r *Reporter) LogSubHeader(text string) {
-	fmt.Printf("%s%s░▒▓ %s %s\n", bold, dimGrey, text, reset)
+	fmt.Printf("%s%s░▒▓ %s %s\n", bold, dimCyan, text, reset)
 }
 
-func (r *Reporter) LogStage(message string, args ...any) {
+func (r *Reporter) LogStepSuccess(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s⚡ %s%s...%s\n", dimGrey, grey, formattedMsg, reset)
 }
 
-func (r *Reporter) LogStepSuccess(message string, args ...any) {
+func (r *Reporter) LogStage(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s%s✦ %s%s%s\n", success, bold, grey, formattedMsg, reset)
 }
@@ -115,9 +116,9 @@ func (r *Reporter) GenerateTenantReport(tenantID string) string {
 	for _, ct := range contentTypes {
 		countsLine.WriteString(" ")
 		if ids, exists := ct.getter(tenantID); exists {
-			countsLine.WriteString(fmt.Sprintf("%s%s:%s%d", cyan, ct.name, cyanBright, len(ids)))
+			countsLine.WriteString(fmt.Sprintf("%s%s:%s%d", dimCyan, ct.name, cyan, len(ids)))
 		} else {
-			countsLine.WriteString(fmt.Sprintf("%s%s:%s--", cyan, ct.name, dimGrey))
+			countsLine.WriteString(fmt.Sprintf("%s%s:%s--", dimGrey, ct.name, dimGrey))
 		}
 	}
 	report.WriteString(countsLine.String() + "\n")
