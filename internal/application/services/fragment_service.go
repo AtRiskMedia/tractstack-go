@@ -9,6 +9,8 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/widgets"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/templates"
 )
@@ -17,16 +19,22 @@ import (
 type FragmentService struct {
 	widgetContextService *WidgetContextService
 	sessionBeliefService *SessionBeliefService
+	perfTracker          *performance.Tracker
+	logger               *logging.ChanneledLogger
 }
 
 // NewFragmentService creates a new fragment service
 func NewFragmentService(
 	widgetContextService *WidgetContextService,
 	sessionBeliefService *SessionBeliefService,
+	perfTracker *performance.Tracker,
+	logger *logging.ChanneledLogger,
 ) *FragmentService {
 	return &FragmentService{
 		widgetContextService: widgetContextService,
 		sessionBeliefService: sessionBeliefService,
+		perfTracker:          perfTracker,
+		logger:               logger,
 	}
 }
 
@@ -46,7 +54,10 @@ func (s *FragmentService) GenerateFragment(
 
 	beliefRegistry, err := s.getBeliefRegistry(tenantCtx, storyfragmentID)
 	if err != nil {
-		log.Printf("Warning: failed to get belief registry: %v", err)
+		s.logger.Content().Warn("Failed to get belief registry",
+			"error", err.Error(),
+			"tenantId", tenantCtx.TenantID,
+			"storyfragmentId", storyfragmentID)
 		beliefRegistry = nil
 	}
 
@@ -83,10 +94,14 @@ func (s *FragmentService) GenerateFragment(
 	if beliefRegistry != nil && sessionID != "" {
 		htmlContent, err = s.applyBeliefVisibility(tenantCtx, htmlContent, pane, sessionID, storyfragmentID, beliefRegistry)
 		if err != nil {
-			log.Printf("Warning: failed to apply visibility: %v", err)
+			s.logger.Content().Warn("Failed to get belief registry for batch",
+				"error", err.Error(),
+				"tenantId", tenantCtx.TenantID,
+				"storyfragmentId", storyfragmentID)
 		}
 	}
 
+	s.logger.Content().Info("Fragment completed", "paneId", paneID)
 	return htmlContent, nil
 }
 
@@ -101,7 +116,10 @@ func (s *FragmentService) GenerateFragmentBatch(
 
 	beliefRegistry, err := s.getBeliefRegistry(tenantCtx, storyfragmentID)
 	if err != nil {
-		log.Printf("Warning: failed to get belief registry for batch: %v", err)
+		s.logger.Content().Warn("Failed to pre-resolve widget data",
+			"error", err.Error(),
+			"tenantId", tenantCtx.TenantID,
+			"sessionId", sessionID)
 		beliefRegistry = nil
 	}
 
@@ -111,7 +129,11 @@ func (s *FragmentService) GenerateFragmentBatch(
 			tenantCtx, sessionID, storyfragmentID, paneIDs, beliefRegistry,
 		)
 		if err != nil {
-			log.Printf("Warning: failed to pre-resolve widget data: %v", err)
+			s.logger.Content().Warn("Failed to apply visibility",
+				"error", err.Error(),
+				"paneIds", paneIDs,
+				"sessionId", sessionID,
+				"tenantId", tenantCtx.TenantID)
 		}
 	}
 
@@ -680,4 +702,11 @@ func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string
 		result[k] = v
 	}
 	return result
+}
+
+func (s *FragmentService) sanitizeSessionID(sessionID string) string {
+	if len(sessionID) <= 8 {
+		return "********"
+	}
+	return sessionID[:4] + "****" + sessionID[len(sessionID)-4:]
 }
