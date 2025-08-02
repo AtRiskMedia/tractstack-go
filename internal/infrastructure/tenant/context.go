@@ -5,6 +5,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	domainUser "github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
@@ -18,6 +19,8 @@ type Context struct {
 	Database     *Database
 	Status       string
 	CacheManager *manager.Manager
+	// ADD: Logger field
+	Logger *logging.ChanneledLogger
 }
 
 // Close cleans up the tenant context
@@ -51,6 +54,10 @@ func (ctx *Context) GetStatus() string {
 // GetCacheManager returns the cache manager
 func (ctx *Context) GetCacheManager() *manager.Manager {
 	return ctx.CacheManager
+}
+
+func (ctx *Context) GetLogger() *logging.ChanneledLogger {
+	return ctx.Logger
 }
 
 // IsActive returns true if the tenant is active

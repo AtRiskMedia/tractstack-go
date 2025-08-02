@@ -92,57 +92,77 @@ func Initialize() error {
 		}
 	}
 
-	// Step 7: Create dependency injection container
+	// Step 7: Create dependency injection container (THIS IS WHERE LOGGER IS CREATED!)
 	log.Println("Initializing dependency injection container...")
 	appContainer := container.NewContainer(tenantManager, cacheManager)
 	log.Println("✓ Dependency injection container created with singleton services.")
 
+	// NOW USE THE LOGGER FROM CONTAINER
+	logger := appContainer.Logger
+	logger.Startup().Info("Container initialization complete - switching to channeled logging")
+
 	// Step 8: Initialize application services (handled by container)
-	log.Println("Initializing singleton application services...")
-	log.Println("✓ Singleton application services initialized via container.")
+	logger.Startup().Info("Singleton application services initialized via container")
 
 	// Step 9: Initialize cache warming
-	log.Println("Initializing cache warming...")
-	reporter := cleanup.NewReporter(cacheManager)
+	logger.Startup().Info("Initializing cache warming...")
+	startWarmTime := time.Now()
 
+	reporter := cleanup.NewReporter(cacheManager)
 	warmingService := appContainer.WarmingService
 	contentMapService := appContainer.ContentMapService
 	beliefRegistryService := appContainer.BeliefRegistryService
 
 	if err := warmingService.WarmAllTenants(tenantManager, cacheManager, contentMapService, beliefRegistryService, reporter); err != nil {
-		log.Printf("WARNING: Cache warming failed: %v", err)
+		logger.Startup().Error("Cache warming failed", "error", err.Error(), "duration", time.Since(startWarmTime))
+	} else {
+		logger.Startup().Info("Cache warming completed successfully", "duration", time.Since(startWarmTime))
 	}
 
 	// Step 10: Start background cleanup worker
-	log.Println("Starting background cleanup worker...")
-	// Create the config struct from the central config package.
+	logger.Startup().Info("Starting background cleanup worker...")
+	startWorkerTime := time.Now()
+
 	cleanupConfig := cleanup.NewConfig()
-	//  Inject the config into the worker's constructor.
 	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig)
 	go cleanupWorker.Start(ctx)
-	log.Println("✓ Background cleanup worker started.")
+
+	logger.Startup().Info("Background cleanup worker started", "duration", time.Since(startWorkerTime))
 
 	// Step 11: Start HTTP server
-	log.Println("Starting HTTP server...")
+	logger.Startup().Info("Starting HTTP server...")
+	startServerTime := time.Now()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	httpServer := server.New(port, appContainer)
 
+	logger.Startup().Info("HTTP server initialized", "port", port, "duration", time.Since(startServerTime))
+
 	// Step 12: Setup graceful shutdown
 	gracefulShutdown := make(chan os.Signal, 1)
 	signal.Notify(gracefulShutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
+		logger.System().Info("Starting HTTP server", "address", ":"+port)
 		if err := httpServer.Start(); err != nil {
-			log.Fatalf("Server failed to start: %v", err)
+			logger.System().Error("HTTP server failed", "error", err.Error())
 		}
 	}()
 
+	totalStartupTime := time.Since(start)
+	logger.Startup().Info("Application startup complete",
+		"totalDuration", totalStartupTime,
+		"activeTenants", activeCount,
+		"port", port)
+
 	// Wait for shutdown signal
 	<-gracefulShutdown
-	log.Println("Shutdown signal received, starting graceful shutdown...")
+	logger.Shutdown().Info("Shutdown signal received, starting graceful shutdown...")
+
+	shutdownStart := time.Now()
 
 	// Cancel background tasks
 	cancelBackgroundTasks()
@@ -150,18 +170,26 @@ func Initialize() error {
 	// Stop server
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	logger.Shutdown().Info("Stopping HTTP server...")
 	if err := httpServer.Stop(shutdownCtx); err != nil {
-		log.Printf("Error during server shutdown: %v", err)
+		logger.Shutdown().Error("Error during server shutdown", "error", err.Error())
+	} else {
+		logger.Shutdown().Info("HTTP server stopped successfully")
 	}
 
 	// Close tenant manager
+	logger.Shutdown().Info("Closing tenant manager...")
 	if err := tenantManager.Close(); err != nil {
-		log.Printf("Error closing tenant manager: %v", err)
+		logger.Shutdown().Error("Error closing tenant manager", "error", err.Error())
+	} else {
+		logger.Shutdown().Info("Tenant manager closed successfully")
 	}
 
 	elapsed := time.Since(start)
-	log.Printf("Application ran for %v", elapsed)
-	log.Println("Application shutdown complete.")
+	logger.Shutdown().Info("Application shutdown complete",
+		"totalUptime", elapsed,
+		"shutdownDuration", time.Since(shutdownStart))
 
 	return nil
 }
