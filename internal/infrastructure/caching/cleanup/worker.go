@@ -1,4 +1,4 @@
-// Package cleanup provides background cache cleanup with TTL-based eviction
+// Package cleanup provides background worker
 package cleanup
 
 import (
@@ -96,24 +96,20 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	var totalCleaned int
 	now := time.Now().UTC()
 
-	// Type assert to access the Manager's fields directly
+	// Type assert to access the Manager's methods to get underlying stores
 	manager, ok := w.cache.(*manager.Manager)
 	if !ok {
-		// If it's not the expected Manager type, use the available interface methods
-		// Analytics cleanup via interface
+		// Fallback for generic interface, though less efficient
 		w.cache.PurgeExpiredBins(tenantID, "expired")
 		return 1 // Conservative estimate
 	}
 
 	// 1. Content Cache Cleanup (24 hour TTL)
-	manager.Mu.RLock()
-	contentCache, contentExists := manager.ContentCache[tenantID]
-	manager.Mu.RUnlock()
-
-	if contentExists && contentCache != nil {
+	contentCache, err := manager.GetTenantContentCache(tenantID)
+	if err == nil && contentCache != nil {
 		contentCache.Mu.Lock()
 		if time.Since(contentCache.LastUpdated) > w.config.ContentCacheTTL {
-			// Clear all content cache maps - following the same pattern as InvalidateContentCache
+			// Clear all content cache maps
 			contentCache.TractStacks = make(map[string]*content.TractStackNode)
 			contentCache.StoryFragments = make(map[string]*content.StoryFragmentNode)
 			contentCache.Panes = make(map[string]*content.PaneNode)
@@ -142,11 +138,8 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	}
 
 	// 2. User State Cache Cleanup (2 hour TTL)
-	manager.Mu.RLock()
-	userCache, userExists := manager.UserStateCache[tenantID]
-	manager.Mu.RUnlock()
-
-	if userExists && userCache != nil {
+	userCache, err := manager.GetTenantUserStateCache(tenantID)
+	if err == nil && userCache != nil {
 		userCache.Mu.Lock()
 
 		// Clean expired sessions
@@ -196,11 +189,8 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	}
 
 	// 3. HTML Fragment Cache Cleanup (1 hour TTL)
-	manager.Mu.RLock()
-	htmlCache, htmlExists := manager.HTMLChunkCache[tenantID]
-	manager.Mu.RUnlock()
-
-	if htmlExists && htmlCache != nil {
+	htmlCache, err := manager.GetTenantHTMLChunkCache(tenantID)
+	if err == nil && htmlCache != nil {
 		htmlCache.Mu.Lock()
 		for key, chunk := range htmlCache.Chunks {
 			if time.Since(chunk.LastUpdated) > w.config.FragmentCacheTTL {
@@ -212,17 +202,13 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	}
 
 	// 4. Analytics Cache Cleanup (Various TTLs)
-	manager.Mu.RLock()
-	analyticsCache, analyticsExists := manager.AnalyticsCache[tenantID]
-	manager.Mu.RUnlock()
-
-	if analyticsExists && analyticsCache != nil {
+	analyticsCache, err := manager.GetTenantAnalyticsCache(tenantID)
+	if err == nil && analyticsCache != nil {
 		analyticsCache.Mu.Lock()
 
 		// Clean expired epinet bins
 		for binKey, bin := range analyticsCache.EpinetBins {
 			var ttl time.Duration
-			// Determine TTL based on whether it's current hour or historical
 			lastColonIndex := strings.LastIndex(binKey, ":")
 			if lastColonIndex != -1 {
 				hourKey := binKey[lastColonIndex+1:]

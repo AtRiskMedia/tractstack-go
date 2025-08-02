@@ -57,6 +57,17 @@ func (cs *ContentStore) GetTenantCache(tenantID string) (*types.TenantContentCac
 	return cache, exists
 }
 
+// GetAllTenantIDs returns all tenant IDs present in the store
+func (cs *ContentStore) GetAllTenantIDs() []string {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	ids := make([]string, 0, len(cs.tenantCaches))
+	for id := range cs.tenantCaches {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // =============================================================================
 // Content Map Operations
 // =============================================================================
