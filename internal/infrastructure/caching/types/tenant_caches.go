@@ -24,7 +24,15 @@ type TenantContentCache struct {
 	// Lookup indices
 	SlugToID      map[string]string   // slug -> id
 	CategoryToIDs map[string][]string // category -> []id
-	AllPaneIDs    []string            // cached list of all pane IDs
+
+	AllTractStackIDs    []string
+	AllStoryFragmentIDs []string
+	AllPaneIDs          []string
+	AllMenuIDs          []string
+	AllResourceIDs      []string
+	AllBeliefIDs        []string
+	AllEpinetIDs        []string
+	AllFileIDs          []string
 
 	// Content map cache
 	FullContentMap        []FullContentMapItem `json:"fullContentMap,omitempty"`

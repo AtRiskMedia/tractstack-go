@@ -16,13 +16,11 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
-// Constants for the dynamic batching strategy.
 const (
 	eventCountThreshold = 200000
 	weeklyBatchSize     = 168 // 7 days * 24 hours
 )
 
-// EpinetAnalysis holds pre-analyzed epinet data for optimized queries
 type EpinetAnalysis struct {
 	BeliefValues     map[string]bool
 	IdentifyAsValues map[string]bool
@@ -31,17 +29,12 @@ type EpinetAnalysis struct {
 	ObjectIDs        map[string]bool
 }
 
-// WarmingService orchestrates startup cache warming for all tenants
-type WarmingService struct {
-	// No stored dependencies - all are passed via method calls and tenant context
-}
+type WarmingService struct{}
 
-// NewWarmingService creates a new warming service singleton
 func NewWarmingService() *WarmingService {
 	return &WarmingService{}
 }
 
-// WarmAllTenants performs startup warming for all active tenants. This is for CONTENT warming.
 func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 
@@ -50,7 +43,7 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 		return fmt.Errorf("failed to get active tenants: %w", err)
 	}
 
-	reporter.LogHeader(fmt.Sprintf("Strategic Cache Warming for %d Tenants", len(tenants)))
+	reporter.LogHeader(fmt.Sprintf("Cache Warming %d Tenants", len(tenants)))
 
 	var successCount int
 	for _, tenantID := range tenants {
@@ -69,7 +62,8 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 	}
 
 	duration := time.Since(start)
-	reporter.LogSubHeader(fmt.Sprintf("Strategic Warming Completed in %v", duration))
+	durationMs := float64(duration) / float64(time.Millisecond)
+	reporter.LogSubHeader(fmt.Sprintf("Strategic Warming Completed in %.2fms", durationMs))
 	reporter.LogSuccess("%d/%d tenants warmed successfully", successCount, len(tenants))
 
 	if successCount < len(tenants) {
@@ -79,37 +73,54 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 	return nil
 }
 
-// WarmTenant performs a focused CONTENT warming sequence for a single tenant.
 func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
 
-	reporter.LogStage("Warming Content Map")
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
-	reporter.LogSuccess("Content Map Warmed")
+	reporter.LogStepSuccess("Content Map warmed")
 
-	reporter.LogStage("Warming All Beliefs")
-	if err := ws.warmAllBeliefs(tenantCtx); err != nil {
-		return fmt.Errorf("critical failure: beliefs warming failed: %w", err)
+	if _, err := NewTractStackService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 	}
-	reporter.LogSuccess("Beliefs Warmed")
+	if _, err := NewStoryFragmentService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm StoryFragments: %v", err)
+	}
+	if _, err := NewPaneService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm Panes: %v", err)
+	}
+	if _, err := NewMenuService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm Menus: %v", err)
+	}
+	if _, err := NewResourceService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm Resources: %v", err)
+	}
+	if _, err := NewBeliefService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm Beliefs: %v", err)
+	}
+	if _, err := NewEpinetService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm Epinets: %v", err)
+	}
+	if _, err := NewImageFileService().GetAllIDs(tenantCtx); err != nil {
+		reporter.LogWarning("Failed to warm ImageFiles: %v", err)
+	}
+	reporter.LogStepSuccess("All Content Repositories Warmed")
 
-	reporter.LogStage("Warming Home StoryFragment and its direct dependencies (Panes, Menu, etc.)")
 	if err := ws.warmHomeStoryfragmentAndDeps(tenantCtx); err != nil {
 		reporter.LogWarning("Home storyfragment dependency warming failed: %v", err)
 	} else {
-		reporter.LogSuccess("Home StoryFragment and its dependencies Warmed")
+		reporter.LogStepSuccess("Home StoryFragment and its dependencies warmed")
 	}
 
 	duration := time.Since(start)
-	reporter.LogSuccess("Tenant %s strategically warmed in %v", tenantID, duration)
+	durationMs := float64(duration) / float64(time.Millisecond)
+	reporter.LogStepSuccess("Tenant %s strategically warmed in %.2fms", tenantID, durationMs)
 
 	return nil
 }
 
-// WarmHourlyEpinetData builds complete ANALYTICS bins using a dynamic batching strategy.
 func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, hoursBack int) error {
 	const fullAnalyticsRange = 674
 
@@ -193,7 +204,6 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 	return nil
 }
 
-// WarmRecentHours performs a rapid catch-up for a small number of missing recent hours.
 func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, missingHourKeys []string) error {
 	if len(missingHourKeys) == 0 {
 		return nil
@@ -260,20 +270,12 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 	return nil
 }
 
-// --- Helper Functions (Content Warming) ---
-
 func (ws *WarmingService) warmContentMap(tenantCtx *tenant.Context, contentMapSvc *ContentMapService, cache interfaces.Cache) error {
 	_, _, err := contentMapSvc.GetContentMap(tenantCtx, "", cache)
 	if err != nil {
 		return fmt.Errorf("failed to warm content map: %w", err)
 	}
 	return nil
-}
-
-func (ws *WarmingService) warmAllBeliefs(tenantCtx *tenant.Context) error {
-	beliefService := NewBeliefService()
-	_, err := beliefService.GetAllIDs(tenantCtx)
-	return err
 }
 
 func (ws *WarmingService) warmHomeStoryfragmentAndDeps(tenantCtx *tenant.Context) error {
@@ -290,7 +292,6 @@ func (ws *WarmingService) warmHomeStoryfragmentAndDeps(tenantCtx *tenant.Context
 		log.Printf("WARN: No home storyfragment found for tenant %s with slug '%s'.", tenantCtx.TenantID, homeSlug)
 		return nil
 	}
-	log.Printf("  - Warmed Home Page ('%s') and its %d panes.", homeSlug, len(payload.Panes))
 	return nil
 }
 
@@ -307,8 +308,6 @@ func (ws *WarmingService) getActiveTenants() ([]string, error) {
 	}
 	return activeTenants, nil
 }
-
-// --- Helper Functions (Analytics Warming) ---
 
 type hourlyEvents struct {
 	ActionEvents []analytics.ActionEvent
@@ -347,13 +346,12 @@ func (ws *WarmingService) countEventsInRange(tenantCtx *tenant.Context, startTim
 	return actionCount + beliefCount, nil
 }
 
-// CORRECTED Timestamp Parsing
 func (ws *WarmingService) parseTimestamp(timestampStr string) (time.Time, error) {
 	layouts := []string{
-		"2006-01-02 15:04:05", // SQLite default
+		"2006-01-02 15:04:05",
 		time.RFC3339,
 		time.RFC3339Nano,
-		"2006-01-02T15:04:05.000Z", // Explicit format from logs
+		"2006-01-02T15:04:05.000Z",
 	}
 	for _, layout := range layouts {
 		if t, err := time.Parse(layout, timestampStr); err == nil {

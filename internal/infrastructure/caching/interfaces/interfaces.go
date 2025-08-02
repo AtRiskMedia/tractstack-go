@@ -69,6 +69,10 @@ type UserStateCache interface {
 	SetSessionBeliefContext(tenantID string, context *types.SessionBeliefContext)
 	InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string)
 	InvalidateUserStateCache(tenantID string)
+	GetAllSessionIDs(tenantID string) []string
+	GetAllFingerprintIDs(tenantID string) []string
+	GetAllVisitIDs(tenantID string) []string
+	GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
 }
 
 // HTMLChunkCache defines operations for HTML fragment caching
@@ -79,6 +83,7 @@ type HTMLChunkCache interface {
 	InvalidateByDependency(tenantID, nodeID string)
 	InvalidateHTMLChunkCache(tenantID string)
 	InvalidateHTMLChunk(tenantID, paneID string, variant types.PaneVariant)
+	GetAllHTMLChunkIDs(tenantID string) []string
 }
 
 // AnalyticsCache defines operations for analytics caching
