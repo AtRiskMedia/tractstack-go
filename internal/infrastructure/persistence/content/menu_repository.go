@@ -6,20 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type MenuRepository struct {
-	db    *sql.DB
-	cache interfaces.ContentCache
+	db     *sql.DB
+	cache  interfaces.ContentCache
+	logger *logging.ChanneledLogger
 }
 
-func NewMenuRepository(db *sql.DB, cache interfaces.ContentCache) *MenuRepository {
+func NewMenuRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *MenuRepository {
 	return &MenuRepository{
-		db:    db,
-		cache: cache,
+		db:     db,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
@@ -97,11 +102,20 @@ func (r *MenuRepository) Store(tenantID string, menu *content.MenuNode) error {
 
 	query := `INSERT INTO menus (id, title, theme, options_payload) VALUES (?, ?, ?, ?)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing menu insert", "id", menu.ID)
+
 	_, err := r.db.Exec(query, menu.ID, menu.Title, menu.Theme, string(optionsJSON))
 	if err != nil {
+		r.logger.Database().Error("Menu insert failed", "error", err.Error(), "id", menu.ID)
 		return fmt.Errorf("failed to insert menu: %w", err)
 	}
 
+	r.logger.Database().Info("Menu insert completed", "id", menu.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetMenu(tenantID, menu)
 	return nil
 }
@@ -111,11 +125,20 @@ func (r *MenuRepository) Update(tenantID string, menu *content.MenuNode) error {
 
 	query := `UPDATE menus SET title = ?, theme = ?, options_payload = ? WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing menu update", "id", menu.ID)
+
 	_, err := r.db.Exec(query, menu.Title, menu.Theme, string(optionsJSON), menu.ID)
 	if err != nil {
+		r.logger.Database().Error("Menu update failed", "error", err.Error(), "id", menu.ID)
 		return fmt.Errorf("failed to update menu: %w", err)
 	}
 
+	r.logger.Database().Info("Menu update completed", "id", menu.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetMenu(tenantID, menu)
 	return nil
 }
@@ -123,11 +146,20 @@ func (r *MenuRepository) Update(tenantID string, menu *content.MenuNode) error {
 func (r *MenuRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM menus WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing menu delete", "id", id)
+
 	_, err := r.db.Exec(query, id)
 	if err != nil {
+		r.logger.Database().Error("Menu delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete menu: %w", err)
 	}
 
+	r.logger.Database().Info("Menu delete completed", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.InvalidateContentCache(tenantID)
 	return nil
 }
@@ -135,8 +167,12 @@ func (r *MenuRepository) Delete(tenantID, id string) error {
 func (r *MenuRepository) loadAllIDsFromDB() ([]string, error) {
 	query := `SELECT id FROM menus ORDER BY title`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading all menu IDs from database")
+
 	rows, err := r.db.Query(query)
 	if err != nil {
+		r.logger.Database().Error("Failed to query menu IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query menus: %w", err)
 	}
 	defer rows.Close()
@@ -150,11 +186,19 @@ func (r *MenuRepository) loadAllIDsFromDB() ([]string, error) {
 		menuIDs = append(menuIDs, id)
 	}
 
+	r.logger.Database().Info("Loaded menu IDs from database", "count", len(menuIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return menuIDs, rows.Err()
 }
 
 func (r *MenuRepository) loadFromDB(id string) (*content.MenuNode, error) {
 	query := `SELECT id, title, theme, options_payload FROM menus WHERE id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading menu from database", "id", id)
 
 	row := r.db.QueryRow(query, id)
 
@@ -167,15 +211,22 @@ func (r *MenuRepository) loadFromDB(id string) (*content.MenuNode, error) {
 		return nil, nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to scan menu", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to scan menu: %w", err)
 	}
 
 	if err := json.Unmarshal([]byte(optionsPayloadStr), &menu.OptionsPayload); err != nil {
+		r.logger.Database().Error("Failed to parse menu options payload", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to parse options payload: %w", err)
 	}
 
 	menu.NodeType = "Menu"
 
+	r.logger.Database().Info("Menu loaded from database", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return &menu, nil
 }
 
@@ -194,8 +245,12 @@ func (r *MenuRepository) loadMultipleFromDB(ids []string) ([]*content.MenuNode, 
 	query := `SELECT id, title, theme, options_payload 
               FROM menus WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple menus from database", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple menus", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query menus: %w", err)
 	}
 	defer rows.Close()
@@ -220,5 +275,10 @@ func (r *MenuRepository) loadMultipleFromDB(ids []string) ([]*content.MenuNode, 
 		menus = append(menus, &menu)
 	}
 
+	r.logger.Database().Info("Multiple menus loaded from database", "requested", len(ids), "loaded", len(menus), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return menus, rows.Err()
 }

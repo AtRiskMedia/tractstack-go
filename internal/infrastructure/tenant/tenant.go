@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,23 +18,25 @@ type Manager struct {
 	cacheManager *manager.Manager
 	contexts     map[string]*Context
 	mutex        sync.RWMutex
+	logger       *logging.ChanneledLogger
 }
 
 // NewManager creates and initializes a new tenant manager.
-func NewManager() *Manager {
-	detector, err := NewDetector()
+func NewManager(logger *logging.ChanneledLogger) *Manager {
+	detector, err := NewDetector(logger)
 	if err != nil {
 		// In startup context, we can't return error, so we'll panic
 		// This should be handled by startup error handling
 		panic(fmt.Sprintf("Failed to initialize tenant detector: %v", err))
 	}
 
-	cacheManager := manager.NewManager()
+	cacheManager := manager.NewManager(logger)
 
 	return &Manager{
 		detector:     detector,
 		cacheManager: cacheManager,
 		contexts:     make(map[string]*Context),
+		logger:       logger,
 	}
 }
 
@@ -66,13 +69,13 @@ func (m *Manager) NewContextFromID(tenantID string) (*Context, error) {
 // createContext creates a new tenant context
 func (m *Manager) createContext(tenantID string) (*Context, error) {
 	// Load tenant configuration using existing config loader
-	config, err := LoadTenantConfig(tenantID)
+	config, err := LoadTenantConfig(tenantID, m.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tenant config: %w", err)
 	}
 
 	// Create database connection using existing database infrastructure
-	db, err := NewDatabase(config)
+	db, err := NewDatabase(config, m.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create database connection: %w", err)
 	}
@@ -87,6 +90,7 @@ func (m *Manager) createContext(tenantID string) (*Context, error) {
 		Database:     db,
 		Status:       status,
 		CacheManager: m.cacheManager,
+		Logger:       m.logger,
 	}
 
 	// Cache the context
@@ -244,4 +248,19 @@ func (m *Manager) Close() error {
 
 	m.contexts = make(map[string]*Context)
 	return nil
+}
+
+// SetLogger sets the logger for the tenant manager after container initialization
+func (m *Manager) SetLogger(logger *logging.ChanneledLogger) {
+	m.logger = logger
+
+	// Also update the detector's logger if it exists
+	if m.detector != nil && logger != nil {
+		m.detector.logger = logger
+	}
+}
+
+// GetLogger returns the logger for middleware access
+func (m *Manager) GetLogger() *logging.ChanneledLogger {
+	return m.logger
 }

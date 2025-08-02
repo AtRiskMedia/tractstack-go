@@ -9,21 +9,29 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 )
 
 // ContentMapBuilder implements efficient content map construction
 type ContentMapBuilder struct {
-	db *database.DB
+	db     *database.DB
+	logger *logging.ChanneledLogger
 }
 
 // NewContentMapBuilder creates a new content map builder
-func NewContentMapBuilder(db *database.DB) *ContentMapBuilder {
-	return &ContentMapBuilder{db: db}
+func NewContentMapBuilder(db *database.DB, logger *logging.ChanneledLogger) *ContentMapBuilder {
+	return &ContentMapBuilder{
+		db:     db,
+		logger: logger,
+	}
 }
 
 // BuildContentMap executes single UNION query to build complete content map
 func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.ContentMapItem, error) {
+	start := time.Now()
+	cmb.logger.Database().Debug("Starting content map build", "tenantID", tenantID)
+
 	// CORRECTED: This query is now aligned with the working implementation from api/content_handlers.go
 	query := `
 		SELECT 
@@ -191,25 +199,33 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 		
 		ORDER BY title`
 
+	cmb.logger.Database().Debug("Executing content map UNION query")
+
 	rows, err := cmb.db.Query(query)
 	if err != nil {
+		cmb.logger.Database().Error("Content map UNION query failed", "error", err.Error(), "tenantID", tenantID)
 		return nil, fmt.Errorf("failed to execute content map query: %w", err)
 	}
 	defer rows.Close()
 
 	var items []*content.ContentMapItem
+	rowCount := 0
 	for rows.Next() {
 		item, err := cmb.scanContentMapRow(rows)
 		if err != nil {
+			cmb.logger.Database().Error("Failed to scan content map row", "error", err.Error(), "rowNumber", rowCount+1)
 			return nil, fmt.Errorf("failed to scan content map row: %w", err)
 		}
 		items = append(items, item)
+		rowCount++
 	}
 
 	if err := rows.Err(); err != nil {
+		cmb.logger.Database().Error("Content map row iteration error", "error", err.Error(), "rowsProcessed", rowCount)
 		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 
+	cmb.logger.Database().Info("Content map build completed", "tenantID", tenantID, "itemCount", len(items), "duration", time.Since(start))
 	return items, nil
 }
 
@@ -250,26 +266,26 @@ func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.Conten
 	switch item.Type {
 	case "Menu":
 		if extra.Valid {
-			item.Extra = map[string]interface{}{"theme": extra.String}
+			item.Extra = map[string]any{"theme": extra.String}
 		}
 	case "Pane":
 		if isContext.Valid {
-			item.Extra = map[string]interface{}{"isContext": isContext.Bool}
+			item.Extra = map[string]any{"isContext": isContext.Bool}
 		}
 	case "Resource":
 		if categorySlug.Valid {
-			item.Extra = map[string]interface{}{"categorySlug": categorySlug.String}
+			item.Extra = map[string]any{"categorySlug": categorySlug.String}
 		}
 	case "Belief":
 		if scale.Valid {
-			item.Extra = map[string]interface{}{"scale": scale.String}
+			item.Extra = map[string]any{"scale": scale.String}
 		}
 	case "Epinet":
 		if promoted.Valid {
-			item.Extra = map[string]interface{}{"promoted": promoted.Bool}
+			item.Extra = map[string]any{"promoted": promoted.Bool}
 		}
 	case "StoryFragment":
-		extra := make(map[string]interface{})
+		extra := make(map[string]any)
 		if parentID.Valid {
 			extra["parentId"] = parentID.String
 		}
@@ -298,7 +314,7 @@ func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.Conten
 		item.Extra = extra
 	case "TractStack":
 		if socialImagePath.Valid {
-			item.Extra = map[string]interface{}{"socialImagePath": socialImagePath.String}
+			item.Extra = map[string]any{"socialImagePath": socialImagePath.String}
 		}
 	}
 
@@ -306,7 +322,7 @@ func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.Conten
 }
 
 // addThumbnailPaths generates thumbnail URLs for social images
-func (cmb *ContentMapBuilder) addThumbnailPaths(extra map[string]interface{}, socialImagePath string) {
+func (cmb *ContentMapBuilder) addThumbnailPaths(extra map[string]any, socialImagePath string) {
 	if socialImagePath == "" {
 		return
 	}

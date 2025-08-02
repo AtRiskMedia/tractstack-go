@@ -12,6 +12,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/cleanup"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
@@ -29,10 +30,14 @@ type EpinetAnalysis struct {
 	ObjectIDs        map[string]bool
 }
 
-type WarmingService struct{}
+type WarmingService struct {
+	logger *logging.ChanneledLogger
+}
 
-func NewWarmingService() *WarmingService {
-	return &WarmingService{}
+func NewWarmingService(logger *logging.ChanneledLogger) *WarmingService {
+	return &WarmingService{
+		logger: logger,
+	}
 }
 
 func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
@@ -50,11 +55,13 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 		tenantCtx, err := tenantManager.NewContextFromID(tenantID)
 		if err != nil {
 			reporter.LogError(fmt.Sprintf("Failed to create context for tenant %s", tenantID), err)
+			ws.logger.Cache().Error("Failed to create context for tenant during warming", "tenantId", tenantID, "error", err)
 			continue
 		}
 
 		if err := ws.WarmTenant(tenantCtx, tenantID, cache, contentMapSvc, beliefRegistrySvc, reporter); err != nil {
 			reporter.LogError(fmt.Sprintf("Failed to warm tenant %s", tenantID), err)
+			ws.logger.Cache().Error("Failed to warm tenant", "tenantId", tenantID, "error", err)
 		} else {
 			successCount++
 		}
@@ -65,6 +72,7 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 	durationMs := float64(duration) / float64(time.Millisecond)
 	reporter.LogSubHeader(fmt.Sprintf("Strategic Warming Completed in %.2fms", durationMs))
 	reporter.LogSuccess("%d/%d tenants warmed successfully", successCount, len(tenants))
+	ws.logger.Cache().Info("Strategic warming completed for all tenants", "successCount", successCount, "totalTenants", len(tenants), "duration", duration)
 
 	if successCount < len(tenants) {
 		return fmt.Errorf("warming failed for %d tenants", len(tenants)-successCount)
@@ -76,44 +84,56 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
+	ws.logger.Cache().Info("Starting strategic warming for tenant", "tenantId", tenantID)
 
 	// Step 1: Warm the unified content map.
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
 	reporter.LogStepSuccess("Content Map warmed")
+	ws.logger.Cache().Debug("Content map warmed", "tenantId", tenantID)
 
 	// Step 2: Bulk-load all content types into the cache.
 	if _, err := NewTractStackService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
+		ws.logger.Cache().Warn("Failed to warm TractStacks", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewStoryFragmentService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm StoryFragments: %v", err)
+		ws.logger.Cache().Warn("Failed to warm StoryFragments", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewPaneService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Panes: %v", err)
+		ws.logger.Cache().Warn("Failed to warm Panes", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewMenuService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Menus: %v", err)
+		ws.logger.Cache().Warn("Failed to warm Menus", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewResourceService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Resources: %v", err)
+		ws.logger.Cache().Warn("Failed to warm Resources", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewBeliefService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Beliefs: %v", err)
+		ws.logger.Cache().Warn("Failed to warm Beliefs", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewEpinetService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Epinets: %v", err)
+		ws.logger.Cache().Warn("Failed to warm Epinets", "tenantId", tenantID, "error", err)
 	}
 	if _, err := NewImageFileService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm ImageFiles: %v", err)
+		ws.logger.Cache().Warn("Failed to warm ImageFiles", "tenantId", tenantID, "error", err)
 	}
 	reporter.LogStepSuccess("All Content Repositories Warmed")
+	ws.logger.Cache().Debug("All content repositories warmed", "tenantId", tenantID)
 
 	// Step 3: Build Belief Registries for all Storyfragments (THE CORE FIX)
 	storyFragmentIDs, err := NewStoryFragmentService().GetAllIDs(tenantCtx)
 	if err != nil {
 		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
+		ws.logger.Cache().Warn("Could not retrieve StoryFragment IDs for belief registry warming", "tenantId", tenantID, "error", err)
 	} else {
 		paneService := NewPaneService()
 		for _, sfID := range storyFragmentIDs {
@@ -125,19 +145,23 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 			panes, err := paneService.GetByIDs(tenantCtx, sf.PaneIDs)
 			if err != nil {
 				log.Printf("Warning: Failed to load panes for storyfragment %s during warming: %v", sfID, err)
+				ws.logger.Cache().Warn("Failed to load panes for storyfragment during warming", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
 				continue
 			}
 			// Build and cache the registry.
 			if _, err := beliefRegistrySvc.BuildRegistryFromLoadedPanes(tenantCtx, sfID, panes); err != nil {
 				log.Printf("Warning: Failed to build belief registry for storyfragment %s: %v", sfID, err)
+				ws.logger.Cache().Warn("Failed to build belief registry for storyfragment", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
 			}
 		}
 		reporter.LogStepSuccess("%d StoryFragment<>Beliefs registries cached", len(storyFragmentIDs))
+		ws.logger.Cache().Debug("StoryFragment belief registries cached", "tenantId", tenantID, "count", len(storyFragmentIDs))
 	}
 
 	duration := time.Since(start)
 	durationMs := float64(duration) / float64(time.Millisecond)
 	reporter.LogStepSuccess("Tenant %s strategically warmed in %.2fms", tenantID, durationMs)
+	ws.logger.Cache().Info("Strategic warming completed for tenant", "tenantId", tenantID, "duration", duration)
 
 	return nil
 }
@@ -147,14 +171,17 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 
 	log.Printf("Starting analytics cache warming for tenant '%s' - full %d hour range (requested: %d)",
 		tenantCtx.TenantID, fullAnalyticsRange, hoursBack)
+	ws.logger.Cache().Info("Starting analytics cache warming", "tenantId", tenantCtx.TenantID, "range", fullAnalyticsRange, "requestedHours", hoursBack)
 
 	epinets, err := ws.getEpinets(tenantCtx)
 	if err != nil || len(epinets) == 0 {
 		log.Printf("No epinets found for tenant '%s'. Aborting analytics warming task.", tenantCtx.TenantID)
+		ws.logger.Cache().Info("No epinets found for tenant. Aborting analytics warming task.", "tenantId", tenantCtx.TenantID)
 		return nil
 	}
 	contentItems, err := ws.getContentItems(tenantCtx)
 	if err != nil {
+		ws.logger.Cache().Error("Could not pre-fetch content items for analytics warming", "tenantId", tenantCtx.TenantID, "error", err)
 		return fmt.Errorf("could not pre-fetch content items: %w", err)
 	}
 
@@ -183,10 +210,12 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 		analysis := ws.analyzeEpinet(epinets[0])
 		allActionEvents, err := ws.getActionEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
 		if err != nil {
+			ws.logger.Cache().Error("Analytics warming batch failed: could not get action events", "tenantId", tenantCtx.TenantID, "error", err)
 			return fmt.Errorf("batch failed for tenant '%s': could not get action events: %w", tenantCtx.TenantID, err)
 		}
 		allBeliefEvents, err := ws.getBeliefEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
 		if err != nil {
+			ws.logger.Cache().Error("Analytics warming batch failed: could not get belief events", "tenantId", tenantCtx.TenantID, "error", err)
 			return fmt.Errorf("batch failed for tenant '%s': could not get belief events: %w", tenantCtx.TenantID, err)
 		}
 
@@ -222,6 +251,7 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 	}
 
 	log.Printf("Analytics cache warming process for tenant '%s' completed successfully.", tenantCtx.TenantID)
+	ws.logger.Cache().Info("Analytics cache warming process completed successfully", "tenantId", tenantCtx.TenantID)
 	return nil
 }
 
@@ -231,30 +261,36 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 	}
 
 	log.Printf("Rapid catch-up refresh for tenant '%s' - %d hours", tenantCtx.TenantID, len(missingHourKeys))
+	ws.logger.Cache().Info("Starting rapid catch-up refresh", "tenantId", tenantCtx.TenantID, "missingHours", len(missingHourKeys))
 
 	epinets, err := ws.getEpinets(tenantCtx)
 	if err != nil || len(epinets) == 0 {
+		ws.logger.Cache().Info("No epinets found for tenant. Aborting rapid catch-up.", "tenantId", tenantCtx.TenantID)
 		return nil
 	}
 
 	contentItems, err := ws.getContentItems(tenantCtx)
 	if err != nil {
+		ws.logger.Cache().Error("Failed to get content items for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
 		return fmt.Errorf("failed to get content items: %w", err)
 	}
 
 	now := time.Now().UTC()
 	oldestHour, err := utils.ParseHourKeyToDate(missingHourKeys[len(missingHourKeys)-1])
 	if err != nil {
+		ws.logger.Cache().Error("Invalid hour key during rapid catch-up", "tenantId", tenantCtx.TenantID, "hourKey", missingHourKeys[len(missingHourKeys)-1], "error", err)
 		return fmt.Errorf("invalid hour key: %w", err)
 	}
 
 	analysis := ws.analyzeEpinet(epinets[0])
 	allActionEvents, err := ws.getActionEventsForRange(tenantCtx, oldestHour, now, analysis)
 	if err != nil {
+		ws.logger.Cache().Error("Failed to get action events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
 		return fmt.Errorf("failed to get action events: %w", err)
 	}
 	allBeliefEvents, err := ws.getBeliefEventsForRange(tenantCtx, oldestHour, now, analysis)
 	if err != nil {
+		ws.logger.Cache().Error("Failed to get belief events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
 		return fmt.Errorf("failed to get belief events: %w", err)
 	}
 
@@ -288,6 +324,7 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 	}
 
 	log.Printf("Rapid catch-up completed for tenant '%s'", tenantCtx.TenantID)
+	ws.logger.Cache().Info("Rapid catch-up completed", "tenantId", tenantCtx.TenantID)
 	return nil
 }
 
@@ -394,11 +431,13 @@ func (ws *WarmingService) getActionEventsForRange(tenantCtx *tenant.Context, sta
 		var createdAtStr string
 		if err := rows.Scan(&event.ObjectID, &event.ObjectType, &event.Verb, &event.FingerprintID, &createdAtStr); err != nil {
 			log.Printf("WARN: Failed to scan action event row: %v", err)
+			ws.logger.Cache().Warn("Failed to scan action event row", "error", err)
 			continue
 		}
 		createdAt, err := ws.parseTimestamp(createdAtStr)
 		if err != nil {
 			log.Printf("WARN: Failed to parse created_at timestamp '%s': %v", createdAtStr, err)
+			ws.logger.Cache().Warn("Failed to parse created_at timestamp", "timestamp", createdAtStr, "error", err)
 			continue
 		}
 		event.CreatedAt = createdAt
@@ -447,11 +486,13 @@ func (ws *WarmingService) getBeliefEventsForRange(tenantCtx *tenant.Context, sta
 		var updatedAtStr string
 		if err := rows.Scan(&event.BeliefID, &event.FingerprintID, &event.Verb, &event.Object, &updatedAtStr); err != nil {
 			log.Printf("WARN: Failed to scan belief event row: %v", err)
+			ws.logger.Cache().Warn("Failed to scan belief event row", "error", err)
 			continue
 		}
 		updatedAt, err := ws.parseTimestamp(updatedAtStr)
 		if err != nil {
 			log.Printf("WARN: Failed to parse updated_at timestamp '%s': %v", updatedAtStr, err)
+			ws.logger.Cache().Warn("Failed to parse updated_at timestamp", "timestamp", updatedAtStr, "error", err)
 			continue
 		}
 		event.UpdatedAt = updatedAt

@@ -19,8 +19,7 @@ type Context struct {
 	Database     *Database
 	Status       string
 	CacheManager *manager.Manager
-	// ADD: Logger field
-	Logger *logging.ChanneledLogger
+	Logger       *logging.ChanneledLogger
 }
 
 // Close cleans up the tenant context
@@ -84,67 +83,67 @@ func (ctx *Context) GetDatabaseInfo() string {
 
 // BeliefRepo returns a belief repository instance
 func (ctx *Context) BeliefRepo() repositories.BeliefRepository {
-	return content.NewBeliefRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewBeliefRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // MenuRepo returns a menu repository instance
 func (ctx *Context) MenuRepo() repositories.MenuRepository {
-	return content.NewMenuRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewMenuRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // PaneRepo returns a pane repository instance
 func (ctx *Context) PaneRepo() repositories.PaneRepository {
-	return content.NewPaneRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewPaneRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // ResourceRepo returns a resource repository instance
 func (ctx *Context) ResourceRepo() repositories.ResourceRepository {
-	return content.NewResourceRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewResourceRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // StoryFragmentRepo returns a storyfragment repository instance
 func (ctx *Context) StoryFragmentRepo() repositories.StoryFragmentRepository {
-	return content.NewStoryFragmentRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewStoryFragmentRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // TractStackRepo returns a tractstack repository instance
 func (ctx *Context) TractStackRepo() repositories.TractStackRepository {
-	return content.NewTractStackRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewTractStackRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // EpinetRepo returns an epinet repository instance
 func (ctx *Context) EpinetRepo() repositories.EpinetRepository {
-	return content.NewEpinetRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewEpinetRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // ImageFileRepo returns an imagefile repository instance
 func (ctx *Context) ImageFileRepo() repositories.ImageFileRepository {
-	return content.NewImageFileRepository(ctx.Database.Conn, ctx.CacheManager)
+	return content.NewImageFileRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
 }
 
 // BulkRepo returns a bulk repository instance for complex operations
 func (ctx *Context) BulkRepo() bulk.BulkQueryRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
-	return bulk.NewRepository(db)
+	return bulk.NewRepository(db, ctx.Logger)
 }
 
 // LeadRepo returns a lead repository instance.
 // It returns the interface type from the domain layer.
 func (ctx *Context) LeadRepo() domainUser.LeadRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
-	return persistenceUser.NewSQLLeadRepository(db)
+	return persistenceUser.NewSQLLeadRepository(db, ctx.Logger)
 }
 
 // FingerprintRepo returns a fingerprint repository instance.
 // It returns the interface type from the domain layer.
 func (ctx *Context) FingerprintRepo() domainUser.FingerprintRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
-	return persistenceUser.NewSQLFingerprintRepository(db)
+	return persistenceUser.NewSQLFingerprintRepository(db, ctx.Logger)
 }
 
 // VisitRepo returns a visit repository instance.
 // It returns the interface type from the domain layer.
 func (ctx *Context) VisitRepo() domainUser.VisitRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
-	return persistenceUser.NewSQLVisitRepository(db)
+	return persistenceUser.NewSQLVisitRepository(db, ctx.Logger)
 }

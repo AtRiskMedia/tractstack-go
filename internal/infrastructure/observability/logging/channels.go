@@ -89,21 +89,15 @@ type LoggerConfig struct {
 // DefaultLoggerConfig returns a sensible default configuration
 func DefaultLoggerConfig() *LoggerConfig {
 	return &LoggerConfig{
-		OutputToFile:    true,
-		OutputToConsole: true,
-		LogDirectory:    "logs",
-		FileRotation:    true,
-		JSONFormat:      true,
-		IncludeSource:   true,
-		TimestampFormat: time.RFC3339,
-		DefaultLevel:    slog.LevelInfo,
-		ChannelLevels: map[Channel]slog.Level{
-			ChannelPerf:      slog.LevelDebug,
-			ChannelTrace:     slog.LevelDebug,
-			ChannelDebug:     slog.LevelDebug,
-			ChannelSlowQuery: slog.LevelWarn,
-			ChannelAlert:     slog.LevelWarn,
-		},
+		OutputToFile:                 true,
+		OutputToConsole:              true,
+		LogDirectory:                 "logs",
+		FileRotation:                 true,
+		JSONFormat:                   true,
+		IncludeSource:                true,
+		TimestampFormat:              time.RFC3339,
+		DefaultLevel:                 slog.LevelInfo,
+		ChannelLevels:                make(map[Channel]slog.Level), // Start with empty map to respect DefaultLevel
 		EnablePerformanceCorrelation: true,
 		IncludeMemoryStats:           false,
 		IncludeTenantContext:         true,
@@ -151,7 +145,7 @@ func NewChanneledLogger(config *LoggerConfig) (*ChanneledLogger, error) {
 
 // createChannelLogger creates a slog.Logger for a specific channel
 func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, error) {
-	// Determine log level for this channel
+	// Determine log level for this channel - respect DefaultLevel unless explicitly overridden
 	level := cl.config.DefaultLevel
 	if channelLevel, exists := cl.config.ChannelLevels[channel]; exists {
 		level = channelLevel

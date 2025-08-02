@@ -39,7 +39,7 @@ func Initialize() error {
 
 	// Step 1: Initialize tenant system
 	log.Println("Initializing...")
-	tenantManager := tenant.NewManager()
+	tenantManager := tenant.NewManager(nil)
 
 	// Step 2: Load tenant registry to discover all tenants
 	log.Println("Loading tenant registry...")
@@ -96,10 +96,10 @@ func Initialize() error {
 	log.Println("Initializing dependency injection container...")
 	appContainer := container.NewContainer(tenantManager, cacheManager)
 	log.Println("✓ Dependency injection container created with singleton services.")
-
-	// NOW USE THE LOGGER FROM CONTAINER
 	logger := appContainer.Logger
 	logger.Startup().Info("Container initialization complete - switching to channeled logging")
+	tenantManager.SetLogger(logger)
+	logger.Tenant().Info("Tenant manager logger initialized", "hasDetector", true, "hasCache", true)
 
 	// Step 8: Initialize application services (handled by container)
 	logger.Startup().Info("Singleton application services initialized via container")
@@ -124,7 +124,7 @@ func Initialize() error {
 	startWorkerTime := time.Now()
 
 	cleanupConfig := cleanup.NewConfig()
-	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig)
+	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig, logger)
 	go cleanupWorker.Start(ctx)
 
 	logger.Startup().Info("Background cleanup worker started", "duration", time.Since(startWorkerTime))

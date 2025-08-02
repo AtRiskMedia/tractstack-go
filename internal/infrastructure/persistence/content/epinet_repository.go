@@ -6,20 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type EpinetRepository struct {
-	db    *sql.DB
-	cache interfaces.ContentCache
+	db     *sql.DB
+	cache  interfaces.ContentCache
+	logger *logging.ChanneledLogger
 }
 
-func NewEpinetRepository(db *sql.DB, cache interfaces.ContentCache) *EpinetRepository {
+func NewEpinetRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *EpinetRepository {
 	return &EpinetRepository{
-		db:    db,
-		cache: cache,
+		db:     db,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
@@ -96,11 +101,20 @@ func (r *EpinetRepository) Store(tenantID string, epinet *content.EpinetNode) er
 
 	query := `INSERT INTO epinets (id, title, options_payload) VALUES (?, ?, ?)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing epinet insert", "id", epinet.ID)
+
 	_, err := r.db.Exec(query, epinet.ID, epinet.Title, string(stepsJSON))
 	if err != nil {
+		r.logger.Database().Error("Epinet insert failed", "error", err.Error(), "id", epinet.ID)
 		return fmt.Errorf("failed to insert epinet: %w", err)
 	}
 
+	r.logger.Database().Info("Epinet insert completed", "id", epinet.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetEpinet(tenantID, epinet)
 	return nil
 }
@@ -110,11 +124,20 @@ func (r *EpinetRepository) Update(tenantID string, epinet *content.EpinetNode) e
 
 	query := `UPDATE epinets SET title = ?, options_payload = ? WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing epinet update", "id", epinet.ID)
+
 	_, err := r.db.Exec(query, epinet.Title, string(stepsJSON), epinet.ID)
 	if err != nil {
+		r.logger.Database().Error("Epinet update failed", "error", err.Error(), "id", epinet.ID)
 		return fmt.Errorf("failed to update epinet: %w", err)
 	}
 
+	r.logger.Database().Info("Epinet update completed", "id", epinet.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetEpinet(tenantID, epinet)
 	return nil
 }
@@ -122,20 +145,33 @@ func (r *EpinetRepository) Update(tenantID string, epinet *content.EpinetNode) e
 func (r *EpinetRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM epinets WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing epinet delete", "id", id)
+
 	_, err := r.db.Exec(query, id)
 	if err != nil {
+		r.logger.Database().Error("Epinet delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete epinet: %w", err)
 	}
 
+	r.logger.Database().Info("Epinet delete completed", "id", id, "duration", time.Since(start))
 	r.cache.InvalidateContentCache(tenantID)
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	return nil
 }
 
 func (r *EpinetRepository) loadAllIDsFromDB() ([]string, error) {
 	query := `SELECT id FROM epinets ORDER BY id`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading all epinet IDs from database")
+
 	rows, err := r.db.Query(query)
 	if err != nil {
+		r.logger.Database().Error("Failed to query epinet IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query epinet IDs: %w", err)
 	}
 	defer rows.Close()
@@ -149,12 +185,19 @@ func (r *EpinetRepository) loadAllIDsFromDB() ([]string, error) {
 		ids = append(ids, id)
 	}
 
+	r.logger.Database().Info("Loaded epinet IDs from database", "count", len(ids), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return ids, rows.Err()
 }
 
-// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *EpinetRepository) loadFromDB(id string) (*content.EpinetNode, error) {
 	query := `SELECT id, title, options_payload FROM epinets WHERE id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading epinet from database", "id", id)
 
 	row := r.db.QueryRow(query, id)
 
@@ -166,15 +209,22 @@ func (r *EpinetRepository) loadFromDB(id string) (*content.EpinetNode, error) {
 		return nil, nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to scan epinet", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to load epinet %s: %w", id, err)
 	}
 
 	if err := r.parseOptionsPayload(&epinet, optionsPayloadStr); err != nil {
+		r.logger.Database().Error("Failed to parse epinet options payload", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to parse epinet options: %w", err)
 	}
 
 	epinet.NodeType = "Epinet"
 
+	r.logger.Database().Info("Epinet loaded from database", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return &epinet, nil
 }
 
@@ -193,8 +243,12 @@ func (r *EpinetRepository) loadMultipleFromDB(ids []string) ([]*content.EpinetNo
 	query := `SELECT id, title, options_payload FROM epinets WHERE id IN (` +
 		strings.Join(placeholders, ",") + `) ORDER BY id`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple epinets from database", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple epinets", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query epinets: %w", err)
 	}
 	defer rows.Close()
@@ -217,6 +271,11 @@ func (r *EpinetRepository) loadMultipleFromDB(ids []string) ([]*content.EpinetNo
 		epinets = append(epinets, &epinet)
 	}
 
+	r.logger.Database().Info("Multiple epinets loaded from database", "requested", len(ids), "loaded", len(epinets), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return epinets, rows.Err()
 }
 
@@ -225,15 +284,15 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 		return nil
 	}
 
-	var options interface{}
+	var options any
 	if err := json.Unmarshal([]byte(optionsPayloadStr), &options); err != nil {
 		return fmt.Errorf("failed to parse options_payload: %w", err)
 	}
 
-	if optionsArray, ok := options.([]interface{}); ok {
+	if optionsArray, ok := options.([]any); ok {
 		steps := make([]*content.EpinetStep, len(optionsArray))
 		for i, stepInterface := range optionsArray {
-			if stepMap, ok := stepInterface.(map[string]interface{}); ok {
+			if stepMap, ok := stepInterface.(map[string]any); ok {
 				step := &content.EpinetStep{}
 
 				if gateType, ok := stepMap["gateType"].(string); ok {
@@ -242,7 +301,7 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 				if title, ok := stepMap["title"].(string); ok {
 					step.Title = title
 				}
-				if values, ok := stepMap["values"].([]interface{}); ok {
+				if values, ok := stepMap["values"].([]any); ok {
 					step.Values = make([]string, len(values))
 					for j, v := range values {
 						if str, ok := v.(string); ok {
@@ -253,7 +312,7 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 				if objectType, ok := stepMap["objectType"].(string); ok {
 					step.ObjectType = &objectType
 				}
-				if objectIds, ok := stepMap["objectIds"].([]interface{}); ok {
+				if objectIds, ok := stepMap["objectIds"].([]any); ok {
 					step.ObjectIDs = make([]string, len(objectIds))
 					for j, id := range objectIds {
 						if str, ok := id.(string); ok {
@@ -266,14 +325,14 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 			}
 		}
 		epinet.Steps = steps
-	} else if optionsMap, ok := options.(map[string]interface{}); ok {
+	} else if optionsMap, ok := options.(map[string]any); ok {
 		if promoted, ok := optionsMap["promoted"].(bool); ok {
 			epinet.Promoted = promoted
 		}
-		if stepsData, ok := optionsMap["steps"].([]interface{}); ok {
+		if stepsData, ok := optionsMap["steps"].([]any); ok {
 			steps := make([]*content.EpinetStep, len(stepsData))
 			for i, stepInterface := range stepsData {
-				if stepMap, ok := stepInterface.(map[string]interface{}); ok {
+				if stepMap, ok := stepInterface.(map[string]any); ok {
 					step := &content.EpinetStep{}
 
 					if gateType, ok := stepMap["gateType"].(string); ok {
@@ -282,7 +341,7 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 					if title, ok := stepMap["title"].(string); ok {
 						step.Title = title
 					}
-					if values, ok := stepMap["values"].([]interface{}); ok {
+					if values, ok := stepMap["values"].([]any); ok {
 						step.Values = make([]string, len(values))
 						for j, v := range values {
 							if str, ok := v.(string); ok {
@@ -293,7 +352,7 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 					if objectType, ok := stepMap["objectType"].(string); ok {
 						step.ObjectType = &objectType
 					}
-					if objectIds, ok := stepMap["objectIds"].([]interface{}); ok {
+					if objectIds, ok := stepMap["objectIds"].([]any); ok {
 						step.ObjectIDs = make([]string, len(objectIds))
 						for j, id := range objectIds {
 							if str, ok := id.(string); ok {

@@ -6,20 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type ResourceRepository struct {
-	db    *sql.DB
-	cache interfaces.ContentCache
+	db     *sql.DB
+	cache  interfaces.ContentCache
+	logger *logging.ChanneledLogger
 }
 
-func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache) *ResourceRepository {
+func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *ResourceRepository {
 	return &ResourceRepository{
-		db:    db,
-		cache: cache,
+		db:     db,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
@@ -125,12 +130,21 @@ func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNo
 	query := `INSERT INTO resources (id, title, slug, category_slug, oneliner, action_lisp, options_payload) 
               VALUES (?, ?, ?, ?, ?, ?, ?)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing resource insert", "id", resource.ID)
+
 	_, err := r.db.Exec(query, resource.ID, resource.Title, resource.Slug,
 		resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON))
 	if err != nil {
+		r.logger.Database().Error("Resource insert failed", "error", err.Error(), "id", resource.ID)
 		return fmt.Errorf("failed to insert resource: %w", err)
 	}
 
+	r.logger.Database().Info("Resource insert completed", "id", resource.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetResource(tenantID, resource)
 	return nil
 }
@@ -141,12 +155,21 @@ func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceN
 	query := `UPDATE resources SET title = ?, slug = ?, category_slug = ?, oneliner = ?, 
               action_lisp = ?, options_payload = ? WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing resource update", "id", resource.ID)
+
 	_, err := r.db.Exec(query, resource.Title, resource.Slug, resource.CategorySlug,
 		resource.OneLiner, resource.ActionLisp, string(optionsJSON), resource.ID)
 	if err != nil {
+		r.logger.Database().Error("Resource update failed", "error", err.Error(), "id", resource.ID)
 		return fmt.Errorf("failed to update resource: %w", err)
 	}
 
+	r.logger.Database().Info("Resource update completed", "id", resource.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetResource(tenantID, resource)
 	return nil
 }
@@ -154,11 +177,20 @@ func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceN
 func (r *ResourceRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM resources WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing resource delete", "id", id)
+
 	_, err := r.db.Exec(query, id)
 	if err != nil {
+		r.logger.Database().Error("Resource delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete resource: %w", err)
 	}
 
+	r.logger.Database().Info("Resource delete completed", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.InvalidateContentCache(tenantID)
 	return nil
 }
@@ -166,8 +198,12 @@ func (r *ResourceRepository) Delete(tenantID, id string) error {
 func (r *ResourceRepository) loadAllIDsFromDB() ([]string, error) {
 	query := `SELECT id FROM resources ORDER BY title`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading all resource IDs from database")
+
 	rows, err := r.db.Query(query)
 	if err != nil {
+		r.logger.Database().Error("Failed to query resource IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query resources: %w", err)
 	}
 	defer rows.Close()
@@ -181,13 +217,20 @@ func (r *ResourceRepository) loadAllIDsFromDB() ([]string, error) {
 		resourceIDs = append(resourceIDs, id)
 	}
 
+	r.logger.Database().Info("Loaded resource IDs from database", "count", len(resourceIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return resourceIDs, rows.Err()
 }
 
-// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *ResourceRepository) loadFromDB(id string) (*content.ResourceNode, error) {
 	query := `SELECT id, title, slug, category_slug, oneliner, action_lisp, options_payload 
               FROM resources WHERE id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading resource from database", "id", id)
 
 	row := r.db.QueryRow(query, id)
 
@@ -202,10 +245,12 @@ func (r *ResourceRepository) loadFromDB(id string) (*content.ResourceNode, error
 		return nil, nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to scan resource", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to scan resource: %w", err)
 	}
 
 	if err := json.Unmarshal([]byte(optionsPayloadStr), &resource.OptionsPayload); err != nil {
+		r.logger.Database().Error("Failed to parse resource options payload", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to parse options payload: %w", err)
 	}
 
@@ -218,6 +263,11 @@ func (r *ResourceRepository) loadFromDB(id string) (*content.ResourceNode, error
 
 	resource.NodeType = "Resource"
 
+	r.logger.Database().Info("Resource loaded from database", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return &resource, nil
 }
 
@@ -236,8 +286,12 @@ func (r *ResourceRepository) loadMultipleFromDB(ids []string) ([]*content.Resour
 	query := `SELECT id, title, slug, category_slug, oneliner, action_lisp, options_payload 
               FROM resources WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple resources from database", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple resources", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query resources: %w", err)
 	}
 	defer rows.Close()
@@ -270,60 +324,84 @@ func (r *ResourceRepository) loadMultipleFromDB(ids []string) ([]*content.Resour
 		resources = append(resources, &resource)
 	}
 
+	r.logger.Database().Info("Multiple resources loaded from database", "requested", len(ids), "loaded", len(resources), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return resources, rows.Err()
 }
 
 func (r *ResourceRepository) getIDBySlugFromDB(slug string) (string, error) {
 	query := `SELECT id FROM resources WHERE slug = ? LIMIT 1`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading resource ID by slug from database", "slug", slug)
+
 	var id string
 	err := r.db.QueryRow(query, slug).Scan(&id)
 	if err == sql.ErrNoRows {
+		r.logger.Database().Debug("Resource not found by slug", "slug", slug)
 		return "", nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to query resource by slug", "error", err.Error(), "slug", slug)
 		return "", fmt.Errorf("failed to get resource by slug: %w", err)
 	}
 
+	r.logger.Database().Info("Resource ID loaded by slug", "slug", slug, "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return id, nil
 }
 
 func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, error) {
 	query := `SELECT id FROM resources WHERE category_slug = ? ORDER BY title`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading resource IDs by category from database", "category", category)
+
 	rows, err := r.db.Query(query, category)
 	if err != nil {
+		r.logger.Database().Error("Failed to query resources by category", "error", err.Error(), "category", category)
 		return nil, fmt.Errorf("failed to query resources by category: %w", err)
 	}
 	defer rows.Close()
 
-	var ids []string
+	var resourceIDs []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("failed to scan resource ID: %w", err)
 		}
-		ids = append(ids, id)
+		resourceIDs = append(resourceIDs, id)
 	}
 
-	return ids, rows.Err()
+	r.logger.Database().Info("Resource IDs loaded by category", "category", category, "count", len(resourceIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
+	return resourceIDs, rows.Err()
 }
 
-func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
+func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
 	resourceMap := make(map[string]*content.ResourceNode)
-	var queryIDs []string
 
-	for _, id := range ids {
+	// Check cache first for individual IDs
+	for _, id := range queryIDs {
 		if resource, found := r.cache.GetResource(tenantID, id); found {
-			resourceMap[id] = resource
-		} else {
-			queryIDs = append(queryIDs, id)
+			resourceMap[resource.ID] = resource
 		}
 	}
 
+	// Build dynamic query for remaining filters
 	var queryBuilder strings.Builder
 	queryBuilder.WriteString("SELECT id, title, slug, category_slug, oneliner, action_lisp, options_payload FROM resources WHERE 1=1")
-	args := make([]interface{}, 0)
+
+	var args []any
 
 	if len(queryIDs) > 0 {
 		queryBuilder.WriteString(" AND id IN (?" + strings.Repeat(",?", len(queryIDs)-1) + ")")
@@ -347,8 +425,16 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 	}
 
 	if len(args) > 0 {
+		start := time.Now()
+		r.logger.Database().Debug("Executing resource filter query", "filters", map[string]any{
+			"queryIDs":   queryIDs,
+			"categories": categories,
+			"slugs":      slugs,
+		})
+
 		rows, err := r.db.Query(queryBuilder.String(), args...)
 		if err != nil {
+			r.logger.Database().Error("Failed to query resources by filters", "error", err.Error())
 			return nil, fmt.Errorf("failed to query resources by filters: %w", err)
 		}
 		defer rows.Close()
@@ -382,6 +468,8 @@ func (r *ResourceRepository) FindByFilters(tenantID string, ids []string, catego
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
+
+		r.logger.Database().Info("Resource filter query completed", "loaded", len(resourceMap), "duration", time.Since(start))
 	}
 
 	finalResources := make([]*content.ResourceNode, 0, len(resourceMap))

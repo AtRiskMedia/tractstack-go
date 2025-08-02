@@ -5,20 +5,25 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type TractStackRepository struct {
-	db    *sql.DB
-	cache interfaces.ContentCache
+	db     *sql.DB
+	cache  interfaces.ContentCache
+	logger *logging.ChanneledLogger
 }
 
-func NewTractStackRepository(db *sql.DB, cache interfaces.ContentCache) *TractStackRepository {
+func NewTractStackRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *TractStackRepository {
 	return &TractStackRepository{
-		db:    db,
-		cache: cache,
+		db:     db,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
@@ -105,11 +110,20 @@ func (r *TractStackRepository) FindByIDs(tenantID string, ids []string) ([]*cont
 func (r *TractStackRepository) Store(tenantID string, tractStack *content.TractStackNode) error {
 	query := `INSERT INTO tractstacks (id, title, slug, social_image_path) VALUES (?, ?, ?, ?)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing tractstack insert", "id", tractStack.ID)
+
 	_, err := r.db.Exec(query, tractStack.ID, tractStack.Title, tractStack.Slug, tractStack.SocialImagePath)
 	if err != nil {
+		r.logger.Database().Error("Tractstack insert failed", "error", err.Error(), "id", tractStack.ID)
 		return fmt.Errorf("failed to insert tractstack: %w", err)
 	}
 
+	r.logger.Database().Info("Tractstack insert completed", "id", tractStack.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetTractStack(tenantID, tractStack)
 	return nil
 }
@@ -117,11 +131,20 @@ func (r *TractStackRepository) Store(tenantID string, tractStack *content.TractS
 func (r *TractStackRepository) Update(tenantID string, tractStack *content.TractStackNode) error {
 	query := `UPDATE tractstacks SET title = ?, slug = ?, social_image_path = ? WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing tractstack update", "id", tractStack.ID)
+
 	_, err := r.db.Exec(query, tractStack.Title, tractStack.Slug, tractStack.SocialImagePath, tractStack.ID)
 	if err != nil {
+		r.logger.Database().Error("Tractstack update failed", "error", err.Error(), "id", tractStack.ID)
 		return fmt.Errorf("failed to update tractstack: %w", err)
 	}
 
+	r.logger.Database().Info("Tractstack update completed", "id", tractStack.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetTractStack(tenantID, tractStack)
 	return nil
 }
@@ -129,11 +152,20 @@ func (r *TractStackRepository) Update(tenantID string, tractStack *content.Tract
 func (r *TractStackRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM tractstacks WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing tractstack delete", "id", id)
+
 	_, err := r.db.Exec(query, id)
 	if err != nil {
+		r.logger.Database().Error("Tractstack delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete tractstack: %w", err)
 	}
 
+	r.logger.Database().Info("Tractstack delete completed", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.InvalidateContentCache(tenantID)
 	return nil
 }
@@ -141,8 +173,12 @@ func (r *TractStackRepository) Delete(tenantID, id string) error {
 func (r *TractStackRepository) loadAllIDsFromDB() ([]string, error) {
 	query := `SELECT id FROM tractstacks ORDER BY title`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading all tractstack IDs from database")
+
 	rows, err := r.db.Query(query)
 	if err != nil {
+		r.logger.Database().Error("Failed to query tractstack IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query tractstacks: %w", err)
 	}
 	defer rows.Close()
@@ -156,12 +192,19 @@ func (r *TractStackRepository) loadAllIDsFromDB() ([]string, error) {
 		tractStackIDs = append(tractStackIDs, id)
 	}
 
+	r.logger.Database().Info("Loaded tractstack IDs from database", "count", len(tractStackIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return tractStackIDs, rows.Err()
 }
 
-// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *TractStackRepository) loadFromDB(id string) (*content.TractStackNode, error) {
 	query := `SELECT id, title, slug, social_image_path FROM tractstacks WHERE id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading tractstack from database", "id", id)
 
 	row := r.db.QueryRow(query, id)
 
@@ -174,6 +217,7 @@ func (r *TractStackRepository) loadFromDB(id string) (*content.TractStackNode, e
 		return nil, nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to scan tractstack", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to scan tractstack: %w", err)
 	}
 
@@ -183,6 +227,11 @@ func (r *TractStackRepository) loadFromDB(id string) (*content.TractStackNode, e
 
 	ts.NodeType = "TractStack"
 
+	r.logger.Database().Info("Tractstack loaded from database", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return &ts, nil
 }
 
@@ -201,13 +250,18 @@ func (r *TractStackRepository) loadMultipleFromDB(ids []string) ([]*content.Trac
 	query := `SELECT id, title, slug, social_image_path 
               FROM tractstacks WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple tractstacks from database", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple tractstacks", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query tractstacks: %w", err)
 	}
 	defer rows.Close()
 
 	var tractStacks []*content.TractStackNode
+
 	for rows.Next() {
 		var ts content.TractStackNode
 		var socialImagePath sql.NullString
@@ -225,20 +279,35 @@ func (r *TractStackRepository) loadMultipleFromDB(ids []string) ([]*content.Trac
 		tractStacks = append(tractStacks, &ts)
 	}
 
+	r.logger.Database().Info("Multiple tractstacks loaded from database", "requested", len(ids), "loaded", len(tractStacks), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return tractStacks, rows.Err()
 }
 
 func (r *TractStackRepository) getIDBySlugFromDB(slug string) (string, error) {
 	query := `SELECT id FROM tractstacks WHERE slug = ? LIMIT 1`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading tractstack ID by slug from database", "slug", slug)
+
 	var id string
 	err := r.db.QueryRow(query, slug).Scan(&id)
 	if err == sql.ErrNoRows {
+		r.logger.Database().Debug("Tractstack not found by slug", "slug", slug)
 		return "", nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to query tractstack by slug", "error", err.Error(), "slug", slug)
 		return "", fmt.Errorf("failed to get tractstack by slug: %w", err)
 	}
 
+	r.logger.Database().Info("Tractstack ID loaded by slug", "slug", slug, "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return id, nil
 }
