@@ -10,18 +10,20 @@ import (
 )
 
 const (
-	cyan       = "\033[38;2;86;182;194m"  // One Dark Cyan: #56B6C2
-	cyanBright = "\033[38;2;97;228;240m"  // Brighter Cyan: #61E4F0
-	dimCyan    = "\033[38;2;47;91;102m"   // Dim Cyan: #2F5B66
-	grey       = "\033[38;2;110;118;129m" // Brighter Grey: #6E7681
-	dimGrey    = "\033[38;2;75;82;99m"    // Darker Grey: #4B5263
-	success    = "\033[38;2;62;130;144m"  // Dim Cyan: #3E8290
-	warning    = "\033[38;2;229;192;123m" // One Dark Yellow: #E5C07B
-	errorRed   = "\033[38;2;224;108;117m" // One Dark Red: #E06C75
-	white      = "\033[38;2;171;178;191m" // One Dark Foreground: #ABB2BF
-	purple     = "\033[38;2;198;120;221m" // One Dark Purple: #C678DD
-	reset      = "\033[0m"
-	bold       = "\033[1m"
+	cyan        = "\033[38;2;86;182;194m"  // One Dark Cyan: #56B6C2
+	cyanBright  = "\033[38;2;97;228;240m"  // Brighter Cyan: #61E4F0
+	dimCyan     = "\033[38;2;47;91;102m"   // Dim Cyan: #2F5B66
+	grey        = "\033[38;2;110;118;129m" // Brighter Grey: #6E7681
+	dimGrey     = "\033[38;2;75;82;99m"    // Darker Grey: #4B5263
+	success     = "\033[38;2;62;130;144m"  // Dim Cyan: #3E8290
+	warning     = "\033[38;2;229;192;123m" // One Dark Yellow: #E5C07B
+	errorRed    = "\033[38;2;224;108;117m" // One Dark Red: #E06C75
+	white       = "\033[38;2;171;178;191m" // One Dark Foreground: #ABB2BF
+	whiteBright = "\033[38;2;220;225;230m" // Brighter White
+	purple      = "\033[38;2;198;120;221m" // One Dark Purple: #C678DD
+	dimPurple   = "\033[38;2;142;87;158m"  // Dim Purple: #8E579E
+	reset       = "\033[0m"
+	bold        = "\033[1m"
 )
 
 type Reporter struct {
@@ -71,11 +73,12 @@ func (r *Reporter) LogInfo(message string, args ...any) {
 
 func (r *Reporter) GenerateTenantReport(tenantID string) string {
 	var report strings.Builder
-
 	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")
 
-	report.WriteString(fmt.Sprintf("%s%s▓ %s | Tenant: %s %s\n", bold, cyan, timestamp, tenantID, reset))
+	// Tenant header with bright white name
+	report.WriteString(fmt.Sprintf("%s%s▓ %s | Tenant: %s%s %s\n", bold, dimCyan, timestamp, whiteBright, tenantID, reset))
 
+	// Status line for Content Map and Orphan Analysis
 	var statusLine strings.Builder
 	if contentMap, exists := r.cache.GetFullContentMap(tenantID); exists {
 		statusLine.WriteString(fmt.Sprintf("%s✦ %sContent Map: %s%d items%s",
@@ -96,26 +99,27 @@ func (r *Reporter) GenerateTenantReport(tenantID string) string {
 	}
 	report.WriteString(statusLine.String() + "\n")
 
+	// Cached nodes line (lowercase labels)
 	var countsLine strings.Builder
-	countsLine.WriteString(fmt.Sprintf("%s✦ Cached nodes:%s", dimGrey, reset))
+	countsLine.WriteString(fmt.Sprintf("%s✦ cached nodes:%s", dimGrey, reset))
 
 	contentTypes := []struct {
 		name   string
 		getter func(string) ([]string, bool)
 	}{
-		{"TractStacks", r.cache.GetAllTractStackIDs},
-		{"StoryFragments", r.cache.GetAllStoryFragmentIDs},
-		{"Panes", r.cache.GetAllPaneIDs},
-		{"Menus", r.cache.GetAllMenuIDs},
-		{"Resources", r.cache.GetAllResourceIDs},
-		{"Beliefs", r.cache.GetAllBeliefIDs},
-		{"Epinets", r.cache.GetAllEpinetIDs},
-		{"Files", r.cache.GetAllFileIDs},
+		{"tractstacks", r.cache.GetAllTractStackIDs},
+		{"storyfragments", r.cache.GetAllStoryFragmentIDs},
+		{"panes", r.cache.GetAllPaneIDs},
+		{"menus", r.cache.GetAllMenuIDs},
+		{"resources", r.cache.GetAllResourceIDs},
+		{"beliefs", r.cache.GetAllBeliefIDs},
+		{"epinets", r.cache.GetAllEpinetIDs},
+		{"files", r.cache.GetAllFileIDs},
 	}
 
 	for _, ct := range contentTypes {
 		countsLine.WriteString(" ")
-		if ids, exists := ct.getter(tenantID); exists {
+		if ids, exists := ct.getter(tenantID); exists && len(ids) > 0 {
 			countsLine.WriteString(fmt.Sprintf("%s%s:%s%d", dimCyan, ct.name, cyan, len(ids)))
 		} else {
 			countsLine.WriteString(fmt.Sprintf("%s%s:%s--", dimGrey, ct.name, dimGrey))
@@ -123,8 +127,9 @@ func (r *Reporter) GenerateTenantReport(tenantID string) string {
 	}
 	report.WriteString(countsLine.String() + "\n")
 
+	// Activity line (new colors, lowercase labels, "fragments")
 	var activityLine strings.Builder
-	activityLine.WriteString(fmt.Sprintf("%s✦ Activity:%s", purple, reset))
+	activityLine.WriteString(fmt.Sprintf("%s✦ activity:%s", purple, reset))
 
 	sessionIDs := r.cache.GetAllSessionIDs(tenantID)
 	fingerprintIDs := r.cache.GetAllFingerprintIDs(tenantID)
@@ -132,21 +137,18 @@ func (r *Reporter) GenerateTenantReport(tenantID string) string {
 	beliefRegistryIDs := r.cache.GetAllStoryfragmentBeliefRegistryIDs(tenantID)
 	htmlChunkIDs := r.cache.GetAllHTMLChunkIDs(tenantID)
 
-	activityLine.WriteString(fmt.Sprintf(" %sSessions:%s%d", purple, white, len(sessionIDs)))
-	activityLine.WriteString(fmt.Sprintf(" %sFingerprints:%s%d", purple, white, len(fingerprintIDs)))
-	activityLine.WriteString(fmt.Sprintf(" %sVisits:%s%d", purple, white, len(visitIDs)))
-
-	if len(beliefRegistryIDs) > 0 {
-		activityLine.WriteString(fmt.Sprintf(" %sBelief-Maps:%s%d", purple, white, len(beliefRegistryIDs)))
-	} else {
-		activityLine.WriteString(fmt.Sprintf(" %sBelief-Maps:%s--", purple, dimGrey))
+	formatActivityItem := func(label string, count int) string {
+		if count > 0 {
+			return fmt.Sprintf(" %s%s:%s%d", dimPurple, label, white, count)
+		}
+		return fmt.Sprintf(" %s%s:%s--", dimGrey, label, dimGrey)
 	}
 
-	if len(htmlChunkIDs) > 0 {
-		activityLine.WriteString(fmt.Sprintf(" %sHTML:%s%d", purple, white, len(htmlChunkIDs)))
-	} else {
-		activityLine.WriteString(fmt.Sprintf(" %sHTML:%s--", purple, dimGrey))
-	}
+	activityLine.WriteString(formatActivityItem("sessions", len(sessionIDs)))
+	activityLine.WriteString(formatActivityItem("fingerprints", len(fingerprintIDs)))
+	activityLine.WriteString(formatActivityItem("visits", len(visitIDs)))
+	activityLine.WriteString(formatActivityItem("belief-maps", len(beliefRegistryIDs)))
+	activityLine.WriteString(formatActivityItem("fragments", len(htmlChunkIDs)))
 
 	report.WriteString(activityLine.String() + "\n")
 

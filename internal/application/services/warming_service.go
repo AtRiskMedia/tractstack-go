@@ -77,11 +77,13 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	start := time.Now()
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
 
+	// Step 1: Warm the unified content map.
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
 	reporter.LogStepSuccess("Content Map warmed")
 
+	// Step 2: Bulk-load all content types into the cache.
 	if _, err := NewTractStackService().GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 	}
@@ -108,10 +110,29 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	}
 	reporter.LogStepSuccess("All Content Repositories Warmed")
 
-	if err := ws.warmHomeStoryfragmentAndDeps(tenantCtx); err != nil {
-		reporter.LogWarning("Home storyfragment dependency warming failed: %v", err)
+	// Step 3: Build Belief Registries for all Storyfragments (THE CORE FIX)
+	storyFragmentIDs, err := NewStoryFragmentService().GetAllIDs(tenantCtx)
+	if err != nil {
+		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
 	} else {
-		reporter.LogStepSuccess("Home StoryFragment and its dependencies warmed")
+		paneService := NewPaneService()
+		for _, sfID := range storyFragmentIDs {
+			sf, err := NewStoryFragmentService().GetByID(tenantCtx, sfID)
+			if err != nil || sf == nil {
+				continue
+			}
+			// Load only the panes required for this specific storyfragment.
+			panes, err := paneService.GetByIDs(tenantCtx, sf.PaneIDs)
+			if err != nil {
+				log.Printf("Warning: Failed to load panes for storyfragment %s during warming: %v", sfID, err)
+				continue
+			}
+			// Build and cache the registry.
+			if _, err := beliefRegistrySvc.BuildRegistryFromLoadedPanes(tenantCtx, sfID, panes); err != nil {
+				log.Printf("Warning: Failed to build belief registry for storyfragment %s: %v", sfID, err)
+			}
+		}
+		reporter.LogStepSuccess("%d StoryFragment<>Beliefs registries cached", len(storyFragmentIDs))
 	}
 
 	duration := time.Since(start)
@@ -274,23 +295,6 @@ func (ws *WarmingService) warmContentMap(tenantCtx *tenant.Context, contentMapSv
 	_, _, err := contentMapSvc.GetContentMap(tenantCtx, "", cache)
 	if err != nil {
 		return fmt.Errorf("failed to warm content map: %w", err)
-	}
-	return nil
-}
-
-func (ws *WarmingService) warmHomeStoryfragmentAndDeps(tenantCtx *tenant.Context) error {
-	storyFragmentService := NewStoryFragmentService()
-	homeSlug := "hello"
-	if tenantCtx.Config != nil && tenantCtx.Config.BrandConfig != nil && tenantCtx.Config.BrandConfig.HomeSlug != "" {
-		homeSlug = tenantCtx.Config.BrandConfig.HomeSlug
-	}
-	payload, err := storyFragmentService.GetFullPayloadBySlug(tenantCtx, homeSlug)
-	if err != nil {
-		return fmt.Errorf("failed to get home storyfragment full payload for warming ('%s'): %w", homeSlug, err)
-	}
-	if payload == nil || payload.StoryFragment == nil {
-		log.Printf("WARN: No home storyfragment found for tenant %s with slug '%s'.", tenantCtx.TenantID, homeSlug)
-		return nil
 	}
 	return nil
 }
