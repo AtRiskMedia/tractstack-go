@@ -3,10 +3,12 @@ package tenant
 
 import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	domainUser "github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
+	persistenceUser "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/user"
 )
 
 // Context holds tenant-specific request context
@@ -117,4 +119,25 @@ func (ctx *Context) ImageFileRepo() repositories.ImageFileRepository {
 func (ctx *Context) BulkRepo() bulk.BulkQueryRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
 	return bulk.NewRepository(db)
+}
+
+// LeadRepo returns a lead repository instance.
+// It returns the interface type from the domain layer.
+func (ctx *Context) LeadRepo() domainUser.LeadRepository {
+	db := &database.DB{DB: ctx.Database.Conn}
+	return persistenceUser.NewSQLLeadRepository(db)
+}
+
+// FingerprintRepo returns a fingerprint repository instance.
+// It returns the interface type from the domain layer.
+func (ctx *Context) FingerprintRepo() domainUser.FingerprintRepository {
+	db := &database.DB{DB: ctx.Database.Conn}
+	return persistenceUser.NewSQLFingerprintRepository(db)
+}
+
+// VisitRepo returns a visit repository instance.
+// It returns the interface type from the domain layer.
+func (ctx *Context) VisitRepo() domainUser.VisitRepository {
+	db := &database.DB{DB: ctx.Database.Conn}
+	return persistenceUser.NewSQLVisitRepository(db)
 }

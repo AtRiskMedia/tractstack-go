@@ -7,12 +7,12 @@ import (
 )
 
 type LeadMetrics struct {
-	TotalLeads       int                    `json:"totalLeads"`
-	NewLeads         int                    `json:"newLeads"`
-	ConversionRate   float64                `json:"conversionRate"`
-	LeadSources      map[string]int         `json:"leadSources"`
-	ConversionFunnel map[string]int         `json:"conversionFunnel"`
-	Attribution      map[string]interface{} `json:"attribution"`
+	TotalLeads       int            `json:"totalLeads"`
+	NewLeads         int            `json:"newLeads"`
+	ConversionRate   float64        `json:"conversionRate"`
+	LeadSources      map[string]int `json:"leadSources"`
+	ConversionFunnel map[string]int `json:"conversionFunnel"`
+	Attribution      map[string]any `json:"attribution"`
 }
 
 type LeadAnalyticsService struct{}
@@ -25,7 +25,7 @@ func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, sta
 	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
 
 	totalVisitors := s.getTotalVisitors(tenantCtx, hourKeys)
-	totalLeads := s.getTotalLeads(tenantCtx, hourKeys)
+	totalLeads := s.getTotalLeads(tenantCtx)
 	newLeads := s.getNewLeads(tenantCtx, hourKeys)
 
 	var conversionRate float64
@@ -33,9 +33,9 @@ func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, sta
 		conversionRate = float64(totalLeads) / float64(totalVisitors) * 100
 	}
 
-	leadSources := s.getLeadSources(tenantCtx, hourKeys)
+	leadSources := s.getLeadSources(tenantCtx)
 	conversionFunnel := s.getConversionFunnel(tenantCtx, hourKeys)
-	attribution := s.getAttribution(tenantCtx, hourKeys)
+	attribution := s.getAttribution(tenantCtx)
 
 	return &LeadMetrics{
 		TotalLeads:       totalLeads,
@@ -76,7 +76,7 @@ func (s *LeadAnalyticsService) getTotalVisitors(tenantCtx *tenant.Context, hourK
 	return len(uniqueVisitors)
 }
 
-func (s *LeadAnalyticsService) getTotalLeads(tenantCtx *tenant.Context, hourKeys []string) int {
+func (s *LeadAnalyticsService) getTotalLeads(tenantCtx *tenant.Context) int {
 	query := `SELECT COUNT(DISTINCT fingerprint_id) FROM fingerprints WHERE lead_id IS NOT NULL`
 
 	var count int
@@ -110,7 +110,7 @@ func (s *LeadAnalyticsService) getNewLeads(tenantCtx *tenant.Context, hourKeys [
 	return count
 }
 
-func (s *LeadAnalyticsService) getLeadSources(tenantCtx *tenant.Context, hourKeys []string) map[string]int {
+func (s *LeadAnalyticsService) getLeadSources(tenantCtx *tenant.Context) map[string]int {
 	leadSources := make(map[string]int)
 
 	query := `
@@ -143,8 +143,8 @@ func (s *LeadAnalyticsService) getConversionFunnel(tenantCtx *tenant.Context, ho
 	funnel := map[string]int{
 		"visitors":  s.getTotalVisitors(tenantCtx, hourKeys),
 		"engaged":   s.getEngagedVisitors(tenantCtx, hourKeys),
-		"leads":     s.getTotalLeads(tenantCtx, hourKeys),
-		"activated": s.getActivatedLeads(tenantCtx, hourKeys),
+		"leads":     s.getTotalLeads(tenantCtx),
+		"activated": s.getActivatedLeads(tenantCtx),
 	}
 
 	return funnel
@@ -187,7 +187,7 @@ func (s *LeadAnalyticsService) getEngagedVisitors(tenantCtx *tenant.Context, hou
 	return len(engagedVisitors)
 }
 
-func (s *LeadAnalyticsService) getActivatedLeads(tenantCtx *tenant.Context, hourKeys []string) int {
+func (s *LeadAnalyticsService) getActivatedLeads(tenantCtx *tenant.Context) int {
 	query := `
 		SELECT COUNT(DISTINCT f.id)
 		FROM fingerprints f
@@ -206,8 +206,8 @@ func (s *LeadAnalyticsService) getActivatedLeads(tenantCtx *tenant.Context, hour
 	return count
 }
 
-func (s *LeadAnalyticsService) getAttribution(tenantCtx *tenant.Context, hourKeys []string) map[string]interface{} {
-	attribution := make(map[string]interface{})
+func (s *LeadAnalyticsService) getAttribution(tenantCtx *tenant.Context) map[string]any {
+	attribution := make(map[string]any)
 
 	attribution["direct"] = 0
 	attribution["campaign"] = 0

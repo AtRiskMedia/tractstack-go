@@ -28,12 +28,14 @@ func (ss *SessionsStore) InitializeTenant(tenantID string) {
 
 	if ss.tenantCaches[tenantID] == nil {
 		ss.tenantCaches[tenantID] = &types.TenantUserStateCache{
-			FingerprintStates:     make(map[string]*types.FingerprintState),
-			VisitStates:           make(map[string]*types.VisitState),
-			KnownFingerprints:     make(map[string]bool),
-			SessionStates:         make(map[string]*types.SessionData),
-			SessionBeliefContexts: make(map[string]*types.SessionBeliefContext),
-			LastLoaded:            time.Now().UTC(),
+			FingerprintStates: make(map[string]*types.FingerprintState),
+			VisitStates:       make(map[string]*types.VisitState),
+			KnownFingerprints: make(map[string]bool),
+			SessionStates:     make(map[string]*types.SessionData),
+			// THE FIX IS HERE: This map was not being initialized.
+			StoryfragmentBeliefRegistries: make(map[string]*types.StoryfragmentBeliefRegistry),
+			SessionBeliefContexts:         make(map[string]*types.SessionBeliefContext),
+			LastLoaded:                    time.Now().UTC(),
 		}
 	}
 }
@@ -44,6 +46,29 @@ func (ss *SessionsStore) GetTenantCache(tenantID string) (*types.TenantUserState
 	defer ss.mu.RUnlock()
 	cache, exists := ss.tenantCaches[tenantID]
 	return cache, exists
+}
+
+// GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries.
+// THIS IS THE NEWLY ADDED METHOD FOR THE REPORTER.
+func (ss *SessionsStore) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string {
+	cache, exists := ss.GetTenantCache(tenantID)
+	if !exists {
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	if cache.StoryfragmentBeliefRegistries == nil {
+		return []string{}
+	}
+
+	ids := make([]string, 0, len(cache.StoryfragmentBeliefRegistries))
+	for id := range cache.StoryfragmentBeliefRegistries {
+		ids = append(ids, id)
+	}
+
+	return ids
 }
 
 // =============================================================================
