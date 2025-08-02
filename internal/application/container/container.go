@@ -2,14 +2,17 @@
 package container
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // Container holds all singleton services and infrastructure dependencies
@@ -55,6 +58,25 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	loggerConfig := logging.DefaultLoggerConfig()
 	loggerConfig.LogDirectory = filepath.Join(os.Getenv("HOME"), "t8k-go-server", "log")
 
+	// Wire LogVerbosity config to actual logger level
+	switch strings.ToUpper(config.LogVerbosity) {
+	case "TRACE":
+		loggerConfig.DefaultLevel = slog.LevelDebug - 4 // Trace level
+	case "DEBUG":
+		loggerConfig.DefaultLevel = slog.LevelDebug
+	case "INFO":
+		loggerConfig.DefaultLevel = slog.LevelInfo
+	case "WARN":
+		loggerConfig.DefaultLevel = slog.LevelWarn
+	case "ERROR":
+		loggerConfig.DefaultLevel = slog.LevelError
+	default:
+		loggerConfig.DefaultLevel = slog.LevelInfo
+	}
+
+	// Clear channel-specific levels to ensure DefaultLevel is respected
+	loggerConfig.ChannelLevels = make(map[logging.Channel]slog.Level)
+
 	logger, err := logging.NewChanneledLogger(loggerConfig)
 	if err != nil {
 		// In startup context, we can't return error gracefully
@@ -95,7 +117,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ContentMapService:     services.NewContentMapService(),
 		OrphanAnalysisService: services.NewOrphanAnalysisService(),
 		BeliefRegistryService: services.NewBeliefRegistryService(),
-		WarmingService:        services.NewWarmingService(),
+		WarmingService:        services.NewWarmingService(logger),
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,

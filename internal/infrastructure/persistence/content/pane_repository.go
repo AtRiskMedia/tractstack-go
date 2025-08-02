@@ -10,21 +10,24 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type PaneRepository struct {
-	db    *sql.DB
-	cache interfaces.ContentCache
+	db     *sql.DB
+	cache  interfaces.ContentCache
+	logger *logging.ChanneledLogger
 }
 
-func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache) *PaneRepository {
+func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *PaneRepository {
 	return &PaneRepository{
-		db:    db,
-		cache: cache,
+		db:     db,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
-// FindByID retrieves a pane by ID using a cache-first strategy.
 func (r *PaneRepository) FindByID(tenantID, id string) (*content.PaneNode, error) {
 	if pane, found := r.cache.GetPane(tenantID, id); found {
 		return pane, nil
@@ -35,28 +38,49 @@ func (r *PaneRepository) FindByID(tenantID, id string) (*content.PaneNode, error
 		return nil, err
 	}
 	if pane == nil {
-		return nil, nil // Not found
+		return nil, nil
 	}
 
 	r.cache.SetPane(tenantID, pane)
 	return pane, nil
 }
 
-// FindBySlug retrieves a pane by slug using a cache-first strategy.
 func (r *PaneRepository) FindBySlug(tenantID, slug string) (*content.PaneNode, error) {
-	id, err := r.getIDBySlugFromDB(slug) // Always check DB for slug to ensure uniqueness
+	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
 		return nil, err
 	}
 	if id == "" {
-		return nil, nil // Not found
+		return nil, nil
 	}
 
 	return r.FindByID(tenantID, id)
 }
 
-// FindByIDs retrieves multiple panes by their IDs, using the cache for found items
-// and performing a bulk database query for any missing items.
+// FindAll retrieves all panes for a tenant, employing a cache-first strategy.
+func (r *PaneRepository) FindAll(tenantID string) ([]*content.PaneNode, error) {
+	// 1. Check cache for the master list of IDs first.
+	if ids, found := r.cache.GetAllPaneIDs(tenantID); found {
+		return r.FindByIDs(tenantID, ids)
+	}
+
+	// --- CACHE MISS FALLBACK ---
+	// 2. Load all IDs from the database.
+	ids, err := r.loadAllIDsFromDB()
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []*content.PaneNode{}, nil
+	}
+
+	// 3. Set the master ID list in the cache immediately.
+	r.cache.SetAllPaneIDs(tenantID, ids)
+
+	// 4. Use the robust FindByIDs method to load the actual objects.
+	return r.FindByIDs(tenantID, ids)
+}
+
 func (r *PaneRepository) FindByIDs(tenantID string, ids []string) ([]*content.PaneNode, error) {
 	var result []*content.PaneNode
 	var missingIDs []string
@@ -84,46 +108,27 @@ func (r *PaneRepository) FindByIDs(tenantID string, ids []string) ([]*content.Pa
 	return result, nil
 }
 
-// FindAll retrieves all panes for a tenant, employing a cache-first strategy
-// for the master list of pane IDs.
-func (r *PaneRepository) FindAll(tenantID string) ([]*content.PaneNode, error) {
-	// 1. Check cache for the master list of IDs first.
-	if ids, found := r.cache.GetAllPaneIDs(tenantID); found {
-		// If the list exists, bulk-load the panes themselves (this is also cache-first).
-		return r.FindByIDs(tenantID, ids)
-	}
-
-	// --- CACHE MISS FALLBACK ---
-	// 2. The master ID list is not in the cache. Load all IDs from the database.
-	ids, err := r.loadAllIDsFromDB()
-	if err != nil {
-		return nil, err
-	}
-	if len(ids) == 0 {
-		return []*content.PaneNode{}, nil
-	}
-
-	// 3. Set the master ID list in the cache immediately.
-	r.cache.SetAllPaneIDs(tenantID, ids)
-
-	// 4. Use the robust FindByIDs method to load the actual objects.
-	// This will load them from the DB and populate the individual object cache.
-	return r.FindByIDs(tenantID, ids)
-}
-
 func (r *PaneRepository) Store(tenantID string, pane *content.PaneNode) error {
 	optionsJSON, _ := json.Marshal(pane.OptionsPayload)
 
 	query := `INSERT INTO panes (id, title, slug, pane_type, created, changed, options_payload, 
-              is_context_pane, markdown_id) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+              is_context_pane, markdown_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+	start := time.Now()
+	r.logger.Database().Debug("Executing pane insert", "id", pane.ID)
 
 	_, err := r.db.Exec(query, pane.ID, pane.Title, pane.Slug, "component",
 		pane.Created, pane.Changed, string(optionsJSON), pane.IsContextPane, pane.MarkdownID)
 	if err != nil {
+		r.logger.Database().Error("Pane insert failed", "error", err.Error(), "id", pane.ID)
 		return fmt.Errorf("failed to insert pane: %w", err)
 	}
 
+	r.logger.Database().Info("Pane insert completed", "id", pane.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetPane(tenantID, pane)
 	return nil
 }
@@ -134,12 +139,21 @@ func (r *PaneRepository) Update(tenantID string, pane *content.PaneNode) error {
 	query := `UPDATE panes SET title = ?, slug = ?, changed = ?, options_payload = ?, 
               is_context_pane = ?, markdown_id = ? WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing pane update", "id", pane.ID)
+
 	_, err := r.db.Exec(query, pane.Title, pane.Slug, pane.Changed, string(optionsJSON),
 		pane.IsContextPane, pane.MarkdownID, pane.ID)
 	if err != nil {
+		r.logger.Database().Error("Pane update failed", "error", err.Error(), "id", pane.ID)
 		return fmt.Errorf("failed to update pane: %w", err)
 	}
 
+	r.logger.Database().Info("Pane update completed", "id", pane.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetPane(tenantID, pane)
 	return nil
 }
@@ -147,11 +161,20 @@ func (r *PaneRepository) Update(tenantID string, pane *content.PaneNode) error {
 func (r *PaneRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM panes WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing pane delete", "id", id)
+
 	_, err := r.db.Exec(query, id)
 	if err != nil {
+		r.logger.Database().Error("Pane delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete pane: %w", err)
 	}
 
+	r.logger.Database().Info("Pane delete completed", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.InvalidateContentCache(tenantID)
 	return nil
 }
@@ -159,8 +182,12 @@ func (r *PaneRepository) Delete(tenantID, id string) error {
 func (r *PaneRepository) loadAllIDsFromDB() ([]string, error) {
 	query := `SELECT id FROM panes ORDER BY title`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading all pane IDs from database")
+
 	rows, err := r.db.Query(query)
 	if err != nil {
+		r.logger.Database().Error("Failed to query pane IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query panes: %w", err)
 	}
 	defer rows.Close()
@@ -178,6 +205,11 @@ func (r *PaneRepository) loadAllIDsFromDB() ([]string, error) {
 		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 
+	r.logger.Database().Info("Loaded pane IDs from database", "count", len(paneIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return paneIDs, nil
 }
 
@@ -185,6 +217,9 @@ func (r *PaneRepository) loadFromDB(id string) (*content.PaneNode, error) {
 	query := `SELECT id, title, slug, pane_type, created, changed, options_payload, 
               is_context_pane, markdown_id 
               FROM panes WHERE id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading pane from database", "id", id)
 
 	row := r.db.QueryRow(query, id)
 
@@ -202,6 +237,7 @@ func (r *PaneRepository) loadFromDB(id string) (*content.PaneNode, error) {
 		return nil, nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to scan pane", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to scan pane: %w", err)
 	}
 
@@ -215,6 +251,7 @@ func (r *PaneRepository) loadFromDB(id string) (*content.PaneNode, error) {
 	}
 
 	if err := json.Unmarshal([]byte(optionsPayloadStr), &pane.OptionsPayload); err != nil {
+		r.logger.Database().Error("Failed to parse pane options payload", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to parse options payload: %w", err)
 	}
 
@@ -234,6 +271,11 @@ func (r *PaneRepository) loadFromDB(id string) (*content.PaneNode, error) {
 
 	pane.NodeType = "Pane"
 
+	r.logger.Database().Info("Pane loaded from database", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return &pane, nil
 }
 
@@ -253,8 +295,12 @@ func (r *PaneRepository) loadMultipleFromDB(ids []string) ([]*content.PaneNode, 
               is_context_pane, markdown_id 
               FROM panes WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple panes from database", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple panes", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query panes: %w", err)
 	}
 	defer rows.Close()
@@ -321,36 +367,61 @@ func (r *PaneRepository) loadMultipleFromDB(ids []string) ([]*content.PaneNode, 
 		}
 	}
 
+	r.logger.Database().Info("Multiple panes loaded from database", "requested", len(ids), "loaded", len(panes), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return panes, nil
 }
 
 func (r *PaneRepository) getIDBySlugFromDB(slug string) (string, error) {
 	query := `SELECT id FROM panes WHERE slug = ? LIMIT 1`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading pane ID by slug from database", "slug", slug)
+
 	var id string
 	err := r.db.QueryRow(query, slug).Scan(&id)
 	if err == sql.ErrNoRows {
+		r.logger.Database().Debug("Pane not found by slug", "slug", slug)
 		return "", nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to query pane by slug", "error", err.Error(), "slug", slug)
 		return "", fmt.Errorf("failed to get pane by slug: %w", err)
 	}
 
+	r.logger.Database().Info("Pane ID loaded by slug", "slug", slug, "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return id, nil
 }
 
 func (r *PaneRepository) getMarkdownBody(id string) (string, error) {
 	query := `SELECT body FROM markdowns WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading markdown body", "id", id)
+
 	var body string
 	err := r.db.QueryRow(query, id).Scan(&body)
 	if err == sql.ErrNoRows {
+		r.logger.Database().Debug("Markdown not found", "id", id)
 		return "", nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to query markdown", "error", err.Error(), "id", id)
 		return "", fmt.Errorf("failed to query markdown: %w", err)
 	}
 
+	r.logger.Database().Info("Markdown body loaded", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return body, nil
 }
 
@@ -368,8 +439,12 @@ func (r *PaneRepository) loadMultipleMarkdownFromDB(ids []string) (map[string]st
 
 	query := `SELECT id, body FROM markdowns WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple markdown bodies", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple markdowns", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query markdowns: %w", err)
 	}
 	defer rows.Close()
@@ -383,6 +458,11 @@ func (r *PaneRepository) loadMultipleMarkdownFromDB(ids []string) (map[string]st
 		markdownMap[id] = body
 	}
 
+	r.logger.Database().Info("Multiple markdown bodies loaded", "requested", len(ids), "loaded", len(markdownMap), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return markdownMap, rows.Err()
 }
 

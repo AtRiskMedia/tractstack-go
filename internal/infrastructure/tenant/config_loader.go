@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 )
 
 // Config represents the structure of a single tenant's configuration
@@ -32,7 +33,7 @@ type Config struct {
 }
 
 // LoadTenantConfig loads configuration for a specific tenant from its env.json file.
-func LoadTenantConfig(tenantID string) (*Config, error) {
+func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("could not find user home directory: %w", err)

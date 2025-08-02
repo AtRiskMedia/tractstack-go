@@ -10,6 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/stores"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
@@ -30,17 +31,22 @@ type Manager struct {
 	configStore    *stores.ConfigStore
 	sessionsStore  *stores.SessionsStore
 	fragmentsStore *stores.FragmentsStore
+	logger         *logging.ChanneledLogger
 }
 
-// NewManager creates a new cache manager instance.
-func NewManager() *Manager {
+func NewManager(logger *logging.ChanneledLogger) *Manager {
+	if logger != nil {
+		logger.Cache().Info("Initializing cache manager", "stores", []string{"content", "analytics", "config", "sessions", "fragments"})
+	}
+
 	return &Manager{
 		LastAccessed:   make(map[string]time.Time),
-		contentStore:   stores.NewContentStore(),
-		analyticsStore: stores.NewAnalyticsStore(),
-		configStore:    stores.NewConfigStore(),
-		sessionsStore:  stores.NewSessionsStore(),
-		fragmentsStore: stores.NewFragmentsStore(),
+		contentStore:   stores.NewContentStore(logger),
+		analyticsStore: stores.NewAnalyticsStore(logger),
+		configStore:    stores.NewConfigStore(logger),
+		sessionsStore:  stores.NewSessionsStore(logger),
+		fragmentsStore: stores.NewFragmentsStore(logger),
+		logger:         logger,
 	}
 }
 
@@ -83,12 +89,21 @@ func (m *Manager) updateTenantAccessTime(tenantID string) {
 }
 
 func (m *Manager) InitializeTenant(tenantID string) {
+	start := time.Now()
+	if m.logger != nil {
+		m.logger.Cache().Debug("Initializing tenant cache", "tenantId", tenantID)
+	}
+
 	m.contentStore.InitializeTenant(tenantID)
 	m.analyticsStore.InitializeTenant(tenantID)
 	m.configStore.InitializeTenant(tenantID)
 	m.sessionsStore.InitializeTenant(tenantID)
 	m.fragmentsStore.InitializeTenant(tenantID)
 	m.updateTenantAccessTime(tenantID)
+
+	if m.logger != nil {
+		m.logger.Cache().Info("Tenant cache initialized", "tenantId", tenantID, "duration", time.Since(start))
+	}
 }
 
 func (m *Manager) GetRangeCacheStatus(tenantID, epinetID string, startHour, endHour int) types.RangeCacheStatus {
@@ -654,11 +669,20 @@ func (m *Manager) InvalidateHTMLChunk(tenantID, paneID string, variant types.Pan
 }
 
 func (m *Manager) InvalidateTenant(tenantID string) {
+	start := time.Now()
+	if m.logger != nil {
+		m.logger.Cache().Debug("Invalidating tenant cache", "tenantId", tenantID)
+	}
+
 	m.contentStore.InvalidateContentCache(tenantID)
 	m.sessionsStore.InvalidateUserStateCache(tenantID)
 	m.fragmentsStore.InvalidateHTMLChunkCache(tenantID)
 	m.analyticsStore.InvalidateAnalyticsCache(tenantID)
 	m.updateTenantAccessTime(tenantID)
+
+	if m.logger != nil {
+		m.logger.Cache().Info("Tenant cache invalidated", "tenantId", tenantID, "duration", time.Since(start))
+	}
 }
 
 func (m *Manager) GetTenantStats(tenantID string) interfaces.CacheStats {

@@ -10,6 +10,7 @@ import (
 
 // TenantMiddleware creates middleware that extracts tenant information and creates full tenant context
 func TenantMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
+	// TODO: Add tenant operation logging once manager has logger access
 	return func(c *gin.Context) {
 		// Extract tenant ID from X-Tenant-ID header
 		tenantID := c.GetHeader("X-Tenant-ID")

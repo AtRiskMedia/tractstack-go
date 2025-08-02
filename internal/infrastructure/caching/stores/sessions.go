@@ -6,25 +6,36 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 )
 
 // SessionsStore implements user state caching operations with tenant isolation
 type SessionsStore struct {
 	tenantCaches map[string]*types.TenantUserStateCache
 	mu           sync.RWMutex
+	logger       *logging.ChanneledLogger
 }
 
 // NewSessionsStore creates a new sessions cache store
-func NewSessionsStore() *SessionsStore {
+func NewSessionsStore(logger *logging.ChanneledLogger) *SessionsStore {
+	if logger != nil {
+		logger.Cache().Info("Initializing sessions cache store")
+	}
 	return &SessionsStore{
 		tenantCaches: make(map[string]*types.TenantUserStateCache),
+		logger:       logger,
 	}
 }
 
 // InitializeTenant creates cache structures for a tenant
 func (ss *SessionsStore) InitializeTenant(tenantID string) {
+	start := time.Now()
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Initializing tenant user state cache", "tenantId", tenantID)
+	}
 
 	if ss.tenantCaches[tenantID] == nil {
 		ss.tenantCaches[tenantID] = &types.TenantUserStateCache{
@@ -36,6 +47,10 @@ func (ss *SessionsStore) InitializeTenant(tenantID string) {
 			StoryfragmentBeliefRegistries: make(map[string]*types.StoryfragmentBeliefRegistry),
 			SessionBeliefContexts:         make(map[string]*types.SessionBeliefContext),
 			LastLoaded:                    time.Now().UTC(),
+		}
+
+		if ss.logger != nil {
+			ss.logger.Cache().Info("Tenant user state cache initialized", "tenantId", tenantID, "duration", time.Since(start))
 		}
 	}
 }
@@ -51,8 +66,12 @@ func (ss *SessionsStore) GetTenantCache(tenantID string) (*types.TenantUserState
 // GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries.
 // THIS IS THE NEWLY ADDED METHOD FOR THE REPORTER.
 func (ss *SessionsStore) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get_all_belief_registry_ids", "tenantId", tenantID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return []string{}
 	}
 
@@ -60,12 +79,19 @@ func (ss *SessionsStore) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) [
 	defer cache.Mu.RUnlock()
 
 	if cache.StoryfragmentBeliefRegistries == nil {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get_all_belief_registry_ids", "tenantId", tenantID, "hit", false, "reason", "nil", "duration", time.Since(start))
+		}
 		return []string{}
 	}
 
 	ids := make([]string, 0, len(cache.StoryfragmentBeliefRegistries))
 	for id := range cache.StoryfragmentBeliefRegistries {
 		ids = append(ids, id)
+	}
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get_all_belief_registry_ids", "tenantId", tenantID, "hit", true, "count", len(ids), "duration", time.Since(start))
 	}
 
 	return ids
@@ -77,8 +103,12 @@ func (ss *SessionsStore) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) [
 
 // GetVisitState retrieves a visit state by visit ID
 func (ss *SessionsStore) GetVisitState(tenantID, visitID string) (*types.VisitState, bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "visit_state", "tenantId", tenantID, "visitId", visitID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
@@ -87,15 +117,22 @@ func (ss *SessionsStore) GetVisitState(tenantID, visitID string) (*types.VisitSt
 
 	// Check cache expiration (24 hours TTL for visit states)
 	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "visit_state", "tenantId", tenantID, "visitId", visitID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
-	state, exists := cache.VisitStates[visitID]
-	return state, exists
+	state, found := cache.VisitStates[visitID]
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "visit_state", "tenantId", tenantID, "visitId", visitID, "hit", found, "duration", time.Since(start))
+	}
+	return state, found
 }
 
 // SetVisitState stores a visit state
 func (ss *SessionsStore) SetVisitState(tenantID string, state *types.VisitState) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -107,6 +144,10 @@ func (ss *SessionsStore) SetVisitState(tenantID string, state *types.VisitState)
 
 	cache.VisitStates[state.VisitID] = state
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "visit_state", "tenantId", tenantID, "visitId", state.VisitID, "duration", time.Since(start))
+	}
 }
 
 // =============================================================================
@@ -115,8 +156,12 @@ func (ss *SessionsStore) SetVisitState(tenantID string, state *types.VisitState)
 
 // GetFingerprintState retrieves a fingerprint state by fingerprint ID
 func (ss *SessionsStore) GetFingerprintState(tenantID, fingerprintID string) (*types.FingerprintState, bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "fingerprint_state", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
@@ -124,15 +169,22 @@ func (ss *SessionsStore) GetFingerprintState(tenantID, fingerprintID string) (*t
 	defer cache.Mu.RUnlock()
 
 	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "fingerprint_state", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
-	state, exists := cache.FingerprintStates[fingerprintID]
-	return state, exists
+	state, found := cache.FingerprintStates[fingerprintID]
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "fingerprint_state", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", found, "duration", time.Since(start))
+	}
+	return state, found
 }
 
 // SetFingerprintState stores a fingerprint state
 func (ss *SessionsStore) SetFingerprintState(tenantID string, state *types.FingerprintState) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -144,12 +196,20 @@ func (ss *SessionsStore) SetFingerprintState(tenantID string, state *types.Finge
 
 	cache.FingerprintStates[state.FingerprintID] = state
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "fingerprint_state", "tenantId", tenantID, "fingerprintId", state.FingerprintID, "duration", time.Since(start))
+	}
 }
 
 // IsKnownFingerprint checks if a fingerprint is known
 func (ss *SessionsStore) IsKnownFingerprint(tenantID, fingerprintID string) bool {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "is_known", "type", "fingerprint", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return false
 	}
 
@@ -157,15 +217,23 @@ func (ss *SessionsStore) IsKnownFingerprint(tenantID, fingerprintID string) bool
 	defer cache.Mu.RUnlock()
 
 	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "is_known", "type", "fingerprint", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
 		return false
 	}
 
 	known, exists := cache.KnownFingerprints[fingerprintID]
-	return exists && known
+	result := exists && known
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "is_known", "type", "fingerprint", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", exists, "known", result, "duration", time.Since(start))
+	}
+	return result
 }
 
 // SetKnownFingerprint marks a fingerprint as known or unknown
 func (ss *SessionsStore) SetKnownFingerprint(tenantID, fingerprintID string, isKnown bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -177,10 +245,15 @@ func (ss *SessionsStore) SetKnownFingerprint(tenantID, fingerprintID string, isK
 
 	cache.KnownFingerprints[fingerprintID] = isKnown
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "set_known", "type", "fingerprint", "tenantId", tenantID, "fingerprintId", fingerprintID, "isKnown", isKnown, "duration", time.Since(start))
+	}
 }
 
 // LoadKnownFingerprints bulk loads known fingerprints
 func (ss *SessionsStore) LoadKnownFingerprints(tenantID string, fingerprints map[string]bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -195,6 +268,10 @@ func (ss *SessionsStore) LoadKnownFingerprints(tenantID string, fingerprints map
 		cache.KnownFingerprints[fpID] = isKnown
 	}
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "bulk_load", "type", "fingerprints", "tenantId", tenantID, "count", len(fingerprints), "duration", time.Since(start))
+	}
 }
 
 // =============================================================================
@@ -203,8 +280,12 @@ func (ss *SessionsStore) LoadKnownFingerprints(tenantID string, fingerprints map
 
 // GetSession retrieves session data by session ID
 func (ss *SessionsStore) GetSession(tenantID, sessionID string) (*types.SessionData, bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
@@ -212,15 +293,22 @@ func (ss *SessionsStore) GetSession(tenantID, sessionID string) (*types.SessionD
 	defer cache.Mu.RUnlock()
 
 	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
-	session, exists := cache.SessionStates[sessionID]
-	return session, exists
+	session, found := cache.SessionStates[sessionID]
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "hit", found, "duration", time.Since(start))
+	}
+	return session, found
 }
 
 // SetSession stores session data
 func (ss *SessionsStore) SetSession(tenantID string, sessionData *types.SessionData) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -232,6 +320,10 @@ func (ss *SessionsStore) SetSession(tenantID string, sessionData *types.SessionD
 
 	cache.SessionStates[sessionData.SessionID] = sessionData
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "session", "tenantId", tenantID, "sessionId", sessionData.SessionID, "duration", time.Since(start))
+	}
 }
 
 // =============================================================================
@@ -240,8 +332,12 @@ func (ss *SessionsStore) SetSession(tenantID string, sessionData *types.SessionD
 
 // GetStoryfragmentBeliefRegistry retrieves belief registry for a storyfragment
 func (ss *SessionsStore) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*types.StoryfragmentBeliefRegistry, bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
@@ -249,15 +345,22 @@ func (ss *SessionsStore) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentI
 	defer cache.Mu.RUnlock()
 
 	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
-	registry, exists := cache.StoryfragmentBeliefRegistries[storyfragmentID]
-	return registry, exists
+	registry, found := cache.StoryfragmentBeliefRegistries[storyfragmentID]
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "hit", found, "duration", time.Since(start))
+	}
+	return registry, found
 }
 
 // SetStoryfragmentBeliefRegistry stores belief registry for a storyfragment
 func (ss *SessionsStore) SetStoryfragmentBeliefRegistry(tenantID string, registry *types.StoryfragmentBeliefRegistry) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -269,12 +372,20 @@ func (ss *SessionsStore) SetStoryfragmentBeliefRegistry(tenantID string, registr
 
 	cache.StoryfragmentBeliefRegistries[registry.StoryfragmentID] = registry
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", registry.StoryfragmentID, "duration", time.Since(start))
+	}
 }
 
 // InvalidateStoryfragmentBeliefRegistry removes belief registry for a storyfragment
 func (ss *SessionsStore) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "invalidate", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return
 	}
 
@@ -283,6 +394,10 @@ func (ss *SessionsStore) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfr
 
 	delete(cache.StoryfragmentBeliefRegistries, storyfragmentID)
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "invalidate", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "duration", time.Since(start))
+	}
 }
 
 // =============================================================================
@@ -291,8 +406,12 @@ func (ss *SessionsStore) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfr
 
 // GetSessionBeliefContext retrieves session belief context
 func (ss *SessionsStore) GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*types.SessionBeliefContext, bool) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
@@ -300,16 +419,23 @@ func (ss *SessionsStore) GetSessionBeliefContext(tenantID, sessionID, storyfragm
 	defer cache.Mu.RUnlock()
 
 	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
 		return nil, false
 	}
 
 	contextKey := sessionID + ":" + storyfragmentID
-	context, exists := cache.SessionBeliefContexts[contextKey]
-	return context, exists
+	context, found := cache.SessionBeliefContexts[contextKey]
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "hit", found, "duration", time.Since(start))
+	}
+	return context, found
 }
 
 // SetSessionBeliefContext stores session belief context
 func (ss *SessionsStore) SetSessionBeliefContext(tenantID string, context *types.SessionBeliefContext) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		ss.InitializeTenant(tenantID)
@@ -322,12 +448,20 @@ func (ss *SessionsStore) SetSessionBeliefContext(tenantID string, context *types
 	contextKey := context.SessionID + ":" + context.StoryfragmentID
 	cache.SessionBeliefContexts[contextKey] = context
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "session_belief_context", "tenantId", tenantID, "sessionId", context.SessionID, "storyfragmentId", context.StoryfragmentID, "duration", time.Since(start))
+	}
 }
 
 // InvalidateSessionBeliefContext removes session belief context
 func (ss *SessionsStore) InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "invalidate", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return
 	}
 
@@ -337,6 +471,10 @@ func (ss *SessionsStore) InvalidateSessionBeliefContext(tenantID, sessionID, sto
 	contextKey := sessionID + ":" + storyfragmentID
 	delete(cache.SessionBeliefContexts, contextKey)
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "invalidate", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "duration", time.Since(start))
+	}
 }
 
 // =============================================================================
@@ -345,9 +483,17 @@ func (ss *SessionsStore) InvalidateSessionBeliefContext(tenantID, sessionID, sto
 
 // InvalidateUserStateCache clears all user state cache for a tenant
 func (ss *SessionsStore) InvalidateUserStateCache(tenantID string) {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "invalidate_all", "type", "user_state", "tenantId", tenantID, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return
+	}
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Invalidating all user state cache", "tenantId", tenantID)
 	}
 
 	cache.Mu.Lock()
@@ -362,12 +508,20 @@ func (ss *SessionsStore) InvalidateUserStateCache(tenantID string) {
 	cache.StoryfragmentBeliefRegistries = make(map[string]*types.StoryfragmentBeliefRegistry)
 
 	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Info("All user state cache invalidated", "tenantId", tenantID, "duration", time.Since(start))
+	}
 }
 
 // GetUserStateSummary returns cache status summary for debugging
 func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]interface{} {
+	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get_summary", "type", "user_state", "tenantId", tenantID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
 		return map[string]interface{}{
 			"exists": false,
 		}
@@ -376,7 +530,7 @@ func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]interfa
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
 
-	return map[string]interface{}{
+	summary := map[string]interface{}{
 		"exists":                        true,
 		"fingerprintStates":             len(cache.FingerprintStates),
 		"visitStates":                   len(cache.VisitStates),
@@ -386,4 +540,10 @@ func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]interfa
 		"storyfragmentBeliefRegistries": len(cache.StoryfragmentBeliefRegistries),
 		"lastLoaded":                    cache.LastLoaded,
 	}
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get_summary", "type", "user_state", "tenantId", tenantID, "hit", true, "fingerprintStates", len(cache.FingerprintStates), "visitStates", len(cache.VisitStates), "sessionStates", len(cache.SessionStates), "duration", time.Since(start))
+	}
+
+	return summary
 }

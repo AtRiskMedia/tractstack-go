@@ -12,6 +12,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/utils"
 )
@@ -21,14 +22,16 @@ type Worker struct {
 	cache    interfaces.Cache
 	detector *tenant.Detector
 	config   *Config
+	logger   *logging.ChanneledLogger
 }
 
 // NewWorker creates a new cleanup worker with injected configuration
-func NewWorker(cache interfaces.Cache, detector *tenant.Detector, config *Config) *Worker {
+func NewWorker(cache interfaces.Cache, detector *tenant.Detector, config *Config, logger *logging.ChanneledLogger) *Worker {
 	return &Worker{
 		cache:    cache,
 		detector: detector,
 		config:   config,
+		logger:   logger,
 	}
 }
 
@@ -39,11 +42,13 @@ func (w *Worker) Start(ctx context.Context) {
 
 	log.Printf("Cache cleanup worker started (interval: %v, verbose: %v)",
 		w.config.CleanupInterval, w.config.VerboseReporting)
+	w.logger.Cache().Info("Cache cleanup worker started", "interval", w.config.CleanupInterval, "verbose", w.config.VerboseReporting)
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Cache cleanup worker stopping...")
+			w.logger.Cache().Info("Cache cleanup worker stopping...")
 			return
 		case <-ticker.C:
 			w.performCleanup(ctx)
@@ -59,11 +64,13 @@ func (w *Worker) performCleanup(ctx context.Context) {
 	tenants, err := w.getActiveTenants()
 	if err != nil {
 		reporter.LogError("Cache cleanup failed to get active tenants", err)
+		w.logger.Cache().Error("Cache cleanup failed to get active tenants", "error", err)
 		return
 	}
 
 	if w.config.VerboseReporting {
 		reporter.LogStage("PERIODIC CACHE CLEANUP")
+		w.logger.Cache().Info("Starting periodic cache cleanup cycle")
 
 		// ALWAYS show detailed cache reports for all tenants
 		for _, tenantID := range tenants {
@@ -77,7 +84,13 @@ func (w *Worker) performCleanup(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			reporter.LogInfo("Running cleanup for tenant: %s", tenantID)
+			w.logger.Cache().Info("Running cleanup for tenant", "tenantId", tenantID)
 			cleaned := w.cleanupTenant(tenantID)
+			if cleaned > 0 {
+				reporter.LogStepSuccess("Cleaned %d items for tenant %s", cleaned, tenantID)
+				w.logger.Cache().Debug("Cleaned items for tenant", "count", cleaned, "tenantId", tenantID)
+			}
 			totalCleaned += cleaned
 		}
 	}
@@ -86,8 +99,10 @@ func (w *Worker) performCleanup(ctx context.Context) {
 	if totalCleaned > 0 {
 		reporter.LogSuccess("Cache cleanup finished: %d items cleaned from %d tenants in %v",
 			totalCleaned, len(tenants), duration)
+		w.logger.Cache().Info("Cache cleanup finished", "itemsCleaned", totalCleaned, "tenants", len(tenants), "duration", duration)
 	} else if w.config.VerboseReporting {
 		reporter.LogInfo("Cache cleanup completed - no expired items found (%v)", duration)
+		w.logger.Cache().Info("Cache cleanup completed, no expired items found", "duration", duration)
 	}
 }
 

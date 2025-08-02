@@ -6,20 +6,25 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type BeliefRepository struct {
-	db    *sql.DB
-	cache interfaces.ContentCache
+	db     *sql.DB
+	cache  interfaces.ContentCache
+	logger *logging.ChanneledLogger
 }
 
-func NewBeliefRepository(db *sql.DB, cache interfaces.ContentCache) *BeliefRepository {
+func NewBeliefRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *BeliefRepository {
 	return &BeliefRepository{
-		db:    db,
-		cache: cache,
+		db:     db,
+		cache:  cache,
+		logger: logger,
 	}
 }
 
@@ -124,11 +129,20 @@ func (r *BeliefRepository) Store(tenantID string, belief *content.BeliefNode) er
 
 	query := `INSERT INTO beliefs (id, title, slug, scale, custom_values) VALUES (?, ?, ?, ?, ?)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing belief insert", "id", belief.ID)
+
 	_, err := r.db.Exec(query, belief.ID, belief.Title, belief.Slug, belief.Scale, string(customValuesJSON))
 	if err != nil {
+		r.logger.Database().Error("Belief insert failed", "error", err.Error(), "id", belief.ID)
 		return fmt.Errorf("failed to insert belief: %w", err)
 	}
 
+	r.logger.Database().Info("Belief insert completed", "id", belief.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetBelief(tenantID, belief)
 	return nil
 }
@@ -138,11 +152,20 @@ func (r *BeliefRepository) Update(tenantID string, belief *content.BeliefNode) e
 
 	query := `UPDATE beliefs SET title = ?, slug = ?, scale = ?, custom_values = ? WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing belief update", "id", belief.ID)
+
 	_, err := r.db.Exec(query, belief.Title, belief.Slug, belief.Scale, string(customValuesJSON), belief.ID)
 	if err != nil {
+		r.logger.Database().Error("Belief update failed", "error", err.Error(), "id", belief.ID)
 		return fmt.Errorf("failed to update belief: %w", err)
 	}
 
+	r.logger.Database().Info("Belief update completed", "id", belief.ID, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.SetBelief(tenantID, belief)
 	return nil
 }
@@ -150,11 +173,20 @@ func (r *BeliefRepository) Update(tenantID string, belief *content.BeliefNode) e
 func (r *BeliefRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM beliefs WHERE id = ?`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing belief delete", "id", id)
+
 	_, err := r.db.Exec(query, id)
 	if err != nil {
+		r.logger.Database().Error("Belief delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete belief: %w", err)
 	}
 
+	r.logger.Database().Info("Belief delete completed", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
 	r.cache.InvalidateContentCache(tenantID)
 	return nil
 }
@@ -162,8 +194,12 @@ func (r *BeliefRepository) Delete(tenantID, id string) error {
 func (r *BeliefRepository) loadAllIDsFromDB() ([]string, error) {
 	query := `SELECT id FROM beliefs ORDER BY title`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading all belief IDs from database")
+
 	rows, err := r.db.Query(query)
 	if err != nil {
+		r.logger.Database().Error("Failed to query belief IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query beliefs: %w", err)
 	}
 	defer rows.Close()
@@ -177,12 +213,19 @@ func (r *BeliefRepository) loadAllIDsFromDB() ([]string, error) {
 		beliefIDs = append(beliefIDs, id)
 	}
 
+	r.logger.Database().Info("Loaded belief IDs from database", "count", len(beliefIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return beliefIDs, rows.Err()
 }
 
-// ... (rest of the helper methods: loadFromDB, loadMultipleFromDB, etc. remain the same)
 func (r *BeliefRepository) loadFromDB(id string) (*content.BeliefNode, error) {
 	query := `SELECT id, title, slug, scale, custom_values FROM beliefs WHERE id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading belief from database", "id", id)
 
 	row := r.db.QueryRow(query, id)
 
@@ -195,6 +238,7 @@ func (r *BeliefRepository) loadFromDB(id string) (*content.BeliefNode, error) {
 		return nil, nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to scan belief", "error", err.Error(), "id", id)
 		return nil, fmt.Errorf("failed to scan belief: %w", err)
 	}
 
@@ -207,6 +251,11 @@ func (r *BeliefRepository) loadFromDB(id string) (*content.BeliefNode, error) {
 
 	belief.NodeType = "Belief"
 
+	r.logger.Database().Info("Belief loaded from database", "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return &belief, nil
 }
 
@@ -225,8 +274,12 @@ func (r *BeliefRepository) loadMultipleFromDB(ids []string) ([]*content.BeliefNo
 	query := `SELECT id, title, slug, scale, custom_values 
               FROM beliefs WHERE id IN (` + strings.Join(placeholders, ",") + `)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading multiple beliefs from database", "count", len(ids))
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query multiple beliefs", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query beliefs: %w", err)
 	}
 	defer rows.Close()
@@ -251,20 +304,35 @@ func (r *BeliefRepository) loadMultipleFromDB(ids []string) ([]*content.BeliefNo
 		beliefs = append(beliefs, &belief)
 	}
 
+	r.logger.Database().Info("Multiple beliefs loaded from database", "requested", len(ids), "loaded", len(beliefs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return beliefs, rows.Err()
 }
 
 func (r *BeliefRepository) getIDBySlugFromDB(slug string) (string, error) {
 	query := `SELECT id FROM beliefs WHERE slug = ? LIMIT 1`
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading belief ID by slug from database", "slug", slug)
+
 	var id string
 	err := r.db.QueryRow(query, slug).Scan(&id)
 	if err == sql.ErrNoRows {
+		r.logger.Database().Debug("Belief not found by slug", "slug", slug)
 		return "", nil
 	}
 	if err != nil {
+		r.logger.Database().Error("Failed to query belief by slug", "error", err.Error(), "slug", slug)
 		return "", fmt.Errorf("failed to query belief by slug: %w", err)
 	}
 
+	r.logger.Database().Info("Belief ID loaded by slug", "slug", slug, "id", id, "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return id, nil
 }

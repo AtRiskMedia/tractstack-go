@@ -108,6 +108,7 @@ var (
 	DBMaxIdleConns           int
 	DBConnMaxLifetimeMinutes int
 	DBConnMaxIdleMinutes     int
+	SlowQueryThreshold       time.Duration
 
 	// SSE Configuration
 	MaxSessionsPerClient        int
@@ -132,6 +133,9 @@ var (
 	DBPoolCleanupInterval     time.Duration
 	RepositoryCleanupInterval time.Duration
 	RepositoryCleanupVerbose  bool
+
+	// Logging Configuration
+	LogVerbosity string
 )
 
 func init() {
@@ -153,6 +157,7 @@ func init() {
 	DBMaxIdleConns = getEnvInt("DB_MAX_IDLE_CONNS", 3)
 	DBConnMaxLifetimeMinutes = getEnvInt("DB_CONN_MAX_LIFETIME_MINUTES", 30)
 	DBConnMaxIdleMinutes = getEnvInt("DB_CONN_MAX_IDLE_MINUTES", 3)
+	SlowQueryThreshold = getEnvDuration("SLOW_QUERY_THRESHOLD", 500*time.Millisecond)
 
 	// SSE Configuration
 	MaxSessionsPerClient = getEnvInt("MAX_SESSIONS_PER_CLIENT", 10000)
@@ -177,4 +182,7 @@ func init() {
 	DBPoolCleanupInterval = time.Duration(getEnvInt("DB_POOL_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 	RepositoryCleanupInterval = time.Duration(getEnvInt("REPOSITORY_CLEANUP_INTERVAL", 30)) * time.Minute
 	RepositoryCleanupVerbose = getEnvString("REPOSITORY_CLEANUP_VERBOSE", "true") == "true"
+
+	// Logging Configuration
+	LogVerbosity = getEnvString("LOG_VERBOSITY", "WARN")
 }

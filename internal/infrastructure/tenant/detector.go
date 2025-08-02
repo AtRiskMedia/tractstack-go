@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,10 +16,11 @@ import (
 type Detector struct {
 	registry    *TenantRegistry
 	multiTenant bool
+	logger      *logging.ChanneledLogger
 }
 
 // NewDetector creates a new tenant detector
-func NewDetector() (*Detector, error) {
+func NewDetector(logger *logging.ChanneledLogger) (*Detector, error) {
 	registry, err := LoadTenantRegistry()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tenant registry: %w", err)
@@ -32,6 +34,7 @@ func NewDetector() (*Detector, error) {
 	return &Detector{
 		registry:    registry,
 		multiTenant: multiTenant,
+		logger:      logger,
 	}, nil
 }
 

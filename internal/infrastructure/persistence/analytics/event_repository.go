@@ -13,17 +13,22 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/analytics"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 )
 
 // SQLEventRepository handles real-time event persistence to database.
 type SQLEventRepository struct {
-	db *database.DB
+	db     *database.DB
+	logger *logging.ChanneledLogger
 }
 
 // NewSQLEventRepository creates a new instance of the repository.
-func NewSQLEventRepository(db *database.DB) *SQLEventRepository {
-	return &SQLEventRepository{db: db}
+func NewSQLEventRepository(db *database.DB, logger *logging.ChanneledLogger) *SQLEventRepository {
+	return &SQLEventRepository{
+		db:     db,
+		logger: logger,
+	}
 }
 
 // StoreActionEvent saves a user action event to the database.
@@ -34,6 +39,14 @@ func (r *SQLEventRepository) StoreActionEvent(event *analytics.ActionEvent) erro
 	const query = `
 		INSERT INTO actions (id, object_id, object_type, duration, visit_id, fingerprint_id, verb, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+	start := time.Now()
+	r.logger.Database().Debug("Executing action event insert",
+		"actionId", actionID,
+		"objectId", event.ObjectID,
+		"objectType", event.ObjectType,
+		"verb", event.Verb,
+		"fingerprintId", event.FingerprintID)
 
 	_, err := r.db.Exec(
 		query,
@@ -47,9 +60,26 @@ func (r *SQLEventRepository) StoreActionEvent(event *analytics.ActionEvent) erro
 		event.CreatedAt.Format("2006-01-02 15:04:05"), // SQLite format
 	)
 	if err != nil {
+		r.logger.Database().Error("Action event insert failed",
+			"error", err.Error(),
+			"actionId", actionID,
+			"objectId", event.ObjectID,
+			"verb", event.Verb,
+			"fingerprintId", event.FingerprintID)
 		return fmt.Errorf("failed to store action event: %w", err)
 	}
 
+	r.logger.Database().Info("Action event insert completed",
+		"actionId", actionID,
+		"objectId", event.ObjectID,
+		"objectType", event.ObjectType,
+		"verb", event.Verb,
+		"fingerprintId", event.FingerprintID,
+		"duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return nil
 }
 
@@ -62,6 +92,13 @@ func (r *SQLEventRepository) StoreBeliefEvent(event *analytics.BeliefEvent) erro
 		INSERT INTO heldbeliefs (id, belief_id, fingerprint_id, verb, object, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)`
 
+	start := time.Now()
+	r.logger.Database().Debug("Executing belief event insert",
+		"beliefEventId", beliefID,
+		"beliefId", event.BeliefID,
+		"verb", event.Verb,
+		"fingerprintId", event.FingerprintID)
+
 	_, err := r.db.Exec(
 		query,
 		beliefID,
@@ -72,9 +109,25 @@ func (r *SQLEventRepository) StoreBeliefEvent(event *analytics.BeliefEvent) erro
 		event.UpdatedAt.Format("2006-01-02 15:04:05"), // SQLite format
 	)
 	if err != nil {
+		r.logger.Database().Error("Belief event insert failed",
+			"error", err.Error(),
+			"beliefEventId", beliefID,
+			"beliefId", event.BeliefID,
+			"verb", event.Verb,
+			"fingerprintId", event.FingerprintID)
 		return fmt.Errorf("failed to store belief event: %w", err)
 	}
 
+	r.logger.Database().Info("Belief event insert completed",
+		"beliefEventId", beliefID,
+		"beliefId", event.BeliefID,
+		"verb", event.Verb,
+		"fingerprintId", event.FingerprintID,
+		"duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
 	return nil
 }
 
@@ -101,15 +154,25 @@ func (r *SQLEventRepository) GetActionEventsInRange(startTime, endTime time.Time
 		ORDER BY created_at`, verbPlaceholders)
 
 	// Prepare arguments
-	args := make([]interface{}, 0, 2+len(verbFilter))
+	args := make([]any, 0, 2+len(verbFilter))
 	args = append(args, startTime.Format("2006-01-02 15:04:05"))
 	args = append(args, endTime.Format("2006-01-02 15:04:05"))
 	for _, verb := range verbFilter {
 		args = append(args, verb)
 	}
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading action events in range",
+		"startTime", startTime,
+		"endTime", endTime,
+		"verbFilter", verbFilter)
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query action events in range",
+			"error", err.Error(),
+			"startTime", startTime,
+			"endTime", endTime)
 		return nil, fmt.Errorf("failed to query action events: %w", err)
 	}
 	defer rows.Close()
@@ -132,6 +195,7 @@ func (r *SQLEventRepository) GetActionEventsInRange(startTime, endTime time.Time
 		)
 		if err != nil {
 			// Log warning but continue
+			r.logger.Database().Error("Failed to scan action event row", "error", err.Error())
 			continue
 		}
 
@@ -139,6 +203,7 @@ func (r *SQLEventRepository) GetActionEventsInRange(startTime, endTime time.Time
 		event.CreatedAt, err = r.parseTimestamp(createdAtStr)
 		if err != nil {
 			// Log warning but continue
+			r.logger.Database().Error("Failed to parse action event timestamp", "error", err.Error(), "timestamp", createdAtStr)
 			continue
 		}
 
@@ -150,7 +215,21 @@ func (r *SQLEventRepository) GetActionEventsInRange(startTime, endTime time.Time
 		events = append(events, &event)
 	}
 
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		r.logger.Database().Error("Row iteration error for action events", "error", err.Error())
+		return nil, err
+	}
+
+	r.logger.Database().Info("Action events loaded in range",
+		"startTime", startTime,
+		"endTime", endTime,
+		"count", len(events),
+		"duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
+	return events, nil
 }
 
 // GetBeliefEventsInRange retrieves belief events for cache warming.
@@ -176,15 +255,25 @@ func (r *SQLEventRepository) GetBeliefEventsInRange(startTime, endTime time.Time
 		ORDER BY updated_at`, valuePlaceholders)
 
 	// Prepare arguments
-	args := make([]interface{}, 0, 2+len(valueFilter))
+	args := make([]any, 0, 2+len(valueFilter))
 	args = append(args, startTime.Format("2006-01-02 15:04:05"))
 	args = append(args, endTime.Format("2006-01-02 15:04:05"))
 	for _, value := range valueFilter {
 		args = append(args, value)
 	}
 
+	start := time.Now()
+	r.logger.Database().Debug("Loading belief events in range",
+		"startTime", startTime,
+		"endTime", endTime,
+		"valueFilter", valueFilter)
+
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
+		r.logger.Database().Error("Failed to query belief events in range",
+			"error", err.Error(),
+			"startTime", startTime,
+			"endTime", endTime)
 		return nil, fmt.Errorf("failed to query belief events: %w", err)
 	}
 	defer rows.Close()
@@ -204,6 +293,7 @@ func (r *SQLEventRepository) GetBeliefEventsInRange(startTime, endTime time.Time
 		)
 		if err != nil {
 			// Log warning but continue
+			r.logger.Database().Error("Failed to scan belief event row", "error", err.Error())
 			continue
 		}
 
@@ -211,6 +301,7 @@ func (r *SQLEventRepository) GetBeliefEventsInRange(startTime, endTime time.Time
 		event.UpdatedAt, err = r.parseTimestamp(updatedAtStr)
 		if err != nil {
 			// Log warning but continue
+			r.logger.Database().Error("Failed to parse belief event timestamp", "error", err.Error(), "timestamp", updatedAtStr)
 			continue
 		}
 
@@ -221,12 +312,29 @@ func (r *SQLEventRepository) GetBeliefEventsInRange(startTime, endTime time.Time
 		events = append(events, &event)
 	}
 
-	return events, rows.Err()
+	if err := rows.Err(); err != nil {
+		r.logger.Database().Error("Row iteration error for belief events", "error", err.Error())
+		return nil, err
+	}
+
+	r.logger.Database().Info("Belief events loaded in range",
+		"startTime", startTime,
+		"endTime", endTime,
+		"count", len(events),
+		"duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
+	return events, nil
 }
 
 // CountEventsInRange returns total event count for batching decisions.
 // This mirrors the cache_warmer.go countEventsInRange function.
 func (r *SQLEventRepository) CountEventsInRange(startTime, endTime time.Time) (int, error) {
+	start := time.Now()
+	r.logger.Database().Debug("Counting events in range", "startTime", startTime, "endTime", endTime)
+
 	var actionCount, beliefCount int
 
 	// Count actions
@@ -235,6 +343,7 @@ func (r *SQLEventRepository) CountEventsInRange(startTime, endTime time.Time) (i
 		startTime.Format("2006-01-02 15:04:05"),
 		endTime.Format("2006-01-02 15:04:05")).Scan(&actionCount)
 	if err != nil {
+		r.logger.Database().Error("Failed to count action events", "error", err.Error(), "startTime", startTime, "endTime", endTime)
 		return 0, fmt.Errorf("failed to count action events: %w", err)
 	}
 
@@ -244,10 +353,27 @@ func (r *SQLEventRepository) CountEventsInRange(startTime, endTime time.Time) (i
 		startTime.Format("2006-01-02 15:04:05"),
 		endTime.Format("2006-01-02 15:04:05")).Scan(&beliefCount)
 	if err != nil {
+		r.logger.Database().Error("Failed to count belief events", "error", err.Error(), "startTime", startTime, "endTime", endTime)
 		return 0, fmt.Errorf("failed to count belief events: %w", err)
 	}
 
-	return actionCount + beliefCount, nil
+	totalCount := actionCount + beliefCount
+	r.logger.Database().Info("Event count completed",
+		"startTime", startTime,
+		"endTime", endTime,
+		"actionCount", actionCount,
+		"beliefCount", beliefCount,
+		"totalCount", totalCount,
+		"duration", time.Since(start))
+
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		// Log both action and belief queries as slow if the total operation is slow
+		r.logger.LogSlowQuery("SELECT COUNT(*) FROM actions WHERE created_at >= ? AND created_at < ?", duration, "system")
+		r.logger.LogSlowQuery("SELECT COUNT(*) FROM heldbeliefs WHERE updated_at >= ? AND updated_at < ?", duration, "system")
+	}
+
+	return totalCount, nil
 }
 
 // parseTimestamp handles multiple timestamp formats
