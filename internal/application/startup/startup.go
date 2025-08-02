@@ -87,7 +87,7 @@ func Initialize() error {
 
 	for tenantID, tenantInfo := range registry.Tenants {
 		if tenantInfo.Status == "active" {
-			log.Printf("  Initializing cache for tenant: %s", tenantID)
+			log.Printf("✓ Initializing cache for tenant: %s", tenantID)
 			cacheManager.InitializeTenant(tenantID)
 		}
 	}
@@ -115,9 +115,9 @@ func Initialize() error {
 
 	// Step 10: Start background cleanup worker
 	log.Println("Starting background cleanup worker...")
-	// CORRECT: Create the config struct from the central config package.
+	// Create the config struct from the central config package.
 	cleanupConfig := cleanup.NewConfig()
-	// CORRECT: Inject the config into the worker's constructor.
+	//  Inject the config into the worker's constructor.
 	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig)
 	go cleanupWorker.Start(ctx)
 	log.Println("✓ Background cleanup worker started.")

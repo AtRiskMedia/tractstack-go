@@ -163,7 +163,7 @@ func init() {
 
 	// TTL Configuration
 	ContentCacheTTL = time.Duration(getEnvInt("CONTENT_CACHE_TTL_HOURS", 24)) * time.Hour
-	UserStateTTL = time.Duration(getEnvInt("USER_STATE_TTL_HOURS", 2)) * time.Hour
+	UserStateTTL = time.Duration(getEnvInt("USER_STATE_TTL_HOURS", 168)) * time.Hour
 	HTMLChunkTTL = time.Duration(getEnvInt("HTML_CHUNK_TTL_HOURS", 1)) * time.Hour
 	AnalyticsBinTTL = time.Duration(getEnvInt("ANALYTICS_BIN_TTL_DAYS", 28)) * 24 * time.Hour
 	CurrentHourTTL = time.Duration(getEnvInt("CURRENT_HOUR_TTL_MINUTES", 15)) * time.Minute
@@ -175,6 +175,6 @@ func init() {
 	TenantTimeout = time.Duration(getEnvInt("TENANT_TIMEOUT_HOURS", 4)) * time.Hour
 	SSECleanupInterval = time.Duration(getEnvInt("SSE_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 	DBPoolCleanupInterval = time.Duration(getEnvInt("DB_POOL_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
-	RepositoryCleanupInterval = time.Duration(getEnvInt("REPOSITORY_CLEANUP_INTERVAL", 5)) * time.Minute
+	RepositoryCleanupInterval = time.Duration(getEnvInt("REPOSITORY_CLEANUP_INTERVAL", 30)) * time.Minute
 	RepositoryCleanupVerbose = getEnvString("REPOSITORY_CLEANUP_VERBOSE", "true") == "true"
 }

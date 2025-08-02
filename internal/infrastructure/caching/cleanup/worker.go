@@ -3,11 +3,17 @@ package cleanup
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // Worker handles background cache cleanup operations
@@ -48,7 +54,7 @@ func (w *Worker) Start(ctx context.Context) {
 // performCleanup executes cleanup for all active tenants
 func (w *Worker) performCleanup(ctx context.Context) {
 	start := time.Now()
-	reporter := NewReporter(w.cache) // <-- CREATE REPORTER INSTANCE
+	reporter := NewReporter(w.cache)
 
 	tenants, err := w.getActiveTenants()
 	if err != nil {
@@ -57,7 +63,12 @@ func (w *Worker) performCleanup(ctx context.Context) {
 	}
 
 	if w.config.VerboseReporting {
-		reporter.LogHeader("PERIODIC CACHE CLEANUP")
+		reporter.LogStage("PERIODIC CACHE CLEANUP")
+
+		// ALWAYS show detailed cache reports for all tenants
+		for _, tenantID := range tenants {
+			fmt.Print(reporter.GenerateTenantReport(tenantID))
+		}
 	}
 
 	var totalCleaned int
@@ -73,19 +84,200 @@ func (w *Worker) performCleanup(ctx context.Context) {
 
 	duration := time.Since(start)
 	if totalCleaned > 0 {
-		// Use the reporter for consistent logging
 		reporter.LogSuccess("Cache cleanup finished: %d items cleaned from %d tenants in %v",
 			totalCleaned, len(tenants), duration)
+	} else if w.config.VerboseReporting {
+		reporter.LogInfo("Cache cleanup completed - no expired items found (%v)", duration)
 	}
 }
 
 // cleanupTenant performs TTL-based cleanup for a single tenant
 func (w *Worker) cleanupTenant(tenantID string) int {
-	var cleaned int
-	// The actual cleanup logic would go here, using w.config.ContentCacheTTL, etc.
-	// For example:
-	// cleaned += w.cache.PurgeExpiredContent(tenantID, w.config.ContentCacheTTL)
-	return cleaned
+	var totalCleaned int
+	now := time.Now().UTC()
+
+	// Type assert to access the Manager's fields directly
+	manager, ok := w.cache.(*manager.Manager)
+	if !ok {
+		// If it's not the expected Manager type, use the available interface methods
+		// Analytics cleanup via interface
+		w.cache.PurgeExpiredBins(tenantID, "expired")
+		return 1 // Conservative estimate
+	}
+
+	// 1. Content Cache Cleanup (24 hour TTL)
+	manager.Mu.RLock()
+	contentCache, contentExists := manager.ContentCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if contentExists && contentCache != nil {
+		contentCache.Mu.Lock()
+		if time.Since(contentCache.LastUpdated) > w.config.ContentCacheTTL {
+			// Clear all content cache maps - following the same pattern as InvalidateContentCache
+			contentCache.TractStacks = make(map[string]*content.TractStackNode)
+			contentCache.StoryFragments = make(map[string]*content.StoryFragmentNode)
+			contentCache.Panes = make(map[string]*content.PaneNode)
+			contentCache.Menus = make(map[string]*content.MenuNode)
+			contentCache.Resources = make(map[string]*content.ResourceNode)
+			contentCache.Epinets = make(map[string]*content.EpinetNode)
+			contentCache.Beliefs = make(map[string]*content.BeliefNode)
+			contentCache.Files = make(map[string]*content.ImageFileNode)
+			contentCache.StoryfragmentBeliefRegistries = make(map[string]*types.StoryfragmentBeliefRegistry)
+			contentCache.SlugToID = make(map[string]string)
+			contentCache.CategoryToIDs = make(map[string][]string)
+			contentCache.AllTractStackIDs = nil
+			contentCache.AllStoryFragmentIDs = nil
+			contentCache.AllPaneIDs = nil
+			contentCache.AllMenuIDs = nil
+			contentCache.AllResourceIDs = nil
+			contentCache.AllBeliefIDs = nil
+			contentCache.AllEpinetIDs = nil
+			contentCache.AllFileIDs = nil
+			contentCache.FullContentMap = nil
+			contentCache.OrphanAnalysis = nil
+			contentCache.LastUpdated = now
+			totalCleaned++
+		}
+		contentCache.Mu.Unlock()
+	}
+
+	// 2. User State Cache Cleanup (2 hour TTL)
+	manager.Mu.RLock()
+	userCache, userExists := manager.UserStateCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if userExists && userCache != nil {
+		userCache.Mu.Lock()
+
+		// Clean expired sessions
+		for sessionID, session := range userCache.SessionStates {
+			if time.Since(session.LastActivity) > w.config.SessionCacheTTL {
+				delete(userCache.SessionStates, sessionID)
+				totalCleaned++
+			}
+		}
+
+		// Clean expired fingerprint states
+		for fingerprintID, state := range userCache.FingerprintStates {
+			if time.Since(state.LastActivity) > w.config.SessionCacheTTL {
+				delete(userCache.FingerprintStates, fingerprintID)
+				totalCleaned++
+			}
+		}
+
+		// Clean expired visit states
+		for visitID, state := range userCache.VisitStates {
+			if time.Since(state.LastActivity) > w.config.SessionCacheTTL {
+				delete(userCache.VisitStates, visitID)
+				totalCleaned++
+			}
+		}
+
+		// Clean expired session belief contexts
+		for key, context := range userCache.SessionBeliefContexts {
+			if time.Since(context.LastEvaluation) > w.config.SessionCacheTTL {
+				delete(userCache.SessionBeliefContexts, key)
+				totalCleaned++
+			}
+		}
+
+		// Clear entire user cache if LastLoaded is too old
+		if time.Since(userCache.LastLoaded) > w.config.SessionCacheTTL {
+			userCache.FingerprintStates = make(map[string]*types.FingerprintState)
+			userCache.VisitStates = make(map[string]*types.VisitState)
+			userCache.KnownFingerprints = make(map[string]bool)
+			userCache.SessionStates = make(map[string]*types.SessionData)
+			userCache.SessionBeliefContexts = make(map[string]*types.SessionBeliefContext)
+			userCache.LastLoaded = now
+			totalCleaned += 5 // Count as 5 cleared maps
+		}
+
+		userCache.Mu.Unlock()
+	}
+
+	// 3. HTML Fragment Cache Cleanup (1 hour TTL)
+	manager.Mu.RLock()
+	htmlCache, htmlExists := manager.HTMLChunkCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if htmlExists && htmlCache != nil {
+		htmlCache.Mu.Lock()
+		for key, chunk := range htmlCache.Chunks {
+			if time.Since(chunk.LastUpdated) > w.config.FragmentCacheTTL {
+				delete(htmlCache.Chunks, key)
+				totalCleaned++
+			}
+		}
+		htmlCache.Mu.Unlock()
+	}
+
+	// 4. Analytics Cache Cleanup (Various TTLs)
+	manager.Mu.RLock()
+	analyticsCache, analyticsExists := manager.AnalyticsCache[tenantID]
+	manager.Mu.RUnlock()
+
+	if analyticsExists && analyticsCache != nil {
+		analyticsCache.Mu.Lock()
+
+		// Clean expired epinet bins
+		for binKey, bin := range analyticsCache.EpinetBins {
+			var ttl time.Duration
+			// Determine TTL based on whether it's current hour or historical
+			lastColonIndex := strings.LastIndex(binKey, ":")
+			if lastColonIndex != -1 {
+				hourKey := binKey[lastColonIndex+1:]
+				currentHourKey := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+				if hourKey == currentHourKey {
+					ttl = 15 * time.Minute // CurrentHourTTL
+				} else {
+					ttl = w.config.AnalyticsCacheTTL // 28 days
+				}
+			} else {
+				ttl = w.config.AnalyticsCacheTTL
+			}
+
+			if time.Since(bin.ComputedAt) > ttl {
+				delete(analyticsCache.EpinetBins, binKey)
+				totalCleaned++
+			}
+		}
+
+		// Clean expired content bins
+		for binKey, bin := range analyticsCache.ContentBins {
+			if time.Since(bin.ComputedAt) > w.config.AnalyticsCacheTTL {
+				delete(analyticsCache.ContentBins, binKey)
+				totalCleaned++
+			}
+		}
+
+		// Clean expired site bins
+		for binKey, bin := range analyticsCache.SiteBins {
+			if time.Since(bin.ComputedAt) > w.config.AnalyticsCacheTTL {
+				delete(analyticsCache.SiteBins, binKey)
+				totalCleaned++
+			}
+		}
+
+		// Clean expired lead metrics (5 minute TTL)
+		if analyticsCache.LeadMetrics != nil {
+			if time.Since(analyticsCache.LeadMetrics.LastComputed) > 5*time.Minute {
+				analyticsCache.LeadMetrics = nil
+				totalCleaned++
+			}
+		}
+
+		// Clean expired dashboard data (10 minute TTL)
+		if analyticsCache.DashboardData != nil {
+			if time.Since(analyticsCache.DashboardData.LastComputed) > 10*time.Minute {
+				analyticsCache.DashboardData = nil
+				totalCleaned++
+			}
+		}
+
+		analyticsCache.Mu.Unlock()
+	}
+
+	return totalCleaned
 }
 
 // getActiveTenants loads the tenant registry and returns active tenant IDs

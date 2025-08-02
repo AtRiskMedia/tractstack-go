@@ -334,16 +334,26 @@ func (m *Manager) GetAllTractStackIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.TractStacks) == 0 {
+	// The key change: check the dedicated slice.
+	// If this slice is nil or empty, it's a cache miss.
+	if len(cache.AllTractStackIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.TractStacks))
-	for id := range cache.TractStacks {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllTractStackIDs))
+	copy(ids, cache.AllTractStackIDs)
 	return ids, true
 }
-func (m *Manager) SetAllTractStackIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllTractStackIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllTractStackIDs = ids
+}
+
 func (m *Manager) GetStoryFragment(tenantID, id string) (*content.StoryFragmentNode, bool) {
 	return m.contentStore.GetStoryFragment(tenantID, id)
 }
@@ -360,16 +370,24 @@ func (m *Manager) GetAllStoryFragmentIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.StoryFragments) == 0 {
+	if len(cache.AllStoryFragmentIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.StoryFragments))
-	for id := range cache.StoryFragments {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllStoryFragmentIDs))
+	copy(ids, cache.AllStoryFragmentIDs)
 	return ids, true
 }
-func (m *Manager) SetAllStoryFragmentIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllStoryFragmentIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllStoryFragmentIDs = ids
+}
+
 func (m *Manager) GetPane(tenantID, id string) (*content.PaneNode, bool) {
 	return m.contentStore.GetPane(tenantID, id)
 }
@@ -419,16 +437,24 @@ func (m *Manager) GetAllMenuIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.Menus) == 0 {
+	if len(cache.AllMenuIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.Menus))
-	for id := range cache.Menus {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllMenuIDs))
+	copy(ids, cache.AllMenuIDs)
 	return ids, true
 }
-func (m *Manager) SetAllMenuIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllMenuIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllMenuIDs = ids
+}
+
 func (m *Manager) GetResource(tenantID, id string) (*content.ResourceNode, bool) {
 	return m.contentStore.GetResource(tenantID, id)
 }
@@ -444,16 +470,24 @@ func (m *Manager) GetAllResourceIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.Resources) == 0 {
+	if len(cache.AllResourceIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.Resources))
-	for id := range cache.Resources {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllResourceIDs))
+	copy(ids, cache.AllResourceIDs)
 	return ids, true
 }
-func (m *Manager) SetAllResourceIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllResourceIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllResourceIDs = ids
+}
+
 func (m *Manager) GetBelief(tenantID, id string) (*content.BeliefNode, bool) {
 	return m.contentStore.GetBelief(tenantID, id)
 }
@@ -469,16 +503,24 @@ func (m *Manager) GetAllBeliefIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.Beliefs) == 0 {
+	if len(cache.AllBeliefIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.Beliefs))
-	for id := range cache.Beliefs {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllBeliefIDs))
+	copy(ids, cache.AllBeliefIDs)
 	return ids, true
 }
-func (m *Manager) SetAllBeliefIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllBeliefIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllBeliefIDs = ids
+}
+
 func (m *Manager) GetEpinet(tenantID, id string) (*content.EpinetNode, bool) {
 	return m.contentStore.GetEpinet(tenantID, id)
 }
@@ -494,16 +536,24 @@ func (m *Manager) GetAllEpinetIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.Epinets) == 0 {
+	if len(cache.AllEpinetIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.Epinets))
-	for id := range cache.Epinets {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllEpinetIDs))
+	copy(ids, cache.AllEpinetIDs)
 	return ids, true
 }
-func (m *Manager) SetAllEpinetIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllEpinetIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllEpinetIDs = ids
+}
+
 func (m *Manager) GetFile(tenantID, id string) (*content.ImageFileNode, bool) {
 	return m.contentStore.GetImageFile(tenantID, id)
 }
@@ -519,16 +569,24 @@ func (m *Manager) GetAllFileIDs(tenantID string) ([]string, bool) {
 	}
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
-	if len(cache.Files) == 0 {
+	if len(cache.AllFileIDs) == 0 {
 		return nil, false
 	}
-	ids := make([]string, 0, len(cache.Files))
-	for id := range cache.Files {
-		ids = append(ids, id)
-	}
+	ids := make([]string, len(cache.AllFileIDs))
+	copy(ids, cache.AllFileIDs)
 	return ids, true
 }
-func (m *Manager) SetAllFileIDs(tenantID string, ids []string) {}
+
+func (m *Manager) SetAllFileIDs(tenantID string, ids []string) {
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllFileIDs = ids
+}
+
 func (m *Manager) GetContentBySlug(tenantID, slug string) (string, bool) {
 	cache, err := m.GetTenantContentCache(tenantID)
 	if err != nil {
@@ -692,4 +750,94 @@ func (m *Manager) InvalidateAll() {
 
 func (m *Manager) Health() map[string]any {
 	return map[string]any{"status": "ok"}
+}
+
+// GetAllSessionIDs returns all session IDs for a tenant
+func (m *Manager) GetAllSessionIDs(tenantID string) []string {
+	cache, err := m.GetTenantUserStateCache(tenantID)
+	if err != nil {
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	sessionIDs := make([]string, 0, len(cache.SessionStates))
+	for sessionID := range cache.SessionStates {
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	return sessionIDs
+}
+
+// GetAllFingerprintIDs returns all fingerprint IDs for a tenant
+func (m *Manager) GetAllFingerprintIDs(tenantID string) []string {
+	cache, err := m.GetTenantUserStateCache(tenantID)
+	if err != nil {
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	fingerprintIDs := make([]string, 0, len(cache.FingerprintStates))
+	for fingerprintID := range cache.FingerprintStates {
+		fingerprintIDs = append(fingerprintIDs, fingerprintID)
+	}
+	return fingerprintIDs
+}
+
+// GetAllVisitIDs returns all visit IDs for a tenant
+func (m *Manager) GetAllVisitIDs(tenantID string) []string {
+	cache, err := m.GetTenantUserStateCache(tenantID)
+	if err != nil {
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	visitIDs := make([]string, 0, len(cache.VisitStates))
+	for visitID := range cache.VisitStates {
+		visitIDs = append(visitIDs, visitID)
+	}
+	return visitIDs
+}
+
+// GetAllHTMLChunkIDs returns all HTML chunk keys for a tenant
+func (m *Manager) GetAllHTMLChunkIDs(tenantID string) []string {
+	cache, err := m.GetTenantHTMLChunkCache(tenantID)
+	if err != nil {
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	chunkIDs := make([]string, 0, len(cache.Chunks))
+	for chunkID := range cache.Chunks {
+		chunkIDs = append(chunkIDs, chunkID)
+	}
+	return chunkIDs
+}
+
+// GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries
+func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string {
+	cache, err := m.GetTenantUserStateCache(tenantID)
+	if err != nil {
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	if cache.StoryfragmentBeliefRegistries == nil {
+		return []string{}
+	}
+
+	storyfragmentIDs := make([]string, 0, len(cache.StoryfragmentBeliefRegistries))
+	for storyfragmentID := range cache.StoryfragmentBeliefRegistries {
+		storyfragmentIDs = append(storyfragmentIDs, storyfragmentID)
+	}
+
+	return storyfragmentIDs
 }
