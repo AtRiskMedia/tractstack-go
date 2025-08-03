@@ -22,19 +22,19 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	config.AllowCredentials = true
 	r.Use(cors.New(config))
 
-	// Initialize all handler structs with injected singleton services
-	menuHandlers := handlers.NewMenuHandlers(container.MenuService)
-	paneHandlers := handlers.NewPaneHandlers(container.PaneService)
-	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService)
-	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService)
-	tractStackHandlers := handlers.NewTractStackHandlers(container.TractStackService)
-	beliefHandlers := handlers.NewBeliefHandlers(container.BeliefService)
-	imageFileHandlers := handlers.NewImageFileHandlers(container.ImageFileService)
-	epinetHandlers := handlers.NewEpinetHandlers(container.EpinetService)
-	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService)
-	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService)
-	configHandlers := handlers.NewConfigHandlers()
-	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService)
+	// Initialize all handler structs with injected singleton services and logger
+	menuHandlers := handlers.NewMenuHandlers(container.MenuService, container.Logger)
+	paneHandlers := handlers.NewPaneHandlers(container.PaneService, container.Logger)
+	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService, container.Logger)
+	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.Logger)
+	tractStackHandlers := handlers.NewTractStackHandlers(container.TractStackService, container.Logger)
+	beliefHandlers := handlers.NewBeliefHandlers(container.BeliefService, container.Logger)
+	imageFileHandlers := handlers.NewImageFileHandlers(container.ImageFileService, container.Logger)
+	epinetHandlers := handlers.NewEpinetHandlers(container.EpinetService, container.Logger)
+	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService, container.Logger)
+	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService, container.Logger)
+	configHandlers := handlers.NewConfigHandlers(container.Logger)
+	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService, container.Logger)
 	analyticsHandlers := handlers.NewAnalyticsHandlers(
 		container.AnalyticsService,
 		container.DashboardAnalyticsService,
@@ -43,6 +43,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.ContentAnalyticsService,
 		container.WarmingService,
 		container.TenantManager,
+		container.Logger,
 	)
 
 	// API routes with tenant middleware

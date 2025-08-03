@@ -10,17 +10,20 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ContentMapService orchestrates content map building and caching
 type ContentMapService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewContentMapService creates a new content map service singleton
-func NewContentMapService() *ContentMapService {
-	return &ContentMapService{}
+func NewContentMapService(logger *logging.ChanneledLogger) *ContentMapService {
+	return &ContentMapService{
+		logger: logger,
+	}
 }
 
 // ContentMapResponse represents the API response structure
@@ -31,6 +34,7 @@ type ContentMapResponse struct {
 
 // GetContentMap returns content map with timestamp-based caching
 func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLastUpdated string, cache interfaces.ContentCache) (*ContentMapResponse, bool, error) {
+	start := time.Now()
 	// Check cache first
 	if cachedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
 		convertedItems := make([]*content.ContentMapItem, len(cachedItems))
@@ -86,6 +90,8 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 			Type:  item.Type,
 		}
 	}
+
+	cms.logger.Content().Info("Successfully retrieved content map", "tenantId", tenantCtx.TenantID, "itemCount", len(convertedItems), "fromCache", true, "notModified", false, "duration", time.Since(start))
 
 	return &ContentMapResponse{
 		Data:        convertedItems,
@@ -144,6 +150,7 @@ func (cms *ContentMapService) convertToFullContentMapItems(contentMap []*content
 
 // RefreshContentMap forces a refresh of the content map cache
 func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache interfaces.ContentCache) error {
+	start := time.Now()
 	// Invalidate existing cache
 	cache.InvalidateContentCache(tenantCtx.TenantID)
 
@@ -159,5 +166,8 @@ func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache
 	cache.SetFullContentMap(tenantCtx.TenantID, cacheItems)
 
 	log.Printf("Refreshed content map cache for tenant %s with %d items", tenantCtx.TenantID, len(contentMap))
+
+	cms.logger.Content().Info("Successfully refreshed content map", "tenantId", tenantCtx.TenantID, "itemCount", len(contentMap), "duration", time.Since(start))
+
 	return nil
 }

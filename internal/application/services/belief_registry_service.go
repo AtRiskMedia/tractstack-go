@@ -7,6 +7,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -14,18 +15,21 @@ import (
 // It is responsible for scanning storyfragments and their panes to build a comprehensive
 // map of all belief-based visibility rules and widget dependencies.
 type BeliefRegistryService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewBeliefRegistryService creates a new belief registry service singleton.
-func NewBeliefRegistryService() *BeliefRegistryService {
-	return &BeliefRegistryService{}
+func NewBeliefRegistryService(logger *logging.ChanneledLogger) *BeliefRegistryService {
+	return &BeliefRegistryService{
+		logger: logger,
+	}
 }
 
 // BuildRegistryFromLoadedPanes constructs a belief registry using already-loaded pane nodes.
 // This is the primary entry point, designed to be called after a storyfragment's panes have been fetched.
 // It avoids redundant database calls and populates the cache with the resulting registry.
 func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(tenantCtx *tenant.Context, storyfragmentID string, loadedPanes []*content.PaneNode) (*types.StoryfragmentBeliefRegistry, error) {
+	start := time.Now()
 	// First, check if a valid registry already exists in the cache.
 	if registry, found := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID); found {
 		return registry, nil
@@ -71,6 +75,8 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(tenantCtx *tenant
 
 	// Cache the newly built registry for future requests.
 	tenantCtx.CacheManager.SetStoryfragmentBeliefRegistry(tenantCtx.TenantID, registry)
+
+	brs.logger.Content().Info("Successfully built belief registry from loaded panes", "tenantId", tenantCtx.TenantID, "storyfragmentId", storyfragmentID, "paneCount", len(loadedPanes), "duration", time.Since(start))
 
 	return registry, nil
 }

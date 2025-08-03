@@ -106,17 +106,17 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 	return &Container{
 		// Content Services (stateless singletons)
-		MenuService:           services.NewMenuService(),
-		PaneService:           services.NewPaneService(),
-		ResourceService:       services.NewResourceService(),
-		StoryFragmentService:  services.NewStoryFragmentService(),
-		TractStackService:     services.NewTractStackService(),
-		BeliefService:         services.NewBeliefService(),
-		ImageFileService:      services.NewImageFileService(),
-		EpinetService:         services.NewEpinetService(),
-		ContentMapService:     services.NewContentMapService(),
-		OrphanAnalysisService: services.NewOrphanAnalysisService(),
-		BeliefRegistryService: services.NewBeliefRegistryService(),
+		MenuService:           services.NewMenuService(logger),
+		PaneService:           services.NewPaneService(logger),
+		ResourceService:       services.NewResourceService(logger),
+		StoryFragmentService:  services.NewStoryFragmentService(logger),
+		TractStackService:     services.NewTractStackService(logger),
+		BeliefService:         services.NewBeliefService(logger),
+		ImageFileService:      services.NewImageFileService(logger),
+		EpinetService:         services.NewEpinetService(logger),
+		ContentMapService:     services.NewContentMapService(logger),
+		OrphanAnalysisService: services.NewOrphanAnalysisService(logger),
+		BeliefRegistryService: services.NewBeliefRegistryService(logger),
 		WarmingService:        services.NewWarmingService(logger),
 
 		// Fragment Services
@@ -125,11 +125,11 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		FragmentService:      fragmentService,
 
 		// Analytics Services (stateless singletons)
-		AnalyticsService:          services.NewAnalyticsService(),
-		DashboardAnalyticsService: services.NewDashboardAnalyticsService(),
-		EpinetAnalyticsService:    services.NewEpinetAnalyticsService(),
-		LeadAnalyticsService:      services.NewLeadAnalyticsService(),
-		ContentAnalyticsService:   services.NewContentAnalyticsService(),
+		AnalyticsService:          services.NewAnalyticsService(logger),
+		DashboardAnalyticsService: services.NewDashboardAnalyticsService(logger),
+		EpinetAnalyticsService:    services.NewEpinetAnalyticsService(logger),
+		LeadAnalyticsService:      services.NewLeadAnalyticsService(logger),
+		ContentAnalyticsService:   services.NewContentAnalyticsService(logger),
 
 		// Infrastructure
 		TenantManager: tenantManager,

@@ -9,21 +9,25 @@ import (
 	domainservices "github.com/AtRiskMedia/tractstack-go/internal/domain/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // OrphanAnalysisService orchestrates orphan detection with cache-first repository pattern
 type OrphanAnalysisService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewOrphanAnalysisService creates a new orphan analysis service singleton
-func NewOrphanAnalysisService() *OrphanAnalysisService {
-	return &OrphanAnalysisService{}
+func NewOrphanAnalysisService(logger *logging.ChanneledLogger) *OrphanAnalysisService {
+	return &OrphanAnalysisService{
+		logger: logger,
+	}
 }
 
 // GetOrphanAnalysis returns orphan analysis with ETag caching
 func (s *OrphanAnalysisService) GetOrphanAnalysis(tenantCtx *tenant.Context, clientETag string, cacheManager interfaces.Cache) (*types.OrphanAnalysisPayload, string, error) {
+	start := time.Now()
 	cachedPayload, cachedETag, exists := cacheManager.GetOrphanAnalysis(tenantCtx.TenantID)
 
 	if exists {
@@ -45,16 +49,18 @@ func (s *OrphanAnalysisService) GetOrphanAnalysis(tenantCtx *tenant.Context, cli
 	go s.computeOrphanAnalysisAsync(tenantCtx, cacheManager)
 
 	etag := s.generateETag(tenantCtx.TenantID)
+
+	s.logger.Content().Info("Successfully retrieved orphan analysis", "tenantId", tenantCtx.TenantID, "fromCache", exists, "etag", etag, "duration", time.Since(start))
+
 	return loadingPayload, etag, nil
 }
 
 // computeOrphanAnalysisAsync performs the analysis computation in background
 func (s *OrphanAnalysisService) computeOrphanAnalysisAsync(tenantCtx *tenant.Context, cacheManager interfaces.Cache) {
+	start := time.Now()
 	// Use bulk repository from tenant context
 	bulkRepo := tenantCtx.BulkRepo()
 	integrityService := domainservices.NewContentIntegrityService()
-
-	// FIXED: Use existing bulk repository methods to build all required parameters
 
 	// 1. Build content ID map using existing method
 	contentIDMap, err := bulkRepo.ScanAllContentIDs(tenantCtx.TenantID)
@@ -133,6 +139,8 @@ func (s *OrphanAnalysisService) computeOrphanAnalysisAsync(tenantCtx *tenant.Con
 	// Cache the result with ETag
 	etag := s.generateETag(tenantCtx.TenantID)
 	cacheManager.SetOrphanAnalysis(tenantCtx.TenantID, payload, etag)
+
+	s.logger.Content().Info("Successfully computed orphan analysis async", "tenantId", tenantCtx.TenantID, "duration", time.Since(start))
 }
 
 // generateETag creates a unique ETag for the orphan analysis

@@ -94,35 +94,35 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	ws.logger.Cache().Debug("Content map warmed", "tenantId", tenantID)
 
 	// Step 2: Bulk-load all content types into the cache.
-	if _, err := NewTractStackService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewTractStackService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 		ws.logger.Cache().Warn("Failed to warm TractStacks", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewStoryFragmentService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewStoryFragmentService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm StoryFragments: %v", err)
 		ws.logger.Cache().Warn("Failed to warm StoryFragments", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewPaneService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewPaneService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Panes: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Panes", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewMenuService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewMenuService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Menus: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Menus", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewResourceService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewResourceService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Resources: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Resources", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewBeliefService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewBeliefService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Beliefs: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Beliefs", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewEpinetService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewEpinetService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Epinets: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Epinets", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewImageFileService().GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewImageFileService(ws.logger).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm ImageFiles: %v", err)
 		ws.logger.Cache().Warn("Failed to warm ImageFiles", "tenantId", tenantID, "error", err)
 	}
@@ -130,28 +130,30 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	ws.logger.Cache().Debug("All content repositories warmed", "tenantId", tenantID)
 
 	// Step 3: Build Belief Registries for all Storyfragments (THE CORE FIX)
-	storyFragmentIDs, err := NewStoryFragmentService().GetAllIDs(tenantCtx)
+	storyFragmentIDs, err := NewStoryFragmentService(ws.logger).GetAllIDs(tenantCtx)
 	if err != nil {
 		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
 		ws.logger.Cache().Warn("Could not retrieve StoryFragment IDs for belief registry warming", "tenantId", tenantID, "error", err)
 	} else {
-		paneService := NewPaneService()
+		paneService := NewPaneService(ws.logger)
 		for _, sfID := range storyFragmentIDs {
-			sf, err := NewStoryFragmentService().GetByID(tenantCtx, sfID)
+			sf, err := NewStoryFragmentService(ws.logger).GetByID(tenantCtx, sfID)
 			if err != nil || sf == nil {
 				continue
 			}
 			// Load only the panes required for this specific storyfragment.
-			panes, err := paneService.GetByIDs(tenantCtx, sf.PaneIDs)
-			if err != nil {
-				log.Printf("Warning: Failed to load panes for storyfragment %s during warming: %v", sfID, err)
-				ws.logger.Cache().Warn("Failed to load panes for storyfragment during warming", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
-				continue
-			}
-			// Build and cache the registry.
-			if _, err := beliefRegistrySvc.BuildRegistryFromLoadedPanes(tenantCtx, sfID, panes); err != nil {
-				log.Printf("Warning: Failed to build belief registry for storyfragment %s: %v", sfID, err)
-				ws.logger.Cache().Warn("Failed to build belief registry for storyfragment", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
+			if len(sf.PaneIDs) > 0 {
+				panes, err := paneService.GetByIDs(tenantCtx, sf.PaneIDs)
+				if err != nil {
+					log.Printf("Warning: Failed to load panes for storyfragment %s during warming: %v", sfID, err)
+					ws.logger.Cache().Warn("Failed to load panes for storyfragment during warming", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
+					continue
+				}
+				// Build and cache the registry.
+				if _, err := beliefRegistrySvc.BuildRegistryFromLoadedPanes(tenantCtx, sfID, panes); err != nil {
+					log.Printf("Warning: Failed to build belief registry for storyfragment %s: %v", sfID, err)
+					ws.logger.Cache().Warn("Failed to build belief registry for storyfragment", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
+				}
 			}
 		}
 		reporter.LogStepSuccess("%d StoryFragment<>Beliefs registries cached", len(storyFragmentIDs))

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -18,13 +19,18 @@ type StoryfragmentAnalytics struct {
 	EventCounts int    `json:"eventCounts"`
 }
 
-type ContentAnalyticsService struct{}
+type ContentAnalyticsService struct {
+	logger *logging.ChanneledLogger
+}
 
-func NewContentAnalyticsService() *ContentAnalyticsService {
-	return &ContentAnalyticsService{}
+func NewContentAnalyticsService(logger *logging.ChanneledLogger) *ContentAnalyticsService {
+	return &ContentAnalyticsService{
+		logger: logger,
+	}
 }
 
 func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Context, epinetID string, startHour, endHour *int) (HourlyActivity, error) {
+	start := time.Now()
 	var hourKeys []string
 	if startHour != nil && endHour != nil {
 		hourKeys = s.getHourKeysForCustomRange(*startHour, *endHour)
@@ -86,10 +92,13 @@ func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Contex
 			hourlyActivity[hourKey] = hourNodeData
 		}
 	}
+
+	s.logger.Analytics().Info("Successfully computed hourly node activity", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "hourCount", len(hourKeys), "activityHours", len(hourlyActivity), "duration", time.Since(start))
 	return hourlyActivity, nil
 }
 
 func (s *ContentAnalyticsService) GetStoryfragmentAnalytics(tenantCtx *tenant.Context, epinetIDs []string, startHour, endHour int) ([]StoryfragmentAnalytics, error) {
+	start := time.Now()
 	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
 
 	storyFragmentCounts := make(map[string]int)
@@ -140,6 +149,8 @@ func (s *ContentAnalyticsService) GetStoryfragmentAnalytics(tenantCtx *tenant.Co
 			}
 		}
 	}
+
+	s.logger.Analytics().Info("Successfully computed storyfragment analytics", "tenantId", tenantCtx.TenantID, "epinetCount", len(epinetIDs), "storyfragmentCount", len(result), "duration", time.Since(start))
 
 	return result, nil
 }

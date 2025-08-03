@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -39,13 +40,18 @@ type EpinetConfig struct {
 	Title string `json:"title"`
 }
 
-type DashboardAnalyticsService struct{}
+type DashboardAnalyticsService struct {
+	logger *logging.ChanneledLogger
+}
 
-func NewDashboardAnalyticsService() *DashboardAnalyticsService {
-	return &DashboardAnalyticsService{}
+func NewDashboardAnalyticsService(logger *logging.ChanneledLogger) *DashboardAnalyticsService {
+	return &DashboardAnalyticsService{
+		logger: logger,
+	}
 }
 
 func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, startHour, endHour int) (*DashboardAnalytics, error) {
+	start := time.Now()
 	epinets, err := s.getEpinets(tenantCtx)
 	if err != nil {
 		return nil, err
@@ -64,6 +70,8 @@ func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, 
 		Weekly:  s.computeAllEvents(tenantCtx, epinets, weeklyHourKeys),
 		Monthly: s.computeAllEvents(tenantCtx, epinets, monthlyHourKeys),
 	}
+
+	s.logger.Analytics().Info("Successfully computed dashboard analytics", "tenantId", tenantCtx.TenantID, "startHour", startHour, "endHour", endHour, "epinetCount", len(epinets), "duration", time.Since(start))
 
 	return &DashboardAnalytics{
 		Stats:      stats,

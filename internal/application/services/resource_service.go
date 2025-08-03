@@ -4,23 +4,28 @@ package services
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ResourceService orchestrates resource operations with cache-first repository pattern
 type ResourceService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewResourceService creates a new resource service singleton
-func NewResourceService() *ResourceService {
-	return &ResourceService{}
+func NewResourceService(logger *logging.ChanneledLogger) *ResourceService {
+	return &ResourceService{
+		logger: logger,
+	}
 }
 
 // GetAllIDs returns all resource IDs for a tenant by leveraging the robust repository.
 func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	start := time.Now()
 	resourceRepo := tenantCtx.ResourceRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -35,11 +40,14 @@ func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error)
 		ids[i] = resource.ID
 	}
 
+	s.logger.Content().Info("Successfully retrieved all resource IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+
 	return ids, nil
 }
 
 // GetByID returns a resource by ID (cache-first via repository)
 func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*content.ResourceNode, error) {
+	start := time.Now()
 	if id == "" {
 		return nil, fmt.Errorf("resource ID cannot be empty")
 	}
@@ -50,11 +58,14 @@ func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*conten
 		return nil, fmt.Errorf("failed to get resource %s: %w", id, err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved resource by ID", "tenantId", tenantCtx.TenantID, "resourceId", id, "found", resource != nil, "duration", time.Since(start))
+
 	return resource, nil
 }
 
 // GetByIDs returns multiple resources by IDs (cache-first with bulk loading via repository)
 func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ResourceNode, error) {
+	start := time.Now()
 	if len(ids) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
@@ -65,11 +76,14 @@ func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*
 		return nil, fmt.Errorf("failed to get resources by IDs from repository: %w", err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved resources by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(resources), "duration", time.Since(start))
+
 	return resources, nil
 }
 
 // GetBySlug returns a resource by slug (cache-first via repository)
 func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.ResourceNode, error) {
+	start := time.Now()
 	if slug == "" {
 		return nil, fmt.Errorf("resource slug cannot be empty")
 	}
@@ -80,11 +94,14 @@ func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*co
 		return nil, fmt.Errorf("failed to get resource by slug %s: %w", slug, err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved resource by slug", "tenantId", tenantCtx.TenantID, "slug", slug, "found", resource != nil, "duration", time.Since(start))
+
 	return resource, nil
 }
 
 // GetByFilters returns resources by multiple filter criteria (cache-first via repository)
 func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
+	start := time.Now()
 	if len(ids) == 0 && len(categories) == 0 && len(slugs) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
@@ -95,11 +112,14 @@ func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, 
 		return nil, fmt.Errorf("failed to get resources by filters from repository: %w", err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved resources by filters", "tenantId", tenantCtx.TenantID, "idCount", len(ids), "categoryCount", len(categories), "slugCount", len(slugs), "foundCount", len(resources), "duration", time.Since(start))
+
 	return resources, nil
 }
 
 // Create creates a new resource
 func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
+	start := time.Now()
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
 	}
@@ -119,11 +139,14 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("failed to create resource %s: %w", resource.ID, err)
 	}
 
+	s.logger.Content().Info("Successfully created resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
+
 	return nil
 }
 
 // Update updates an existing resource
 func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
+	start := time.Now()
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
 	}
@@ -152,11 +175,14 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("failed to update resource %s: %w", resource.ID, err)
 	}
 
+	s.logger.Content().Info("Successfully updated resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
+
 	return nil
 }
 
 // Delete deletes a resource
 func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
 	if id == "" {
 		return fmt.Errorf("resource ID cannot be empty")
 	}
@@ -175,6 +201,8 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete resource %s: %w", id, err)
 	}
+
+	s.logger.Content().Info("Successfully deleted resource", "tenantId", tenantCtx.TenantID, "resourceId", id, "duration", time.Since(start))
 
 	return nil
 }
