@@ -372,9 +372,9 @@ func (s *FragmentService) extractWidgetBeliefsFromPane(pane *content.PaneNode) [
 		return beliefKeys
 	}
 
-	if nodes, ok := pane.OptionsPayload["nodes"].(map[string]interface{}); ok {
+	if nodes, ok := pane.OptionsPayload["nodes"].(map[string]any); ok {
 		for _, nodeData := range nodes {
-			if nodeMap, ok := nodeData.(map[string]interface{}); ok {
+			if nodeMap, ok := nodeData.(map[string]any); ok {
 				if nodeType, ok := nodeMap["type"].(string); ok && nodeType == "code" {
 					if beliefKey := s.extractBeliefFromCodeNode(nodeMap); beliefKey != "" {
 						beliefKeys = append(beliefKeys, beliefKey)
@@ -388,8 +388,8 @@ func (s *FragmentService) extractWidgetBeliefsFromPane(pane *content.PaneNode) [
 }
 
 // extractBeliefFromCodeNode extracts belief key from code node
-func (s *FragmentService) extractBeliefFromCodeNode(nodeData map[string]interface{}) string {
-	if optionsPayload, ok := nodeData["optionsPayload"].(map[string]interface{}); ok {
+func (s *FragmentService) extractBeliefFromCodeNode(nodeData map[string]any) string {
+	if optionsPayload, ok := nodeData["optionsPayload"].(map[string]any); ok {
 		if beliefKey, ok := optionsPayload["beliefKey"].(string); ok {
 			return beliefKey
 		}
@@ -407,13 +407,13 @@ func (s *FragmentService) extractPaneBeliefData(pane *content.PaneNode) *beliefs
 	}
 
 	beliefMode := "neutral"
-	requiredData := make(map[string]interface{})
+	requiredData := make(map[string]any)
 
 	if mode, ok := pane.OptionsPayload["beliefMode"].(string); ok {
 		beliefMode = mode
 	}
 
-	if requirements, ok := pane.OptionsPayload["beliefRequirements"].(map[string]interface{}); ok {
+	if requirements, ok := pane.OptionsPayload["beliefRequirements"].(map[string]any); ok {
 		requiredData = requirements
 	}
 
@@ -479,10 +479,10 @@ func (s *FragmentService) evaluatePaneVisibility(
 
 // evaluateHeldBeliefs checks if user holds required beliefs
 func (s *FragmentService) evaluateHeldBeliefs(
-	requiredData map[string]interface{},
+	requiredData map[string]any,
 	userBeliefs map[string][]string,
 ) string {
-	if requiredBeliefs, ok := requiredData["beliefs"].([]interface{}); ok {
+	if requiredBeliefs, ok := requiredData["beliefs"].([]any); ok {
 		for _, beliefInterface := range requiredBeliefs {
 			if beliefKey, ok := beliefInterface.(string); ok {
 				if _, exists := userBeliefs[beliefKey]; !exists {
@@ -497,10 +497,10 @@ func (s *FragmentService) evaluateHeldBeliefs(
 
 // evaluateWithheldBeliefs checks if user withholds required beliefs
 func (s *FragmentService) evaluateWithheldBeliefs(
-	requiredData map[string]interface{},
+	requiredData map[string]any,
 	userBeliefs map[string][]string,
 ) string {
-	if requiredBeliefs, ok := requiredData["beliefs"].([]interface{}); ok {
+	if requiredBeliefs, ok := requiredData["beliefs"].([]any); ok {
 		for _, beliefInterface := range requiredBeliefs {
 			if beliefKey, ok := beliefInterface.(string); ok {
 				if _, exists := userBeliefs[beliefKey]; exists {
@@ -515,13 +515,13 @@ func (s *FragmentService) evaluateWithheldBeliefs(
 
 // evaluateMatchAcrossBeliefs checks for belief matching across categories
 func (s *FragmentService) evaluateMatchAcrossBeliefs(
-	requiredData map[string]interface{},
+	requiredData map[string]any,
 	userBeliefs map[string][]string,
 ) string {
-	if categories, ok := requiredData["categories"].([]interface{}); ok {
+	if categories, ok := requiredData["categories"].([]any); ok {
 		matchCount := 0
 		for _, categoryInterface := range categories {
-			if categoryBeliefs, ok := categoryInterface.([]interface{}); ok {
+			if categoryBeliefs, ok := categoryInterface.([]any); ok {
 				for _, beliefInterface := range categoryBeliefs {
 					if beliefKey, ok := beliefInterface.(string); ok {
 						if _, exists := userBeliefs[beliefKey]; exists {
@@ -557,7 +557,7 @@ func (s *FragmentService) extractDependencies(pane *content.PaneNode) []string {
 	dependencies := []string{pane.ID}
 
 	if pane.OptionsPayload != nil {
-		if deps, ok := pane.OptionsPayload["dependencies"].([]interface{}); ok {
+		if deps, ok := pane.OptionsPayload["dependencies"].([]any); ok {
 			for _, dep := range deps {
 				if depStr, ok := dep.(string); ok {
 					dependencies = append(dependencies, depStr)
@@ -577,7 +577,7 @@ func (s *FragmentService) convertTypesToDomainRegistry(typesRegistry *types.Stor
 		beliefData := &beliefs.PaneBeliefData{
 			PaneID:       paneID,
 			BeliefMode:   "neutral",
-			RequiredData: make(map[string]interface{}),
+			RequiredData: make(map[string]any),
 		}
 
 		if len(typesBeliefData.HeldBeliefs) > 0 {
@@ -592,7 +592,7 @@ func (s *FragmentService) convertTypesToDomainRegistry(typesRegistry *types.Stor
 
 		if len(typesBeliefData.MatchAcross) > 0 {
 			beliefData.BeliefMode = "match-across"
-			beliefData.RequiredData["categories"] = []interface{}{typesBeliefData.MatchAcross}
+			beliefData.RequiredData["categories"] = []any{typesBeliefData.MatchAcross}
 		}
 
 		registry.AddPaneBeliefData(paneID, beliefData)
@@ -628,7 +628,7 @@ func (s *FragmentService) convertDomainToTypesRegistry(registry *beliefs.BeliefR
 
 		switch beliefData.BeliefMode {
 		case "held":
-			if beliefs, ok := beliefData.RequiredData["beliefs"].([]interface{}); ok {
+			if beliefs, ok := beliefData.RequiredData["beliefs"].([]any); ok {
 				for _, belief := range beliefs {
 					if beliefStr, ok := belief.(string); ok {
 						typesBeliefData.HeldBeliefs[beliefStr] = []string{beliefStr}
@@ -637,7 +637,7 @@ func (s *FragmentService) convertDomainToTypesRegistry(registry *beliefs.BeliefR
 				}
 			}
 		case "withheld":
-			if beliefs, ok := beliefData.RequiredData["beliefs"].([]interface{}); ok {
+			if beliefs, ok := beliefData.RequiredData["beliefs"].([]any); ok {
 				for _, belief := range beliefs {
 					if beliefStr, ok := belief.(string); ok {
 						typesBeliefData.WithheldBeliefs[beliefStr] = []string{beliefStr}
@@ -646,7 +646,7 @@ func (s *FragmentService) convertDomainToTypesRegistry(registry *beliefs.BeliefR
 				}
 			}
 		case "match-across":
-			if categories, ok := beliefData.RequiredData["categories"].([]interface{}); ok {
+			if categories, ok := beliefData.RequiredData["categories"].([]any); ok {
 				for _, category := range categories {
 					if categorySlice, ok := category.([]string); ok {
 						typesBeliefData.MatchAcross = append(typesBeliefData.MatchAcross, categorySlice...)
@@ -671,42 +671,42 @@ func (s *FragmentService) convertDomainToTypesRegistry(registry *beliefs.BeliefR
 	return typesRegistry
 }
 
-// convertMapToSlice converts map[string][]string keys to []interface{}
-func (s *FragmentService) convertMapToSlice(beliefMap map[string][]string) []interface{} {
-	var result []interface{}
+// convertMapToSlice converts map[string][]string keys to []any
+func (s *FragmentService) convertMapToSlice(beliefMap map[string][]string) []any {
+	var result []any
 	for key := range beliefMap {
 		result = append(result, key)
 	}
 	return result
 }
 
-// convertStringMapToInterface converts map[string][]string to map[string]interface{}
-func (s *FragmentService) convertStringMapToInterface(input map[string][]string) map[string]interface{} {
+// convertStringMapToInterface converts map[string][]string to map[string]any
+func (s *FragmentService) convertStringMapToInterface(input map[string][]string) map[string]any {
 	if input == nil {
 		return nil
 	}
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range input {
 		result[k] = v
 	}
 	return result
 }
 
-// convertStringMapToInterfaceMap converts map[string]string to map[string]interface{}
-func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string) map[string]interface{} {
+// convertStringMapToInterfaceMap converts map[string]string to map[string]any
+func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string) map[string]any {
 	if input == nil {
 		return nil
 	}
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for k, v := range input {
 		result[k] = v
 	}
 	return result
 }
 
-func (s *FragmentService) sanitizeSessionID(sessionID string) string {
-	if len(sessionID) <= 8 {
-		return "********"
-	}
-	return sessionID[:4] + "****" + sessionID[len(sessionID)-4:]
-}
+//func (s *FragmentService) sanitizeSessionID(sessionID string) string {
+//	if len(sessionID) <= 8 {
+//		return "********"
+//	}
+//	return sessionID[:4] + "****" + sessionID[len(sessionID)-4:]
+//}

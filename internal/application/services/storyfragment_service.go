@@ -190,12 +190,12 @@ func (s *StoryFragmentService) GetFullPayloadBySlug(tenantCtx *tenant.Context, s
 
 // GetHome returns the home storyfragment by reading the home slug from the tenant's configuration.
 func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.StoryFragmentNode, error) {
-	start := time.Now()
-	marker := s.perfTracker.StartOperation("get_home_storyfragment", tenantCtx.TenantID)
-	defer marker.Complete()
 	if tenantCtx == nil || tenantCtx.Config == nil || tenantCtx.Config.BrandConfig == nil {
 		return nil, fmt.Errorf("tenant context or configuration is not available")
 	}
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_home_storyfragment", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	homeSlug := tenantCtx.Config.BrandConfig.HomeSlug
 	if homeSlug == "" {

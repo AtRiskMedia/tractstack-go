@@ -29,6 +29,7 @@ func NewStoryFragmentHandlers(storyFragmentService *services.StoryFragmentServic
 	return &StoryFragmentHandlers{
 		storyFragmentService: storyFragmentService,
 		logger:               logger,
+		perfTracker:          perfTracker,
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	domainservices "github.com/AtRiskMedia/tractstack-go/internal/domain/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
@@ -56,84 +55,51 @@ func (s *OrphanAnalysisService) GetOrphanAnalysis(tenantCtx *tenant.Context, cli
 }
 
 // computeOrphanAnalysisAsync performs the analysis computation in background
+// computeOrphanAnalysisAsync performs the analysis computation in background
 func (s *OrphanAnalysisService) computeOrphanAnalysisAsync(tenantCtx *tenant.Context, cacheManager interfaces.Cache) {
 	start := time.Now()
 	// Use bulk repository from tenant context
 	bulkRepo := tenantCtx.BulkRepo()
-	integrityService := domainservices.NewContentIntegrityService()
 
-	// 1. Build content ID map using existing method
-	contentIDMap, err := bulkRepo.ScanAllContentIDs(tenantCtx.TenantID)
-	if err != nil {
-		fmt.Printf("Failed to scan content IDs: %v", err)
-		return
-	}
-
-	// 2. Build all 5 dependency maps using existing methods
+	// 1. Build all 5 dependency maps using existing methods
 	storyFragmentDeps, err := bulkRepo.ScanStoryFragmentDependencies(tenantCtx.TenantID)
 	if err != nil {
-		fmt.Printf("Failed to scan storyfragment dependencies: %v", err)
+		s.logger.Content().Error("Failed to scan storyfragment dependencies", "error", err, "tenantId", tenantCtx.TenantID)
 		return
 	}
 
 	paneDeps, err := bulkRepo.ScanPaneDependencies(tenantCtx.TenantID)
 	if err != nil {
-		fmt.Printf("Failed to scan pane dependencies: %v", err)
+		s.logger.Content().Error("Failed to scan pane dependencies", "error", err, "tenantId", tenantCtx.TenantID)
 		return
 	}
 
 	menuDeps, err := bulkRepo.ScanMenuDependencies(tenantCtx.TenantID)
 	if err != nil {
-		fmt.Printf("Failed to scan menu dependencies: %v", err)
+		s.logger.Content().Error("Failed to scan menu dependencies", "error", err, "tenantId", tenantCtx.TenantID)
 		return
 	}
 
 	fileDeps, err := bulkRepo.ScanFileDependencies(tenantCtx.TenantID)
 	if err != nil {
-		fmt.Printf("Failed to scan file dependencies: %v", err)
+		s.logger.Content().Error("Failed to scan file dependencies", "error", err, "tenantId", tenantCtx.TenantID)
 		return
 	}
 
 	beliefDeps, err := bulkRepo.ScanBeliefDependencies(tenantCtx.TenantID)
 	if err != nil {
-		fmt.Printf("Failed to scan belief dependencies: %v", err)
+		s.logger.Content().Error("Failed to scan belief dependencies", "error", err, "tenantId", tenantCtx.TenantID)
 		return
 	}
 
-	// 3. Call CalculateOrphans with correct signature (6 parameters)
-	orphans := integrityService.CalculateOrphans(
-		contentIDMap,
-		storyFragmentDeps,
-		paneDeps,
-		menuDeps,
-		fileDeps,
-		beliefDeps,
-	)
-
-	// Build final payload
+	// 2. Build final payload using the dependency maps directly
 	payload := &types.OrphanAnalysisPayload{
-		StoryFragments: make(map[string][]string),
-		Panes:          make(map[string][]string),
-		Menus:          make(map[string][]string),
-		Files:          make(map[string][]string),
-		Beliefs:        make(map[string][]string),
+		StoryFragments: storyFragmentDeps, // Return ALL story fragments with their dependencies
+		Panes:          paneDeps,          // Return ALL panes with their dependencies
+		Menus:          menuDeps,          // Return ALL menus with their dependencies
+		Files:          fileDeps,          // Return ALL files with their dependencies
+		Beliefs:        beliefDeps,        // Return ALL beliefs with their dependencies
 		Status:         "complete",
-	}
-
-	// Populate orphan data - identify which content types each orphan belongs to
-	for _, orphanID := range orphans {
-		// Check which content type this orphan ID belongs to and add to appropriate map
-		if _, exists := contentIDMap.StoryFragments[orphanID]; exists {
-			payload.StoryFragments[orphanID] = []string{} // Empty deps = orphan
-		} else if _, exists := contentIDMap.Panes[orphanID]; exists {
-			payload.Panes[orphanID] = []string{}
-		} else if _, exists := contentIDMap.Menus[orphanID]; exists {
-			payload.Menus[orphanID] = []string{}
-		} else if _, exists := contentIDMap.Files[orphanID]; exists {
-			payload.Files[orphanID] = []string{}
-		} else if _, exists := contentIDMap.Beliefs[orphanID]; exists {
-			payload.Beliefs[orphanID] = []string{}
-		}
 	}
 
 	// Cache the result with ETag
