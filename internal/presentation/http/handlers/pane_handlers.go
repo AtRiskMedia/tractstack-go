@@ -7,6 +7,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -20,19 +21,24 @@ type PaneIDsRequest struct {
 type PaneHandlers struct {
 	paneService *services.PaneService
 	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewPaneHandlers creates pane handlers with injected dependencies
-func NewPaneHandlers(paneService *services.PaneService, logger *logging.ChanneledLogger) *PaneHandlers {
+func NewPaneHandlers(paneService *services.PaneService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *PaneHandlers {
 	return &PaneHandlers{
 		paneService: paneService,
 		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 // GetAllPaneIDs returns all pane IDs using cache-first pattern
 func (h *PaneHandlers) GetAllPaneIDs(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_all_pane_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -44,6 +50,10 @@ func (h *PaneHandlers) GetAllPaneIDs(c *gin.Context) {
 		return
 	}
 
+	h.logger.Content().Info("Get pane IDs request completed", "foundCount", len(paneIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetAllPaneIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
 	c.JSON(http.StatusOK, gin.H{
 		"paneIds": paneIDs,
 		"count":   len(paneIDs),
@@ -52,9 +62,11 @@ func (h *PaneHandlers) GetAllPaneIDs(c *gin.Context) {
 
 // GetPanesByIDs returns multiple panes by IDs using cache-first pattern
 func (h *PaneHandlers) GetPanesByIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get all pane IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_panes_by_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get all pane IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -78,6 +90,9 @@ func (h *PaneHandlers) GetPanesByIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get panes by IDs request completed", "requestedCount", len(req.PaneIDs), "foundCount", len(panes), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPanesByIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(req.PaneIDs))
+
 	c.JSON(http.StatusOK, gin.H{
 		"panes": panes,
 		"count": len(panes),
@@ -86,9 +101,11 @@ func (h *PaneHandlers) GetPanesByIDs(c *gin.Context) {
 
 // GetPaneByID returns a specific pane by ID using cache-first pattern
 func (h *PaneHandlers) GetPaneByID(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get pane by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "paneId", c.Param("id"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_pane_by_id_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get pane by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "paneId", c.Param("id"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -112,14 +129,19 @@ func (h *PaneHandlers) GetPaneByID(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get pane by ID request completed", "paneId", paneID, "found", paneNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPaneByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
+
 	c.JSON(http.StatusOK, paneNode)
 }
 
 // GetPaneBySlug returns a specific pane by slug using cache-first pattern
 func (h *PaneHandlers) GetPaneBySlug(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get pane by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_pane_by_slug_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get pane by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -143,14 +165,19 @@ func (h *PaneHandlers) GetPaneBySlug(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get pane by slug request completed", "slug", slug, "found", paneNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPaneBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
+
 	c.JSON(http.StatusOK, paneNode)
 }
 
 // GetContextPanes returns all context panes using cache-first pattern
 func (h *PaneHandlers) GetContextPanes(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get context panes request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_context_panes_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get context panes request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -163,6 +190,9 @@ func (h *PaneHandlers) GetContextPanes(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get context panes request completed", "count", len(contextPanes), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetContextPanes request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
 	c.JSON(http.StatusOK, gin.H{
 		"contextPanes": contextPanes,
 		"count":        len(contextPanes),

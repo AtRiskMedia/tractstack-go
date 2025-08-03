@@ -8,6 +8,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -16,29 +17,32 @@ import (
 type OrphanAnalysisHandlers struct {
 	orphanAnalysisService *services.OrphanAnalysisService
 	logger                *logging.ChanneledLogger
+	perfTracker           *performance.Tracker
 }
 
 // NewOrphanAnalysisHandlers creates orphan analysis handlers with injected dependencies
-func NewOrphanAnalysisHandlers(orphanAnalysisService *services.OrphanAnalysisService, logger *logging.ChanneledLogger) *OrphanAnalysisHandlers {
+func NewOrphanAnalysisHandlers(orphanAnalysisService *services.OrphanAnalysisService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *OrphanAnalysisHandlers {
 	return &OrphanAnalysisHandlers{
 		orphanAnalysisService: orphanAnalysisService,
 		logger:                logger,
+		perfTracker:           perfTracker,
 	}
 }
 
 // GetOrphanAnalysis handles GET /api/v1/admin/orphan-analysis
 func (h *OrphanAnalysisHandlers) GetOrphanAnalysis(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get orphan analysis request", "method", c.Request.Method, "path", c.Request.URL.Path)
-	// TODO: Add admin authentication middleware to protect this route
-	log.Println("************** WARNING --> ROUTE NEEDS TO BE PROTECTED")
-
-	// Get tenant context from middleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("orphan_analysis_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get orphan analysis request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	// TODO: Add admin authentication middleware to protect this route
+	log.Println("************** WARNING --> ROUTE NEEDS TO BE PROTECTED")
 
 	// Get client's ETag for cache validation
 	clientETag := c.GetHeader("If-None-Match")
@@ -55,6 +59,8 @@ func (h *OrphanAnalysisHandlers) GetOrphanAnalysis(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get orphan analysis request completed", "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetOrphanAnalysis request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, payload)
 }

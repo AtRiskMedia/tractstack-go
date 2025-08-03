@@ -8,6 +8,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -35,13 +36,15 @@ type UpdateMenuRequest struct {
 type MenuHandlers struct {
 	menuService *services.MenuService
 	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewMenuHandlers creates menu handlers with injected dependencies
-func NewMenuHandlers(menuService *services.MenuService, logger *logging.ChanneledLogger) *MenuHandlers {
+func NewMenuHandlers(menuService *services.MenuService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *MenuHandlers {
 	return &MenuHandlers{
 		menuService: menuService,
 		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
@@ -55,6 +58,9 @@ func (h *MenuHandlers) GetAllMenuIDs(c *gin.Context) {
 		return
 	}
 
+	marker := h.perfTracker.StartOperation("get_all_menu_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
 	menuIDs, err := h.menuService.GetAllIDs(tenantCtx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -62,6 +68,9 @@ func (h *MenuHandlers) GetAllMenuIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get all menu IDs request completed", "count", len(menuIDs), "duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetAllMenuIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 	c.JSON(http.StatusOK, gin.H{
 		"menuIds": menuIDs,
 		"count":   len(menuIDs),
@@ -77,6 +86,9 @@ func (h *MenuHandlers) GetMenusByIDs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	marker := h.perfTracker.StartOperation("get_menus_by_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	var req MenuIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -96,6 +108,8 @@ func (h *MenuHandlers) GetMenusByIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get menus by IDs request completed", "requestedCount", len(req.MenuIDs), "foundCount", len(menus), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetMenusByIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(req.MenuIDs))
 	c.JSON(http.StatusOK, gin.H{
 		"menus": menus,
 		"count": len(menus),
@@ -111,6 +125,9 @@ func (h *MenuHandlers) GetMenuByID(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	marker := h.perfTracker.StartOperation("get_menu_by_id_request", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	menuID := c.Param("id")
 	if menuID == "" {
@@ -130,6 +147,8 @@ func (h *MenuHandlers) GetMenuByID(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get menu by ID request completed", "menuId", menuID, "found", menuNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetMenuByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menuID)
 	c.JSON(http.StatusOK, menuNode)
 }
 
@@ -142,6 +161,9 @@ func (h *MenuHandlers) CreateMenu(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	marker := h.perfTracker.StartOperation("create_menu_request", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	var req CreateMenuRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -161,6 +183,8 @@ func (h *MenuHandlers) CreateMenu(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Create menu request completed", "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateMenu request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menu.ID)
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "menu created successfully",
 		"menuId":  menu.ID,
@@ -176,6 +200,9 @@ func (h *MenuHandlers) UpdateMenu(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	marker := h.perfTracker.StartOperation("update_menu_request", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	menuID := c.Param("id")
 	if menuID == "" {
@@ -202,6 +229,8 @@ func (h *MenuHandlers) UpdateMenu(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Update menu request completed", "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateMenu request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menu.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "menu updated successfully",
 		"menuId":  menu.ID,
@@ -218,6 +247,9 @@ func (h *MenuHandlers) DeleteMenu(c *gin.Context) {
 		return
 	}
 
+	marker := h.perfTracker.StartOperation("delete_menu_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
 	menuID := c.Param("id")
 	if menuID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "menu ID is required"})
@@ -230,6 +262,8 @@ func (h *MenuHandlers) DeleteMenu(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Delete menu request completed", "menuId", menuID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteMenu request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menuID)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "menu deleted successfully",
 		"menuId":  menuID,

@@ -6,6 +6,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -15,27 +16,30 @@ import (
 type FragmentHandlers struct {
 	fragmentService *services.FragmentService
 	logger          *logging.ChanneledLogger
+	perfTracker     *performance.Tracker
 }
 
 // NewFragmentHandlers creates a new fragment handlers instance
-func NewFragmentHandlers(fragmentService *services.FragmentService, logger *logging.ChanneledLogger) *FragmentHandlers {
+func NewFragmentHandlers(fragmentService *services.FragmentService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *FragmentHandlers {
 	return &FragmentHandlers{
 		fragmentService: fragmentService,
 		logger:          logger,
+		perfTracker:     perfTracker,
 	}
 }
 
 // GetPaneFragment handles GET /api/v1/fragments/panes/:id
-// This implements the exact API contract from legacy api/pane_fragment_handler.go
 func (h *FragmentHandlers) GetPaneFragment(c *gin.Context) {
 	start := time.Now()
 	h.logger.Content().Debug("Received get fragment request", "method", c.Request.Method, "path", c.Request.URL.Path)
-	// Extract tenant context from middleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Tenant context not found"})
 		return
 	}
+
+	marker := h.perfTracker.StartOperation("get_pane_fragment_request", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	// Extract path parameter
 	paneID := c.Param("id")
@@ -57,6 +61,8 @@ func (h *FragmentHandlers) GetPaneFragment(c *gin.Context) {
 
 	h.logger.Content().Info("Get fragment request completed", "duration", time.Since(start))
 
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPaneFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
@@ -66,7 +72,6 @@ type BatchFragmentRequest struct {
 }
 
 // GetPaneFragmentBatch handles POST /api/v1/fragments/panes
-// This implements batch fragment generation from legacy
 func (h *FragmentHandlers) GetPaneFragmentBatch(c *gin.Context) {
 	// Extract tenant context from middleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
@@ -74,6 +79,9 @@ func (h *FragmentHandlers) GetPaneFragmentBatch(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Tenant context not found"})
 		return
 	}
+
+	marker := h.perfTracker.StartOperation("get_pane_fragment_batch_request", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	// Parse request body
 	var req BatchFragmentRequest
@@ -111,5 +119,7 @@ func (h *FragmentHandlers) GetPaneFragmentBatch(c *gin.Context) {
 		response["errors"] = errors
 	}
 
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPaneFragmentBatch request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.PaneIDs))
 	c.JSON(http.StatusOK, response)
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -24,17 +25,21 @@ type SankeyFilters struct {
 }
 
 type AnalyticsService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
-func NewAnalyticsService(logger *logging.ChanneledLogger) *AnalyticsService {
+func NewAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AnalyticsService {
 	return &AnalyticsService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, epinetID string, visitorType string, startHour, endHour *int) ([]UserCount, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_filtered_visitor_counts", tenantCtx.TenantID)
+	defer marker.Complete()
 	var hourKeys []string
 	if startHour != nil && endHour != nil {
 		hourKeys = s.getHourKeysForCustomRange(*startHour, *endHour)
@@ -79,6 +84,8 @@ func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, e
 	})
 
 	s.logger.Analytics().Info("Successfully retrieved filtered visitor counts", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "visitorType", visitorType, "count", len(userCounts), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetFilteredVisitorCounts", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return userCounts, nil
 }

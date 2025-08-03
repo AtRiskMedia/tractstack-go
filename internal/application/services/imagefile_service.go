@@ -8,24 +8,29 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ImageFileService orchestrates imagefile operations with cache-first repository pattern
 type ImageFileService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewImageFileService creates a new imagefile service singleton
-func NewImageFileService(logger *logging.ChanneledLogger) *ImageFileService {
+func NewImageFileService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ImageFileService {
 	return &ImageFileService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 // GetAllIDs returns all imagefile IDs for a tenant by leveraging the robust repository.
 func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_all_imagefile_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	imageFileRepo := tenantCtx.ImageFileRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -41,6 +46,8 @@ func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error
 	}
 
 	s.logger.Content().Info("Successfully retrieved all imagefile IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetAllImageFileIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return ids, nil
 }
@@ -48,6 +55,8 @@ func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error
 // GetByID returns an imagefile by ID (cache-first via repository)
 func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*content.ImageFileNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_imagefile_by_id", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return nil, fmt.Errorf("imagefile ID cannot be empty")
 	}
@@ -59,6 +68,8 @@ func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*conte
 	}
 
 	s.logger.Content().Info("Successfully retrieved imagefile by ID", "tenantId", tenantCtx.TenantID, "imagefileId", id, "found", imageFile != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetImageFileByID", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "imageFileId", id)
 
 	return imageFile, nil
 }
@@ -66,6 +77,8 @@ func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*conte
 // GetByIDs returns multiple imagefiles by IDs (cache-first with bulk loading via repository)
 func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ImageFileNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_imagefiles_by_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	if len(ids) == 0 {
 		return []*content.ImageFileNode{}, nil
 	}
@@ -77,6 +90,8 @@ func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]
 	}
 
 	s.logger.Content().Info("Successfully retrieved imagefiles by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(imageFiles), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetImageFilesByIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(ids))
 
 	return imageFiles, nil
 }

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -17,17 +18,21 @@ type LeadMetrics struct {
 }
 
 type LeadAnalyticsService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
-func NewLeadAnalyticsService(logger *logging.ChanneledLogger) *LeadAnalyticsService {
+func NewLeadAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *LeadAnalyticsService {
 	return &LeadAnalyticsService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, startHour, endHour int) (*LeadMetrics, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("compute_lead_metrics", tenantCtx.TenantID)
+	defer marker.Complete()
 	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
 
 	totalVisitors := s.getTotalVisitors(tenantCtx, hourKeys)
@@ -44,6 +49,8 @@ func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, sta
 	attribution := s.getAttribution(tenantCtx)
 
 	s.logger.Analytics().Info("Successfully computed lead metrics", "tenantId", tenantCtx.TenantID, "startHour", startHour, "endHour", endHour, "totalLeads", totalLeads, "newLeads", newLeads, "conversionRate", conversionRate, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for ComputeLeadMetrics", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return &LeadMetrics{
 		TotalLeads:       totalLeads,

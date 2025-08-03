@@ -8,24 +8,29 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // PaneService orchestrates pane operations with cache-first repository pattern
 type PaneService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewPaneService creates a new pane service singleton
-func NewPaneService(logger *logging.ChanneledLogger) *PaneService {
+func NewPaneService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *PaneService {
 	return &PaneService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 // GetAllIDs returns all pane IDs for a tenant by leveraging the robust repository.
 func (s *PaneService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_all_pane_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	paneRepo := tenantCtx.PaneRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -41,6 +46,8 @@ func (s *PaneService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	}
 
 	s.logger.Content().Info("Successfully retrieved all pane IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetAllPaneIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return ids, nil
 }
@@ -48,6 +55,8 @@ func (s *PaneService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 // GetByID returns a pane by ID (cache-first via repository)
 func (s *PaneService) GetByID(tenantCtx *tenant.Context, id string) (*content.PaneNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_pane_by_id", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return nil, fmt.Errorf("pane ID cannot be empty")
 	}
@@ -59,6 +68,8 @@ func (s *PaneService) GetByID(tenantCtx *tenant.Context, id string) (*content.Pa
 	}
 
 	s.logger.Content().Info("Successfully retrieved pane by ID", "tenantId", tenantCtx.TenantID, "paneId", id, "found", pane != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetPaneByID", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", id)
 
 	return pane, nil
 }
@@ -66,6 +77,8 @@ func (s *PaneService) GetByID(tenantCtx *tenant.Context, id string) (*content.Pa
 // GetByIDs returns multiple panes by IDs (cache-first with bulk loading via repository)
 func (s *PaneService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.PaneNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_panes_by_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	if len(ids) == 0 {
 		return []*content.PaneNode{}, nil
 	}
@@ -77,6 +90,8 @@ func (s *PaneService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*cont
 	}
 
 	s.logger.Content().Info("Successfully retrieved panes by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(panes), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetPanesByIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(ids))
 
 	return panes, nil
 }
@@ -84,6 +99,8 @@ func (s *PaneService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*cont
 // GetBySlug returns a pane by slug (cache-first via repository)
 func (s *PaneService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.PaneNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_pane_by_slug", tenantCtx.TenantID)
+	defer marker.Complete()
 	if slug == "" {
 		return nil, fmt.Errorf("pane slug cannot be empty")
 	}
@@ -95,6 +112,8 @@ func (s *PaneService) GetBySlug(tenantCtx *tenant.Context, slug string) (*conten
 	}
 
 	s.logger.Content().Info("Successfully retrieved pane by slug", "tenantId", tenantCtx.TenantID, "slug", slug, "found", pane != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetPaneBySlug", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	return pane, nil
 }
@@ -102,6 +121,8 @@ func (s *PaneService) GetBySlug(tenantCtx *tenant.Context, slug string) (*conten
 // GetContextPanes returns all context panes (cache-first with filtering via repository)
 func (s *PaneService) GetContextPanes(tenantCtx *tenant.Context) ([]*content.PaneNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_context_panes", tenantCtx.TenantID)
+	defer marker.Complete()
 	paneRepo := tenantCtx.PaneRepo()
 	contextPanes, err := paneRepo.FindContext(tenantCtx.TenantID)
 	if err != nil {
@@ -109,6 +130,8 @@ func (s *PaneService) GetContextPanes(tenantCtx *tenant.Context) ([]*content.Pan
 	}
 
 	s.logger.Content().Info("Successfully retrieved context panes", "tenantId", tenantCtx.TenantID, "count", len(contextPanes), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetContextPanes", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return contextPanes, nil
 }
