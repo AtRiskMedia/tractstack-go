@@ -63,7 +63,7 @@ func (s *ContentIntegrityService) AnalyzeFileReferences(optionsPayload string) [
 		return fileIDs
 	}
 
-	var options map[string]interface{}
+	var options map[string]any
 	if err := json.Unmarshal([]byte(optionsPayload), &options); err != nil {
 		return fileIDs
 	}
@@ -78,12 +78,12 @@ func (s *ContentIntegrityService) AnalyzeBeliefReferences(optionsPayload string)
 		return beliefSlugs
 	}
 
-	var options map[string]interface{}
+	var options map[string]any
 	if err := json.Unmarshal([]byte(optionsPayload), &options); err != nil {
 		return beliefSlugs
 	}
 
-	if heldBeliefs, ok := options["heldBeliefs"].(map[string]interface{}); ok {
+	if heldBeliefs, ok := options["heldBeliefs"].(map[string]any); ok {
 		for beliefSlug := range heldBeliefs {
 			if beliefSlug != "MATCH-ACROSS" && beliefSlug != "LINKED-BELIEFS" {
 				beliefSlugs = append(beliefSlugs, beliefSlug)
@@ -91,7 +91,7 @@ func (s *ContentIntegrityService) AnalyzeBeliefReferences(optionsPayload string)
 		}
 	}
 
-	if withheldBeliefs, ok := options["withheldBeliefs"].(map[string]interface{}); ok {
+	if withheldBeliefs, ok := options["withheldBeliefs"].(map[string]any); ok {
 		for beliefSlug := range withheldBeliefs {
 			if beliefSlug != "MATCH-ACROSS" && beliefSlug != "LINKED-BELIEFS" {
 				beliefSlugs = append(beliefSlugs, beliefSlug)
@@ -146,28 +146,28 @@ func (s *ContentIntegrityService) BuildOrphanAnalysisPayload(
 	}
 }
 
-func (s *ContentIntegrityService) scanForFileIDs(data interface{}, fileIDs *[]string) {
+func (s *ContentIntegrityService) scanForFileIDs(data any, fileIDs *[]string) {
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if fileID, ok := v["fileId"].(string); ok && fileID != "" {
 			*fileIDs = append(*fileIDs, fileID)
 		}
 		for _, value := range v {
 			s.scanForFileIDs(value, fileIDs)
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			s.scanForFileIDs(item, fileIDs)
 		}
 	}
 }
 
-func (s *ContentIntegrityService) scanForBeliefWidgets(data interface{}, beliefSlugs *[]string) {
+func (s *ContentIntegrityService) scanForBeliefWidgets(data any, beliefSlugs *[]string) {
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if tagName, ok := v["tagName"].(string); ok && tagName == "code" {
 			if copy, ok := v["copy"].(string); ok {
-				if params, ok := v["codeHookParams"].([]interface{}); ok && len(params) > 0 {
+				if params, ok := v["codeHookParams"].([]any); ok && len(params) > 0 {
 					if strings.HasPrefix(copy, "belief(") ||
 						strings.HasPrefix(copy, "toggle(") ||
 						strings.HasPrefix(copy, "identifyAs(") {
@@ -181,7 +181,7 @@ func (s *ContentIntegrityService) scanForBeliefWidgets(data interface{}, beliefS
 		for _, value := range v {
 			s.scanForBeliefWidgets(value, beliefSlugs)
 		}
-	case []interface{}:
+	case []any:
 		for _, item := range v {
 			s.scanForBeliefWidgets(item, beliefSlugs)
 		}

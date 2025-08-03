@@ -414,7 +414,7 @@ func (ws *WarmingService) getActionEventsForRange(tenantCtx *tenant.Context, sta
 	}
 
 	verbPlaceholders := strings.Repeat("?,", len(analysis.ActionVerbs)-1) + "?"
-	args := []interface{}{startTime, endTime}
+	args := []any{startTime, endTime}
 	for verb := range analysis.ActionVerbs {
 		args = append(args, verb)
 	}
@@ -469,7 +469,7 @@ func (ws *WarmingService) getBeliefEventsForRange(tenantCtx *tenant.Context, sta
 	}
 
 	valuePlaceholders := strings.Repeat("?,", len(allValues)-1) + "?"
-	args := []interface{}{startTime, endTime}
+	args := []any{startTime, endTime}
 	for _, val := range allValues {
 		args = append(args, val)
 	}
