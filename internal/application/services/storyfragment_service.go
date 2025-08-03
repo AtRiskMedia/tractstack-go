@@ -4,8 +4,10 @@ package services
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -19,16 +21,19 @@ type StoryFragmentFullPayload struct {
 
 // StoryFragmentService orchestrates storyfragment operations with cache-first repository pattern
 type StoryFragmentService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewStoryFragmentService creates a new storyfragment service singleton
-func NewStoryFragmentService() *StoryFragmentService {
-	return &StoryFragmentService{}
+func NewStoryFragmentService(logger *logging.ChanneledLogger) *StoryFragmentService {
+	return &StoryFragmentService{
+		logger: logger,
+	}
 }
 
 // GetAllIDs returns all storyfragment IDs for a tenant by leveraging the robust repository.
 func (s *StoryFragmentService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	start := time.Now()
 	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -43,11 +48,14 @@ func (s *StoryFragmentService) GetAllIDs(tenantCtx *tenant.Context) ([]string, e
 		ids[i] = storyFragment.ID
 	}
 
+	s.logger.Content().Info("Successfully retrieved all storyfragment IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+
 	return ids, nil
 }
 
 // GetByID returns a storyfragment by ID (cache-first via repository)
 func (s *StoryFragmentService) GetByID(tenantCtx *tenant.Context, id string) (*content.StoryFragmentNode, error) {
+	start := time.Now()
 	if id == "" {
 		return nil, fmt.Errorf("storyfragment ID cannot be empty")
 	}
@@ -58,11 +66,14 @@ func (s *StoryFragmentService) GetByID(tenantCtx *tenant.Context, id string) (*c
 		return nil, fmt.Errorf("failed to get storyfragment %s: %w", id, err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved storyfragment by ID", "tenantId", tenantCtx.TenantID, "storyfragmentId", id, "found", storyFragment != nil, "duration", time.Since(start))
+
 	return storyFragment, nil
 }
 
 // GetByIDs returns multiple storyfragments by IDs (cache-first with bulk loading via repository)
 func (s *StoryFragmentService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.StoryFragmentNode, error) {
+	start := time.Now()
 	if len(ids) == 0 {
 		return []*content.StoryFragmentNode{}, nil
 	}
@@ -73,11 +84,14 @@ func (s *StoryFragmentService) GetByIDs(tenantCtx *tenant.Context, ids []string)
 		return nil, fmt.Errorf("failed to get storyfragments by IDs from repository: %w", err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved storyfragments by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(storyFragments), "duration", time.Since(start))
+
 	return storyFragments, nil
 }
 
 // GetBySlug returns a storyfragment by slug (cache-first via repository)
 func (s *StoryFragmentService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.StoryFragmentNode, error) {
+	start := time.Now()
 	if slug == "" {
 		return nil, fmt.Errorf("storyfragment slug cannot be empty")
 	}
@@ -88,11 +102,14 @@ func (s *StoryFragmentService) GetBySlug(tenantCtx *tenant.Context, slug string)
 		return nil, fmt.Errorf("failed to get storyfragment by slug %s: %w", slug, err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved storyfragment by slug", "tenantId", tenantCtx.TenantID, "slug", slug, "found", storyFragment != nil, "duration", time.Since(start))
+
 	return storyFragment, nil
 }
 
 // GetFullPayloadBySlug returns a storyfragment with full editorial payload (cache-first)
 func (s *StoryFragmentService) GetFullPayloadBySlug(tenantCtx *tenant.Context, slug string) (*StoryFragmentFullPayload, error) {
+	start := time.Now()
 	if slug == "" {
 		return nil, fmt.Errorf("storyfragment slug cannot be empty")
 	}
@@ -143,11 +160,14 @@ func (s *StoryFragmentService) GetFullPayloadBySlug(tenantCtx *tenant.Context, s
 		payload.Panes = panes
 	}
 
+	s.logger.Content().Info("Successfully retrieved storyfragment full payload by slug", "tenantId", tenantCtx.TenantID, "slug", slug, "hasMenu", payload.Menu != nil, "hasTractStack", payload.TractStack != nil, "paneCount", len(payload.Panes), "duration", time.Since(start))
+
 	return payload, nil
 }
 
 // GetHome returns the home storyfragment by reading the home slug from the tenant's configuration.
 func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.StoryFragmentNode, error) {
+	start := time.Now()
 	if tenantCtx == nil || tenantCtx.Config == nil || tenantCtx.Config.BrandConfig == nil {
 		return nil, fmt.Errorf("tenant context or configuration is not available")
 	}
@@ -162,5 +182,8 @@ func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.Stor
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home storyfragment by slug '%s': %w", homeSlug, err)
 	}
+
+	s.logger.Content().Info("Successfully retrieved home storyfragment", "tenantId", tenantCtx.TenantID, "homeSlug", homeSlug, "found", storyFragment != nil, "duration", time.Since(start))
+
 	return storyFragment, nil
 }

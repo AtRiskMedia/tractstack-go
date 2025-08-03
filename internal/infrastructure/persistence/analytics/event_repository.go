@@ -15,6 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/analytics"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // SQLEventRepository handles real-time event persistence to database.

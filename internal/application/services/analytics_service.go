@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -22,13 +23,18 @@ type SankeyFilters struct {
 	EndHour        *int    `json:"endHour,omitempty"`
 }
 
-type AnalyticsService struct{}
+type AnalyticsService struct {
+	logger *logging.ChanneledLogger
+}
 
-func NewAnalyticsService() *AnalyticsService {
-	return &AnalyticsService{}
+func NewAnalyticsService(logger *logging.ChanneledLogger) *AnalyticsService {
+	return &AnalyticsService{
+		logger: logger,
+	}
 }
 
 func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, epinetID string, visitorType string, startHour, endHour *int) ([]UserCount, error) {
+	start := time.Now()
 	var hourKeys []string
 	if startHour != nil && endHour != nil {
 		hourKeys = s.getHourKeysForCustomRange(*startHour, *endHour)
@@ -71,6 +77,8 @@ func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, e
 		}
 		return userCounts[i].ID < userCounts[j].ID
 	})
+
+	s.logger.Analytics().Info("Successfully retrieved filtered visitor counts", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "visitorType", visitorType, "count", len(userCounts), "duration", time.Since(start))
 
 	return userCounts, nil
 }

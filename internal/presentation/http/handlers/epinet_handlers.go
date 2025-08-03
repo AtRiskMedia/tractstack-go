@@ -3,8 +3,10 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -17,17 +19,21 @@ type EpinetIDsRequest struct {
 // EpinetHandlers contains all epinet-related HTTP handlers
 type EpinetHandlers struct {
 	epinetService *services.EpinetService
+	logger        *logging.ChanneledLogger
 }
 
 // NewEpinetHandlers creates epinet handlers with injected dependencies
-func NewEpinetHandlers(epinetService *services.EpinetService) *EpinetHandlers {
+func NewEpinetHandlers(epinetService *services.EpinetService, logger *logging.ChanneledLogger) *EpinetHandlers {
 	return &EpinetHandlers{
 		epinetService: epinetService,
+		logger:        logger,
 	}
 }
 
 // GetAllEpinetIDs returns all epinet IDs using cache-first pattern
 func (h *EpinetHandlers) GetAllEpinetIDs(c *gin.Context) {
+	start := time.Now()
+	h.logger.Content().Debug("Received get all epinet IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -40,6 +46,8 @@ func (h *EpinetHandlers) GetAllEpinetIDs(c *gin.Context) {
 		return
 	}
 
+	h.logger.Content().Info("Get all epinet IDs request completed", "count", len(epinetIDs), "duration", time.Since(start))
+
 	c.JSON(http.StatusOK, gin.H{
 		"epinetIds": epinetIDs,
 		"count":     len(epinetIDs),
@@ -48,6 +56,8 @@ func (h *EpinetHandlers) GetAllEpinetIDs(c *gin.Context) {
 
 // GetEpinetsByIDs returns multiple epinets by IDs using cache-first pattern
 func (h *EpinetHandlers) GetEpinetsByIDs(c *gin.Context) {
+	start := time.Now()
+	h.logger.Content().Debug("Received get epinets by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -71,6 +81,8 @@ func (h *EpinetHandlers) GetEpinetsByIDs(c *gin.Context) {
 		return
 	}
 
+	h.logger.Content().Info("Get epinets by IDs request completed", "requestedCount", len(req.EpinetIDs), "foundCount", len(epinets), "duration", time.Since(start))
+
 	c.JSON(http.StatusOK, gin.H{
 		"epinets": epinets,
 		"count":   len(epinets),
@@ -79,6 +91,8 @@ func (h *EpinetHandlers) GetEpinetsByIDs(c *gin.Context) {
 
 // GetEpinetByID returns a specific epinet by ID using cache-first pattern
 func (h *EpinetHandlers) GetEpinetByID(c *gin.Context) {
+	start := time.Now()
+	h.logger.Content().Debug("Received get epinet by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "epinetId", c.Param("id"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -101,6 +115,8 @@ func (h *EpinetHandlers) GetEpinetByID(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "epinet not found"})
 		return
 	}
+
+	h.logger.Content().Info("Get epinet by ID request completed", "epinetId", epinetID, "found", epinetNode != nil, "duration", time.Since(start))
 
 	c.JSON(http.StatusOK, epinetNode)
 }

@@ -4,23 +4,28 @@ package services
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // MenuService orchestrates menu operations with cache-first repository pattern
 type MenuService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewMenuService creates a new menu service singleton
-func NewMenuService() *MenuService {
-	return &MenuService{}
+func NewMenuService(logger *logging.ChanneledLogger) *MenuService {
+	return &MenuService{
+		logger: logger,
+	}
 }
 
 // GetAllIDs returns all menu IDs for a tenant by leveraging the robust repository.
 func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	start := time.Now()
 	menuRepo := tenantCtx.MenuRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -36,11 +41,17 @@ func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 		ids[i] = menu.ID
 	}
 
+	s.logger.Content().Info("Successfully retrieved all menu IDs",
+		"tenantId", tenantCtx.TenantID,
+		"count", len(ids),
+		"duration", time.Since(start))
+
 	return ids, nil
 }
 
 // GetByID returns a menu by ID (cache-first via repository)
 func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.MenuNode, error) {
+	start := time.Now()
 	if id == "" {
 		return nil, fmt.Errorf("menu ID cannot be empty")
 	}
@@ -51,11 +62,18 @@ func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.Me
 		return nil, fmt.Errorf("failed to get menu %s: %w", id, err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved menu by ID",
+		"tenantId", tenantCtx.TenantID,
+		"menuId", id,
+		"found", menu != nil,
+		"duration", time.Since(start))
+
 	return menu, nil
 }
 
 // GetByIDs returns multiple menus by IDs (cache-first with bulk loading via repository)
 func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.MenuNode, error) {
+	start := time.Now()
 	if len(ids) == 0 {
 		return []*content.MenuNode{}, nil
 	}
@@ -66,11 +84,14 @@ func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*cont
 		return nil, fmt.Errorf("failed to get menus by IDs from repository: %w", err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved menus by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(menus), "duration", time.Since(start))
+
 	return menus, nil
 }
 
 // Create creates a new menu
 func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) error {
+	start := time.Now()
 	if menu == nil {
 		return fmt.Errorf("menu cannot be nil")
 	}
@@ -87,11 +108,14 @@ func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) 
 		return fmt.Errorf("failed to create menu %s: %w", menu.ID, err)
 	}
 
+	s.logger.Content().Info("Successfully created menu", "tenantId", tenantCtx.TenantID, "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
+
 	return nil
 }
 
 // Update updates an existing menu
 func (s *MenuService) Update(tenantCtx *tenant.Context, menu *content.MenuNode) error {
+	start := time.Now()
 	if menu == nil {
 		return fmt.Errorf("menu cannot be nil")
 	}
@@ -118,11 +142,14 @@ func (s *MenuService) Update(tenantCtx *tenant.Context, menu *content.MenuNode) 
 		return fmt.Errorf("failed to update menu %s: %w", menu.ID, err)
 	}
 
+	s.logger.Content().Info("Successfully updated menu", "tenantId", tenantCtx.TenantID, "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
+
 	return nil
 }
 
 // Delete deletes a menu
 func (s *MenuService) Delete(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
 	if id == "" {
 		return fmt.Errorf("menu ID cannot be empty")
 	}
@@ -142,6 +169,8 @@ func (s *MenuService) Delete(tenantCtx *tenant.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to delete menu %s: %w", id, err)
 	}
+
+	s.logger.Content().Info("Successfully deleted menu", "tenantId", tenantCtx.TenantID, "menuId", id, "duration", time.Since(start))
 
 	return nil
 }

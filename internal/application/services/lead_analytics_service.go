@@ -3,6 +3,7 @@ package services
 import (
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -15,13 +16,18 @@ type LeadMetrics struct {
 	Attribution      map[string]any `json:"attribution"`
 }
 
-type LeadAnalyticsService struct{}
+type LeadAnalyticsService struct {
+	logger *logging.ChanneledLogger
+}
 
-func NewLeadAnalyticsService() *LeadAnalyticsService {
-	return &LeadAnalyticsService{}
+func NewLeadAnalyticsService(logger *logging.ChanneledLogger) *LeadAnalyticsService {
+	return &LeadAnalyticsService{
+		logger: logger,
+	}
 }
 
 func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, startHour, endHour int) (*LeadMetrics, error) {
+	start := time.Now()
 	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
 
 	totalVisitors := s.getTotalVisitors(tenantCtx, hourKeys)
@@ -36,6 +42,8 @@ func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, sta
 	leadSources := s.getLeadSources(tenantCtx)
 	conversionFunnel := s.getConversionFunnel(tenantCtx, hourKeys)
 	attribution := s.getAttribution(tenantCtx)
+
+	s.logger.Analytics().Info("Successfully computed lead metrics", "tenantId", tenantCtx.TenantID, "startHour", startHour, "endHour", endHour, "totalLeads", totalLeads, "newLeads", newLeads, "conversionRate", conversionRate, "duration", time.Since(start))
 
 	return &LeadMetrics{
 		TotalLeads:       totalLeads,

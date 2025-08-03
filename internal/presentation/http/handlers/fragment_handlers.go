@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -12,18 +14,22 @@ import (
 // This is a thin wrapper around FragmentService following the established pattern
 type FragmentHandlers struct {
 	fragmentService *services.FragmentService
+	logger          *logging.ChanneledLogger
 }
 
 // NewFragmentHandlers creates a new fragment handlers instance
-func NewFragmentHandlers(fragmentService *services.FragmentService) *FragmentHandlers {
+func NewFragmentHandlers(fragmentService *services.FragmentService, logger *logging.ChanneledLogger) *FragmentHandlers {
 	return &FragmentHandlers{
 		fragmentService: fragmentService,
+		logger:          logger,
 	}
 }
 
 // GetPaneFragment handles GET /api/v1/fragments/panes/:id
 // This implements the exact API contract from legacy api/pane_fragment_handler.go
 func (h *FragmentHandlers) GetPaneFragment(c *gin.Context) {
+	start := time.Now()
+	h.logger.Content().Debug("Received get fragment request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	// Extract tenant context from middleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -49,7 +55,8 @@ func (h *FragmentHandlers) GetPaneFragment(c *gin.Context) {
 		return
 	}
 
-	// Return HTML content with proper content type
+	h.logger.Content().Info("Get fragment request completed", "duration", time.Since(start))
+
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 

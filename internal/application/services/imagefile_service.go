@@ -4,23 +4,28 @@ package services
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ImageFileService orchestrates imagefile operations with cache-first repository pattern
 type ImageFileService struct {
-	// No stored dependencies - all passed via tenant context
+	logger *logging.ChanneledLogger
 }
 
 // NewImageFileService creates a new imagefile service singleton
-func NewImageFileService() *ImageFileService {
-	return &ImageFileService{}
+func NewImageFileService(logger *logging.ChanneledLogger) *ImageFileService {
+	return &ImageFileService{
+		logger: logger,
+	}
 }
 
 // GetAllIDs returns all imagefile IDs for a tenant by leveraging the robust repository.
 func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
+	start := time.Now()
 	imageFileRepo := tenantCtx.ImageFileRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -35,11 +40,14 @@ func (s *ImageFileService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error
 		ids[i] = imageFile.ID
 	}
 
+	s.logger.Content().Info("Successfully retrieved all imagefile IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+
 	return ids, nil
 }
 
 // GetByID returns an imagefile by ID (cache-first via repository)
 func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*content.ImageFileNode, error) {
+	start := time.Now()
 	if id == "" {
 		return nil, fmt.Errorf("imagefile ID cannot be empty")
 	}
@@ -50,11 +58,14 @@ func (s *ImageFileService) GetByID(tenantCtx *tenant.Context, id string) (*conte
 		return nil, fmt.Errorf("failed to get imagefile %s: %w", id, err)
 	}
 
+	s.logger.Content().Info("Successfully retrieved imagefile by ID", "tenantId", tenantCtx.TenantID, "imagefileId", id, "found", imageFile != nil, "duration", time.Since(start))
+
 	return imageFile, nil
 }
 
 // GetByIDs returns multiple imagefiles by IDs (cache-first with bulk loading via repository)
 func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ImageFileNode, error) {
+	start := time.Now()
 	if len(ids) == 0 {
 		return []*content.ImageFileNode{}, nil
 	}
@@ -64,6 +75,8 @@ func (s *ImageFileService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("failed to get imagefiles by IDs from repository: %w", err)
 	}
+
+	s.logger.Content().Info("Successfully retrieved imagefiles by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(imageFiles), "duration", time.Since(start))
 
 	return imageFiles, nil
 }

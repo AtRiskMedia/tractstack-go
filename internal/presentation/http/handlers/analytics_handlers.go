@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/adapters"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
@@ -26,6 +28,7 @@ type AnalyticsHandlers struct {
 	contentAnalyticsService   *services.ContentAnalyticsService
 	warmingService            *services.WarmingService
 	tenantManager             *tenant.Manager
+	logger                    *logging.ChanneledLogger
 }
 
 // NewAnalyticsHandlers creates analytics handlers with injected dependencies
@@ -37,6 +40,7 @@ func NewAnalyticsHandlers(
 	contentAnalyticsService *services.ContentAnalyticsService,
 	warmingService *services.WarmingService,
 	tenantManager *tenant.Manager,
+	logger *logging.ChanneledLogger,
 ) *AnalyticsHandlers {
 	return &AnalyticsHandlers{
 		analyticsService:          analyticsService,
@@ -46,11 +50,14 @@ func NewAnalyticsHandlers(
 		contentAnalyticsService:   contentAnalyticsService,
 		warmingService:            warmingService,
 		tenantManager:             tenantManager,
+		logger:                    logger,
 	}
 }
 
 // HandleDashboardAnalytics handles GET /api/v1/analytics/dashboard
 func (h *AnalyticsHandlers) HandleDashboardAnalytics(c *gin.Context) {
+	start := time.Now()
+	h.logger.Analytics().Debug("Received dashboard analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -79,11 +86,14 @@ func (h *AnalyticsHandlers) HandleDashboardAnalytics(c *gin.Context) {
 		return
 	}
 
+	h.logger.Analytics().Info("Dashboard analytics request completed", "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
 	c.JSON(http.StatusOK, gin.H{"dashboard": dashboard})
 }
 
 // HandleEpinetSankey handles GET /api/v1/analytics/epinets/:id
 func (h *AnalyticsHandlers) HandleEpinetSankey(c *gin.Context) {
+	start := time.Now()
+	h.logger.Analytics().Debug("Received epinet analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -126,6 +136,7 @@ func (h *AnalyticsHandlers) HandleEpinetSankey(c *gin.Context) {
 	userCounts, _ := h.analyticsService.GetFilteredVisitorCounts(tenantCtx, epinetID, visitorType, &startHour, &endHour)
 	hourlyNodeActivity, _ := h.contentAnalyticsService.GetHourlyNodeActivity(tenantCtx, epinetID, &startHour, &endHour)
 
+	h.logger.Analytics().Info("Epinet analytics request completed", "epinetId", epinetID, "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
 	c.JSON(http.StatusOK, gin.H{
 		"epinet":             epinet,
 		"userCounts":         userCounts,
@@ -135,6 +146,8 @@ func (h *AnalyticsHandlers) HandleEpinetSankey(c *gin.Context) {
 
 // HandleStoryfragmentAnalytics handles GET /api/v1/analytics/storyfragments
 func (h *AnalyticsHandlers) HandleStoryfragmentAnalytics(c *gin.Context) {
+	start := time.Now()
+	h.logger.Analytics().Debug("Received storyfragment analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -162,11 +175,14 @@ func (h *AnalyticsHandlers) HandleStoryfragmentAnalytics(c *gin.Context) {
 		return
 	}
 
+	h.logger.Analytics().Info("Storyfragment analytics request completed", "epinetId", epinetID, "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
 	c.JSON(http.StatusOK, gin.H{"storyfragments": storyfragments})
 }
 
 // HandleLeadMetrics handles GET /api/v1/analytics/leads
 func (h *AnalyticsHandlers) HandleLeadMetrics(c *gin.Context) {
+	start := time.Now()
+	h.logger.Analytics().Debug("Received lead analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -194,11 +210,14 @@ func (h *AnalyticsHandlers) HandleLeadMetrics(c *gin.Context) {
 		return
 	}
 
+	h.logger.Analytics().Info("Lead analytics request completed", "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
 	c.JSON(http.StatusOK, gin.H{"leads": leadMetrics})
 }
 
 // HandleAllAnalytics provides a composite analytics response.
 func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
+	start := time.Now()
+	h.logger.Analytics().Debug("Received all analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -298,6 +317,7 @@ func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
 		return
 	}
 
+	h.logger.Analytics().Info("All analytics request completed", "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
 	c.JSON(http.StatusOK, gin.H{
 		"dashboard":          dashboard,
 		"leads":              leadMetrics,
