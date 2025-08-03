@@ -8,6 +8,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -23,21 +24,25 @@ type ResourceIDsRequest struct {
 type ResourceHandlers struct {
 	resourceService *services.ResourceService
 	logger          *logging.ChanneledLogger
+	perfTracker     *performance.Tracker
 }
 
 // NewResourceHandlers creates resource handlers with injected dependencies
-func NewResourceHandlers(resourceService *services.ResourceService, logger *logging.ChanneledLogger) *ResourceHandlers {
+func NewResourceHandlers(resourceService *services.ResourceService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ResourceHandlers {
 	return &ResourceHandlers{
 		resourceService: resourceService,
 		logger:          logger,
+		perfTracker:     perfTracker,
 	}
 }
 
 // GetAllResourceIDs returns all resource IDs using cache-first pattern
 func (h *ResourceHandlers) GetAllResourceIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get all resource IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_all_resource_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get all resource IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -50,6 +55,9 @@ func (h *ResourceHandlers) GetAllResourceIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get all resource IDs request completed", "count", len(resourceIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetAllResourceIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
 	c.JSON(http.StatusOK, gin.H{
 		"resourceIds": resourceIDs,
 		"count":       len(resourceIDs),
@@ -58,9 +66,11 @@ func (h *ResourceHandlers) GetAllResourceIDs(c *gin.Context) {
 
 // GetResourcesByIDs returns multiple resources by IDs/filters using cache-first pattern
 func (h *ResourceHandlers) GetResourcesByIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get resources by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_resources_by_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get resources by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -90,6 +100,8 @@ func (h *ResourceHandlers) GetResourcesByIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get resources by IDs request completed", "requestedCount", len(req.ResourceIDs), "foundCount", len(resources), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetResourcesByIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(req.ResourceIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"resources": resources,
@@ -99,9 +111,11 @@ func (h *ResourceHandlers) GetResourcesByIDs(c *gin.Context) {
 
 // GetResourceByID returns a specific resource by ID using cache-first pattern
 func (h *ResourceHandlers) GetResourceByID(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get resource by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "resourceId", c.Param("id"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_resource_by_id_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get resource by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "resourceId", c.Param("id"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -125,15 +139,19 @@ func (h *ResourceHandlers) GetResourceByID(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get resource by ID request completed", "resourceId", resourceID, "found", resourceNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetResourceByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resourceID)
 
 	c.JSON(http.StatusOK, resourceNode)
 }
 
 // GetResourceBySlug returns a specific resource by slug using cache-first pattern
 func (h *ResourceHandlers) GetResourceBySlug(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get resource by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_resource_by_slug_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get resource by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -157,12 +175,17 @@ func (h *ResourceHandlers) GetResourceBySlug(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get resource by slug request completed", "slug", slug, "found", resourceNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetResourceBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
+
 	c.JSON(http.StatusOK, resourceNode)
 }
 
 // CreateResource creates a new resource
 func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	marker := h.perfTracker.StartOperation("create_resource_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -180,6 +203,9 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 		return
 	}
 
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message":    "resource created successfully",
 		"resourceId": resource.ID,
@@ -189,6 +215,8 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 // UpdateResource updates an existing resource
 func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	marker := h.perfTracker.StartOperation("update_resource_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -215,6 +243,9 @@ func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 		return
 	}
 
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "resource updated successfully",
 		"resourceId": resource.ID,
@@ -224,6 +255,8 @@ func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 // DeleteResource deletes a resource
 func (h *ResourceHandlers) DeleteResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	marker := h.perfTracker.StartOperation("delete_resource_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -240,6 +273,9 @@ func (h *ResourceHandlers) DeleteResource(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resourceID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "resource deleted successfully",

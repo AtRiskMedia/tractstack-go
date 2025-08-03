@@ -8,24 +8,29 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // BeliefService orchestrates belief operations with cache-first repository pattern
 type BeliefService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewBeliefService creates a new belief service singleton
-func NewBeliefService(logger *logging.ChanneledLogger) *BeliefService {
+func NewBeliefService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *BeliefService {
 	return &BeliefService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 // GetAllIDs returns all belief IDs for a tenant by leveraging the robust repository.
 func (s *BeliefService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_all_belief_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	beliefRepo := tenantCtx.BeliefRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -41,6 +46,8 @@ func (s *BeliefService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	}
 
 	s.logger.Content().Info("Successfully retrieved all belief IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetAllBeliefIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return ids, nil
 }
@@ -48,6 +55,8 @@ func (s *BeliefService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 // GetByID returns a belief by ID (cache-first via repository)
 func (s *BeliefService) GetByID(tenantCtx *tenant.Context, id string) (*content.BeliefNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_belief_by_id", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return nil, fmt.Errorf("belief ID cannot be empty")
 	}
@@ -59,6 +68,8 @@ func (s *BeliefService) GetByID(tenantCtx *tenant.Context, id string) (*content.
 	}
 
 	s.logger.Content().Info("Successfully retrieved belief by ID", "tenantId", tenantCtx.TenantID, "beliefId", id, "found", belief != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetBeliefByID", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", id)
 
 	return belief, nil
 }
@@ -66,6 +77,8 @@ func (s *BeliefService) GetByID(tenantCtx *tenant.Context, id string) (*content.
 // GetByIDs returns multiple beliefs by IDs (cache-first with bulk loading via repository)
 func (s *BeliefService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.BeliefNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_beliefs_by_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	if len(ids) == 0 {
 		return []*content.BeliefNode{}, nil
 	}
@@ -77,6 +90,8 @@ func (s *BeliefService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*co
 	}
 
 	s.logger.Content().Info("Successfully retrieved beliefs by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(beliefs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetBeliefsByIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(ids))
 
 	return beliefs, nil
 }
@@ -84,6 +99,8 @@ func (s *BeliefService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*co
 // GetBySlug returns a belief by slug (cache-first via repository)
 func (s *BeliefService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.BeliefNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_belief_by_slug", tenantCtx.TenantID)
+	defer marker.Complete()
 	if slug == "" {
 		return nil, fmt.Errorf("belief slug cannot be empty")
 	}
@@ -95,6 +112,8 @@ func (s *BeliefService) GetBySlug(tenantCtx *tenant.Context, slug string) (*cont
 	}
 
 	s.logger.Content().Info("Successfully retrieved belief by slug", "tenantId", tenantCtx.TenantID, "slug", slug, "found", belief != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetBeliefBySlug", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	return belief, nil
 }
@@ -102,6 +121,8 @@ func (s *BeliefService) GetBySlug(tenantCtx *tenant.Context, slug string) (*cont
 // Create creates a new belief
 func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.BeliefNode) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_belief", tenantCtx.TenantID)
+	defer marker.Complete()
 	if belief == nil {
 		return fmt.Errorf("belief cannot be nil")
 	}
@@ -125,6 +146,8 @@ func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.Belief
 	}
 
 	s.logger.Content().Info("Successfully created belief", "tenantId", tenantCtx.TenantID, "beliefId", belief.ID, "title", belief.Title, "slug", belief.Slug, "scale", belief.Scale, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreateBelief", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", belief.ID)
 
 	return nil
 }
@@ -132,6 +155,8 @@ func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.Belief
 // Update updates an existing belief
 func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.BeliefNode) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_belief", tenantCtx.TenantID)
+	defer marker.Complete()
 	if belief == nil {
 		return fmt.Errorf("belief cannot be nil")
 	}
@@ -164,6 +189,8 @@ func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.Belief
 	}
 
 	s.logger.Content().Info("Successfully updated belief", "tenantId", tenantCtx.TenantID, "beliefId", belief.ID, "title", belief.Title, "slug", belief.Slug, "scale", belief.Scale, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateBelief", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", belief.ID)
 
 	return nil
 }
@@ -171,6 +198,8 @@ func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.Belief
 // Delete deletes a belief
 func (s *BeliefService) Delete(tenantCtx *tenant.Context, id string) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_belief", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return fmt.Errorf("belief ID cannot be empty")
 	}
@@ -191,6 +220,8 @@ func (s *BeliefService) Delete(tenantCtx *tenant.Context, id string) error {
 	}
 
 	s.logger.Content().Info("Successfully deleted belief", "tenantId", tenantCtx.TenantID, "beliefId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeleteBelief", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", id)
 
 	return nil
 }

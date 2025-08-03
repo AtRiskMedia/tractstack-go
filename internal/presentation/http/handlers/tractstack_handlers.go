@@ -7,6 +7,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -20,25 +21,30 @@ type TractStackIDsRequest struct {
 type TractStackHandlers struct {
 	tractStackService *services.TractStackService
 	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
 }
 
 // NewTractStackHandlers creates tractstack handlers with injected dependencies
-func NewTractStackHandlers(tractStackService *services.TractStackService, logger *logging.ChanneledLogger) *TractStackHandlers {
+func NewTractStackHandlers(tractStackService *services.TractStackService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *TractStackHandlers {
 	return &TractStackHandlers{
 		tractStackService: tractStackService,
 		logger:            logger,
+		perfTracker:       perfTracker,
 	}
 }
 
 // GetAllTractStackIDs returns all tractstack IDs using cache-first pattern
 func (h *TractStackHandlers) GetAllTractStackIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get all tractstack IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_all_tractstack_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get all tractstack IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 
 	tractStackIDs, err := h.tractStackService.GetAllIDs(tenantCtx)
 	if err != nil {
@@ -47,6 +53,8 @@ func (h *TractStackHandlers) GetAllTractStackIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get all tractstack IDs request completed", "count", len(tractStackIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetAllTractStackIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"tractStackIds": tractStackIDs,
@@ -56,13 +64,16 @@ func (h *TractStackHandlers) GetAllTractStackIDs(c *gin.Context) {
 
 // GetTractStacksByIDs returns multiple tractstacks by IDs using cache-first pattern
 func (h *TractStackHandlers) GetTractStacksByIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get tractstacks by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_tractstacks_by_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get tractstacks by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 
 	var req TractStackIDsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -82,6 +93,8 @@ func (h *TractStackHandlers) GetTractStacksByIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get tractstacks by IDs request completed", "requestedCount", len(req.TractStackIDs), "foundCount", len(tractStacks), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetTractStacksByIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(req.TractStackIDs))
 
 	c.JSON(http.StatusOK, gin.H{
 		"tractStacks": tractStacks,
@@ -91,13 +104,16 @@ func (h *TractStackHandlers) GetTractStacksByIDs(c *gin.Context) {
 
 // GetTractStackByID returns a specific tractstack by ID using cache-first pattern
 func (h *TractStackHandlers) GetTractStackByID(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get tractstack by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "tractStackId", c.Param("id"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_tractstack_by_id_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get tractstack by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "tractStackId", c.Param("id"))
 
 	tractStackID := c.Param("id")
 	if tractStackID == "" {
@@ -117,19 +133,24 @@ func (h *TractStackHandlers) GetTractStackByID(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get tractstack by ID request completed", "tractStackId", tractStackID, "found", tractStackNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetTractStackByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", tractStackID)
 
 	c.JSON(http.StatusOK, tractStackNode)
 }
 
 // GetTractStackBySlug returns a specific tractstack by slug using cache-first pattern
 func (h *TractStackHandlers) GetTractStackBySlug(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get tractstack by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_tractstack_by_slug_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get tractstack by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 
 	slug := c.Param("slug")
 	if slug == "" {
@@ -149,6 +170,8 @@ func (h *TractStackHandlers) GetTractStackBySlug(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get tractstack by slug request completed", "slug", slug, "found", tractStackNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetTractStackBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	c.JSON(http.StatusOK, tractStackNode)
 }

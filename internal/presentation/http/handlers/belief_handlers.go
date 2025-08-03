@@ -8,6 +8,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -21,21 +22,25 @@ type BeliefIDsRequest struct {
 type BeliefHandlers struct {
 	beliefService *services.BeliefService
 	logger        *logging.ChanneledLogger
+	perfTracker   *performance.Tracker
 }
 
 // NewBeliefHandlers creates belief handlers with injected dependencies
-func NewBeliefHandlers(beliefService *services.BeliefService, logger *logging.ChanneledLogger) *BeliefHandlers {
+func NewBeliefHandlers(beliefService *services.BeliefService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *BeliefHandlers {
 	return &BeliefHandlers{
 		beliefService: beliefService,
 		logger:        logger,
+		perfTracker:   perfTracker,
 	}
 }
 
 // GetAllBeliefIDs returns all belief IDs using cache-first pattern
 func (h *BeliefHandlers) GetAllBeliefIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get all belief IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_all_belief_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get all belief IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -48,6 +53,8 @@ func (h *BeliefHandlers) GetAllBeliefIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get all belief IDs request completed", "count", len(beliefIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetAllBeliefIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"beliefIds": beliefIDs,
@@ -57,9 +64,11 @@ func (h *BeliefHandlers) GetAllBeliefIDs(c *gin.Context) {
 
 // GetBeliefsByIDs returns multiple beliefs by IDs using cache-first pattern
 func (h *BeliefHandlers) GetBeliefsByIDs(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get beliefs by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_beliefs_by_ids_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get beliefs by IDs request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -83,6 +92,9 @@ func (h *BeliefHandlers) GetBeliefsByIDs(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get beliefs by IDs request completed", "requestedCount", len(req.BeliefIDs), "foundCount", len(beliefs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetBeliefsByIDs request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(req.BeliefIDs))
+
 	c.JSON(http.StatusOK, gin.H{
 		"beliefs": beliefs,
 		"count":   len(beliefs),
@@ -91,9 +103,11 @@ func (h *BeliefHandlers) GetBeliefsByIDs(c *gin.Context) {
 
 // GetBeliefByID returns a specific belief by ID using cache-first pattern
 func (h *BeliefHandlers) GetBeliefByID(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get belief by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "beliefId", c.Param("id"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_belief_by_id_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get belief by ID request", "method", c.Request.Method, "path", c.Request.URL.Path, "beliefId", c.Param("id"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -117,15 +131,19 @@ func (h *BeliefHandlers) GetBeliefByID(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get belief by ID request completed", "beliefId", beliefID, "found", beliefNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetBeliefByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", beliefID)
 
 	c.JSON(http.StatusOK, beliefNode)
 }
 
 // GetBeliefBySlug returns a specific belief by slug using cache-first pattern
 func (h *BeliefHandlers) GetBeliefBySlug(c *gin.Context) {
-	start := time.Now()
-	h.logger.Content().Debug("Received get belief by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_belief_by_slug_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get belief by slug request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -149,6 +167,8 @@ func (h *BeliefHandlers) GetBeliefBySlug(c *gin.Context) {
 	}
 
 	h.logger.Content().Info("Get belief by slug request completed", "slug", slug, "found", beliefNode != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetBeliefBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	c.JSON(http.StatusOK, beliefNode)
 }
@@ -156,6 +176,8 @@ func (h *BeliefHandlers) GetBeliefBySlug(c *gin.Context) {
 // CreateBelief creates a new belief
 func (h *BeliefHandlers) CreateBelief(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	marker := h.perfTracker.StartOperation("create_belief_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -173,6 +195,9 @@ func (h *BeliefHandlers) CreateBelief(c *gin.Context) {
 		return
 	}
 
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateBelief request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "belief created successfully",
 		"beliefId": belief.ID,
@@ -182,6 +207,8 @@ func (h *BeliefHandlers) CreateBelief(c *gin.Context) {
 // UpdateBelief updates an existing belief
 func (h *BeliefHandlers) UpdateBelief(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	marker := h.perfTracker.StartOperation("update_belief_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -208,6 +235,9 @@ func (h *BeliefHandlers) UpdateBelief(c *gin.Context) {
 		return
 	}
 
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateBelief request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", belief.ID)
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "belief updated successfully",
 		"beliefId": belief.ID,
@@ -217,6 +247,8 @@ func (h *BeliefHandlers) UpdateBelief(c *gin.Context) {
 // DeleteBelief deletes a belief
 func (h *BeliefHandlers) DeleteBelief(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
+	marker := h.perfTracker.StartOperation("delete_belief_request", tenantCtx.TenantID)
+	defer marker.Complete()
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -233,6 +265,9 @@ func (h *BeliefHandlers) DeleteBelief(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteBelief request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", beliefID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "belief deleted successfully",

@@ -11,18 +11,21 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ContentMapService orchestrates content map building and caching
 type ContentMapService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewContentMapService creates a new content map service singleton
-func NewContentMapService(logger *logging.ChanneledLogger) *ContentMapService {
+func NewContentMapService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ContentMapService {
 	return &ContentMapService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
@@ -34,6 +37,8 @@ type ContentMapResponse struct {
 
 // GetContentMap returns content map with timestamp-based caching
 func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLastUpdated string, cache interfaces.ContentCache) (*ContentMapResponse, bool, error) {
+	marker := cms.perfTracker.StartOperation("get_content_map", tenantCtx.TenantID)
+	defer marker.Complete()
 	start := time.Now()
 	// Check cache first
 	if cachedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
@@ -55,11 +60,15 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 			if clientTimestamp, err := strconv.ParseInt(clientLastUpdated, 10, 64); err == nil {
 				if clientTimestamp == timestamp {
 					// Client has current version - return not modified
+					marker.SetSuccess(true)
+					cms.logger.Perf().Info("Performance for GetContentMap", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 					return nil, true, nil
 				}
 			}
 		}
 		// Return cached data
+		marker.SetSuccess(true)
+		cms.logger.Perf().Info("Performance for GetContentMap", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 		return &ContentMapResponse{
 			Data:        convertedItems,
 			LastUpdated: timestamp,
@@ -93,6 +102,8 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 
 	cms.logger.Content().Info("Successfully retrieved content map", "tenantId", tenantCtx.TenantID, "itemCount", len(convertedItems), "fromCache", true, "notModified", false, "duration", time.Since(start))
 
+	marker.SetSuccess(true)
+	cms.logger.Perf().Info("Performance for GetContentMap", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 	return &ContentMapResponse{
 		Data:        convertedItems,
 		LastUpdated: timestamp,
@@ -150,6 +161,8 @@ func (cms *ContentMapService) convertToFullContentMapItems(contentMap []*content
 
 // RefreshContentMap forces a refresh of the content map cache
 func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache interfaces.ContentCache) error {
+	marker := cms.perfTracker.StartOperation("refresh_content_map", tenantCtx.TenantID)
+	defer marker.Complete()
 	start := time.Now()
 	// Invalidate existing cache
 	cache.InvalidateContentCache(tenantCtx.TenantID)
@@ -169,5 +182,7 @@ func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache
 
 	cms.logger.Content().Info("Successfully refreshed content map", "tenantId", tenantCtx.TenantID, "itemCount", len(contentMap), "duration", time.Since(start))
 
+	marker.SetSuccess(true)
+	cms.logger.Perf().Info("Performance for RefreshContentMap", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 	return nil
 }

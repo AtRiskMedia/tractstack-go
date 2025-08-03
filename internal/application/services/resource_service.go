@@ -8,24 +8,29 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // ResourceService orchestrates resource operations with cache-first repository pattern
 type ResourceService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewResourceService creates a new resource service singleton
-func NewResourceService(logger *logging.ChanneledLogger) *ResourceService {
+func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ResourceService {
 	return &ResourceService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 // GetAllIDs returns all resource IDs for a tenant by leveraging the robust repository.
 func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_all_resource_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	resourceRepo := tenantCtx.ResourceRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -41,6 +46,8 @@ func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error)
 	}
 
 	s.logger.Content().Info("Successfully retrieved all resource IDs", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetAllResourceIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return ids, nil
 }
@@ -48,6 +55,8 @@ func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error)
 // GetByID returns a resource by ID (cache-first via repository)
 func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*content.ResourceNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_resource_by_id", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return nil, fmt.Errorf("resource ID cannot be empty")
 	}
@@ -59,6 +68,8 @@ func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*conten
 	}
 
 	s.logger.Content().Info("Successfully retrieved resource by ID", "tenantId", tenantCtx.TenantID, "resourceId", id, "found", resource != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetResourceByID", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", id)
 
 	return resource, nil
 }
@@ -66,6 +77,8 @@ func (s *ResourceService) GetByID(tenantCtx *tenant.Context, id string) (*conten
 // GetByIDs returns multiple resources by IDs (cache-first with bulk loading via repository)
 func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.ResourceNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_resources_by_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	if len(ids) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
@@ -77,6 +90,8 @@ func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*
 	}
 
 	s.logger.Content().Info("Successfully retrieved resources by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(resources), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetResourcesByIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(ids))
 
 	return resources, nil
 }
@@ -84,6 +99,8 @@ func (s *ResourceService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*
 // GetBySlug returns a resource by slug (cache-first via repository)
 func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*content.ResourceNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_resource_by_slug", tenantCtx.TenantID)
+	defer marker.Complete()
 	if slug == "" {
 		return nil, fmt.Errorf("resource slug cannot be empty")
 	}
@@ -95,6 +112,8 @@ func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*co
 	}
 
 	s.logger.Content().Info("Successfully retrieved resource by slug", "tenantId", tenantCtx.TenantID, "slug", slug, "found", resource != nil, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetResourceBySlug", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	return resource, nil
 }
@@ -102,6 +121,8 @@ func (s *ResourceService) GetBySlug(tenantCtx *tenant.Context, slug string) (*co
 // GetByFilters returns resources by multiple filter criteria (cache-first via repository)
 func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_resources_by_filters", tenantCtx.TenantID)
+	defer marker.Complete()
 	if len(ids) == 0 && len(categories) == 0 && len(slugs) == 0 {
 		return []*content.ResourceNode{}, nil
 	}
@@ -113,6 +134,8 @@ func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, 
 	}
 
 	s.logger.Content().Info("Successfully retrieved resources by filters", "tenantId", tenantCtx.TenantID, "idCount", len(ids), "categoryCount", len(categories), "slugCount", len(slugs), "foundCount", len(resources), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetByFilters", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return resources, nil
 }
@@ -120,6 +143,8 @@ func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, 
 // Create creates a new resource
 func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_resource", tenantCtx.TenantID)
+	defer marker.Complete()
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
 	}
@@ -140,6 +165,8 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 	}
 
 	s.logger.Content().Info("Successfully created resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreateResource", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
 
 	return nil
 }
@@ -147,6 +174,8 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 // Update updates an existing resource
 func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_resource", tenantCtx.TenantID)
+	defer marker.Complete()
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
 	}
@@ -176,6 +205,8 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 	}
 
 	s.logger.Content().Info("Successfully updated resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateResource", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
 
 	return nil
 }
@@ -183,6 +214,8 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 // Delete deletes a resource
 func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_resource", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return fmt.Errorf("resource ID cannot be empty")
 	}
@@ -203,6 +236,8 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	}
 
 	s.logger.Content().Info("Successfully deleted resource", "tenantId", tenantCtx.TenantID, "resourceId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeleteResource", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", id)
 
 	return nil
 }

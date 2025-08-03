@@ -23,18 +23,18 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	r.Use(cors.New(config))
 
 	// Initialize all handler structs with injected singleton services and logger
-	menuHandlers := handlers.NewMenuHandlers(container.MenuService, container.Logger)
-	paneHandlers := handlers.NewPaneHandlers(container.PaneService, container.Logger)
-	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService, container.Logger)
-	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.Logger)
-	tractStackHandlers := handlers.NewTractStackHandlers(container.TractStackService, container.Logger)
-	beliefHandlers := handlers.NewBeliefHandlers(container.BeliefService, container.Logger)
-	imageFileHandlers := handlers.NewImageFileHandlers(container.ImageFileService, container.Logger)
-	epinetHandlers := handlers.NewEpinetHandlers(container.EpinetService, container.Logger)
-	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService, container.Logger)
-	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService, container.Logger)
-	configHandlers := handlers.NewConfigHandlers(container.Logger)
-	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService, container.Logger)
+	menuHandlers := handlers.NewMenuHandlers(container.MenuService, container.Logger, container.PerfTracker)
+	paneHandlers := handlers.NewPaneHandlers(container.PaneService, container.Logger, container.PerfTracker)
+	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService, container.Logger, container.PerfTracker)
+	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.Logger, container.PerfTracker)
+	tractStackHandlers := handlers.NewTractStackHandlers(container.TractStackService, container.Logger, container.PerfTracker)
+	beliefHandlers := handlers.NewBeliefHandlers(container.BeliefService, container.Logger, container.PerfTracker)
+	imageFileHandlers := handlers.NewImageFileHandlers(container.ImageFileService, container.Logger, container.PerfTracker)
+	epinetHandlers := handlers.NewEpinetHandlers(container.EpinetService, container.Logger, container.PerfTracker)
+	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService, container.Logger, container.PerfTracker)
+	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService, container.Logger, container.PerfTracker)
+	configHandlers := handlers.NewConfigHandlers(container.Logger, container.PerfTracker)
+	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService, container.Logger, container.PerfTracker)
 	analyticsHandlers := handlers.NewAnalyticsHandlers(
 		container.AnalyticsService,
 		container.DashboardAnalyticsService,
@@ -44,6 +44,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.WarmingService,
 		container.TenantManager,
 		container.Logger,
+		container.PerfTracker,
 	)
 
 	// API routes with tenant middleware

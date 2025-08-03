@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -41,17 +42,21 @@ type EpinetConfig struct {
 }
 
 type DashboardAnalyticsService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
-func NewDashboardAnalyticsService(logger *logging.ChanneledLogger) *DashboardAnalyticsService {
+func NewDashboardAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *DashboardAnalyticsService {
 	return &DashboardAnalyticsService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, startHour, endHour int) (*DashboardAnalytics, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("compute_dashboard", tenantCtx.TenantID)
+	defer marker.Complete()
 	epinets, err := s.getEpinets(tenantCtx)
 	if err != nil {
 		return nil, err
@@ -72,6 +77,8 @@ func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, 
 	}
 
 	s.logger.Analytics().Info("Successfully computed dashboard analytics", "tenantId", tenantCtx.TenantID, "startHour", startHour, "endHour", endHour, "epinetCount", len(epinets), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for ComputeDashboard", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return &DashboardAnalytics{
 		Stats:      stats,

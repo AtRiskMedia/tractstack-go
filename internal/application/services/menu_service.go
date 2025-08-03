@@ -8,24 +8,29 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // MenuService orchestrates menu operations with cache-first repository pattern
 type MenuService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
 // NewMenuService creates a new menu service singleton
-func NewMenuService(logger *logging.ChanneledLogger) *MenuService {
+func NewMenuService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *MenuService {
 	return &MenuService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 // GetAllIDs returns all menu IDs for a tenant by leveraging the robust repository.
 func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_all_menu_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	menuRepo := tenantCtx.MenuRepo()
 
 	// The repository's FindAll method is now the cache-aware entry point.
@@ -45,6 +50,8 @@ func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 		"tenantId", tenantCtx.TenantID,
 		"count", len(ids),
 		"duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetAllMenuIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return ids, nil
 }
@@ -52,6 +59,8 @@ func (s *MenuService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 // GetByID returns a menu by ID (cache-first via repository)
 func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.MenuNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_menu_by_id", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return nil, fmt.Errorf("menu ID cannot be empty")
 	}
@@ -67,6 +76,8 @@ func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.Me
 		"menuId", id,
 		"found", menu != nil,
 		"duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetMenuByID", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", id)
 
 	return menu, nil
 }
@@ -74,6 +85,8 @@ func (s *MenuService) GetByID(tenantCtx *tenant.Context, id string) (*content.Me
 // GetByIDs returns multiple menus by IDs (cache-first with bulk loading via repository)
 func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*content.MenuNode, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_menus_by_ids", tenantCtx.TenantID)
+	defer marker.Complete()
 	if len(ids) == 0 {
 		return []*content.MenuNode{}, nil
 	}
@@ -85,6 +98,8 @@ func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*cont
 	}
 
 	s.logger.Content().Info("Successfully retrieved menus by IDs", "tenantId", tenantCtx.TenantID, "requestedCount", len(ids), "foundCount", len(menus), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetMenusByIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(ids))
 
 	return menus, nil
 }
@@ -92,6 +107,8 @@ func (s *MenuService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*cont
 // Create creates a new menu
 func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_menu", tenantCtx.TenantID)
+	defer marker.Complete()
 	if menu == nil {
 		return fmt.Errorf("menu cannot be nil")
 	}
@@ -109,6 +126,8 @@ func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) 
 	}
 
 	s.logger.Content().Info("Successfully created menu", "tenantId", tenantCtx.TenantID, "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreateMenu", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menu.ID)
 
 	return nil
 }
@@ -116,6 +135,8 @@ func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) 
 // Update updates an existing menu
 func (s *MenuService) Update(tenantCtx *tenant.Context, menu *content.MenuNode) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_menu", tenantCtx.TenantID)
+	defer marker.Complete()
 	if menu == nil {
 		return fmt.Errorf("menu cannot be nil")
 	}
@@ -143,6 +164,8 @@ func (s *MenuService) Update(tenantCtx *tenant.Context, menu *content.MenuNode) 
 	}
 
 	s.logger.Content().Info("Successfully updated menu", "tenantId", tenantCtx.TenantID, "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateMenu", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menu.ID)
 
 	return nil
 }
@@ -150,6 +173,8 @@ func (s *MenuService) Update(tenantCtx *tenant.Context, menu *content.MenuNode) 
 // Delete deletes a menu
 func (s *MenuService) Delete(tenantCtx *tenant.Context, id string) error {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_menu", tenantCtx.TenantID)
+	defer marker.Complete()
 	if id == "" {
 		return fmt.Errorf("menu ID cannot be empty")
 	}
@@ -171,6 +196,8 @@ func (s *MenuService) Delete(tenantCtx *tenant.Context, id string) error {
 	}
 
 	s.logger.Content().Info("Successfully deleted menu", "tenantId", tenantCtx.TenantID, "menuId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeleteMenu", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", id)
 
 	return nil
 }

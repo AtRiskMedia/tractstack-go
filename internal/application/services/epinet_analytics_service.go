@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -38,17 +39,21 @@ type potentialLink struct {
 }
 
 type EpinetAnalyticsService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
-func NewEpinetAnalyticsService(logger *logging.ChanneledLogger) *EpinetAnalyticsService {
+func NewEpinetAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *EpinetAnalyticsService {
 	return &EpinetAnalyticsService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, epinetID string, filters *SankeyFilters) (*SankeyDiagram, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("compute_epinet_sankey", tenantCtx.TenantID)
+	defer marker.Complete()
 	var hourKeys []string
 	if filters != nil && filters.StartHour != nil && filters.EndHour != nil {
 		hourKeys = s.getHourKeysForCustomRange(*filters.StartHour, *filters.EndHour)
@@ -149,6 +154,8 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 	}
 
 	s.logger.Analytics().Info("Successfully computed epinet sankey", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "nodeCount", len(finalNodes), "linkCount", len(finalLinks), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for ComputeEpinetSankey", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return &SankeyDiagram{
 		ID:    epinetID,

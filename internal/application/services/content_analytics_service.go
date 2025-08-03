@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -20,17 +21,21 @@ type StoryfragmentAnalytics struct {
 }
 
 type ContentAnalyticsService struct {
-	logger *logging.ChanneledLogger
+	logger      *logging.ChanneledLogger
+	perfTracker *performance.Tracker
 }
 
-func NewContentAnalyticsService(logger *logging.ChanneledLogger) *ContentAnalyticsService {
+func NewContentAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ContentAnalyticsService {
 	return &ContentAnalyticsService{
-		logger: logger,
+		logger:      logger,
+		perfTracker: perfTracker,
 	}
 }
 
 func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Context, epinetID string, startHour, endHour *int) (HourlyActivity, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_hourly_node_activity", tenantCtx.TenantID)
+	defer marker.Complete()
 	var hourKeys []string
 	if startHour != nil && endHour != nil {
 		hourKeys = s.getHourKeysForCustomRange(*startHour, *endHour)
@@ -94,11 +99,16 @@ func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Contex
 	}
 
 	s.logger.Analytics().Info("Successfully computed hourly node activity", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "hourCount", len(hourKeys), "activityHours", len(hourlyActivity), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetHourlyNodeActivity", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
 	return hourlyActivity, nil
 }
 
 func (s *ContentAnalyticsService) GetStoryfragmentAnalytics(tenantCtx *tenant.Context, epinetIDs []string, startHour, endHour int) ([]StoryfragmentAnalytics, error) {
 	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_storyfragment_analytics", tenantCtx.TenantID)
+	defer marker.Complete()
 	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
 
 	storyFragmentCounts := make(map[string]int)
@@ -151,6 +161,8 @@ func (s *ContentAnalyticsService) GetStoryfragmentAnalytics(tenantCtx *tenant.Co
 	}
 
 	s.logger.Analytics().Info("Successfully computed storyfragment analytics", "tenantId", tenantCtx.TenantID, "epinetCount", len(epinetIDs), "storyfragmentCount", len(result), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetStoryfragmentAnalytics", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return result, nil
 }

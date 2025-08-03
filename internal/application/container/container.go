@@ -46,7 +46,8 @@ type Container struct {
 	// Infrastructure Dependencies
 	TenantManager *tenant.Manager
 	CacheManager  *manager.Manager
-	Logger        *logging.ChanneledLogger // ADD THIS LINE
+	Logger        *logging.ChanneledLogger
+	PerfTracker   *performance.Tracker
 }
 
 // NewContainer creates and wires all singleton services
@@ -106,18 +107,18 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 	return &Container{
 		// Content Services (stateless singletons)
-		MenuService:           services.NewMenuService(logger),
-		PaneService:           services.NewPaneService(logger),
-		ResourceService:       services.NewResourceService(logger),
-		StoryFragmentService:  services.NewStoryFragmentService(logger),
-		TractStackService:     services.NewTractStackService(logger),
-		BeliefService:         services.NewBeliefService(logger),
-		ImageFileService:      services.NewImageFileService(logger),
-		EpinetService:         services.NewEpinetService(logger),
-		ContentMapService:     services.NewContentMapService(logger),
+		MenuService:           services.NewMenuService(logger, perfTracker),
+		PaneService:           services.NewPaneService(logger, perfTracker),
+		ResourceService:       services.NewResourceService(logger, perfTracker),
+		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker),
+		TractStackService:     services.NewTractStackService(logger, perfTracker),
+		BeliefService:         services.NewBeliefService(logger, perfTracker),
+		ImageFileService:      services.NewImageFileService(logger, perfTracker),
+		EpinetService:         services.NewEpinetService(logger, perfTracker),
+		ContentMapService:     services.NewContentMapService(logger, perfTracker),
 		OrphanAnalysisService: services.NewOrphanAnalysisService(logger),
 		BeliefRegistryService: services.NewBeliefRegistryService(logger),
-		WarmingService:        services.NewWarmingService(logger),
+		WarmingService:        services.NewWarmingService(logger, perfTracker),
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,
@@ -125,15 +126,16 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		FragmentService:      fragmentService,
 
 		// Analytics Services (stateless singletons)
-		AnalyticsService:          services.NewAnalyticsService(logger),
-		DashboardAnalyticsService: services.NewDashboardAnalyticsService(logger),
-		EpinetAnalyticsService:    services.NewEpinetAnalyticsService(logger),
-		LeadAnalyticsService:      services.NewLeadAnalyticsService(logger),
-		ContentAnalyticsService:   services.NewContentAnalyticsService(logger),
+		AnalyticsService:          services.NewAnalyticsService(logger, perfTracker),
+		DashboardAnalyticsService: services.NewDashboardAnalyticsService(logger, perfTracker),
+		EpinetAnalyticsService:    services.NewEpinetAnalyticsService(logger, perfTracker),
+		LeadAnalyticsService:      services.NewLeadAnalyticsService(logger, perfTracker),
+		ContentAnalyticsService:   services.NewContentAnalyticsService(logger, perfTracker),
 
 		// Infrastructure
 		TenantManager: tenantManager,
 		CacheManager:  cacheManager,
 		Logger:        logger,
+		PerfTracker:   perfTracker,
 	}
 }
