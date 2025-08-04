@@ -8,24 +8,28 @@ import (
 	"slices"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/golang-jwt/jwt/v4"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthService handles authentication workflows and JWT operations
 type AuthService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+	leadRepo    user.LeadRepository
 }
 
 // NewAuthService creates a new authentication service
-func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AuthService {
+func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, leadRepo user.LeadRepository) *AuthService {
 	return &AuthService{
 		logger:      logger,
 		perfTracker: perfTracker,
+		leadRepo:    leadRepo,
 	}
 }
 
@@ -208,4 +212,37 @@ func (a *AuthService) GetTokenInfo(tokenString string, tenantCtx *tenant.Context
 	}
 
 	return info
+}
+
+// ValidateEncryptedCredentials validates profile credentials using encrypted data
+func (a *AuthService) ValidateEncryptedCredentials(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *user.Profile {
+	decryptedEmail, err := security.Decrypt(encryptedEmail, tenantCtx.Config.AESKey)
+	if err != nil {
+		a.logger.Auth().Warn("Failed to decrypt email for credential validation", "tenantId", tenantCtx.TenantID)
+		return nil
+	}
+
+	decryptedCode, err := security.Decrypt(encryptedCode, tenantCtx.Config.AESKey)
+	if err != nil {
+		a.logger.Auth().Warn("Failed to decrypt code for credential validation", "tenantId", tenantCtx.TenantID)
+		return nil
+	}
+
+	lead, err := a.leadRepo.FindByEmail(decryptedEmail)
+	if err != nil || lead == nil {
+		return nil // User not found
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(decryptedCode)); err != nil {
+		return nil // Invalid password
+	}
+
+	// Convert lead to profile
+	return &user.Profile{
+		LeadID:         lead.ID,
+		Firstname:      lead.FirstName,
+		Email:          lead.Email,
+		ContactPersona: lead.ContactPersona,
+		ShortBio:       lead.ShortBio,
+	}
 }

@@ -8,17 +8,19 @@ import (
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	persistenceUser "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // Container holds all singleton services and infrastructure dependencies
 type Container struct {
-	// Content Services (stateless singletons)
+	// Content Services
 	MenuService           *services.MenuService
 	PaneService           *services.PaneService
 	ResourceService       *services.ResourceService
@@ -37,7 +39,7 @@ type Container struct {
 	WidgetContextService *services.WidgetContextService
 	FragmentService      *services.FragmentService
 
-	// Analytics Services (stateless singletons)
+	// Analytics Services
 	AnalyticsService          *services.AnalyticsService
 	DashboardAnalyticsService *services.DashboardAnalyticsService
 	EpinetAnalyticsService    *services.EpinetAnalyticsService
@@ -54,11 +56,12 @@ type Container struct {
 	LogBroadcaster     *logging.LogBroadcaster
 
 	// Infrastructure Dependencies
-	TenantManager *tenant.Manager
-	CacheManager  *manager.Manager
-	Logger        *logging.ChanneledLogger
-	PerfTracker   *performance.Tracker
-	EmailService  email.Service
+	TenantManager  *tenant.Manager
+	CacheManager   *manager.Manager
+	Logger         *logging.ChanneledLogger
+	PerfTracker    *performance.Tracker
+	EmailService   email.Service
+	LeadRepository user.LeadRepository
 }
 
 // NewContainer creates and wires all singleton services
@@ -93,8 +96,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	if err != nil {
 		panic("Failed to initialize logger: " + err.Error())
 	}
-
 	logger.Startup().Info("Channeled logger initialized successfully", "logDirectory", loggerConfig.LogDirectory)
+
+	// Initialize Repositories (example, assuming a way to get a DB connection)
+	// This part is simplified; in a real app, you'd manage DB connections more robustly.
+	// For this refactor, we assume the tenant context will provide the correct DB connection.
+	// We instantiate a placeholder here for injection.
+	leadRepo := persistenceUser.NewSQLLeadRepository(nil, logger) // DB connection will be provided by context
 
 	// Initialize fragment services
 	sessionBeliefService := services.NewSessionBeliefService()
@@ -110,12 +118,11 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	contentMapService := services.NewContentMapService(logger, perfTracker)
 
 	// Initialize auth, session, state, and system services with correct dependencies
-	authService := services.NewAuthService(logger, perfTracker)
+	authService := services.NewAuthService(logger, perfTracker, leadRepo)
 	sessionService := services.NewSessionService(logger, perfTracker)
 	stateService := services.NewStateService(logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
-	// Initialize the new MultiTenantService
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
 	logBroadcaster := logging.GetBroadcaster()
 
@@ -158,10 +165,11 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		LogBroadcaster:     logBroadcaster,
 
 		// Infrastructure
-		TenantManager: tenantManager,
-		CacheManager:  cacheManager,
-		Logger:        logger,
-		PerfTracker:   perfTracker,
-		EmailService:  emailService,
+		TenantManager:  tenantManager,
+		CacheManager:   cacheManager,
+		Logger:         logger,
+		PerfTracker:    perfTracker,
+		EmailService:   emailService,
+		LeadRepository: leadRepo,
 	}
 }

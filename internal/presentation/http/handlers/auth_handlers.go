@@ -273,10 +273,7 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 	}
 
 	// Generate new token with same role
-	// TODO:
-	h.authService.AuthenticateAdmin("", tenantCtx) // This is a bit of a hack - we should have a refresh method
-	// For now, we'll generate a new token with the same role
-	claims := map[string]interface{}{
+	claims := map[string]any{
 		"role":     tokenInfo.Role,
 		"tenantId": tokenInfo.TenantID,
 		"type":     "admin_auth",
@@ -292,9 +289,10 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 	}
 
 	// Update cookie if token came from cookie
-	if tokenSource == "admin_cookie" {
+	switch tokenSource {
+	case "admin_cookie":
 		c.SetCookie("admin_auth", newToken, 86400, "/", "", false, true)
-	} else if tokenSource == "editor_cookie" {
+	case "editor_cookie":
 		c.SetCookie("editor_auth", newToken, 86400, "/", "", false, true)
 	}
 

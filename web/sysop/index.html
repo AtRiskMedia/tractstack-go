@@ -50,7 +50,7 @@
         .metric-label { color: var(--color-cyan); }
         .metric-value { color: var(--color-cyan-bright); }
         .metric-dim { color: var(--color-text-dim); }
-        .activity-label { color: var(--color-cyan); }
+        .activity-label { color: var(--color-purple); }
         .activity-value { color: var(--color-white-bright); }
         .status-primed, .status-warmed { color: var(--color-yellow); }
         .status-ready, .status-online, .status-complete, .status-hot { color: var(--color-green); }
@@ -65,11 +65,9 @@
         .sysop-select:focus { outline: none; border-color: var(--color-cyan); }
         .sysop-button { background: transparent; border: none; color: var(--color-purple); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
         .sysop-button:hover { color: var(--color-white-bright); }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(33, 37, 43, 0.9); z-index: 1000; justify-content: center; align-items: center; }
-        .modal-content { background: var(--color-bg-sidebar); border: 1px solid var(--color-cyan); padding: 20px 30px; min-width: 350px; }
-        .tenant-option, .log-level-option-modal { color: var(--color-text-main); padding: 8px; cursor: pointer; margin: 2px 0; }
-        .tenant-option:hover, .tenant-option.focused, .log-level-option-modal:hover, .log-level-option-modal.focused { background: var(--color-bg); color: var(--color-cyan-bright); }
-        .tenant-option.active { color: var(--color-white-bright); }
+        .tenant-option { color: var(--color-text-dim); padding: 4px 0; cursor: pointer; }
+        .tenant-option:hover { color: var(--color-cyan-bright); }
+        .tenant-option.active { color: var(--color-green); }
         .progress-bar { display: inline-block; background-color: var(--color-text-dim); white-space: pre; }
         .progress-bar-fill { display: inline-block; height: 1em; background-color: var(--color-cyan); color: var(--color-bg); }
         .bbs-table-header { color: var(--color-cyan); border-bottom: 1px solid var(--color-text-dim); padding-bottom: 4px; margin-bottom: 8px; }
@@ -125,11 +123,22 @@
                     </div>
                     <div id="tab-cache" x-show="currentTab === 'cache'" x-cloak><pre class="dashboard-header"><span class="header-label">CACHE DETAILS - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span></pre><div id="cache-detail-table" class="metrics-table">Loading...</div></div>
                     <div id="tab-analytics" x-show="currentTab === 'analytics'" x-cloak><pre class="dashboard-header"><span class="header-label">ANALYTICS - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span></pre><div id="analytics-detail-table" class="metrics-table">Loading...</div></div>
-                    <div id="tab-tenants" x-show="currentTab === 'tenants'" x-cloak><pre class="dashboard-header">TENANT MANAGEMENT</pre><pre id="tenants-list-display">Loading...</pre></div>
+                    
+                    <div id="tab-tenants" x-show="currentTab === 'tenants'" x-cloak>
+                        <pre class="dashboard-header">TENANT MANAGEMENT</pre>
+                        <div class="status-section">
+                            <pre class="section-title">AVAILABLE TENANTS</pre>
+                            <template x-for="(tenant, index) in availableTenants" :key="tenant">
+                                <pre class="tenant-option" :class="{ 'active': tenant === currentTenant }" @click="switchTenant(tenant)">
+                                    <span x-text="`[${index + 1}] ${tenant}`"></span>
+                                    <span x-show="tenant === currentTenant" x-text="' (current)'"></span>
+                                </pre>
+                            </template>
+                        </div>
+                    </div>
                     
                     <div id="tab-logs" x-show="currentTab === 'logs'" x-cloak>
-                        <pre class="dashboard-header"><span class="header-label">SYSTEM LOGS - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span></pre>
-                        
+                        <pre class="dashboard-header"><span class="header-label">SYSTEM LOGS</span></pre>
                         <div class="status-section">
                             <pre class="section-title">LIVE STREAM</pre>
                             <div class="metrics-wrapper" style="margin-bottom: 15px;">
@@ -152,27 +161,6 @@
                                 <div x-show="logs.length === 0"><pre class="metric-dim">Waiting for log messages...</pre></div>
                             </div>
                         </div>
-
-                        <div class="status-section">
-                            <pre class="section-title">LOG LEVEL CONTROL <button class="sysop-button" @click="fetchCurrentLevels">[ Refresh ]</button></pre>
-                            <div class="log-level-grid">
-                                <pre class="bbs-table-header">CHANNEL</pre>
-                                <pre class="bbs-table-header">DEBUG</pre>
-                                <pre class="bbs-table-header">INFO</pre>
-                                <pre class="bbs-table-header">WARN</pre>
-                                <pre class="bbs-table-header">ERROR</pre>
-                                <template x-if="Object.keys(channelLevels).length === 0"><pre class="metric-dim">Loading levels...</pre></template>
-                                <template x-for="channelName in Object.keys(channelLevels).sort()" :key="channelName">
-                                    <pre>
-                                        <span class="log-level-channel" x-text="channelName"></span>
-                                        <span @click="showLevelModal(channelName)" class="metric-dim sysop-button" style="font-size: 12px; margin-left: 5px;">[ change ]</span>
-                                    </pre>
-                                    <template x-for="level in levelModal.levels" :key="level">
-                                        <pre class="log-level-option" :class="{ 'active': channelLevels[channelName] === level }" x-text="level"></pre>
-                                    </template>
-                                </template>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -183,31 +171,7 @@
             </div>
         </div>
     </div>
-
-    <div id="tenant-modal" class="modal-overlay" x-show="tenantModalOpen" @click.outside="hideTenantModal()" @keydown.escape.window="hideTenantModal()" x-cloak>
-        <div class="modal-content">
-            <pre class="dashboard-header">SELECT TENANT</pre>
-            <div id="tenant-list"></div>
-            <pre style="margin-top: 15px; color: var(--color-text-dim); font-size: 12px;">Use [↑][↓] and [Enter], or number keys. [ESC] to cancel.</pre>
-        </div>
-    </div>
     
-    <div id="log-level-modal" class="modal-overlay" x-show="levelModal.open" @click.outside="hideLevelModal()" @keydown.escape.window="hideLevelModal()" x-cloak>
-        <div class="modal-content">
-            <pre class="dashboard-header">SET LEVEL FOR: <span class="metric-value" x-text="levelModal.channel"></span></pre>
-            <div id="log-level-list">
-                 <template x-for="(level, index) in levelModal.levels" :key="level">
-                    <div class="log-level-option-modal" 
-                         :class="{ 'focused': levelModal.focusedIndex === index }"
-                         @click="setLevel(levelModal.channel, level)">
-                         <pre x-text="`[${index + 1}] ${level}`"></pre>
-                    </div>
-                </template>
-            </div>
-             <pre style="margin-top: 15px; color: var(--color-text-dim); font-size: 12px;">Use [↑][↓] and [Enter], or number keys. [ESC] to cancel.</pre>
-        </div>
-    </div>
-
     <script src="app.js"></script>
 </body>
 </html>

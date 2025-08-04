@@ -139,6 +139,9 @@ var (
 
 	// Logging Configuration
 	LogVerbosity string
+
+	// SysOp Configuration
+	SysopPassword string
 )
 
 func init() {
@@ -191,4 +194,7 @@ func init() {
 
 	// Logging Configuration
 	LogVerbosity = getEnvString("LOG_VERBOSITY", "WARN")
+
+	// SysOp Configuration
+	SysopPassword = getEnvString("SYSOP_PASSWORD", "storykeep")
 }

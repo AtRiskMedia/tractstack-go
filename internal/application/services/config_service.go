@@ -189,21 +189,6 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.TursoAuthToken != "" {
 		tenantCtx.Config.TursoToken = request.TursoAuthToken
 	}
-	if request.EmailHost != "" {
-		// EmailHost field doesn't exist in tenant.Config - skip or add to BrandConfig
-	}
-	if request.EmailPort != 0 {
-		// EmailPort field doesn't exist in tenant.Config - skip or add to BrandConfig
-	}
-	if request.EmailUser != "" {
-		// EmailUser field doesn't exist in tenant.Config - skip or add to BrandConfig
-	}
-	if request.EmailPass != "" {
-		// EmailPass field doesn't exist in tenant.Config - skip or add to BrandConfig
-	}
-	if request.EmailFrom != "" {
-		// EmailFrom field doesn't exist in tenant.Config - skip or add to BrandConfig
-	}
 	if request.AdminPassword != "" {
 		tenantCtx.Config.AdminPassword = request.AdminPassword
 	}

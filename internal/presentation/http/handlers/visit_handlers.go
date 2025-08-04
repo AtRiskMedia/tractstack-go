@@ -24,6 +24,50 @@ type VisitHandlers struct {
 	perfTracker    *performance.Tracker
 }
 
+// ProfileRequest represents the structure for profile requests
+type ProfileRequest struct {
+	SessionID      *string `json:"sessionId,omitempty"`
+	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
+	EncryptedCode  *string `json:"encryptedCode,omitempty"`
+	Email          string  `json:"email,omitempty"`
+	Codeword       string  `json:"codeword,omitempty"`
+	FirstName      string  `json:"firstName,omitempty"`
+	ContactPersona string  `json:"contactPersona,omitempty"`
+	ShortBio       string  `json:"shortBio,omitempty"`
+}
+
+// ProfileResponse represents the response structure for profile requests
+type ProfileResponse struct {
+	Success        bool          `json:"success"`
+	Profile        *user.Profile `json:"profile,omitempty"`
+	Token          string        `json:"token,omitempty"`
+	EncryptedEmail string        `json:"encryptedEmail,omitempty"`
+	EncryptedCode  string        `json:"encryptedCode,omitempty"`
+	Fingerprint    string        `json:"fingerprint,omitempty"`
+	VisitID        string        `json:"visitId,omitempty"`
+	HasProfile     bool          `json:"hasProfile"`
+	Consent        string        `json:"consent,omitempty"`
+	Error          string        `json:"error,omitempty"`
+}
+
+// VisitResponse represents the response structure for visit requests
+type VisitResponse struct {
+	Fingerprint string        `json:"fingerprint"`
+	VisitID     string        `json:"visitId"`
+	HasProfile  bool          `json:"hasProfile"`
+	Profile     *user.Profile `json:"profile,omitempty"`
+	Token       string        `json:"token,omitempty"`
+	Consent     string        `json:"consent"`
+}
+
+// SSEMessage represents the structure for SSE messages
+type SSEMessage struct {
+	Type      string `json:"type"`
+	SessionID string `json:"sessionId,omitempty"`
+	Data      any    `json:"data,omitempty"`
+	Timestamp string `json:"timestamp"`
+}
+
 // NewVisitHandlers creates visit handlers with injected dependencies
 func NewVisitHandlers(sessionService *services.SessionService, authService *services.AuthService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *VisitHandlers {
 	return &VisitHandlers{
@@ -96,11 +140,12 @@ func (h *VisitHandlers) PostVisit(c *gin.Context) {
 		h.logger.Perf().Info("Performance for PostVisit request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", false)
 
 		// Return appropriate HTTP status based on error type
-		if result.Error == "session ID required" {
+		switch result.Error {
+		case "session ID required":
 			c.JSON(http.StatusBadRequest, gin.H{"error": result.Error})
-		} else if result.Error == "invalid credentials" {
+		case "invalid credentials":
 			c.JSON(http.StatusUnauthorized, gin.H{"error": result.Error})
-		} else {
+		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error})
 		}
 		return
@@ -338,6 +383,11 @@ func (h *VisitHandlers) PostProfile(c *gin.Context) {
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "Profile creation/update not yet implemented"})
 }
 
+// validateEncryptedCredentials validates encrypted email and code
+func (h *VisitHandlers) validateEncryptedCredentials(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *user.Profile {
+	return h.authService.ValidateEncryptedCredentials(encryptedEmail, encryptedCode, tenantCtx)
+}
+
 // handleProfileValidation handles profile validation with encrypted credentials
 func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *tenant.Context) *ProfileResponse {
 	// Use auth service to validate encrypted credentials
@@ -359,7 +409,7 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 	}
 
 	// Generate JWT token
-	token, err := h.authService.GenerateJWT(map[string]interface{}{
+	token, err := h.authService.GenerateJWT(map[string]any{
 		"leadId":         profile.LeadID,
 		"fingerprint":    profile.Fingerprint,
 		"email":          profile.Email,
@@ -387,56 +437,4 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 		HasProfile:     true,
 		Consent:        "1",
 	}
-}
-
-// validateEncryptedCredentials validates encrypted email and code
-func (h *VisitHandlers) validateEncryptedCredentials(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *user.Profile {
-	// TODO: ?????
-	return nil
-}
-
-// Request/Response structures
-
-// ProfileRequest represents the structure for profile requests
-type ProfileRequest struct {
-	SessionID      *string `json:"sessionId,omitempty"`
-	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
-	EncryptedCode  *string `json:"encryptedCode,omitempty"`
-	Email          string  `json:"email,omitempty"`
-	Codeword       string  `json:"codeword,omitempty"`
-	FirstName      string  `json:"firstName,omitempty"`
-	ContactPersona string  `json:"contactPersona,omitempty"`
-	ShortBio       string  `json:"shortBio,omitempty"`
-}
-
-// ProfileResponse represents the response structure for profile requests
-type ProfileResponse struct {
-	Success        bool          `json:"success"`
-	Profile        *user.Profile `json:"profile,omitempty"`
-	Token          string        `json:"token,omitempty"`
-	EncryptedEmail string        `json:"encryptedEmail,omitempty"`
-	EncryptedCode  string        `json:"encryptedCode,omitempty"`
-	Fingerprint    string        `json:"fingerprint,omitempty"`
-	VisitID        string        `json:"visitId,omitempty"`
-	HasProfile     bool          `json:"hasProfile"`
-	Consent        string        `json:"consent,omitempty"`
-	Error          string        `json:"error,omitempty"`
-}
-
-// VisitResponse represents the response structure for visit requests
-type VisitResponse struct {
-	Fingerprint string        `json:"fingerprint"`
-	VisitID     string        `json:"visitId"`
-	HasProfile  bool          `json:"hasProfile"`
-	Profile     *user.Profile `json:"profile,omitempty"`
-	Token       string        `json:"token,omitempty"`
-	Consent     string        `json:"consent"`
-}
-
-// SSEMessage represents the structure for SSE messages
-type SSEMessage struct {
-	Type      string      `json:"type"`
-	SessionID string      `json:"sessionId,omitempty"`
-	Data      interface{} `json:"data,omitempty"`
-	Timestamp string      `json:"timestamp"`
 }
