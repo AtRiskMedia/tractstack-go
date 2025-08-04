@@ -153,3 +153,31 @@ func (h *SysOpHandlers) ForceReload(c *gin.Context) {
 		"message": "Cache reload initiated",
 	})
 }
+
+// GetActivityMetrics fetches live activity counts from the cache manager.
+func (h *SysOpHandlers) GetActivityMetrics(c *gin.Context) {
+	tenantID := c.Query("tenant")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant query parameter is required"})
+		return
+	}
+
+	// Access the cache manager directly from the container
+	cacheManager := h.container.CacheManager
+
+	// Fetch the same counts the reporter uses
+	sessions := len(cacheManager.GetAllSessionIDs(tenantID))
+	fingerprints := len(cacheManager.GetAllFingerprintIDs(tenantID))
+	visits := len(cacheManager.GetAllVisitIDs(tenantID))
+	beliefMaps := len(cacheManager.GetAllStoryfragmentBeliefRegistryIDs(tenantID))
+	fragments := len(cacheManager.GetAllHTMLChunkIDs(tenantID))
+
+	// Return the data as JSON
+	c.JSON(http.StatusOK, gin.H{
+		"sessions":     sessions,
+		"fingerprints": fingerprints,
+		"visits":       visits,
+		"beliefMaps":   beliefMaps,
+		"fragments":    fragments,
+	})
+}

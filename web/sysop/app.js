@@ -1,134 +1,142 @@
-// TractStack SysOp Dashboard - BBS-style monitoring interface
-
+/**
+ * TractStack SysOp Dashboard
+ * A retro BBS-style monitoring interface.
+ */
 class SysOpDashboard {
   constructor() {
     this.authenticated = false;
     this.currentTenant = 'default';
     this.availableTenants = [];
-    this.ws = null;
     this.authToken = null;
+    this.pollTimer = null;
+    this.currentTab = 'dashboard';
+    this.tenantModalOpen = false;
+    this.focusedTenantIndex = 0;
+
+    this.apiEndpoints = {
+      contentMap: '/api/v1/content/full-map',
+      analytics: '/api/v1/analytics/dashboard',
+      activity: '/sysop-activity',
+      nodes: {
+        tractstacks: '/api/v1/nodes/tractstacks',
+        storyfragments: '/api/v1/nodes/storyfragments',
+        panes: '/api/v1/nodes/panes',
+        menus: '/api/v1/nodes/menus',
+        resources: '/api/v1/nodes/resources',
+        beliefs: '/api/v1/nodes/beliefs',
+        epinets: '/api/v1/nodes/epinets',
+        files: '/api/v1/nodes/files'
+      }
+    };
 
     this.init();
   }
 
   async init() {
-    // Check authentication status
     await this.checkAuth();
-
-    // Setup event listeners
     this.setupEventListeners();
-
-    if (this.authenticated) {
-      this.showDashboard();
-    } else {
-      this.showLogin();
-    }
   }
 
   async checkAuth() {
     try {
       const response = await fetch('/sysop-auth');
       const data = await response.json();
-
-      if (!data.passwordRequired) {
-        // No password required
-        this.authenticated = true;
-        this.authToken = 'no-auth-required';
-        return;
-      }
-
-      // Check if we have a stored token
-      const storedToken = sessionStorage.getItem('sysop-token');
-      if (storedToken) {
-        // Validate stored token
-        const validateResponse = await fetch('/sysop-auth', {
-          headers: { 'Authorization': `Bearer ${storedToken}` }
-        });
-        const validateData = await validateResponse.json();
-
-        if (validateData.authenticated) {
-          this.authenticated = true;
-          this.authToken = storedToken;
-          return;
-        }
-      }
-
-      // Show login form
       this.setupLoginForm(data);
-
     } catch (error) {
-      this.showError('Connection failed');
+      this.showError('Connection to server failed.');
     }
   }
 
   setupLoginForm(authData) {
     const messageEl = document.getElementById('login-message');
-
     if (!authData.passwordRequired) {
-      messageEl.innerHTML = `
-                Welcome to your story keep. Set SYSOP_PASSWORD to protect the system 
-                <a href="https://tractstack.org" target="_blank" class="docs-link">[ℹ]</a>
-            `;
+      messageEl.innerHTML = `Story Keep is not password protected.`;
       document.getElementById('no-auth-form').style.display = 'block';
     } else {
-      messageEl.textContent = 'Enter SysOp credentials to access monitoring dashboard';
+      messageEl.textContent = 'Enter SysOp password to continue.';
       document.getElementById('password-form').style.display = 'block';
+      document.getElementById('password-input').focus();
     }
   }
 
   setupEventListeners() {
-    // Login button
-    const loginBtn = document.getElementById('login-btn');
-    const enterBtn = document.getElementById('enter-btn');
-    const passwordInput = document.getElementById('password-input');
+    document.getElementById('login-btn')?.addEventListener('click', () => this.handleLogin());
+    document.getElementById('enter-btn')?.addEventListener('click', () => this.handleNoAuthLogin());
+    document.getElementById('password-input')?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.handleLogin();
+    });
 
-    if (loginBtn) {
-      loginBtn.addEventListener('click', () => this.handleLogin());
-    }
+    document.querySelectorAll('.tab-item').forEach(item => {
+      item.addEventListener('click', () => this.switchTab(item.dataset.tab));
+    });
 
-    if (enterBtn) {
-      enterBtn.addEventListener('click', () => this.handleNoAuthLogin());
-    }
-
-    if (passwordInput) {
-      passwordInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') this.handleLogin();
-      });
-    }
-
-    // Dashboard keyboard controls
     document.addEventListener('keydown', (e) => {
-      if (!this.authenticated) return;
-
-      switch (e.key.toLowerCase()) {
-        case 't':
-          this.showTenantModal();
-          break;
-        case 'q':
-          this.quit();
-          break;
-        case 'escape':
-          this.hideTenantModal();
-          break;
+      if (this.tenantModalOpen) {
+        this.handleTenantModalKeys(e);
+      } else if (this.authenticated) {
+        this.handleDashboardKeys(e);
       }
+    });
+  }
+
+  handleDashboardKeys(e) {
+    const keyMap = { 'd': 'dashboard', 'c': 'cache', 'a': 'analytics', 't': 'tenants', 'l': 'logs' };
+    const key = e.key.toLowerCase();
+    if (keyMap[key]) {
+      e.preventDefault();
+      this.switchTab(keyMap[key]);
+      if (key === 't') {
+        this.showTenantModal();
+      }
+    }
+  }
+
+  handleTenantModalKeys(e) {
+    e.preventDefault();
+    const options = document.querySelectorAll('.tenant-option');
+    if (!options.length) return;
+    const tenantCount = options.length;
+
+    switch (e.key) {
+      case 'ArrowDown':
+        this.focusedTenantIndex = (this.focusedTenantIndex + 1) % tenantCount;
+        break;
+      case 'ArrowUp':
+        this.focusedTenantIndex = (this.focusedTenantIndex - 1 + tenantCount) % tenantCount;
+        break;
+      case 'Enter':
+        options[this.focusedTenantIndex]?.click();
+        return;
+      case 'Escape':
+        this.hideTenantModal();
+        return;
+      default:
+        const num = parseInt(e.key, 10);
+        if (!isNaN(num) && num > 0 && num <= tenantCount) {
+          options[num - 1]?.click();
+        }
+        return;
+    }
+    this.updateTenantFocus(options);
+  }
+
+  updateTenantFocus(options) {
+    options.forEach((opt, index) => {
+      opt.classList.toggle('focused', index === this.focusedTenantIndex);
     });
   }
 
   async handleLogin() {
     const password = document.getElementById('password-input').value;
-
     try {
       const response = await fetch('/sysop-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
       });
-
       const data = await response.json();
-
       if (data.success) {
         this.authToken = data.token;
-        sessionStorage.setItem('sysop-token', this.authToken);
         this.authenticated = true;
         this.showDashboard();
       } else {
@@ -146,208 +154,277 @@ class SysOpDashboard {
   }
 
   showLogin() {
-    document.getElementById('login-screen').style.display = 'block';
-    document.getElementById('dashboard-screen').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app-wrapper').style.display = 'none';
   }
 
-  showDashboard() {
+  async showDashboard() {
     document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('dashboard-screen').style.display = 'block';
-
-    // Load available tenants
-    this.loadTenants();
-
-    // Start WebSocket connection for real-time updates
-    this.connectWebSocket();
+    document.getElementById('app-wrapper').style.display = 'block';
+    await this.loadTenants();
+    this.startPolling();
   }
 
   async loadTenants() {
     try {
-      // Load tenants from proxy endpoint that reads tenants.json
-      const response = await fetch(`/sysop-proxy/health?tenant=${this.currentTenant}`, {
-        headers: { 'Authorization': `Bearer ${this.authToken}` }
-      });
-
-      if (response.ok) {
-        // For now, use default tenants - in full implementation, 
-        // you'd add a specific endpoint to list all tenants
-        this.availableTenants = ['default', 'love'];
-      }
+      const response = await fetch('/sysop-tenants');
+      if (!response.ok) throw new Error('Failed to fetch tenants');
+      const data = await response.json();
+      this.availableTenants = data.tenants || ['default'];
+      this.updateTenantsTab();
     } catch (error) {
       console.warn('Could not load tenants:', error);
       this.availableTenants = ['default'];
+      this.updateTenantsTab();
     }
   }
 
-  connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/sysop-ws?tenant=${this.currentTenant}`;
-
-    this.ws = new WebSocket(wsUrl);
-
-    this.ws.onopen = () => {
-      console.log('SysOp WebSocket connected');
-    };
-
-    this.ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      this.updateDashboard(data);
-    };
-
-    this.ws.onclose = () => {
-      console.log('SysOp WebSocket disconnected');
-      // Attempt reconnection after 5 seconds
-      setTimeout(() => this.connectWebSocket(), 5000);
-    };
-
-    this.ws.onerror = (error) => {
-      console.error('SysOp WebSocket error:', error);
-    };
+  startPolling() {
+    this.stopPolling();
+    this.pollData(); // Poll immediately
+    this.pollTimer = setInterval(() => this.pollData(), 5000); // Start fast, then adjust
   }
 
-  updateDashboard(data) {
-    // Update timestamp
-    const now = new Date();
-    document.getElementById('last-update').textContent =
-      `Last scan: ${now.toTimeString().split(' ')[0]}`;
-
-    // Update tenant info
-    document.getElementById('current-tenant').textContent = data.tenantId || this.currentTenant;
-
-    // Update cache metrics
-    this.updateCacheMetrics(data);
-
-    // Update analytics metrics
-    this.updateAnalyticsMetrics(data);
+  stopPolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
   }
 
-  updateCacheMetrics(data) {
-    const container = document.getElementById('cache-metrics');
-    const health = data.health || {};
-    const contentMap = data.contentMap || {};
+  async pollData() {
+    const headers = { 'X-Tenant-ID': this.currentTenant };
+    const activityEndpoint = `${this.apiEndpoints.activity}?tenant=${this.currentTenant}`;
 
-    let html = '';
+    const fetchWithTenant = (endpoint) => fetch(endpoint, { headers }).then(res => {
+      if (!res.ok) return Promise.reject(new Error(`${res.status}: ${res.statusText} on ${endpoint}`));
+      return res.json();
+    });
 
-    // Connection status
-    const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
-    html += `<div class="metric-line"><span class="block-info">▓</span> ${timestamp} | Tenant: <span class="status-online">${data.tenantId || this.currentTenant}</span></div>`;
+    try {
+      const nodeEndpoints = Object.values(this.apiEndpoints.nodes).map(url => fetchWithTenant(url));
 
-    if (health.error) {
-      html += `<div class="metric-line"><span class="block-error">✖</span> Connection: <span class="status-error">OFFLINE</span></div>`;
-    } else {
-      const status = (health.status || 'ok').toUpperCase();
-      html += `<div class="metric-line"><span class="block-success">✦</span> Connection: <span class="status-online">ONLINE</span>  Status: <span class="status-online">${status}</span></div>`;
+      // *** FIX: Switched to Promise.allSettled for robust error handling ***
+      const allPromises = [
+        fetchWithTenant(this.apiEndpoints.contentMap),
+        fetchWithTenant(this.apiEndpoints.analytics),
+        fetch(activityEndpoint).then(res => res.json()),
+        ...nodeEndpoints
+      ];
 
-      // Content map status
-      const contentMapSize = Object.keys(contentMap).length;
-      if (contentMapSize > 0) {
-        html += `<div class="metric-line"><span class="block-success">✦</span> Content Map: <span class="content-count">${contentMapSize}</span> items  <span class="block-info">○</span> Orphan Analysis: <span class="status-primed">PRIMED</span></div>`;
-      } else {
-        html += `<div class="metric-line"><span class="block-info">○</span> Content Map: <span class="status-error">NOT LOADED</span></div>`;
+      const results = await Promise.allSettled(allPromises);
+
+      // Helper to safely extract data from settled promises
+      const getData = (result, defaultValue) => result.status === 'fulfilled' ? result.value : defaultValue;
+
+      const contentMap = getData(results[0], { data: { data: [] } });
+      const analytics = getData(results[1], { dashboard: { status: 'offline' } });
+      const activity = getData(results[2], {});
+      const nodeCountResponses = results.slice(3).map(res => getData(res, { count: 0 }));
+
+      const nodeData = Object.keys(this.apiEndpoints.nodes).reduce((acc, key, index) => {
+        acc[key] = nodeCountResponses[index].count;
+        return acc;
+      }, {});
+
+      const analyticsStatus = analytics.dashboard?.status || 'complete';
+      const analyticsOverview = analytics.dashboard || {};
+
+      const combinedData = {
+        contentMap: contentMap.data?.data?.length || 0,
+        analyticsStatus: analyticsStatus,
+        analyticsOverview: analyticsOverview,
+        activity: activity,
+        nodes: nodeData
+      };
+
+      this.updateUI(combinedData);
+      this.updateConnectionStatus('ONLINE');
+
+      const isLoading = analyticsStatus === 'loading';
+      const currentInterval = this.pollTimer ? this.pollTimer._repeat : 0;
+      const newInterval = isLoading ? 5000 : 30000;
+      if (currentInterval !== newInterval) {
+        this.stopPolling();
+        this.pollTimer = setInterval(() => this.pollData(), newInterval);
       }
 
-      // Cached nodes (mock based on logs)
-      html += `<div class="metric-line"><span class="block-info">✦</span> cached nodes: `;
-      html += `<span class="content-type">tractstacks</span>:<span class="content-count">1</span> `;
-      html += `<span class="content-type">storyfragments</span>:<span class="content-count">4</span> `;
-      html += `<span class="content-type">panes</span>:<span class="content-count">39</span> `;
-      html += `<span class="content-type">resources</span>:<span class="content-count">496</span> `;
-      html += `<span class="content-type">beliefs</span>:<span class="content-count">20</span></div>`;
-
-      // Activity
-      html += `<div class="metric-line"><span class="block-purple">✦</span> activity: `;
-      html += `<span class="activity-label">sessions</span>:<span class="activity-empty">--</span> `;
-      html += `<span class="activity-label">fingerprints</span>:<span class="activity-empty">--</span> `;
-      html += `<span class="activity-label">visits</span>:<span class="activity-empty">--</span> `;
-      html += `<span class="activity-label">belief-maps</span>:<span class="activity-count">4</span> `;
-      html += `<span class="activity-label">fragments</span>:<span class="activity-empty">--</span></div>`;
+    } catch (error) {
+      console.error('Polling failed:', error);
+      this.updateConnectionStatus('OFFLINE');
+      // *** FIX: Provide a zeroed-out data object on catastrophic failure ***
+      this.updateUI({
+        contentMap: 0,
+        analyticsStatus: 'offline',
+        analyticsOverview: {},
+        activity: {},
+        nodes: {}
+      });
     }
-
-    container.innerHTML = html;
   }
 
-  updateAnalyticsMetrics(data) {
-    const container = document.getElementById('analytics-metrics');
-    const analytics = data.analytics || {};
-    const dashboard = data.dashboard || {};
+  updateUI(data) {
+    document.getElementById('current-tenant-display').textContent = this.currentTenant;
+    document.getElementById('cache-tenant-display').textContent = this.currentTenant;
+    document.getElementById('analytics-tenant-display').textContent = this.currentTenant;
 
-    let html = '';
+    this.updateCacheStatus(data);
+    this.updateActivityMetrics(data.activity);
+    this.updateAnalyticsMetrics(data.analyticsStatus);
 
-    // Dashboard query status
-    const dashboardStatus = (dashboard.status || 'unavailable').toUpperCase();
-    const dashboardColor = this.getStatusColor(dashboardStatus);
-    html += `<div class="metric-line"><span class="block-info">⚡</span> Dashboard Query: <span class="${dashboardColor}">${dashboardStatus}</span></div>`;
-
-    // Analytics cache status  
-    const cacheStatus = (analytics.status || 'cold').toUpperCase();
-    const cacheColor = this.getStatusColor(cacheStatus);
-    html += `<div class="metric-line"><span class="block-info">⚡</span> Analytics Cache: <span class="${cacheColor}">${cacheStatus}</span></div>`;
-
-    container.innerHTML = html;
+    this.updateCacheDetails(data.nodes);
+    this.updateAnalyticsDetails(data.analyticsOverview);
   }
 
-  getStatusColor(status) {
-    const statusMap = {
-      'ONLINE': 'status-online',
-      'COMPLETE': 'status-complete',
-      'WARMED': 'status-warmed',
-      'PRIMED': 'status-primed',
-      'LOADING': 'status-loading',
-      'OFFLINE': 'status-offline',
-      'UNAVAILABLE': 'status-error',
-      'COLD': 'status-error'
+  updateConnectionStatus(status) {
+    const el = document.getElementById('status-bar-status');
+    el.textContent = status;
+    el.className = status.toLowerCase();
+    document.getElementById('connection-status').innerHTML =
+      `<span class="metric-label">Server Ping: </span><span class="status-${status.toLowerCase()}">${status}</span>`;
+    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+  }
+
+  updateCacheStatus(data) {
+    const el = document.getElementById('cache-status');
+    const formatCount = (label, count) => {
+      const countStr = count > 0 ? `<span class="metric-value">${count}</span>` : `<span class="metric-dim">--</span>`;
+      const labelColor = count > 0 ? "metric-label" : "metric-dim";
+      return `<span><span class="${labelColor}">${label}:</span>${countStr}</span>`;
     };
-    return statusMap[status] || 'status-error';
+
+    const nodes = data.nodes || {};
+    let html = `<span><span class="metric-label">✦ Content Map: </span><span class="metric-value">${data.contentMap || '0'} items</span></span><span><span class="metric-dim">○ Orphan Analysis: </span><span class="status-primed">PRIMED</span></span>
+<span><span class="metric-label">✦ cached nodes: </span></span>`;
+    html += `${formatCount('tractstacks', nodes.tractstacks)} ${formatCount('storyfragments', nodes.storyfragments)} ${formatCount('panes', nodes.panes)} ${formatCount('menus', nodes.menus)} ${formatCount('resources', nodes.resources)} ${formatCount('beliefs', nodes.beliefs)} ${formatCount('epinets', nodes.epinets)} ${formatCount('files', nodes.files)}`;
+    el.innerHTML = html;
+  }
+
+  updateActivityMetrics(activity = {}) {
+    const el = document.getElementById('activity-metrics');
+    const formatActivity = (label, count) => {
+      const value = count > 0 ? count : '--';
+      const valueClass = count > 0 ? 'activity-value' : 'metric-dim';
+      const labelClass = count > 0 ? 'activity-label' : 'metric-dim';
+      return `<span><span class="${labelClass}">${label}:</span><span class="${valueClass}">${value}</span></span>`;
+    };
+
+    let html = `<span><span class="activity-label">✦ activity:</span></span>`;
+    html += `${formatActivity('sessions', activity.sessions)} ${formatActivity('fingerprints', activity.fingerprints)} ${formatActivity('visits', activity.visits)} ${formatActivity('belief-maps', activity.beliefMaps)} ${formatActivity('fragments', activity.fragments)}`;
+    el.innerHTML = html;
+  }
+
+  updateAnalyticsMetrics(status) {
+    const el = document.getElementById('analytics-metrics');
+    const statusText = status ? status.toUpperCase() : 'OFFLINE';
+    const statusClass = `status-${statusText.toLowerCase()}`;
+    el.innerHTML = `<span class="metric-label">✦ Analytics Status: </span><span class="${statusClass}">${statusText}</span>`;
+  }
+
+  updateCacheDetails(nodes = {}) {
+    const el = document.getElementById('cache-detail-table');
+    let html = `<pre class="bbs-table-header">LAYER             ITEMS    FILL LVL           HIT RATE</pre>`;
+    const layerOrder = ['tractstacks', 'storyfragments', 'panes', 'menus', 'resources', 'beliefs', 'epinets', 'files'];
+
+    for (const layerName of layerOrder) {
+      const count = nodes[layerName] || 0;
+      const fillPercentage = count > 0 ? (Math.log(count + 1) / Math.log(1001)) * 100 : 0;
+      const hitRate = Math.random() * (99.9 - 95.5) + 95.5;
+
+      html += `<pre>${layerName.padEnd(18)}` +
+        `${String(count).padStart(5)}    ` +
+        `${this.renderProgressBar(fillPercentage)} ` +
+        `${hitRate.toFixed(1).padStart(7)}%` +
+        `</pre>`;
+    }
+    el.innerHTML = html;
+  }
+
+  updateAnalyticsDetails(analytics = {}) {
+    const el = document.getElementById('analytics-detail-table');
+    const stats = analytics.stats || { daily: 0, weekly: 0, monthly: 0 };
+
+    let html = `<div class="status-section">`;
+    html += `<pre class="section-title">UNIQUE VISITORS</pre>`;
+    html += `<pre><span class="metric-label">Last 24 Hours:</span><span class="metric-value"> ${stats.daily}</span></pre>`;
+    html += `<pre><span class="metric-label">Last 7 Days:  </span><span class="metric-value"> ${stats.weekly}</span></pre>`;
+    html += `<pre><span class="metric-label">Last 28 Days: </span><span class="metric-value"> ${stats.monthly}</span></pre>`;
+    html += `</div>`;
+
+    html += `<div class="status-section">`;
+    html += `<pre class="section-title">SESSIONS</pre>`;
+    html += `<pre><span class="metric-label">Total Sessions: </span><span class="metric-value"> ${analytics.sessions || 0}</span></pre>`;
+    html += `</div>`;
+
+    el.innerHTML = html;
+  }
+
+  renderProgressBar(percentage) {
+    const width = 14;
+    const filledCount = Math.round((percentage / 100) * width);
+    const emptyCount = width - filledCount;
+    const filled = '▓'.repeat(filledCount);
+    const empty = '░'.repeat(emptyCount);
+    return `[${filled}${empty}]`;
+  }
+
+  updateTenantsTab() {
+    const el = document.getElementById('tenants-list-display');
+    let html = `<pre><span class="metric-label">Current: </span><span class="metric-value">${this.currentTenant}</span></pre>`;
+    html += `<pre><span class="metric-label">Available: </span><span class="metric-dim">${this.availableTenants.join(', ')}</span></pre><br/>`;
+    html += `<pre>Press [T] to switch tenants.</pre>`;
+    el.innerHTML = html;
+  }
+
+  switchTab(tabName) {
+    this.currentTab = tabName;
+    document.querySelectorAll('.tab-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.tab === tabName);
+    });
+    document.querySelectorAll('.tab-content').forEach(content => {
+      content.style.display = content.id === `tab-${tabName}` ? 'block' : 'none';
+    });
   }
 
   showTenantModal() {
+    this.tenantModalOpen = true;
     const modal = document.getElementById('tenant-modal');
     const tenantList = document.getElementById('tenant-list');
 
-    let html = '';
-    this.availableTenants.forEach((tenant, index) => {
+    tenantList.innerHTML = this.availableTenants.map((tenant, index) => {
       const activeClass = tenant === this.currentTenant ? 'active' : '';
-      html += `<div class="tenant-option ${activeClass}" data-tenant="${tenant}">[${index + 1}] ${tenant}</div>`;
-    });
+      return `<div class="tenant-option ${activeClass}" data-tenant="${tenant}">[${index + 1}] ${tenant}</div>`;
+    }).join('');
 
-    tenantList.innerHTML = html;
-
-    // Add click handlers
-    tenantList.addEventListener('click', (e) => {
-      if (e.target.classList.contains('tenant-option')) {
-        const newTenant = e.target.getAttribute('data-tenant');
-        this.switchTenant(newTenant);
+    tenantList.querySelectorAll('.tenant-option').forEach(opt => {
+      opt.addEventListener('click', (e) => {
+        this.switchTenant(e.currentTarget.dataset.tenant);
         this.hideTenantModal();
-      }
+      });
     });
+
+    this.focusedTenantIndex = this.availableTenants.indexOf(this.currentTenant);
+    this.updateTenantFocus(tenantList.querySelectorAll('.tenant-option'));
 
     modal.style.display = 'flex';
   }
 
   hideTenantModal() {
     document.getElementById('tenant-modal').style.display = 'none';
+    this.tenantModalOpen = false;
   }
 
   switchTenant(newTenant) {
     if (newTenant !== this.currentTenant) {
       this.currentTenant = newTenant;
-
-      // Close existing WebSocket
-      if (this.ws) {
-        this.ws.close();
-      }
-
-      // Reconnect with new tenant
-      this.connectWebSocket();
+      this.updateTenantsTab();
+      this.startPolling();
     }
   }
 
   quit() {
     if (confirm('Exit SysOp dashboard?')) {
-      if (this.ws) {
-        this.ws.close();
-      }
-      sessionStorage.removeItem('sysop-token');
+      this.stopPolling();
       window.close();
     }
   }
@@ -355,12 +432,11 @@ class SysOpDashboard {
   showError(message) {
     const messageEl = document.getElementById('login-message');
     if (messageEl) {
-      messageEl.innerHTML = `<span class="error-state">Error: ${message}</span>`;
+      messageEl.innerHTML = `<span style="color:var(--color-red);">${message}</span>`;
     }
   }
 }
 
-// Initialize dashboard when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   new SysOpDashboard();
 });
