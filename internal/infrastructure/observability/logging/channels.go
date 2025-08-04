@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -61,6 +62,7 @@ type ChanneledLogger struct {
 	channels map[Channel]*slog.Logger
 	config   *LoggerConfig
 	baseDir  string
+	configMu sync.RWMutex // ADDED: Mutex to protect config changes
 }
 
 // LoggerConfig contains configuration options for the channeled logger
@@ -145,6 +147,9 @@ func NewChanneledLogger(config *LoggerConfig) (*ChanneledLogger, error) {
 
 // createChannelLogger creates a slog.Logger for a specific channel
 func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, error) {
+	cl.configMu.RLock()
+	defer cl.configMu.RUnlock()
+
 	// Determine log level for this channel - respect DefaultLevel unless explicitly overridden
 	level := cl.config.DefaultLevel
 	if channelLevel, exists := cl.config.ChannelLevels[channel]; exists {
@@ -171,6 +176,10 @@ func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, e
 		writers = append(writers, file)
 	}
 
+	// Add our custom SSE writer to the list of outputs.
+	// Now, every log message will also be sent to the broadcaster.
+	writers = append(writers, NewSSEWriter())
+
 	// Create multi-writer if we have multiple outputs
 	var writer io.Writer
 	if len(writers) == 1 {
@@ -186,6 +195,9 @@ func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, e
 	handlerOpts := &slog.HandlerOptions{
 		Level:     level,
 		AddSource: cl.config.IncludeSource,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			return a
+		},
 	}
 
 	// Create handler based on format preference
@@ -196,11 +208,8 @@ func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, e
 		handler = slog.NewTextHandler(writer, handlerOpts)
 	}
 
-	// Create logger with channel context
-	logger := slog.New(handler).With(
-		slog.String("channel", string(channel)),
-		slog.String("timestamp", time.Now().Format(cl.config.TimestampFormat)),
-	)
+	// Create logger with the base 'channel' attribute.
+	logger := slog.New(handler).With(slog.String("channel", string(channel)))
 
 	return logger, nil
 }
@@ -449,20 +458,49 @@ func (cl *ChanneledLogger) GetConfig() *LoggerConfig {
 
 // SetChannelLevel dynamically sets the log level for a specific channel
 func (cl *ChanneledLogger) SetChannelLevel(channel Channel, level slog.Level) error {
+	cl.configMu.Lock()
+	defer cl.configMu.Unlock()
+
 	if _, exists := cl.channels[channel]; !exists {
 		return fmt.Errorf("channel %s does not exist", channel)
 	}
 
+	// Update the configuration map
 	cl.config.ChannelLevels[channel] = level
 
-	// In a more sophisticated implementation, you would recreate the logger
-	// with the new level. For now, we'll just update the config.
-	cl.System().Info("Channel log level updated",
+	// Recreate the specific logger for this channel with the new level
+	newLogger, err := cl.createChannelLogger(channel)
+	if err != nil {
+		// Log the error but don't halt the application
+		cl.System().Error("Failed to recreate logger for channel on level change", "channel", channel, "error", err)
+		return fmt.Errorf("failed to recreate logger for channel %s: %w", channel, err)
+	}
+
+	// Atomically replace the old logger with the new one
+	cl.channels[channel] = newLogger
+
+	cl.System().Info("Channel log level updated dynamically",
 		slog.String("channel", string(channel)),
 		slog.String("level", level.String()),
 	)
 
 	return nil
+}
+
+// GetChannelLevels returns the current log levels for all channels.
+func (cl *ChanneledLogger) GetChannelLevels() map[string]string {
+	cl.configMu.RLock()
+	defer cl.configMu.RUnlock()
+
+	levels := make(map[string]string)
+	for channel := range cl.channels {
+		if level, ok := cl.config.ChannelLevels[channel]; ok {
+			levels[string(channel)] = level.String()
+		} else {
+			levels[string(channel)] = cl.config.DefaultLevel.String()
+		}
+	}
+	return levels
 }
 
 // GetChannelStats returns statistics about log messages per channel

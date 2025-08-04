@@ -38,16 +38,15 @@ func PersonalizedPaneVariant(heldBeliefs, withheldBeliefs []string) PaneVariant 
 }
 
 // PaneRenderData represents pane-specific rendering data
-// This replaces models.PaneRenderData to eliminate legacy dependencies
 type PaneRenderData struct {
-	Title           string                 `json:"title"`
-	Slug            string                 `json:"slug"`
-	IsDecorative    bool                   `json:"isDecorative"`
-	BgColour        *string                `json:"bgColour,omitempty"`
-	HeldBeliefs     map[string]interface{} `json:"heldBeliefs,omitempty"`
-	WithheldBeliefs map[string]interface{} `json:"withheldBeliefs,omitempty"`
-	CodeHookTarget  *string                `json:"codeHookTarget,omitempty"`
-	CodeHookPayload map[string]interface{} `json:"codeHookPayload,omitempty"`
-	Created         time.Time              `json:"created"`
-	Changed         *time.Time             `json:"changed,omitempty"`
+	Title           string         `json:"title"`
+	Slug            string         `json:"slug"`
+	IsDecorative    bool           `json:"isDecorative"`
+	BgColour        *string        `json:"bgColour,omitempty"`
+	HeldBeliefs     map[string]any `json:"heldBeliefs,omitempty"`
+	WithheldBeliefs map[string]any `json:"withheldBeliefs,omitempty"`
+	CodeHookTarget  *string        `json:"codeHookTarget,omitempty"`
+	CodeHookPayload map[string]any `json:"codeHookPayload,omitempty"`
+	Created         time.Time      `json:"created"`
+	Changed         *time.Time     `json:"changed,omitempty"`
 }

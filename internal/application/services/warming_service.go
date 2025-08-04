@@ -15,7 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
-	"github.com/AtRiskMedia/tractstack-go/utils"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
 const (
@@ -281,7 +281,7 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 	}
 
 	now := time.Now().UTC()
-	oldestHour, err := utils.ParseHourKeyToDate(missingHourKeys[len(missingHourKeys)-1])
+	oldestHour, err := utilities.ParseHourKeyToDate(missingHourKeys[len(missingHourKeys)-1])
 	if err != nil {
 		ws.logger.Cache().Error("Invalid hour key during rapid catch-up", "tenantId", tenantCtx.TenantID, "hourKey", missingHourKeys[len(missingHourKeys)-1], "error", err)
 		return fmt.Errorf("invalid hour key: %w", err)
@@ -363,13 +363,13 @@ type hourlyEvents struct {
 func (ws *WarmingService) groupEventsByHour(actions []analytics.ActionEvent, beliefs []analytics.BeliefEvent) map[string]hourlyEvents {
 	grouped := make(map[string]hourlyEvents)
 	for _, event := range actions {
-		hourKey := utils.FormatHourKey(event.CreatedAt)
+		hourKey := utilities.FormatHourKey(event.CreatedAt)
 		data := grouped[hourKey]
 		data.ActionEvents = append(data.ActionEvents, event)
 		grouped[hourKey] = data
 	}
 	for _, event := range beliefs {
-		hourKey := utils.FormatHourKey(event.UpdatedAt)
+		hourKey := utilities.FormatHourKey(event.UpdatedAt)
 		data := grouped[hourKey]
 		data.BeliefEvents = append(data.BeliefEvents, event)
 		grouped[hourKey] = data
@@ -725,7 +725,7 @@ func (ws *WarmingService) getNodeName(step types.EpinetStep, contentID string, c
 
 func (ws *WarmingService) getTTLForHour(hourKey string) time.Duration {
 	now := time.Now().UTC()
-	currentHour := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+	currentHour := utilities.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 	if hourKey == currentHour {
 		return 15 * time.Minute
 	}
@@ -737,7 +737,7 @@ func (ws *WarmingService) getHourKeysForBatch(startHourOffset, endHourOffset int
 	var hourKeys []string
 	for i := startHourOffset; i < endHourOffset; i++ {
 		hourTime := now.Add(-time.Duration(i) * time.Hour)
-		hourKey := utils.FormatHourKey(hourTime)
+		hourKey := utilities.FormatHourKey(hourTime)
 		hourKeys = append(hourKeys, hourKey)
 	}
 	return hourKeys

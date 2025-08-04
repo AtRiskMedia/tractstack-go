@@ -128,7 +128,7 @@ func (s *SessionBeliefService) ParseBeliefStates(
 		}
 
 		// Try to parse the first value as JSON for structured beliefs
-		var parsedValue interface{}
+		var parsedValue any
 		if err := json.Unmarshal([]byte(beliefValues[0]), &parsedValue); err != nil {
 			// If JSON parsing fails, use the raw string value
 			parsedValue = beliefValues[0]

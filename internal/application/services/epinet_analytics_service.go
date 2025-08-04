@@ -255,7 +255,7 @@ func (s *EpinetAnalyticsService) getHourKeysForTimeRange(hoursBack int) []string
 	hourKeys := make([]string, hoursBack)
 	now := time.Now().UTC()
 
-	for i := 0; i < hoursBack; i++ {
+	for i := range hoursBack {
 		hourTime := now.Add(-time.Duration(i) * time.Hour)
 		hourKeys[i] = hourTime.Format("2006-01-02-15")
 	}

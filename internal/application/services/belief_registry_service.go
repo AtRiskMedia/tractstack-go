@@ -83,7 +83,6 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(tenantCtx *tenant
 
 // extractPaneBeliefData translates the belief rules from a PaneNode's OptionsPayload
 // into the structured PaneBeliefData format used by the registry.
-// LOGIC SOURCE: Replicates the parsing logic from `models/content_panes.go#deserializeRowData`.
 func (brs *BeliefRegistryService) extractPaneBeliefData(paneNode *content.PaneNode) types.PaneBeliefData {
 	data := types.PaneBeliefData{
 		HeldBeliefs:     make(map[string][]string),
