@@ -98,6 +98,9 @@ var (
 	ServerWriteTimeout time.Duration
 	ServerIdleTimeout  time.Duration
 
+	// Multi-tenant Configuration
+	EnableMultiTenant bool
+
 	// Cache Configuration
 	MaxTenants           int
 	MaxMemoryMB          int
@@ -146,6 +149,9 @@ func init() {
 	ServerReadTimeout = getEnvDuration("SERVER_READ_TIMEOUT", 15*time.Second)
 	ServerWriteTimeout = getEnvDuration("SERVER_WRITE_TIMEOUT", 15*time.Second)
 	ServerIdleTimeout = getEnvDuration("SERVER_IDLE_TIMEOUT", 60*time.Second)
+
+	// Multi-tenant Configuration
+	EnableMultiTenant = getEnvBool("ENABLE_MULTI_TENANT", false)
 
 	// Memory Management
 	MaxTenants = getEnvInt("MAX_TENANTS", 5)

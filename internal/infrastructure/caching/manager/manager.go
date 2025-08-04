@@ -11,8 +11,8 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/stores"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
-	"github.com/AtRiskMedia/tractstack-go/utils"
 )
 
 // Interface assertions to ensure Manager implements all required interfaces.
@@ -107,10 +107,10 @@ func (m *Manager) InitializeTenant(tenantID string) {
 }
 
 func (m *Manager) GetRangeCacheStatus(tenantID, epinetID string, startHour, endHour int) types.RangeCacheStatus {
-	hourKeys := utils.GetHourKeysForCustomRange(startHour, endHour)
+	hourKeys := utilities.GetHourKeysForCustomRange(startHour, endHour)
 
 	now := time.Now().UTC()
-	currentHourKey := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+	currentHourKey := utilities.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 
 	var missingHours []string
 	currentHourExpired := false

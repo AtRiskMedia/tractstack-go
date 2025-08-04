@@ -14,7 +14,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
-	"github.com/AtRiskMedia/tractstack-go/utils"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
 // Worker handles background cache cleanup operations
@@ -227,7 +227,7 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			lastColonIndex := strings.LastIndex(binKey, ":")
 			if lastColonIndex != -1 {
 				hourKey := binKey[lastColonIndex+1:]
-				currentHourKey := utils.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
+				currentHourKey := utilities.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 				if hourKey == currentHourKey {
 					ttl = 15 * time.Minute // CurrentHourTTL
 				} else {

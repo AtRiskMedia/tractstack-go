@@ -33,7 +33,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	epinetHandlers := handlers.NewEpinetHandlers(container.EpinetService, container.Logger, container.PerfTracker)
 	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService, container.Logger, container.PerfTracker)
 	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService, container.Logger, container.PerfTracker)
-	configHandlers := handlers.NewConfigHandlers(container.Logger, container.PerfTracker)
+	configHandlers := handlers.NewConfigHandlers(container.ConfigService, container.Logger, container.PerfTracker)
 	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService, container.Logger, container.PerfTracker)
 	analyticsHandlers := handlers.NewAnalyticsHandlers(
 		container.AnalyticsService,
@@ -46,9 +46,18 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.Logger,
 		container.PerfTracker,
 	)
-
-	// SysOp Dashboard
+	authHandlers := handlers.NewAuthHandlers(container.AuthService, container.Logger, container.PerfTracker)
+	visitHandlers := handlers.NewVisitHandlers(container.SessionService, container.AuthService, container.Logger, container.PerfTracker)
+	stateHandlers := handlers.NewStateHandlers(container.StateService, container.Logger, container.PerfTracker)
+	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
+
+	// Instantiate the MultiTenantHandlers
+	multiTenantHandlers := handlers.NewMultiTenantHandlers(
+		container.MultiTenantService,
+		container.Logger,
+		container.PerfTracker,
+	)
 
 	// Serve static SysOp dashboard
 	r.Static("/sysop", "./web/sysop")
@@ -57,17 +66,32 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	// SysOp endpoints (no WebSocket, direct service access)
 	r.GET("/sysop-auth", sysopHandlers.AuthCheck)
 	r.POST("/sysop-login", sysopHandlers.Login)
-	r.GET("/sysop-dashboard", sysopHandlers.GetDashboard)
+	// r.GET("/sysop-dashboard", sysopHandlers.GetDashboard)
 	r.GET("/sysop-tenants", sysopHandlers.GetTenants)
-	r.POST("/sysop-reload", sysopHandlers.ForceReload)
+	// r.POST("/sysop-reload", sysopHandlers.ForceReload)
 	r.GET("/sysop-activity", sysopHandlers.GetActivityMetrics)
+	r.GET("/sysop-logs/stream", sysopHandlers.StreamLogs)
+	r.GET("/sysop-logs/levels", sysopHandlers.GetLogLevels)
+	r.POST("/sysop-logs/levels", sysopHandlers.SetLogLevel)
+
+	// Public, non-tenant-specific admin routes for provisioning.
+	// These routes DO NOT use the TenantMiddleware.
+	tenantAPI := r.Group("/api/v1/tenant")
+	{
+		tenantAPI.POST("/provision", multiTenantHandlers.HandleProvisionTenant)
+		tenantAPI.POST("/activation", multiTenantHandlers.HandleActivateTenant)
+		tenantAPI.GET("/capacity", multiTenantHandlers.HandleGetCapacity)
+	}
 
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
-	api.Use(middleware.TenantMiddleware(container.TenantManager))
+	api.Use(middleware.TenantMiddleware(container.TenantManager, container.PerfTracker))
 	{
 		// Config endpoints
 		api.GET("/config/brand", configHandlers.GetBrandConfig)
+		api.PUT("/config/brand", configHandlers.UpdateBrandConfig)
+		api.GET("/config/advanced", configHandlers.GetAdvancedConfig)
+		api.PUT("/config/advanced", configHandlers.UpdateAdvancedConfig)
 
 		// Health check endpoint
 		api.GET("/health", func(c *gin.Context) {
@@ -77,6 +101,22 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 				"tenantId": tenantCtx.TenantID,
 			})
 		})
+
+		// Authentication and system routes
+		auth := api.Group("/auth")
+		{
+			auth.POST("/visit", visitHandlers.PostVisit)
+			auth.GET("/sse", visitHandlers.GetSSE)
+			auth.GET("/profile/decode", authHandlers.GetDecodeProfile)
+			auth.POST("/profile", visitHandlers.PostProfile)
+			auth.POST("/login", authHandlers.PostLogin)
+		}
+
+		// State management (separate from auth)
+		api.POST("/state", stateHandlers.PostState)
+
+		// Database status
+		api.GET("/db/status", dbHandlers.GetDatabaseStatus)
 
 		// Analytics endpoints
 		analytics := api.Group("/analytics")
@@ -97,7 +137,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
 		}
 
-		// Fragment rendering endpoints (MATCHES LEGACY main.go EXACTLY)
+		// Fragment rendering endpoints
 		fragments := api.Group("/fragments")
 		{
 			fragments.GET("/panes/:id", fragmentHandlers.GetPaneFragment)
