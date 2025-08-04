@@ -52,6 +52,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 	// Serve static SysOp dashboard
 	r.Static("/sysop", "./web/sysop")
+	r.StaticFile("/favicon.ico", "./web/sysop/favicon.ico")
 
 	// SysOp endpoints (no WebSocket, direct service access)
 	r.GET("/sysop-auth", sysopHandlers.AuthCheck)
@@ -59,6 +60,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	r.GET("/sysop-dashboard", sysopHandlers.GetDashboard)
 	r.GET("/sysop-tenants", sysopHandlers.GetTenants)
 	r.POST("/sysop-reload", sysopHandlers.ForceReload)
+	r.GET("/sysop-activity", sysopHandlers.GetActivityMetrics)
 
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
