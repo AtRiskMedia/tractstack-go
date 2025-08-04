@@ -14,15 +14,17 @@ import (
 
 // MenuService orchestrates menu operations with cache-first repository pattern
 type MenuService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewMenuService creates a new menu service singleton
-func NewMenuService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *MenuService {
+func NewMenuService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *MenuService {
 	return &MenuService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -125,6 +127,14 @@ func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) 
 		return fmt.Errorf("failed to create menu %s: %w", menu.ID, err)
 	}
 
+	// Surgically add the new item to the item cache and the master ID list
+	tenantCtx.CacheManager.SetMenu(tenantCtx.TenantID, menu)
+	tenantCtx.CacheManager.AddMenuID(tenantCtx.TenantID, menu.ID)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after menu creation",
+			"error", err, "menuId", menu.ID, "tenantId", tenantCtx.TenantID)
+	}
+
 	s.logger.Content().Info("Successfully created menu", "tenantId", tenantCtx.TenantID, "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for CreateMenu", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menu.ID)
@@ -163,6 +173,13 @@ func (s *MenuService) Update(tenantCtx *tenant.Context, menu *content.MenuNode) 
 		return fmt.Errorf("failed to update menu %s: %w", menu.ID, err)
 	}
 
+	// Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetMenu(tenantCtx.TenantID, menu)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after menu update",
+			"error", err, "menuId", menu.ID, "tenantId", tenantCtx.TenantID)
+	}
+
 	s.logger.Content().Info("Successfully updated menu", "tenantId", tenantCtx.TenantID, "menuId", menu.ID, "title", menu.Title, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for UpdateMenu", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "menuId", menu.ID)
@@ -193,6 +210,15 @@ func (s *MenuService) Delete(tenantCtx *tenant.Context, id string) error {
 	err = menuRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete menu %s: %w", id, err)
+	}
+
+	// Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidateMenu(tenantCtx.TenantID, id)
+	// Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemoveMenuID(tenantCtx.TenantID, id)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after menu deletion",
+			"error", err, "menuId", id, "tenantId", tenantCtx.TenantID)
 	}
 
 	s.logger.Content().Info("Successfully deleted menu", "tenantId", tenantCtx.TenantID, "menuId", id, "duration", time.Since(start))

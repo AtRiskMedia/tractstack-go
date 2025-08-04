@@ -2,6 +2,7 @@
 package stores
 
 import (
+	"slices"
 	"sync"
 	"time"
 
@@ -634,4 +635,291 @@ func (cs *ContentStore) InvalidateContentCache(tenantID string) {
 	if cs.logger != nil {
 		cs.logger.Cache().Info("Content cache invalidated", "tenantId", tenantID, "duration", time.Since(start))
 	}
+}
+
+func (cs *ContentStore) InvalidateResource(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if resource, ok := cache.Resources[id]; ok {
+		delete(cache.SlugToID, "resource:"+resource.Slug)
+	}
+	delete(cache.Resources, id)
+}
+
+func (cs *ContentStore) AddResourceID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllResourceIDs, id) {
+		cache.AllResourceIDs = append(cache.AllResourceIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveResourceID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllResourceIDs = slices.DeleteFunc(cache.AllResourceIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidateTractStack(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if tractStack, ok := cache.TractStacks[id]; ok {
+		delete(cache.SlugToID, "tractstack:"+tractStack.Slug)
+	}
+	delete(cache.TractStacks, id)
+}
+
+func (cs *ContentStore) AddTractStackID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllTractStackIDs, id) {
+		cache.AllTractStackIDs = append(cache.AllTractStackIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveTractStackID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllTractStackIDs = slices.DeleteFunc(cache.AllTractStackIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidateStoryFragment(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if storyFragment, ok := cache.StoryFragments[id]; ok {
+		delete(cache.SlugToID, "storyfragment:"+storyFragment.Slug)
+	}
+	delete(cache.StoryFragments, id)
+}
+
+func (cs *ContentStore) AddStoryFragmentID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllStoryFragmentIDs, id) {
+		cache.AllStoryFragmentIDs = append(cache.AllStoryFragmentIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveStoryFragmentID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllStoryFragmentIDs = slices.DeleteFunc(cache.AllStoryFragmentIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidatePane(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if pane, ok := cache.Panes[id]; ok {
+		delete(cache.SlugToID, pane.Slug)
+	}
+	delete(cache.Panes, id)
+}
+
+func (cs *ContentStore) AddPaneID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllPaneIDs, id) {
+		cache.AllPaneIDs = append(cache.AllPaneIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemovePaneID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllPaneIDs = slices.DeleteFunc(cache.AllPaneIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidateMenu(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	delete(cache.Menus, id)
+}
+
+func (cs *ContentStore) AddMenuID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllMenuIDs, id) {
+		cache.AllMenuIDs = append(cache.AllMenuIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveMenuID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllMenuIDs = slices.DeleteFunc(cache.AllMenuIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidateBelief(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if belief, ok := cache.Beliefs[id]; ok {
+		delete(cache.SlugToID, "belief:"+belief.Slug)
+	}
+	delete(cache.Beliefs, id)
+}
+
+func (cs *ContentStore) AddBeliefID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllBeliefIDs, id) {
+		cache.AllBeliefIDs = append(cache.AllBeliefIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveBeliefID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllBeliefIDs = slices.DeleteFunc(cache.AllBeliefIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidateEpinet(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	delete(cache.Epinets, id)
+}
+
+func (cs *ContentStore) AddEpinetID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllEpinetIDs, id) {
+		cache.AllEpinetIDs = append(cache.AllEpinetIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveEpinetID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllEpinetIDs = slices.DeleteFunc(cache.AllEpinetIDs, func(existingID string) bool {
+		return existingID == id
+	})
+}
+
+func (cs *ContentStore) InvalidateFile(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	delete(cache.Files, id)
+}
+
+func (cs *ContentStore) AddFileID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	if !slices.Contains(cache.AllFileIDs, id) {
+		cache.AllFileIDs = append(cache.AllFileIDs, id)
+	}
+}
+
+func (cs *ContentStore) RemoveFileID(tenantID, id string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.AllFileIDs = slices.DeleteFunc(cache.AllFileIDs, func(existingID string) bool {
+		return existingID == id
+	})
 }

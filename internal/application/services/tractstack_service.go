@@ -14,15 +14,17 @@ import (
 
 // TractStackService orchestrates tractstack operations with cache-first repository pattern
 type TractStackService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewTractStackService creates a new tractstack service singleton
-func NewTractStackService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *TractStackService {
+func NewTractStackService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *TractStackService {
 	return &TractStackService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -116,4 +118,130 @@ func (s *TractStackService) GetBySlug(tenantCtx *tenant.Context, slug string) (*
 	s.logger.Perf().Info("Performance for GetTractStackBySlug", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	return tractStack, nil
+}
+
+// Create creates a new tractstack
+func (s *TractStackService) Create(tenantCtx *tenant.Context, ts *content.TractStackNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_tractstack", tenantCtx.TenantID)
+	defer marker.Complete()
+	if ts == nil {
+		return fmt.Errorf("tractstack cannot be nil")
+	}
+	if ts.ID == "" {
+		return fmt.Errorf("tractstack ID cannot be empty")
+	}
+	if ts.Title == "" {
+		return fmt.Errorf("tractstack title cannot be empty")
+	}
+	if ts.Slug == "" {
+		return fmt.Errorf("tractstack slug cannot be empty")
+	}
+
+	tractStackRepo := tenantCtx.TractStackRepo()
+	err := tractStackRepo.Store(tenantCtx.TenantID, ts)
+	if err != nil {
+		return fmt.Errorf("failed to create tractstack %s: %w", ts.ID, err)
+	}
+
+	// Surgically add the new item to the item cache and the master ID list
+	tenantCtx.CacheManager.SetTractStack(tenantCtx.TenantID, ts)
+	tenantCtx.CacheManager.AddTractStackID(tenantCtx.TenantID, ts.ID)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after tractstack creation",
+			"error", err, "tractStackId", ts.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully created tractstack", "tenantId", tenantCtx.TenantID, "tractstackId", ts.ID, "title", ts.Title, "slug", ts.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreateTractStack", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", ts.ID)
+
+	return nil
+}
+
+// Update updates an existing tractstack
+func (s *TractStackService) Update(tenantCtx *tenant.Context, ts *content.TractStackNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_tractstack", tenantCtx.TenantID)
+	defer marker.Complete()
+	if ts == nil {
+		return fmt.Errorf("tractstack cannot be nil")
+	}
+	if ts.ID == "" {
+		return fmt.Errorf("tractstack ID cannot be empty")
+	}
+	if ts.Title == "" {
+		return fmt.Errorf("tractstack title cannot be empty")
+	}
+	if ts.Slug == "" {
+		return fmt.Errorf("tractstack slug cannot be empty")
+	}
+
+	tractStackRepo := tenantCtx.TractStackRepo()
+
+	existing, err := tractStackRepo.FindByID(tenantCtx.TenantID, ts.ID)
+	if err != nil {
+		return fmt.Errorf("failed to verify tractstack %s exists: %w", ts.ID, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("tractstack %s not found", ts.ID)
+	}
+
+	err = tractStackRepo.Update(tenantCtx.TenantID, ts)
+	if err != nil {
+		return fmt.Errorf("failed to update tractstack %s: %w", ts.ID, err)
+	}
+
+	// Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetTractStack(tenantCtx.TenantID, ts)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after tractstack update",
+			"error", err, "tractStackId", ts.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully updated tractstack", "tenantId", tenantCtx.TenantID, "tractstackId", ts.ID, "title", ts.Title, "slug", ts.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateTractStack", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", ts.ID)
+
+	return nil
+}
+
+// Delete deletes a tractstack
+func (s *TractStackService) Delete(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_tractstack", tenantCtx.TenantID)
+	defer marker.Complete()
+	if id == "" {
+		return fmt.Errorf("tractstack ID cannot be empty")
+	}
+
+	tractStackRepo := tenantCtx.TractStackRepo()
+
+	existing, err := tractStackRepo.FindByID(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to verify tractstack %s exists: %w", id, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("tractstack %s not found", id)
+	}
+
+	err = tractStackRepo.Delete(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete tractstack %s: %w", id, err)
+	}
+
+	// Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidateTractStack(tenantCtx.TenantID, id)
+	// Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemoveTractStackID(tenantCtx.TenantID, id)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after tractstack deletion",
+			"error", err, "tractStackId", id, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully deleted tractstack", "tenantId", tenantCtx.TenantID, "tractstackId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeleteTractStack", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", id)
+
+	return nil
 }

@@ -47,6 +47,19 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.PerfTracker,
 	)
 
+	// SysOp Dashboard
+	sysopHandlers := handlers.NewSysOpHandlers(container)
+
+	// Serve static SysOp dashboard
+	r.Static("/sysop", "./web/sysop")
+
+	// SysOp endpoints (no WebSocket, direct service access)
+	r.GET("/sysop-auth", sysopHandlers.AuthCheck)
+	r.POST("/sysop-login", sysopHandlers.Login)
+	r.GET("/sysop-dashboard", sysopHandlers.GetDashboard)
+	r.GET("/sysop-tenants", sysopHandlers.GetTenants)
+	r.POST("/sysop-reload", sysopHandlers.ForceReload)
+
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
 	api.Use(middleware.TenantMiddleware(container.TenantManager))
@@ -106,12 +119,18 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.GET("/panes/:id", paneHandlers.GetPaneByID)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
 			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
+			nodes.POST("/panes/create", paneHandlers.CreatePane)
+			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
+			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)
 
 			// Resource endpoints
 			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)
 			nodes.POST("/resources", resourceHandlers.GetResourcesByIDs)
 			nodes.GET("/resources/:id", resourceHandlers.GetResourceByID)
 			nodes.GET("/resources/slug/:slug", resourceHandlers.GetResourceBySlug)
+			nodes.POST("/resources/create", resourceHandlers.CreateResource)
+			nodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
+			nodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
 
 			// StoryFragment endpoints
 			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
@@ -120,28 +139,43 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
 			nodes.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
 			nodes.GET("/storyfragments/home", storyFragmentHandlers.GetHomeStoryFragment)
+			nodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
+			nodes.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
+			nodes.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
 
 			// TractStack endpoints
 			nodes.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)
 			nodes.POST("/tractstacks", tractStackHandlers.GetTractStacksByIDs)
 			nodes.GET("/tractstacks/:id", tractStackHandlers.GetTractStackByID)
 			nodes.GET("/tractstacks/slug/:slug", tractStackHandlers.GetTractStackBySlug)
+			nodes.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
+			nodes.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
+			nodes.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
 
 			// Belief endpoints
 			nodes.GET("/beliefs", beliefHandlers.GetAllBeliefIDs)
 			nodes.POST("/beliefs", beliefHandlers.GetBeliefsByIDs)
 			nodes.GET("/beliefs/:id", beliefHandlers.GetBeliefByID)
 			nodes.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
+			nodes.POST("/beliefs/create", beliefHandlers.CreateBelief)
+			nodes.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
+			nodes.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
 
 			// ImageFile endpoints
 			nodes.GET("/files", imageFileHandlers.GetAllFileIDs)
 			nodes.POST("/files", imageFileHandlers.GetFilesByIDs)
 			nodes.GET("/files/:id", imageFileHandlers.GetFileByID)
+			nodes.POST("/files/create", imageFileHandlers.CreateFile)
+			nodes.PUT("/files/:id", imageFileHandlers.UpdateFile)
+			nodes.DELETE("/files/:id", imageFileHandlers.DeleteFile)
 
 			// Epinet endpoints
 			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
 			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
 			nodes.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
+			nodes.POST("/epinets/create", epinetHandlers.CreateEpinet)
+			nodes.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
+			nodes.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
 		}
 	}
 

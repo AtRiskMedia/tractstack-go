@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -134,4 +135,110 @@ func (h *ImageFileHandlers) GetFileByID(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetFileByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "fileId", fileID)
 
 	c.JSON(http.StatusOK, fileNode)
+}
+
+// CreateFile creates a new imagefile
+func (h *ImageFileHandlers) CreateFile(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("create_imagefile_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received create imagefile request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var imageFile content.ImageFileNode
+	if err := c.ShouldBindJSON(&imageFile); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if err := h.imageFileService.Create(tenantCtx, &imageFile); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Create imagefile request completed", "fileId", imageFile.ID, "filename", imageFile.Filename, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateFile request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "fileId", imageFile.ID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "imagefile created successfully",
+		"fileId":  imageFile.ID,
+	})
+}
+
+// UpdateFile updates an existing imagefile
+func (h *ImageFileHandlers) UpdateFile(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("update_imagefile_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received update imagefile request", "method", c.Request.Method, "path", c.Request.URL.Path, "fileId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	fileID := c.Param("id")
+	if fileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "imagefile ID is required"})
+		return
+	}
+
+	var imageFile content.ImageFileNode
+	if err := c.ShouldBindJSON(&imageFile); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+	imageFile.ID = fileID
+
+	if err := h.imageFileService.Update(tenantCtx, &imageFile); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Update imagefile request completed", "fileId", imageFile.ID, "filename", imageFile.Filename, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateFile request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "fileId", imageFile.ID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "imagefile updated successfully",
+		"fileId":  imageFile.ID,
+	})
+}
+
+// DeleteFile deletes an imagefile
+func (h *ImageFileHandlers) DeleteFile(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("delete_imagefile_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received delete imagefile request", "method", c.Request.Method, "path", c.Request.URL.Path, "fileId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	fileID := c.Param("id")
+	if fileID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "imagefile ID is required"})
+		return
+	}
+
+	if err := h.imageFileService.Delete(tenantCtx, fileID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Delete imagefile request completed", "fileId", fileID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteFile request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "fileId", fileID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "imagefile deleted successfully",
+		"fileId":  fileID,
+	})
 }

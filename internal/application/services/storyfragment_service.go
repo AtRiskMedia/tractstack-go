@@ -22,15 +22,17 @@ type StoryFragmentFullPayload struct {
 
 // StoryFragmentService orchestrates storyfragment operations with cache-first repository pattern
 type StoryFragmentService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewStoryFragmentService creates a new storyfragment service singleton
-func NewStoryFragmentService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *StoryFragmentService {
+func NewStoryFragmentService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *StoryFragmentService {
 	return &StoryFragmentService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -213,4 +215,136 @@ func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.Stor
 	s.logger.Perf().Info("Performance for GetHomeStoryFragment", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return storyFragment, nil
+}
+
+// Create creates a new storyfragment
+func (s *StoryFragmentService) Create(tenantCtx *tenant.Context, sf *content.StoryFragmentNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_storyfragment", tenantCtx.TenantID)
+	defer marker.Complete()
+	if sf == nil {
+		return fmt.Errorf("storyfragment cannot be nil")
+	}
+	if sf.ID == "" {
+		return fmt.Errorf("storyfragment ID cannot be empty")
+	}
+	if sf.Title == "" {
+		return fmt.Errorf("storyfragment title cannot be empty")
+	}
+	if sf.Slug == "" {
+		return fmt.Errorf("storyfragment slug cannot be empty")
+	}
+	if sf.TractStackID == "" {
+		return fmt.Errorf("tractstack ID cannot be empty")
+	}
+
+	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
+	err := storyFragmentRepo.Store(tenantCtx.TenantID, sf)
+	if err != nil {
+		return fmt.Errorf("failed to create storyfragment %s: %w", sf.ID, err)
+	}
+
+	// Surgically add the new item to the item cache and the master ID list
+	tenantCtx.CacheManager.SetStoryFragment(tenantCtx.TenantID, sf)
+	tenantCtx.CacheManager.AddStoryFragmentID(tenantCtx.TenantID, sf.ID)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after storyfragment creation",
+			"error", err, "storyFragmentId", sf.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully created storyfragment", "tenantId", tenantCtx.TenantID, "storyfragmentId", sf.ID, "title", sf.Title, "slug", sf.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreateStoryFragment", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
+
+	return nil
+}
+
+// Update updates an existing storyfragment
+func (s *StoryFragmentService) Update(tenantCtx *tenant.Context, sf *content.StoryFragmentNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_storyfragment", tenantCtx.TenantID)
+	defer marker.Complete()
+	if sf == nil {
+		return fmt.Errorf("storyfragment cannot be nil")
+	}
+	if sf.ID == "" {
+		return fmt.Errorf("storyfragment ID cannot be empty")
+	}
+	if sf.Title == "" {
+		return fmt.Errorf("storyfragment title cannot be empty")
+	}
+	if sf.Slug == "" {
+		return fmt.Errorf("storyfragment slug cannot be empty")
+	}
+	if sf.TractStackID == "" {
+		return fmt.Errorf("tractstack ID cannot be empty")
+	}
+
+	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
+
+	existing, err := storyFragmentRepo.FindByID(tenantCtx.TenantID, sf.ID)
+	if err != nil {
+		return fmt.Errorf("failed to verify storyfragment %s exists: %w", sf.ID, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("storyfragment %s not found", sf.ID)
+	}
+
+	err = storyFragmentRepo.Update(tenantCtx.TenantID, sf)
+	if err != nil {
+		return fmt.Errorf("failed to update storyfragment %s: %w", sf.ID, err)
+	}
+
+	// Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetStoryFragment(tenantCtx.TenantID, sf)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after storyfragment update",
+			"error", err, "storyFragmentId", sf.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully updated storyfragment", "tenantId", tenantCtx.TenantID, "storyfragmentId", sf.ID, "title", sf.Title, "slug", sf.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateStoryFragment", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
+
+	return nil
+}
+
+// Delete deletes a storyfragment
+func (s *StoryFragmentService) Delete(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_storyfragment", tenantCtx.TenantID)
+	defer marker.Complete()
+	if id == "" {
+		return fmt.Errorf("storyfragment ID cannot be empty")
+	}
+
+	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
+
+	existing, err := storyFragmentRepo.FindByID(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to verify storyfragment %s exists: %w", id, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("storyfragment %s not found", id)
+	}
+
+	err = storyFragmentRepo.Delete(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete storyfragment %s: %w", id, err)
+	}
+
+	// Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidateStoryFragment(tenantCtx.TenantID, id)
+	// Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemoveStoryFragmentID(tenantCtx.TenantID, id)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after storyfragment deletion",
+			"error", err, "storyFragmentId", id, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully deleted storyfragment", "tenantId", tenantCtx.TenantID, "storyfragmentId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeleteStoryFragment", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", id)
+
+	return nil
 }

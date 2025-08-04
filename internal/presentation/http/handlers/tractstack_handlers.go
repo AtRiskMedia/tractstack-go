@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -174,4 +175,110 @@ func (h *TractStackHandlers) GetTractStackBySlug(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetTractStackBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
 	c.JSON(http.StatusOK, tractStackNode)
+}
+
+// CreateTractStack creates a new tractstack
+func (h *TractStackHandlers) CreateTractStack(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("create_tractstack_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received create tractstack request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var ts content.TractStackNode
+	if err := c.ShouldBindJSON(&ts); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if err := h.tractStackService.Create(tenantCtx, &ts); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Create tractstack request completed", "tractStackId", ts.ID, "title", ts.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateTractStack request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", ts.ID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":      "tractstack created successfully",
+		"tractStackId": ts.ID,
+	})
+}
+
+// UpdateTractStack updates an existing tractstack
+func (h *TractStackHandlers) UpdateTractStack(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("update_tractstack_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received update tractstack request", "method", c.Request.Method, "path", c.Request.URL.Path, "tractStackId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	tractStackID := c.Param("id")
+	if tractStackID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tractstack ID is required"})
+		return
+	}
+
+	var ts content.TractStackNode
+	if err := c.ShouldBindJSON(&ts); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+	ts.ID = tractStackID
+
+	if err := h.tractStackService.Update(tenantCtx, &ts); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Update tractstack request completed", "tractStackId", ts.ID, "title", ts.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateTractStack request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", ts.ID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "tractstack updated successfully",
+		"tractStackId": ts.ID,
+	})
+}
+
+// DeleteTractStack deletes a tractstack
+func (h *TractStackHandlers) DeleteTractStack(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("delete_tractstack_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received delete tractstack request", "method", c.Request.Method, "path", c.Request.URL.Path, "tractStackId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	tractStackID := c.Param("id")
+	if tractStackID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tractstack ID is required"})
+		return
+	}
+
+	if err := h.tractStackService.Delete(tenantCtx, tractStackID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Delete tractstack request completed", "tractStackId", tractStackID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteTractStack request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "tractStackId", tractStackID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "tractstack deleted successfully",
+		"tractStackId": tractStackID,
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -196,5 +197,111 @@ func (h *PaneHandlers) GetContextPanes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"contextPanes": contextPanes,
 		"count":        len(contextPanes),
+	})
+}
+
+// CreatePane creates a new pane
+func (h *PaneHandlers) CreatePane(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("create_pane_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received create pane request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var pane content.PaneNode
+	if err := c.ShouldBindJSON(&pane); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if err := h.paneService.Create(tenantCtx, &pane); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Create pane request completed", "paneId", pane.ID, "title", pane.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreatePane request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", pane.ID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message": "pane created successfully",
+		"paneId":  pane.ID,
+	})
+}
+
+// UpdatePane updates an existing pane
+func (h *PaneHandlers) UpdatePane(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("update_pane_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received update pane request", "method", c.Request.Method, "path", c.Request.URL.Path, "paneId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	paneID := c.Param("id")
+	if paneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pane ID is required"})
+		return
+	}
+
+	var pane content.PaneNode
+	if err := c.ShouldBindJSON(&pane); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+	pane.ID = paneID
+
+	if err := h.paneService.Update(tenantCtx, &pane); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Update pane request completed", "paneId", pane.ID, "title", pane.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdatePane request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", pane.ID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "pane updated successfully",
+		"paneId":  pane.ID,
+	})
+}
+
+// DeletePane deletes a pane
+func (h *PaneHandlers) DeletePane(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("delete_pane_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received delete pane request", "method", c.Request.Method, "path", c.Request.URL.Path, "paneId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	paneID := c.Param("id")
+	if paneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pane ID is required"})
+		return
+	}
+
+	if err := h.paneService.Delete(tenantCtx, paneID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Delete pane request completed", "paneId", paneID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeletePane request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "pane deleted successfully",
+		"paneId":  paneID,
 	})
 }

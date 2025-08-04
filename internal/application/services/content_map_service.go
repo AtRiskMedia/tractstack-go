@@ -3,11 +3,11 @@ package services
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
@@ -159,11 +159,26 @@ func (cms *ContentMapService) convertToFullContentMapItems(contentMap []*content
 	return cacheItems
 }
 
-// RefreshContentMap forces a refresh of the content map cache
+// RefreshContentMap forces a refresh of the content map cache with thundering herd protection
 func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache interfaces.ContentCache) error {
+	lockKey := fmt.Sprintf("contentmap:%s", tenantCtx.TenantID)
+
+	// Try to acquire warming lock to prevent thundering herd
+	warmingLock := caching.GetGlobalWarmingLock()
+	if !warmingLock.TryLock(lockKey) {
+		// Another thread is already rebuilding, just return success
+		if cms.logger != nil {
+			cms.logger.Content().Debug("Content map rebuild already in progress",
+				"tenantId", tenantCtx.TenantID, "lockKey", lockKey)
+		}
+		return nil
+	}
+	defer warmingLock.Unlock(lockKey)
+
 	marker := cms.perfTracker.StartOperation("refresh_content_map", tenantCtx.TenantID)
 	defer marker.Complete()
 	start := time.Now()
+
 	// Invalidate existing cache
 	cache.InvalidateContentCache(tenantCtx.TenantID)
 
@@ -178,11 +193,10 @@ func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache
 	cacheItems := cms.convertToFullContentMapItems(contentMap)
 	cache.SetFullContentMap(tenantCtx.TenantID, cacheItems)
 
-	log.Printf("Refreshed content map cache for tenant %s with %d items", tenantCtx.TenantID, len(contentMap))
-
-	cms.logger.Content().Info("Successfully refreshed content map", "tenantId", tenantCtx.TenantID, "itemCount", len(contentMap), "duration", time.Since(start))
+	cms.logger.Content().Info("Successfully refreshed content map",
+		"tenantId", tenantCtx.TenantID, "itemCount", len(contentMap),
+		"lockKey", lockKey, "duration", time.Since(start))
 
 	marker.SetSuccess(true)
-	cms.logger.Perf().Info("Performance for RefreshContentMap", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 	return nil
 }

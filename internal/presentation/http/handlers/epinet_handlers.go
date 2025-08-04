@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -137,4 +138,110 @@ func (h *EpinetHandlers) GetEpinetByID(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetEpinetByID request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", epinetID)
 
 	c.JSON(http.StatusOK, epinetNode)
+}
+
+// CreateEpinet creates a new epinet
+func (h *EpinetHandlers) CreateEpinet(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("create_epinet_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received create epinet request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var epinet content.EpinetNode
+	if err := c.ShouldBindJSON(&epinet); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if err := h.epinetService.Create(tenantCtx, &epinet); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Create epinet request completed", "epinetId", epinet.ID, "title", epinet.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateEpinet request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", epinet.ID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":  "epinet created successfully",
+		"epinetId": epinet.ID,
+	})
+}
+
+// UpdateEpinet updates an existing epinet
+func (h *EpinetHandlers) UpdateEpinet(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("update_epinet_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received update epinet request", "method", c.Request.Method, "path", c.Request.URL.Path, "epinetId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	epinetID := c.Param("id")
+	if epinetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "epinet ID is required"})
+		return
+	}
+
+	var epinet content.EpinetNode
+	if err := c.ShouldBindJSON(&epinet); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+	epinet.ID = epinetID
+
+	if err := h.epinetService.Update(tenantCtx, &epinet); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Update epinet request completed", "epinetId", epinet.ID, "title", epinet.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateEpinet request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", epinet.ID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "epinet updated successfully",
+		"epinetId": epinet.ID,
+	})
+}
+
+// DeleteEpinet deletes an epinet
+func (h *EpinetHandlers) DeleteEpinet(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("delete_epinet_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received delete epinet request", "method", c.Request.Method, "path", c.Request.URL.Path, "epinetId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	epinetID := c.Param("id")
+	if epinetID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "epinet ID is required"})
+		return
+	}
+
+	if err := h.epinetService.Delete(tenantCtx, epinetID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Delete epinet request completed", "epinetId", epinetID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteEpinet request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", epinetID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "epinet deleted successfully",
+		"epinetId": epinetID,
+	})
 }
