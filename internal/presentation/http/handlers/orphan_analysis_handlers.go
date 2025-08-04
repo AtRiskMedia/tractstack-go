@@ -2,7 +2,6 @@
 package handlers
 
 import (
-	"log"
 	"net/http"
 	"time"
 
@@ -41,8 +40,6 @@ func (h *OrphanAnalysisHandlers) GetOrphanAnalysis(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("orphan_analysis_request", tenantCtx.TenantID)
 	defer marker.Complete()
 	h.logger.Content().Debug("Received get orphan analysis request", "method", c.Request.Method, "path", c.Request.URL.Path)
-	// TODO: Add admin authentication middleware to protect this route
-	log.Println("************** WARNING --> ROUTE NEEDS TO BE PROTECTED")
 
 	// Get client's ETag for cache validation
 	clientETag := c.GetHeader("If-None-Match")

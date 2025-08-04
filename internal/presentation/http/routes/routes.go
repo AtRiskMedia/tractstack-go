@@ -5,24 +5,20 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/container"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/handlers"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
-	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-// SetupRoutes configures all HTTP routes and middleware with dependency injection
+// SetupRoutes configures all HTTP routes and middleware with dependency injection.
 func SetupRoutes(container *container.Container) *gin.Engine {
-	// Create Gin router
 	r := gin.Default()
 
-	// Configure CORS
-	config := cors.DefaultConfig()
-	config.AllowOrigins = []string{"*"} // In production, configure specific origins
-	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Tenant-ID"}
-	config.AllowCredentials = true
-	r.Use(cors.New(config))
+	r.Use(middleware.CORSMiddleware())
 
-	// Initialize all handler structs with injected singleton services and logger
+	// Serve static SysOp dashboard files from the /sysop URL.
+	r.Static("/sysop", "web/sysop")
+	r.StaticFile("/favicon.ico", "web/sysop/favicon.ico")
+
+	// Initialize handlers
 	menuHandlers := handlers.NewMenuHandlers(container.MenuService, container.Logger, container.PerfTracker)
 	paneHandlers := handlers.NewPaneHandlers(container.PaneService, container.Logger, container.PerfTracker)
 	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService, container.Logger, container.PerfTracker)
@@ -51,31 +47,29 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	stateHandlers := handlers.NewStateHandlers(container.StateService, container.Logger, container.PerfTracker)
 	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
+	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
 
-	// Instantiate the MultiTenantHandlers
-	multiTenantHandlers := handlers.NewMultiTenantHandlers(
-		container.MultiTenantService,
-		container.Logger,
-		container.PerfTracker,
-	)
+	// SysOp API endpoints moved to /api/sysop to avoid conflict with static file serving
+	sysopAPI := r.Group("/api/sysop")
+	{
+		sysopAPI.GET("/auth", sysopHandlers.AuthCheck)
+		sysopAPI.POST("/login", sysopHandlers.Login)
 
-	// Serve static SysOp dashboard
-	r.Static("/sysop", "./web/sysop")
-	r.StaticFile("/favicon.ico", "./web/sysop/favicon.ico")
+		// SysOp Authenticated endpoints
+		sysopAPI.Use(sysopHandlers.SysOpAuthMiddleware())
+		{
+			sysopAPI.GET("/tenants", sysopHandlers.GetTenants)
+			sysopAPI.GET("/activity", sysopHandlers.GetActivityMetrics)
+			sysopAPI.POST("/tenant-token", sysopHandlers.GetTenantToken)
+			sysopAPI.GET("/logs/levels", sysopHandlers.GetLogLevels)
+			sysopAPI.POST("/logs/levels", sysopHandlers.SetLogLevel)
+		}
+	}
 
-	// SysOp endpoints (no WebSocket, direct service access)
-	r.GET("/sysop-auth", sysopHandlers.AuthCheck)
-	r.POST("/sysop-login", sysopHandlers.Login)
-	// r.GET("/sysop-dashboard", sysopHandlers.GetDashboard)
-	r.GET("/sysop-tenants", sysopHandlers.GetTenants)
-	// r.POST("/sysop-reload", sysopHandlers.ForceReload)
-	r.GET("/sysop-activity", sysopHandlers.GetActivityMetrics)
+	// Log streaming is a special case and can remain at top level
 	r.GET("/sysop-logs/stream", sysopHandlers.StreamLogs)
-	r.GET("/sysop-logs/levels", sysopHandlers.GetLogLevels)
-	r.POST("/sysop-logs/levels", sysopHandlers.SetLogLevel)
 
 	// Public, non-tenant-specific admin routes for provisioning.
-	// These routes DO NOT use the TenantMiddleware.
 	tenantAPI := r.Group("/api/v1/tenant")
 	{
 		tenantAPI.POST("/provision", multiTenantHandlers.HandleProvisionTenant)
@@ -86,21 +80,17 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
 	api.Use(middleware.TenantMiddleware(container.TenantManager, container.PerfTracker))
+	api.Use(middleware.DomainValidationMiddleware(container.TenantManager))
 	{
 		// Config endpoints
-		api.GET("/config/brand", configHandlers.GetBrandConfig)
-		api.PUT("/config/brand", configHandlers.UpdateBrandConfig)
-		api.GET("/config/advanced", configHandlers.GetAdvancedConfig)
-		api.PUT("/config/advanced", configHandlers.UpdateAdvancedConfig)
-
-		// Health check endpoint
-		api.GET("/health", func(c *gin.Context) {
-			tenantCtx, _ := middleware.GetTenantContext(c)
-			c.JSON(200, gin.H{
-				"status":   "ok",
-				"tenantId": tenantCtx.TenantID,
-			})
-		})
+		configGroup := api.Group("/config")
+		configGroup.Use(authHandlers.AuthMiddleware())
+		{
+			configGroup.GET("/brand", configHandlers.GetBrandConfig)
+			configGroup.PUT("/brand", configHandlers.UpdateBrandConfig)
+			configGroup.GET("/advanced", configHandlers.GetAdvancedConfig)
+			configGroup.PUT("/advanced", authHandlers.AdminOnlyMiddleware(), configHandlers.UpdateAdvancedConfig)
+		}
 
 		// Authentication and system routes
 		auth := api.Group("/auth")
@@ -110,6 +100,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			auth.GET("/profile/decode", authHandlers.GetDecodeProfile)
 			auth.POST("/profile", visitHandlers.PostProfile)
 			auth.POST("/login", authHandlers.PostLogin)
+			auth.POST("/logout", authHandlers.PostLogout)
+			auth.GET("/status", authHandlers.GetAuthStatus)
+			auth.POST("/refresh", authHandlers.PostRefreshToken)
 		}
 
 		// State management (separate from auth)
@@ -120,6 +113,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 		// Analytics endpoints
 		analytics := api.Group("/analytics")
+		analytics.Use(authHandlers.AuthMiddleware())
 		{
 			analytics.GET("/dashboard", analyticsHandlers.HandleDashboardAnalytics)
 			analytics.GET("/epinet/:id", analyticsHandlers.HandleEpinetSankey)
@@ -133,6 +127,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 		// Admin endpoints
 		admin := api.Group("/admin")
+		admin.Use(authHandlers.AuthMiddleware())
 		{
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
 		}
@@ -147,77 +142,69 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		// Content nodes
 		nodes := api.Group("/nodes")
 		{
-			// Menu endpoints
+			// Read-Only Routes (Public)
 			nodes.GET("/menus", menuHandlers.GetAllMenuIDs)
 			nodes.POST("/menus", menuHandlers.GetMenusByIDs)
 			nodes.GET("/menus/:id", menuHandlers.GetMenuByID)
-			nodes.POST("/menus/create", menuHandlers.CreateMenu)
-			nodes.PUT("/menus/:id", menuHandlers.UpdateMenu)
-			nodes.DELETE("/menus/:id", menuHandlers.DeleteMenu)
-
-			// Pane endpoints
 			nodes.GET("/panes", paneHandlers.GetAllPaneIDs)
 			nodes.POST("/panes", paneHandlers.GetPanesByIDs)
 			nodes.GET("/panes/:id", paneHandlers.GetPaneByID)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
 			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
-			nodes.POST("/panes/create", paneHandlers.CreatePane)
-			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
-			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)
-
-			// Resource endpoints
 			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)
 			nodes.POST("/resources", resourceHandlers.GetResourcesByIDs)
 			nodes.GET("/resources/:id", resourceHandlers.GetResourceByID)
 			nodes.GET("/resources/slug/:slug", resourceHandlers.GetResourceBySlug)
-			nodes.POST("/resources/create", resourceHandlers.CreateResource)
-			nodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
-			nodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
-
-			// StoryFragment endpoints
 			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
 			nodes.POST("/storyfragments", storyFragmentHandlers.GetStoryFragmentsByIDs)
 			nodes.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
-			nodes.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
 			nodes.GET("/storyfragments/home", storyFragmentHandlers.GetHomeStoryFragment)
-			nodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
-			nodes.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
-			nodes.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
-
-			// TractStack endpoints
 			nodes.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)
 			nodes.POST("/tractstacks", tractStackHandlers.GetTractStacksByIDs)
 			nodes.GET("/tractstacks/:id", tractStackHandlers.GetTractStackByID)
 			nodes.GET("/tractstacks/slug/:slug", tractStackHandlers.GetTractStackBySlug)
-			nodes.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
-			nodes.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
-			nodes.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
-
-			// Belief endpoints
 			nodes.GET("/beliefs", beliefHandlers.GetAllBeliefIDs)
 			nodes.POST("/beliefs", beliefHandlers.GetBeliefsByIDs)
 			nodes.GET("/beliefs/:id", beliefHandlers.GetBeliefByID)
 			nodes.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
-			nodes.POST("/beliefs/create", beliefHandlers.CreateBelief)
-			nodes.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
-			nodes.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
-
-			// ImageFile endpoints
 			nodes.GET("/files", imageFileHandlers.GetAllFileIDs)
 			nodes.POST("/files", imageFileHandlers.GetFilesByIDs)
 			nodes.GET("/files/:id", imageFileHandlers.GetFileByID)
-			nodes.POST("/files/create", imageFileHandlers.CreateFile)
-			nodes.PUT("/files/:id", imageFileHandlers.UpdateFile)
-			nodes.DELETE("/files/:id", imageFileHandlers.DeleteFile)
-
-			// Epinet endpoints
 			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
 			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
 			nodes.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
-			nodes.POST("/epinets/create", epinetHandlers.CreateEpinet)
-			nodes.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
-			nodes.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+
+			// Mutation Routes (Protected)
+			mutations := nodes.Group("/")
+			mutations.Use(authHandlers.AuthMiddleware())
+			{
+				mutations.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
+				mutations.POST("/menus/create", menuHandlers.CreateMenu)
+				mutations.PUT("/menus/:id", menuHandlers.UpdateMenu)
+				mutations.DELETE("/menus/:id", menuHandlers.DeleteMenu)
+				mutations.POST("/panes/create", paneHandlers.CreatePane)
+				mutations.PUT("/panes/:id", paneHandlers.UpdatePane)
+				mutations.DELETE("/panes/:id", paneHandlers.DeletePane)
+				mutations.POST("/resources/create", resourceHandlers.CreateResource)
+				mutations.PUT("/resources/:id", resourceHandlers.UpdateResource)
+				mutations.DELETE("/resources/:id", resourceHandlers.DeleteResource)
+				mutations.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
+				mutations.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
+				mutations.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
+				mutations.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
+				mutations.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
+				mutations.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
+				mutations.POST("/beliefs/create", beliefHandlers.CreateBelief)
+				mutations.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
+				mutations.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
+				mutations.POST("/files/create", imageFileHandlers.CreateFile)
+				mutations.PUT("/files/:id", imageFileHandlers.UpdateFile)
+				mutations.DELETE("/files/:id", imageFileHandlers.DeleteFile)
+				mutations.POST("/epinets/create", epinetHandlers.CreateEpinet)
+				mutations.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
+				mutations.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+			}
 		}
 	}
 
