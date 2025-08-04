@@ -14,15 +14,17 @@ import (
 
 // ResourceService orchestrates resource operations with cache-first repository pattern
 type ResourceService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewResourceService creates a new resource service singleton
-func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ResourceService {
+func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *ResourceService {
 	return &ResourceService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -164,6 +166,17 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("failed to create resource %s: %w", resource.ID, err)
 	}
 
+	// 1. Surgically add the new item to the item cache.
+	tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
+	// 2. Surgically add the new ID to the master ID list.
+	tenantCtx.CacheManager.AddResourceID(tenantCtx.TenantID, resource.ID)
+	// 3. Refresh content map after successful creation
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after resource creation",
+			"error", err, "resourceId", resource.ID, "tenantId", tenantCtx.TenantID)
+		// Do not fail the operation; the content map will be refreshed on the next cache miss.
+	}
+
 	s.logger.Content().Info("Successfully created resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for CreateResource", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
@@ -204,6 +217,15 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("failed to update resource %s: %w", resource.ID, err)
 	}
 
+	// 1. Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
+	// 2. Refresh content map after successful creation
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after resource update",
+			"error", err, "resourceId", resource.ID, "tenantId", tenantCtx.TenantID)
+		// Do not fail the operation; the content map will be refreshed on the next cache miss.
+	}
+
 	s.logger.Content().Info("Successfully updated resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for UpdateResource", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
@@ -233,6 +255,17 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	err = resourceRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete resource %s: %w", id, err)
+	}
+
+	// 1. Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidateResource(tenantCtx.TenantID, id)
+	// 2. Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemoveResourceID(tenantCtx.TenantID, id)
+	// 3. Refresh content map after successful creation
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after resource deletion",
+			"error", err, "resourceId", id, "tenantId", tenantCtx.TenantID)
+		// Do not fail the operation; the content map will be refreshed on the next cache miss.
 	}
 
 	s.logger.Content().Info("Successfully deleted resource", "tenantId", tenantCtx.TenantID, "resourceId", id, "duration", time.Since(start))

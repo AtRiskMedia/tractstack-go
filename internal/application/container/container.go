@@ -103,19 +103,22 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		logger,
 	)
 
+	// Create contentMapService before other content services
+	contentMapService := services.NewContentMapService(logger, perfTracker)
+
 	logger.Startup().Info("Dependency injection container services initialized")
 
 	return &Container{
 		// Content Services (stateless singletons)
-		MenuService:           services.NewMenuService(logger, perfTracker),
-		PaneService:           services.NewPaneService(logger, perfTracker),
-		ResourceService:       services.NewResourceService(logger, perfTracker),
-		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker),
-		TractStackService:     services.NewTractStackService(logger, perfTracker),
-		BeliefService:         services.NewBeliefService(logger, perfTracker),
-		ImageFileService:      services.NewImageFileService(logger, perfTracker),
-		EpinetService:         services.NewEpinetService(logger, perfTracker),
-		ContentMapService:     services.NewContentMapService(logger, perfTracker),
+		MenuService:           services.NewMenuService(logger, perfTracker, contentMapService),
+		PaneService:           services.NewPaneService(logger, perfTracker, contentMapService),
+		ResourceService:       services.NewResourceService(logger, perfTracker, contentMapService),
+		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker, contentMapService),
+		TractStackService:     services.NewTractStackService(logger, perfTracker, contentMapService),
+		BeliefService:         services.NewBeliefService(logger, perfTracker, contentMapService),
+		ImageFileService:      services.NewImageFileService(logger, perfTracker, contentMapService),
+		EpinetService:         services.NewEpinetService(logger, perfTracker, contentMapService),
+		ContentMapService:     contentMapService,
 		OrphanAnalysisService: services.NewOrphanAnalysisService(logger),
 		BeliefRegistryService: services.NewBeliefRegistryService(logger),
 		WarmingService:        services.NewWarmingService(logger, perfTracker),

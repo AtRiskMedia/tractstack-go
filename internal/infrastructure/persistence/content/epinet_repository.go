@@ -155,7 +155,6 @@ func (r *EpinetRepository) Delete(tenantID, id string) error {
 	}
 
 	r.logger.Database().Info("Epinet delete completed", "id", id, "duration", time.Since(start))
-	r.cache.InvalidateContentCache(tenantID)
 	duration := time.Since(start)
 	if duration > config.SlowQueryThreshold {
 		r.logger.LogSlowQuery(query, duration, tenantID)

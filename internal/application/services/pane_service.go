@@ -14,15 +14,17 @@ import (
 
 // PaneService orchestrates pane operations with cache-first repository pattern
 type PaneService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewPaneService creates a new pane service singleton
-func NewPaneService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *PaneService {
+func NewPaneService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *PaneService {
 	return &PaneService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -134,4 +136,130 @@ func (s *PaneService) GetContextPanes(tenantCtx *tenant.Context) ([]*content.Pan
 	s.logger.Perf().Info("Performance for GetContextPanes", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return contextPanes, nil
+}
+
+// Create creates a new pane
+func (s *PaneService) Create(tenantCtx *tenant.Context, pane *content.PaneNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_pane", tenantCtx.TenantID)
+	defer marker.Complete()
+	if pane == nil {
+		return fmt.Errorf("pane cannot be nil")
+	}
+	if pane.ID == "" {
+		return fmt.Errorf("pane ID cannot be empty")
+	}
+	if pane.Title == "" {
+		return fmt.Errorf("pane title cannot be empty")
+	}
+	if pane.Slug == "" {
+		return fmt.Errorf("pane slug cannot be empty")
+	}
+
+	paneRepo := tenantCtx.PaneRepo()
+	err := paneRepo.Store(tenantCtx.TenantID, pane)
+	if err != nil {
+		return fmt.Errorf("failed to create pane %s: %w", pane.ID, err)
+	}
+
+	// Surgically add the new item to the item cache and the master ID list
+	tenantCtx.CacheManager.SetPane(tenantCtx.TenantID, pane)
+	tenantCtx.CacheManager.AddPaneID(tenantCtx.TenantID, pane.ID)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after pane creation",
+			"error", err, "paneId", pane.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully created pane", "tenantId", tenantCtx.TenantID, "paneId", pane.ID, "title", pane.Title, "slug", pane.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreatePane", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", pane.ID)
+
+	return nil
+}
+
+// Update updates an existing pane
+func (s *PaneService) Update(tenantCtx *tenant.Context, pane *content.PaneNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_pane", tenantCtx.TenantID)
+	defer marker.Complete()
+	if pane == nil {
+		return fmt.Errorf("pane cannot be nil")
+	}
+	if pane.ID == "" {
+		return fmt.Errorf("pane ID cannot be empty")
+	}
+	if pane.Title == "" {
+		return fmt.Errorf("pane title cannot be empty")
+	}
+	if pane.Slug == "" {
+		return fmt.Errorf("pane slug cannot be empty")
+	}
+
+	paneRepo := tenantCtx.PaneRepo()
+
+	existing, err := paneRepo.FindByID(tenantCtx.TenantID, pane.ID)
+	if err != nil {
+		return fmt.Errorf("failed to verify pane %s exists: %w", pane.ID, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("pane %s not found", pane.ID)
+	}
+
+	err = paneRepo.Update(tenantCtx.TenantID, pane)
+	if err != nil {
+		return fmt.Errorf("failed to update pane %s: %w", pane.ID, err)
+	}
+
+	// Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetPane(tenantCtx.TenantID, pane)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after pane update",
+			"error", err, "paneId", pane.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully updated pane", "tenantId", tenantCtx.TenantID, "paneId", pane.ID, "title", pane.Title, "slug", pane.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdatePane", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", pane.ID)
+
+	return nil
+}
+
+// Delete deletes a pane
+func (s *PaneService) Delete(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_pane", tenantCtx.TenantID)
+	defer marker.Complete()
+	if id == "" {
+		return fmt.Errorf("pane ID cannot be empty")
+	}
+
+	paneRepo := tenantCtx.PaneRepo()
+
+	existing, err := paneRepo.FindByID(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to verify pane %s exists: %w", id, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("pane %s not found", id)
+	}
+
+	err = paneRepo.Delete(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete pane %s: %w", id, err)
+	}
+
+	// Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidatePane(tenantCtx.TenantID, id)
+	// Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemovePaneID(tenantCtx.TenantID, id)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after pane deletion",
+			"error", err, "paneId", id, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully deleted pane", "tenantId", tenantCtx.TenantID, "paneId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeletePane", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", id)
+
+	return nil
 }

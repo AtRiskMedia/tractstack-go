@@ -101,7 +101,7 @@ func (r *Reporter) GenerateTenantReport(tenantID string) string {
 
 	// Cached nodes line (lowercase labels)
 	var countsLine strings.Builder
-	countsLine.WriteString(fmt.Sprintf("%s✦ cached nodes:%s", dimGrey, reset))
+	countsLine.WriteString(fmt.Sprintf("%s✦ cached nodes:%s", cyanBright, reset))
 
 	contentTypes := []struct {
 		name   string

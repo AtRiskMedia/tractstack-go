@@ -14,15 +14,17 @@ import (
 
 // BeliefService orchestrates belief operations with cache-first repository pattern
 type BeliefService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewBeliefService creates a new belief service singleton
-func NewBeliefService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *BeliefService {
+func NewBeliefService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *BeliefService {
 	return &BeliefService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -145,6 +147,14 @@ func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.Belief
 		return fmt.Errorf("failed to create belief %s: %w", belief.ID, err)
 	}
 
+	// Surgically add the new item to the item cache and the master ID list
+	tenantCtx.CacheManager.SetBelief(tenantCtx.TenantID, belief)
+	tenantCtx.CacheManager.AddBeliefID(tenantCtx.TenantID, belief.ID)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after belief creation",
+			"error", err, "beliefId", belief.ID, "tenantId", tenantCtx.TenantID)
+	}
+
 	s.logger.Content().Info("Successfully created belief", "tenantId", tenantCtx.TenantID, "beliefId", belief.ID, "title", belief.Title, "slug", belief.Slug, "scale", belief.Scale, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for CreateBelief", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", belief.ID)
@@ -188,6 +198,13 @@ func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.Belief
 		return fmt.Errorf("failed to update belief %s: %w", belief.ID, err)
 	}
 
+	// Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetBelief(tenantCtx.TenantID, belief)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after belief update",
+			"error", err, "beliefId", belief.ID, "tenantId", tenantCtx.TenantID)
+	}
+
 	s.logger.Content().Info("Successfully updated belief", "tenantId", tenantCtx.TenantID, "beliefId", belief.ID, "title", belief.Title, "slug", belief.Slug, "scale", belief.Scale, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for UpdateBelief", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "beliefId", belief.ID)
@@ -217,6 +234,15 @@ func (s *BeliefService) Delete(tenantCtx *tenant.Context, id string) error {
 	err = beliefRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete belief %s: %w", id, err)
+	}
+
+	// Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidateBelief(tenantCtx.TenantID, id)
+	// Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemoveBeliefID(tenantCtx.TenantID, id)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after belief deletion",
+			"error", err, "beliefId", id, "tenantId", tenantCtx.TenantID)
 	}
 
 	s.logger.Content().Info("Successfully deleted belief", "tenantId", tenantCtx.TenantID, "beliefId", id, "duration", time.Since(start))

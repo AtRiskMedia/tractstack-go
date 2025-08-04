@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -237,4 +238,110 @@ func (h *StoryFragmentHandlers) GetHomeStoryFragment(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetHomeStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, homeStoryFragment)
+}
+
+// CreateStoryFragment creates a new storyfragment
+func (h *StoryFragmentHandlers) CreateStoryFragment(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("create_storyfragment_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received create storyfragment request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var sf content.StoryFragmentNode
+	if err := c.ShouldBindJSON(&sf); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if err := h.storyFragmentService.Create(tenantCtx, &sf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Create storyfragment request completed", "storyFragmentId", sf.ID, "title", sf.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for CreateStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":         "storyfragment created successfully",
+		"storyFragmentId": sf.ID,
+	})
+}
+
+// UpdateStoryFragment updates an existing storyfragment
+func (h *StoryFragmentHandlers) UpdateStoryFragment(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("update_storyfragment_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received update storyfragment request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	storyFragmentID := c.Param("id")
+	if storyFragmentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "storyfragment ID is required"})
+		return
+	}
+
+	var sf content.StoryFragmentNode
+	if err := c.ShouldBindJSON(&sf); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+	sf.ID = storyFragmentID
+
+	if err := h.storyFragmentService.Update(tenantCtx, &sf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Update storyfragment request completed", "storyFragmentId", sf.ID, "title", sf.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "storyfragment updated successfully",
+		"storyFragmentId": sf.ID,
+	})
+}
+
+// DeleteStoryFragment deletes a storyfragment
+func (h *StoryFragmentHandlers) DeleteStoryFragment(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("delete_storyfragment_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received delete storyfragment request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	storyFragmentID := c.Param("id")
+	if storyFragmentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "storyfragment ID is required"})
+		return
+	}
+
+	if err := h.storyFragmentService.Delete(tenantCtx, storyFragmentID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Delete storyfragment request completed", "storyFragmentId", storyFragmentID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for DeleteStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", storyFragmentID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "storyfragment deleted successfully",
+		"storyFragmentId": storyFragmentID,
+	})
 }

@@ -14,15 +14,17 @@ import (
 
 // EpinetService orchestrates epinet operations with cache-first repository pattern
 type EpinetService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
+	contentMapService *ContentMapService
 }
 
 // NewEpinetService creates a new epinet service singleton
-func NewEpinetService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *EpinetService {
+func NewEpinetService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *EpinetService {
 	return &EpinetService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:            logger,
+		perfTracker:       perfTracker,
+		contentMapService: contentMapService,
 	}
 }
 
@@ -94,4 +96,124 @@ func (s *EpinetService) GetByIDs(tenantCtx *tenant.Context, ids []string) ([]*co
 	s.logger.Perf().Info("Performance for GetEpinetsByIDs", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "requestedCount", len(ids))
 
 	return epinets, nil
+}
+
+// Create creates a new epinet
+func (s *EpinetService) Create(tenantCtx *tenant.Context, epinet *content.EpinetNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("create_epinet", tenantCtx.TenantID)
+	defer marker.Complete()
+	if epinet == nil {
+		return fmt.Errorf("epinet cannot be nil")
+	}
+	if epinet.ID == "" {
+		return fmt.Errorf("epinet ID cannot be empty")
+	}
+	if epinet.Title == "" {
+		return fmt.Errorf("epinet title cannot be empty")
+	}
+
+	epinetRepo := tenantCtx.EpinetRepo()
+	err := epinetRepo.Store(tenantCtx.TenantID, epinet)
+	if err != nil {
+		return fmt.Errorf("failed to create epinet %s: %w", epinet.ID, err)
+	}
+
+	// Surgically add the new item to the item cache and the master ID list
+	tenantCtx.CacheManager.SetEpinet(tenantCtx.TenantID, epinet)
+	tenantCtx.CacheManager.AddEpinetID(tenantCtx.TenantID, epinet.ID)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after epinet creation",
+			"error", err, "epinetId", epinet.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully created epinet", "tenantId", tenantCtx.TenantID, "epinetId", epinet.ID, "title", epinet.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for CreateEpinet", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", epinet.ID)
+
+	return nil
+}
+
+// Update updates an existing epinet
+func (s *EpinetService) Update(tenantCtx *tenant.Context, epinet *content.EpinetNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_epinet", tenantCtx.TenantID)
+	defer marker.Complete()
+	if epinet == nil {
+		return fmt.Errorf("epinet cannot be nil")
+	}
+	if epinet.ID == "" {
+		return fmt.Errorf("epinet ID cannot be empty")
+	}
+	if epinet.Title == "" {
+		return fmt.Errorf("epinet title cannot be empty")
+	}
+
+	epinetRepo := tenantCtx.EpinetRepo()
+
+	existing, err := epinetRepo.FindByID(tenantCtx.TenantID, epinet.ID)
+	if err != nil {
+		return fmt.Errorf("failed to verify epinet %s exists: %w", epinet.ID, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("epinet %s not found", epinet.ID)
+	}
+
+	err = epinetRepo.Update(tenantCtx.TenantID, epinet)
+	if err != nil {
+		return fmt.Errorf("failed to update epinet %s: %w", epinet.ID, err)
+	}
+
+	// Surgically update the item in the item cache. The ID list is not affected.
+	tenantCtx.CacheManager.SetEpinet(tenantCtx.TenantID, epinet)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after epinet update",
+			"error", err, "epinetId", epinet.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully updated epinet", "tenantId", tenantCtx.TenantID, "epinetId", epinet.ID, "title", epinet.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateEpinet", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", epinet.ID)
+
+	return nil
+}
+
+// Delete deletes an epinet
+func (s *EpinetService) Delete(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_epinet", tenantCtx.TenantID)
+	defer marker.Complete()
+	if id == "" {
+		return fmt.Errorf("epinet ID cannot be empty")
+	}
+
+	epinetRepo := tenantCtx.EpinetRepo()
+
+	existing, err := epinetRepo.FindByID(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to verify epinet %s exists: %w", id, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("epinet %s not found", id)
+	}
+
+	err = epinetRepo.Delete(tenantCtx.TenantID, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete epinet %s: %w", id, err)
+	}
+
+	// Surgically remove the single item from the item cache.
+	tenantCtx.CacheManager.InvalidateEpinet(tenantCtx.TenantID, id)
+	// Surgically remove the ID from the master ID list.
+	tenantCtx.CacheManager.RemoveEpinetID(tenantCtx.TenantID, id)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after epinet deletion",
+			"error", err, "epinetId", id, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully deleted epinet", "tenantId", tenantCtx.TenantID, "epinetId", id, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for DeleteEpinet", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "epinetId", id)
+
+	return nil
 }

@@ -175,7 +175,6 @@ func (r *PaneRepository) Delete(tenantID, id string) error {
 	if duration > config.SlowQueryThreshold {
 		r.logger.LogSlowQuery(query, duration, tenantID)
 	}
-	r.cache.InvalidateContentCache(tenantID)
 	return nil
 }
 

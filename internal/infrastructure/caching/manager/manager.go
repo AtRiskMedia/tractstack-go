@@ -794,3 +794,148 @@ func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
 
 	return storyfragmentIDs
 }
+
+// InvalidateFullContentMap clears the content map with thundering herd protection
+func (m *Manager) InvalidateFullContentMap(tenantID string) {
+	start := time.Now()
+
+	cache, err := m.GetTenantContentCache(tenantID)
+	if err != nil {
+		if m.logger != nil {
+			m.logger.Cache().Error("Failed to get tenant cache for content map invalidation",
+				"tenantId", tenantID, "error", err, "duration", time.Since(start))
+		}
+		return
+	}
+
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	cache.FullContentMap = make([]types.FullContentMapItem, 0)
+	cache.ContentMapLastUpdated = time.Time{}
+	cache.LastUpdated = time.Now().UTC()
+
+	if m.logger != nil {
+		m.logger.Cache().Info("Content map invalidated", "tenantId", tenantID, "duration", time.Since(start))
+	}
+}
+
+func (m *Manager) InvalidateResource(tenantID, id string) {
+	m.contentStore.InvalidateResource(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddResourceID(tenantID, id string) {
+	m.contentStore.AddResourceID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveResourceID(tenantID, id string) {
+	m.contentStore.RemoveResourceID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidateTractStack(tenantID, id string) {
+	m.contentStore.InvalidateTractStack(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddTractStackID(tenantID, id string) {
+	m.contentStore.AddTractStackID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveTractStackID(tenantID, id string) {
+	m.contentStore.RemoveTractStackID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidateStoryFragment(tenantID, id string) {
+	m.contentStore.InvalidateStoryFragment(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddStoryFragmentID(tenantID, id string) {
+	m.contentStore.AddStoryFragmentID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveStoryFragmentID(tenantID, id string) {
+	m.contentStore.RemoveStoryFragmentID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidatePane(tenantID, id string) {
+	m.contentStore.InvalidatePane(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddPaneID(tenantID, id string) {
+	m.contentStore.AddPaneID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemovePaneID(tenantID, id string) {
+	m.contentStore.RemovePaneID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidateMenu(tenantID, id string) {
+	m.contentStore.InvalidateMenu(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddMenuID(tenantID, id string) {
+	m.contentStore.AddMenuID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveMenuID(tenantID, id string) {
+	m.contentStore.RemoveMenuID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidateBelief(tenantID, id string) {
+	m.contentStore.InvalidateBelief(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddBeliefID(tenantID, id string) {
+	m.contentStore.AddBeliefID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveBeliefID(tenantID, id string) {
+	m.contentStore.RemoveBeliefID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidateEpinet(tenantID, id string) {
+	m.contentStore.InvalidateEpinet(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddEpinetID(tenantID, id string) {
+	m.contentStore.AddEpinetID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveEpinetID(tenantID, id string) {
+	m.contentStore.RemoveEpinetID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) InvalidateFile(tenantID, id string) {
+	m.contentStore.InvalidateFile(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) AddFileID(tenantID, id string) {
+	m.contentStore.AddFileID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
+
+func (m *Manager) RemoveFileID(tenantID, id string) {
+	m.contentStore.RemoveFileID(tenantID, id)
+	m.updateTenantAccessTime(tenantID)
+}
