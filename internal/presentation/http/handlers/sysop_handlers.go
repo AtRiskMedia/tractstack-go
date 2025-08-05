@@ -4,26 +4,31 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/container"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 // SysOpHandlers handles SysOp dashboard authentication and data streaming
 type SysOpHandlers struct {
-	container *container.Container
+	container        *container.Container
+	sysOpBroadcaster *messaging.SysOpBroadcaster
 }
 
 // NewSysOpHandlers creates new SysOp handlers
 func NewSysOpHandlers(container *container.Container) *SysOpHandlers {
 	return &SysOpHandlers{
-		container: container,
+		container:        container,
+		sysOpBroadcaster: container.SysOpBroadcaster,
 	}
 }
 
@@ -43,7 +48,6 @@ func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
 		response["message"] = "WARNING: Your Story Keep is not protected. Please change the default SYSOP_PASSWORD."
 	}
 
-	// Also check for a valid token in the header
 	auth := c.GetHeader("Authorization")
 	if sysopPassword != "" && auth == "Bearer "+sysopPassword {
 		response["authenticated"] = true
@@ -87,7 +91,6 @@ func (h *SysOpHandlers) GetTenants(c *gin.Context) {
 		return
 	}
 
-	// Extract the keys (tenant IDs) from the registry map
 	tenants := make([]string, 0, len(registry.Tenants))
 	for tenantID := range registry.Tenants {
 		tenants = append(tenants, tenantID)
@@ -119,8 +122,6 @@ func (h *SysOpHandlers) GetActivityMetrics(c *gin.Context) {
 }
 
 // GetTenantToken is the secure token broker endpoint.
-// It leverages the fact that the SysOp is already authenticated via middleware
-// to generate a short-lived, admin-level token for the requested tenant.
 func (h *SysOpHandlers) GetTenantToken(c *gin.Context) {
 	var req struct {
 		TenantID string `json:"tenantId" binding:"required"`
@@ -138,13 +139,11 @@ func (h *SysOpHandlers) GetTenantToken(c *gin.Context) {
 	}
 	defer tenantCtx.Close()
 
-	// Since the SysOp is already authenticated, we can directly generate an admin token.
-	// This is the correct way to grant temporary, privileged access.
 	claims := map[string]interface{}{
-		"role":     "admin", // SysOp gets admin-level access for monitoring.
+		"role":     "admin",
 		"tenantId": tenantCtx.Config.TenantID,
 		"type":     "admin_auth",
-		"exp":      time.Now().Add(1 * time.Hour).Unix(), // Token is valid for 1 hour.
+		"exp":      time.Now().Add(1 * time.Hour).Unix(),
 		"iat":      time.Now().Unix(),
 	}
 
@@ -167,14 +166,17 @@ func (h *SysOpHandlers) SysOpAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sysopPassword := config.SysopPassword
 		if sysopPassword == "" {
-			c.Next() // No password set, allow access
+			c.Next()
 			return
 		}
 
-		authHeader := c.GetHeader("Authorization")
 		token := ""
+		authHeader := c.GetHeader("Authorization")
 		if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
 			token = authHeader[7:]
+		} else {
+			// Fallback for WebSocket authentication via query parameter
+			token = c.Query("token")
 		}
 
 		if token != sysopPassword {
@@ -185,8 +187,6 @@ func (h *SysOpHandlers) SysOpAuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-// StreamLogs, GetLogLevels, and SetLogLevel remain unchanged as they have separate auth logic if needed.
 
 // StreamLogs handles the SSE connection for live log streaming.
 func (h *SysOpHandlers) StreamLogs(c *gin.Context) {
@@ -243,7 +243,7 @@ func (h *SysOpHandlers) StreamLogs(c *gin.Context) {
 	})
 }
 
-// GetLogLevels handles GET /sysop-logs/levels - returns current log levels for all channels.
+// GetLogLevels handles GET /sysop-logs/levels
 func (h *SysOpHandlers) GetLogLevels(c *gin.Context) {
 	logger := h.container.Logger
 	if logger == nil {
@@ -254,7 +254,7 @@ func (h *SysOpHandlers) GetLogLevels(c *gin.Context) {
 	c.JSON(http.StatusOK, levels)
 }
 
-// SetLogLevel handles POST /sysop-logs/levels - sets the log level for a specific channel.
+// SetLogLevel handles POST /sysop-logs/levels
 func (h *SysOpHandlers) SetLogLevel(c *gin.Context) {
 	logger := h.container.Logger
 	if logger == nil {
@@ -291,4 +291,94 @@ func (h *SysOpHandlers) SetLogLevel(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": fmt.Sprintf("Log level for channel '%s' set to '%s'", req.Channel, req.Level)})
+}
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		return strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1")
+	},
+}
+
+// HandleSessionMapStream handles the WebSocket connection for the session map.
+func (h *SysOpHandlers) HandleSessionMapStream(c *gin.Context) {
+	tenantID := c.Query("tenant")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant query parameter is required"})
+		return
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		log.Printf("Failed to upgrade to websocket: %v", err)
+		return
+	}
+
+	client := &messaging.SysOpClient{
+		Conn:     conn,
+		TenantID: tenantID,
+		Send:     make(chan []byte, 256),
+	}
+
+	h.container.SysOpBroadcaster.Register(client)
+
+	go h.clientWritePump(client)
+	go h.clientReadPump(client)
+}
+
+// clientReadPump handles incoming messages from the client (primarily for disconnection detection).
+func (h *SysOpHandlers) clientReadPump(client *messaging.SysOpClient) {
+	defer func() {
+		h.container.SysOpBroadcaster.Unregister(client)
+		client.Conn.Close()
+	}()
+	client.Conn.SetReadLimit(512)
+	_ = client.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	client.Conn.SetPongHandler(func(string) error { _ = client.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); return nil })
+
+	for {
+		_, _, err := client.Conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket read error: %v", err)
+			}
+			break
+		}
+	}
+}
+
+// clientWritePump handles pushing messages from the broadcaster to the client.
+func (h *SysOpHandlers) clientWritePump(client *messaging.SysOpClient) {
+	ticker := time.NewTicker(54 * time.Second)
+	defer func() {
+		ticker.Stop()
+		client.Conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-client.Send:
+			_ = client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if !ok {
+				_ = client.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			w, err := client.Conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			_, _ = w.Write(message)
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		case <-ticker.C:
+			_ = client.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := client.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
+		}
+	}
 }

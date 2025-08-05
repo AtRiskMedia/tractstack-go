@@ -65,6 +65,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			sysopAPI.GET("/logs/levels", sysopHandlers.GetLogLevels)
 			sysopAPI.POST("/logs/levels", sysopHandlers.SetLogLevel)
 			sysopAPI.GET("/orphan-analysis", sysopHandlers.GetOrphanAnalysis)
+			sysopAPI.GET("/ws/session-map", sysopHandlers.HandleSessionMapStream)
 		}
 	}
 
