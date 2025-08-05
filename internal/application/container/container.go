@@ -48,14 +48,14 @@ type Container struct {
 	ContentAnalyticsService   *services.ContentAnalyticsService
 
 	// System & State Services
-	AuthService        *services.AuthService
-	SessionService     *services.SessionService
-	StateService       *services.StateService
-	DBService          *services.DBService
-	ConfigService      *services.ConfigService
-	MultiTenantService *services.MultiTenantService
-	LogBroadcaster     *logging.LogBroadcaster
-	Broadcaster        messaging.Broadcaster
+	AuthService            *services.AuthService
+	SessionService         *services.SessionService
+	EventProcessingService *services.EventProcessingService
+	DBService              *services.DBService
+	ConfigService          *services.ConfigService
+	MultiTenantService     *services.MultiTenantService
+	LogBroadcaster         *logging.LogBroadcaster
+	Broadcaster            messaging.Broadcaster
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -100,13 +100,18 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	}
 	logger.Startup().Info("Channeled logger initialized successfully", "logDirectory", loggerConfig.LogDirectory)
 
-	// Initialize Repositories (example, assuming a way to get a DB connection)
-	// This part is simplified; in a real app, you'd manage DB connections more robustly.
-	// For this refactor, we assume the tenant context will provide the correct DB connection.
-	// We instantiate a placeholder here for injection.
-	leadRepo := persistenceUser.NewSQLLeadRepository(nil, logger) // DB connection will be provided by context
+	leadRepo := persistenceUser.NewSQLLeadRepository(nil, logger)
 
-	// Initialize fragment services
+	// 1. Instantiate pure domain services first (no dependencies)
+	beliefEvaluationService := services.NewBeliefEvaluationService()
+
+	// 2. Instantiate application services that depend on infrastructure
+	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
+
+	// 3. Instantiate orchestrator service, injecting its dependencies
+	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService)
+
+	// Initialize other services
 	sessionBeliefService := services.NewSessionBeliefService()
 	widgetContextService := services.NewWidgetContextService(sessionBeliefService)
 	fragmentService := services.NewFragmentService(
@@ -115,14 +120,9 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		perfTracker,
 		logger,
 	)
-
-	// Create contentMapService before other content services
 	contentMapService := services.NewContentMapService(logger, perfTracker)
-
-	// Initialize auth, session, state, and system services with correct dependencies
 	authService := services.NewAuthService(logger, perfTracker, leadRepo)
 	sessionService := services.NewSessionService(logger, perfTracker)
-	stateService := services.NewStateService(logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
@@ -159,14 +159,14 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ContentAnalyticsService:   services.NewContentAnalyticsService(logger, perfTracker),
 
 		// System & State Services
-		AuthService:        authService,
-		SessionService:     sessionService,
-		StateService:       stateService,
-		DBService:          dbService,
-		ConfigService:      configService,
-		MultiTenantService: multiTenantService,
-		LogBroadcaster:     logBroadcaster,
-		Broadcaster:        broadcaster,
+		AuthService:            authService,
+		SessionService:         sessionService,
+		EventProcessingService: eventProcessingService,
+		DBService:              dbService,
+		ConfigService:          configService,
+		MultiTenantService:     multiTenantService,
+		LogBroadcaster:         logBroadcaster,
+		Broadcaster:            broadcaster,
 
 		// Infrastructure
 		TenantManager:  tenantManager,
