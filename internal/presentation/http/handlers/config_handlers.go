@@ -20,7 +20,7 @@ type AdvancedConfigStatusResponse struct {
 	TursoTokenSet     bool `json:"tursoTokenSet"`
 	AdminPasswordSet  bool `json:"adminPasswordSet"`
 	EditorPasswordSet bool `json:"editorPasswordSet"`
-	AAIAPIKeySet      bool `json:"aaiApiKeySet"`
+	AAIAPIKeySet      bool `json:"aaiAPIKeySet"`
 	TursoEnabled      bool `json:"tursoEnabled"`
 }
 
@@ -78,13 +78,6 @@ func (h *ConfigHandlers) UpdateBrandConfig(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.System().Debug("Received update brand config request", "method", c.Request.Method, "path", c.Request.URL.Path)
 
-	// Validate permissions
-	authHeader := c.GetHeader("Authorization")
-	if err := h.configService.ValidateEditorPermissions(authHeader, tenantCtx); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
 	// Parse request
 	var request services.BrandConfigUpdateRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -137,13 +130,6 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.System().Debug("Received get advanced config request", "method", c.Request.Method, "path", c.Request.URL.Path)
 
-	// Validate admin permissions
-	authHeader := c.GetHeader("Authorization")
-	if err := h.configService.ValidateAdminPermissions(authHeader, tenantCtx); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
-
 	// Check configuration status (never expose actual values)
 	status := AdvancedConfigStatusResponse{
 		TursoConfigured:   tenantCtx.Config.TursoDatabase != "",
@@ -173,13 +159,6 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("update_advanced_config_request", tenantCtx.TenantID)
 	defer marker.Complete()
 	h.logger.System().Debug("Received update advanced config request", "method", c.Request.Method, "path", c.Request.URL.Path)
-
-	// Validate admin permissions
-	authHeader := c.GetHeader("Authorization")
-	if err := h.configService.ValidateAdminPermissions(authHeader, tenantCtx); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
-		return
-	}
 
 	// Parse request
 	var request services.AdvancedConfigUpdateRequest

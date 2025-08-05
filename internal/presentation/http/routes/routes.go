@@ -144,78 +144,103 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
 		}
 
-		// Fragment rendering endpoints
+		// Fragment rendering endpoints - PUBLIC (needed for frontend)
 		fragments := api.Group("/fragments")
 		{
 			fragments.GET("/panes/:id", fragmentHandlers.GetPaneFragment)
 			fragments.POST("/panes", fragmentHandlers.GetPaneFragmentBatch)
 		}
 
-		// Content nodes
+		// Content nodes with public/protected split
 		nodes := api.Group("/nodes")
 		{
-			// Read-Only Routes (Public)
-			nodes.GET("/menus", menuHandlers.GetAllMenuIDs)
-			nodes.POST("/menus", menuHandlers.GetMenusByIDs)
-			nodes.GET("/menus/:id", menuHandlers.GetMenuByID)
-			nodes.GET("/panes", paneHandlers.GetAllPaneIDs)
-			nodes.POST("/panes", paneHandlers.GetPanesByIDs)
-			nodes.GET("/panes/:id", paneHandlers.GetPaneByID)
-			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
-			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
-			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)
-			nodes.POST("/resources", resourceHandlers.GetResourcesByIDs)
-			nodes.GET("/resources/:id", resourceHandlers.GetResourceByID)
-			nodes.GET("/resources/slug/:slug", resourceHandlers.GetResourceBySlug)
-			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
-			nodes.POST("/storyfragments", storyFragmentHandlers.GetStoryFragmentsByIDs)
-			nodes.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
+			// PUBLIC ROUTES - Frontend website access (no auth required)
+			// Story fragments
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
 			nodes.GET("/storyfragments/home", storyFragmentHandlers.GetHomeStoryFragment)
-			nodes.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)
-			nodes.POST("/tractstacks", tractStackHandlers.GetTractStacksByIDs)
-			nodes.GET("/tractstacks/:id", tractStackHandlers.GetTractStackByID)
-			nodes.GET("/tractstacks/slug/:slug", tractStackHandlers.GetTractStackBySlug)
-			nodes.GET("/beliefs", beliefHandlers.GetAllBeliefIDs)
-			nodes.POST("/beliefs", beliefHandlers.GetBeliefsByIDs)
-			nodes.GET("/beliefs/:id", beliefHandlers.GetBeliefByID)
-			nodes.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
-			nodes.GET("/files", imageFileHandlers.GetAllFileIDs)
-			nodes.POST("/files", imageFileHandlers.GetFilesByIDs)
-			nodes.GET("/files/:id", imageFileHandlers.GetFileByID)
-			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
-			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
-			nodes.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
 
-			// Mutation Routes (Protected)
-			mutations := nodes.Group("/")
-			mutations.Use(authHandlers.AuthMiddleware())
+			// Panes by slug for context pages
+			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
+
+			// Resources - public access needed for frontend
+			nodes.GET("/resources/:id", resourceHandlers.GetResourceByID)
+			nodes.GET("/resources/slug/:slug", resourceHandlers.GetResourceBySlug)
+
+			// PROTECTED ROUTES - Admin/Editor access only (StoryKeep interface)
+			protected := nodes.Group("/")
+			protected.Use(authHandlers.AuthMiddleware())
 			{
-				mutations.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
-				mutations.POST("/menus/create", menuHandlers.CreateMenu)
-				mutations.PUT("/menus/:id", menuHandlers.UpdateMenu)
-				mutations.DELETE("/menus/:id", menuHandlers.DeleteMenu)
-				mutations.POST("/panes/create", paneHandlers.CreatePane)
-				mutations.PUT("/panes/:id", paneHandlers.UpdatePane)
-				mutations.DELETE("/panes/:id", paneHandlers.DeletePane)
-				mutations.POST("/resources/create", resourceHandlers.CreateResource)
-				mutations.PUT("/resources/:id", resourceHandlers.UpdateResource)
-				mutations.DELETE("/resources/:id", resourceHandlers.DeleteResource)
-				mutations.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
-				mutations.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
-				mutations.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
-				mutations.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
-				mutations.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
-				mutations.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
-				mutations.POST("/beliefs/create", beliefHandlers.CreateBelief)
-				mutations.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
-				mutations.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
-				mutations.POST("/files/create", imageFileHandlers.CreateFile)
-				mutations.PUT("/files/:id", imageFileHandlers.UpdateFile)
-				mutations.DELETE("/files/:id", imageFileHandlers.DeleteFile)
-				mutations.POST("/epinets/create", epinetHandlers.CreateEpinet)
-				mutations.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
-				mutations.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+				// Menu endpoints
+				protected.GET("/menus", menuHandlers.GetAllMenuIDs)
+				protected.POST("/menus", menuHandlers.GetMenusByIDs)
+				protected.GET("/menus/:id", menuHandlers.GetMenuByID)
+
+				// Pane endpoints (except slug which is public)
+				protected.GET("/panes", paneHandlers.GetAllPaneIDs)
+				protected.POST("/panes", paneHandlers.GetPanesByIDs)
+				protected.GET("/panes/:id", paneHandlers.GetPaneByID)
+				protected.GET("/panes/context", paneHandlers.GetContextPanes)
+
+				// Resource endpoints (except individual gets which are public)
+				protected.GET("/resources", resourceHandlers.GetAllResourceIDs)
+				protected.POST("/resources", resourceHandlers.GetResourcesByIDs)
+
+				// Story fragment endpoints (except slug and home which are public)
+				protected.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
+				protected.POST("/storyfragments", storyFragmentHandlers.GetStoryFragmentsByIDs)
+				protected.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
+
+				// TractStack endpoints
+				protected.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)
+				protected.POST("/tractstacks", tractStackHandlers.GetTractStacksByIDs)
+				protected.GET("/tractstacks/:id", tractStackHandlers.GetTractStackByID)
+				protected.GET("/tractstacks/slug/:slug", tractStackHandlers.GetTractStackBySlug)
+
+				// Belief endpoints
+				protected.GET("/beliefs", beliefHandlers.GetAllBeliefIDs)
+				protected.POST("/beliefs", beliefHandlers.GetBeliefsByIDs)
+				protected.GET("/beliefs/:id", beliefHandlers.GetBeliefByID)
+				protected.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
+
+				// File endpoints
+				protected.GET("/files", imageFileHandlers.GetAllFileIDs)
+				protected.POST("/files", imageFileHandlers.GetFilesByIDs)
+				protected.GET("/files/:id", imageFileHandlers.GetFileByID)
+
+				// Epinet endpoints
+				protected.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
+				protected.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
+				protected.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
+
+				// Mutation Routes (Create/Update/Delete)
+				mutations := protected.Group("/")
+				{
+					mutations.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
+					mutations.POST("/menus/create", menuHandlers.CreateMenu)
+					mutations.PUT("/menus/:id", menuHandlers.UpdateMenu)
+					mutations.DELETE("/menus/:id", menuHandlers.DeleteMenu)
+					mutations.POST("/panes/create", paneHandlers.CreatePane)
+					mutations.PUT("/panes/:id", paneHandlers.UpdatePane)
+					mutations.DELETE("/panes/:id", paneHandlers.DeletePane)
+					mutations.POST("/resources/create", resourceHandlers.CreateResource)
+					mutations.PUT("/resources/:id", resourceHandlers.UpdateResource)
+					mutations.DELETE("/resources/:id", resourceHandlers.DeleteResource)
+					mutations.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
+					mutations.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
+					mutations.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
+					mutations.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
+					mutations.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
+					mutations.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
+					mutations.POST("/beliefs/create", beliefHandlers.CreateBelief)
+					mutations.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
+					mutations.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
+					mutations.POST("/files/create", imageFileHandlers.CreateFile)
+					mutations.PUT("/files/:id", imageFileHandlers.UpdateFile)
+					mutations.DELETE("/files/:id", imageFileHandlers.DeleteFile)
+					mutations.POST("/epinets/create", epinetHandlers.CreateEpinet)
+					mutations.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
+					mutations.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+				}
 			}
 		}
 	}
