@@ -23,11 +23,12 @@ func New(port string, container *container.Container) *Server {
 	router := routes.SetupRoutes(container)
 
 	httpServer := &http.Server{
-		Addr:         ":" + port,
-		Handler:      router,
-		ReadTimeout:  config.ServerReadTimeout,
-		WriteTimeout: config.ServerWriteTimeout,
-		IdleTimeout:  config.ServerIdleTimeout,
+		Addr:    ":" + port,
+		Handler: router,
+		// ReadTimeout protects against slow clients on initial request.
+		ReadTimeout: config.ServerReadTimeout,
+		// WriteTimeout is removed to allow long-lived streaming responses like SSE.
+		// IdleTimeout is also removed as it can prematurely close SSE connections.
 	}
 
 	return &Server{

@@ -23,7 +23,7 @@ import (
 type VisitHandlers struct {
 	sessionService *services.SessionService
 	authService    *services.AuthService
-	broadcaster    messaging.Broadcaster // Correct: Depends on the new interface
+	broadcaster    messaging.Broadcaster
 	logger         *logging.ChanneledLogger
 	perfTracker    *performance.Tracker
 }
@@ -77,7 +77,7 @@ func NewVisitHandlers(sessionService *services.SessionService, authService *serv
 	return &VisitHandlers{
 		sessionService: sessionService,
 		authService:    authService,
-		broadcaster:    broadcaster, // Correct: Injected via constructor
+		broadcaster:    broadcaster,
 		logger:         logger,
 		perfTracker:    perfTracker,
 	}
@@ -228,7 +228,7 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	atomic.AddInt64(&activeSSEConnections, 1)
 	connectionStart := time.Now()
 
-	// Correct: Use the injected broadcaster to manage the connection
+	// Use the injected broadcaster to manage the connection
 	connection := &safeSSEConnection{
 		ch: h.broadcaster.AddClientWithSession(tenantCtx.TenantID, sessionID),
 	}
@@ -237,7 +237,6 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 		// Cleanup on disconnect
 		connection.SafeClose()
 		atomic.AddInt64(&activeSSEConnections, -1)
-		// Correct: Use the broadcaster for cleanup
 		h.broadcaster.RemoveClientWithSession(connection.ch, tenantCtx.TenantID, sessionID)
 
 		h.logger.SSE().Info("SSE connection cleanup completed",
@@ -270,28 +269,27 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	ticker := time.NewTicker(time.Duration(config.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
-	// Context for connection management
-	clientCtx, cancel := context.WithCancel(c.Request.Context())
+	// CORRECTED: Create a new context with a long timeout for the SSE connection
+	clientCtx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(config.SSEConnectionTimeoutMinutes)*time.Minute)
 	defer cancel()
 
 	// Message handling loop
 	for {
 		select {
 		case <-clientCtx.Done():
-			// Client disconnected
-			h.logger.SSE().Info("SSE client disconnected",
+			// Client disconnected or timeout reached
+			h.logger.SSE().Info("SSE connection closing",
 				"tenantId", tenantCtx.TenantID,
 				"sessionId", sessionID,
-				"connectionDuration", time.Since(connectionStart))
+				"reason", clientCtx.Err().Error())
 			return
 
 		case message, ok := <-connection.ch:
 			if !ok {
-				// Channel closed
+				// Channel closed by the broadcaster
 				h.logger.SSE().Info("SSE connection channel closed",
 					"tenantId", tenantCtx.TenantID,
-					"sessionId", sessionID,
-					"connectionDuration", time.Since(connectionStart))
+					"sessionId", sessionID)
 				return
 			}
 
