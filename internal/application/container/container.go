@@ -56,6 +56,7 @@ type Container struct {
 	MultiTenantService     *services.MultiTenantService
 	LogBroadcaster         *logging.LogBroadcaster
 	Broadcaster            messaging.Broadcaster
+	SysOpBroadcaster       *messaging.SysOpBroadcaster
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -128,6 +129,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
 	logBroadcaster := logging.GetBroadcaster()
 	broadcaster := messaging.NewSSEBroadcaster(logger)
+	sysOpBroadcaster := messaging.NewSysOpBroadcaster(tenantManager, cacheManager)
+	go sysOpBroadcaster.Run()
 
 	logger.Startup().Info("Dependency injection container services initialized")
 
@@ -167,6 +170,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		MultiTenantService:     multiTenantService,
 		LogBroadcaster:         logBroadcaster,
 		Broadcaster:            broadcaster,
+		SysOpBroadcaster:       sysOpBroadcaster,
 
 		// Infrastructure
 		TenantManager:  tenantManager,
