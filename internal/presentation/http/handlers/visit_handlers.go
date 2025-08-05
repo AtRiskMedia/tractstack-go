@@ -38,6 +38,7 @@ type ProfileRequest struct {
 	FirstName      string  `json:"firstName,omitempty"`
 	ContactPersona string  `json:"contactPersona,omitempty"`
 	ShortBio       string  `json:"shortBio,omitempty"`
+	IsUpdate       bool    `json:"isUpdate"`
 }
 
 // ProfileResponse represents the response structure for profile requests
@@ -269,7 +270,7 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	ticker := time.NewTicker(time.Duration(config.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
-	// CORRECTED: Create a new context with a long timeout for the SSE connection
+	// Create a new context with a long timeout for the SSE connection
 	clientCtx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(config.SSEConnectionTimeoutMinutes)*time.Minute)
 	defer cancel()
 
@@ -326,12 +327,10 @@ func (h *VisitHandlers) PostProfile(c *gin.Context) {
 		return
 	}
 
-	start := time.Now()
 	marker := h.perfTracker.StartOperation("post_profile_request", tenantCtx.TenantID)
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received post profile request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	// Parse profile request
 	var req ProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.Auth().Error("Profile request JSON binding failed", "tenantId", tenantCtx.TenantID, "error", err.Error())
@@ -339,54 +338,67 @@ func (h *VisitHandlers) PostProfile(c *gin.Context) {
 		return
 	}
 
-	// Validate required fields
 	if req.SessionID == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session ID is required"})
 		return
 	}
 
-	h.logger.Auth().Debug("Processing profile request",
-		"tenantId", tenantCtx.TenantID,
-		"sessionId", *req.SessionID,
-		"hasEncryptedEmail", req.EncryptedEmail != nil,
-		"hasEncryptedCode", req.EncryptedCode != nil,
-		"isUpdate", req.Email != "")
-
-	// Handle profile validation/authentication with encrypted credentials
 	if req.EncryptedEmail != nil && req.EncryptedCode != nil {
 		result := h.handleProfileValidation(&req, tenantCtx)
-
 		if !result.Success {
-			h.logger.Auth().Error("Profile validation failed",
-				"tenantId", tenantCtx.TenantID,
-				"sessionId", *req.SessionID,
-				"error", result.Error,
-				"duration", time.Since(start))
-			marker.SetSuccess(false)
-
-			if result.Error == "Invalid credentials" {
-				c.JSON(http.StatusUnauthorized, result)
-			} else {
-				c.JSON(http.StatusInternalServerError, result)
-			}
-			return
+			c.JSON(http.StatusUnauthorized, result)
+		} else {
+			c.JSON(http.StatusOK, result)
 		}
-
-		h.logger.Auth().Info("Profile validation completed",
-			"tenantId", tenantCtx.TenantID,
-			"sessionId", *req.SessionID,
-			"duration", time.Since(start))
-		marker.SetSuccess(true)
-		h.logger.Perf().Info("Performance for PostProfile request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
-
-		c.JSON(http.StatusOK, result)
 		return
 	}
 
-	// Handle profile creation/update (this would require more complex logic)
-	// For now, return not implemented
-	h.logger.Auth().Warn("Profile creation/update not yet implemented", "tenantId", tenantCtx.TenantID, "sessionId", *req.SessionID)
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "Profile creation/update not yet implemented"})
+	if req.Email == "" || req.Codeword == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email and codeword required"})
+		return
+	}
+
+	if req.IsUpdate {
+		result := h.handleProfileUpdate(&req, tenantCtx)
+		if !result.Success {
+			c.JSON(http.StatusUnauthorized, result)
+		} else {
+			c.JSON(http.StatusOK, result)
+		}
+	} else {
+		if req.FirstName == "" || req.ContactPersona == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "FirstName and ContactPersona required for profile creation"})
+			return
+		}
+
+		result, err := h.authService.CreateLead(req.Email, req.Codeword, req.FirstName, req.ContactPersona, req.ShortBio, tenantCtx)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if !result.Success {
+			c.JSON(http.StatusConflict, gin.H{"error": result.Error})
+			return
+		}
+
+		sessionResponse, err := h.sessionService.HandleProfileSession(tenantCtx, result.Profile, *req.SessionID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to handle profile session"})
+			return
+		}
+
+		c.JSON(http.StatusOK, ProfileResponse{
+			Success:        true,
+			Profile:        result.Profile,
+			Token:          result.Token,
+			EncryptedEmail: result.EncryptedEmail,
+			EncryptedCode:  result.EncryptedCode,
+			Fingerprint:    sessionResponse.Fingerprint,
+			VisitID:        sessionResponse.VisitID,
+			HasProfile:     true,
+			Consent:        "1",
+		})
+	}
 }
 
 // validateEncryptedCredentials validates encrypted email and code
@@ -396,7 +408,6 @@ func (h *VisitHandlers) validateEncryptedCredentials(encryptedEmail, encryptedCo
 
 // handleProfileValidation handles profile validation with encrypted credentials
 func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *tenant.Context) *ProfileResponse {
-	// Use auth service to validate encrypted credentials
 	profile := h.validateEncryptedCredentials(*req.EncryptedEmail, *req.EncryptedCode, tenantCtx)
 	if profile == nil {
 		return &ProfileResponse{
@@ -405,7 +416,6 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 		}
 	}
 
-	// Handle session creation/update
 	sessionResponse, err := h.sessionService.HandleProfileSession(tenantCtx, profile, *req.SessionID)
 	if err != nil {
 		return &ProfileResponse{
@@ -414,7 +424,6 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 		}
 	}
 
-	// Generate JWT token
 	token, err := h.authService.GenerateJWT(map[string]any{
 		"leadId":         profile.LeadID,
 		"fingerprint":    profile.Fingerprint,
@@ -422,7 +431,7 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 		"firstName":      profile.Firstname,
 		"contactPersona": profile.ContactPersona,
 		"type":           "profile",
-		"exp":            time.Now().Add(7 * 24 * time.Hour).Unix(), // 7 days
+		"exp":            time.Now().Add(7 * 24 * time.Hour).Unix(),
 		"iat":            time.Now().Unix(),
 	}, tenantCtx.Config.JWTSecret)
 	if err != nil {
@@ -438,6 +447,62 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 		Token:          token,
 		EncryptedEmail: *req.EncryptedEmail,
 		EncryptedCode:  *req.EncryptedCode,
+		Fingerprint:    sessionResponse.Fingerprint,
+		VisitID:        sessionResponse.VisitID,
+		HasProfile:     true,
+		Consent:        "1",
+	}
+}
+
+// handleProfileUpdate handles the logic for a user logging in with email/password.
+func (h *VisitHandlers) handleProfileUpdate(req *ProfileRequest, tenantCtx *tenant.Context) *ProfileResponse {
+	lead, err := h.sessionService.ValidateLeadCredentials(req.Email, req.Codeword, tenantCtx)
+	if err != nil {
+		return &ProfileResponse{
+			Success: false,
+			Error:   "Invalid credentials",
+		}
+	}
+
+	profile := &user.Profile{
+		LeadID:         lead.ID,
+		Firstname:      lead.FirstName,
+		Email:          lead.Email,
+		ContactPersona: lead.ContactPersona,
+		ShortBio:       lead.ShortBio,
+	}
+
+	sessionResponse, err := h.sessionService.HandleProfileSession(tenantCtx, profile, *req.SessionID)
+	if err != nil {
+		return &ProfileResponse{
+			Success: false,
+			Error:   fmt.Sprintf("Session handling failed: %v", err),
+		}
+	}
+
+	token, err := h.authService.GenerateJWT(map[string]any{
+		"leadId":         profile.LeadID,
+		"fingerprint":    profile.Fingerprint,
+		"email":          profile.Email,
+		"firstName":      profile.Firstname,
+		"contactPersona": profile.ContactPersona,
+		"type":           "profile",
+		"exp":            time.Now().Add(7 * 24 * time.Hour).Unix(),
+		"iat":            time.Now().Unix(),
+	}, tenantCtx.Config.JWTSecret)
+	if err != nil {
+		return &ProfileResponse{
+			Success: false,
+			Error:   "Token generation failed",
+		}
+	}
+
+	return &ProfileResponse{
+		Success:        true,
+		Profile:        profile,
+		Token:          token,
+		EncryptedEmail: lead.EncryptedEmail,
+		EncryptedCode:  lead.EncryptedCode,
 		Fingerprint:    sessionResponse.Fingerprint,
 		VisitID:        sessionResponse.VisitID,
 		HasProfile:     true,
