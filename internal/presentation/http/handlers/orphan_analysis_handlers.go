@@ -61,3 +61,41 @@ func (h *OrphanAnalysisHandlers) GetOrphanAnalysis(c *gin.Context) {
 
 	c.JSON(http.StatusOK, payload)
 }
+
+// GetOrphanAnalysis wraps the tenant-specific orphan analysis endpoint for SysOp access
+func (h *SysOpHandlers) GetOrphanAnalysis(c *gin.Context) {
+	tenantID := c.Query("tenant")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tenant query parameter is required"})
+		return
+	}
+
+	// Create tenant context for the requested tenant
+	tenantCtx, err := h.container.TenantManager.NewContextFromID(tenantID)
+	if err != nil {
+		h.container.Logger.System().Error("SysOp failed to create context for orphan analysis", "error", err, "tenantId", tenantID)
+		c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found or could not be initialized"})
+		return
+	}
+	defer tenantCtx.Close()
+
+	// Get client's ETag for cache validation
+	clientETag := c.GetHeader("If-None-Match")
+
+	// Call the orphan analysis service directly (same as the normal endpoint)
+	payload, etag, err := h.container.OrphanAnalysisService.GetOrphanAnalysis(tenantCtx, clientETag, tenantCtx.CacheManager)
+	if err != nil {
+		h.container.Logger.System().Error("SysOp orphan analysis failed", "error", err, "tenantId", tenantID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Set ETag header if available
+	if etag != "" {
+		c.Header("ETag", etag)
+		c.Header("Cache-Control", "private, must-revalidate")
+	}
+
+	h.container.Logger.System().Info("SysOp orphan analysis request completed", "tenantId", tenantID)
+	c.JSON(http.StatusOK, payload)
+}

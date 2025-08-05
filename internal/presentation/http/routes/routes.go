@@ -64,6 +64,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			sysopAPI.POST("/tenant-token", sysopHandlers.GetTenantToken)
 			sysopAPI.GET("/logs/levels", sysopHandlers.GetLogLevels)
 			sysopAPI.POST("/logs/levels", sysopHandlers.SetLogLevel)
+			sysopAPI.GET("/orphan-analysis", sysopHandlers.GetOrphanAnalysis)
 		}
 	}
 
