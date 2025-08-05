@@ -39,12 +39,12 @@ type Visit struct {
 // Profile represents a view of Lead data for frontend consumption.
 // This is a derived entity, not persisted directly.
 type Profile struct {
-	Fingerprint    string `json:"fingerprint"`
-	LeadID         string `json:"leadId"`
-	Firstname      string `json:"firstName"`
-	Email          string `json:"email"`
-	ContactPersona string `json:"contactPersona"`
-	ShortBio       string `json:"shortBio"`
+	Fingerprint    string `json:"Fingerprint"`
+	LeadID         string `json:"LeadID"`
+	Firstname      string `json:"Firstname"`
+	Email          string `json:"Email"`
+	ContactPersona string `json:"ContactPersona"`
+	ShortBio       string `json:"ShortBio"`
 }
 
 // LeadRepository defines the operations for persisting Lead entities.

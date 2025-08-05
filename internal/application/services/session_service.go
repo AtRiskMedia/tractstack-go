@@ -471,33 +471,45 @@ type SessionResponse struct {
 func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile *user.Profile, sessionID string) (*SessionResponse, error) {
 	var fingerprintID string
 
-	// Check if this lead already has a fingerprint
+	// PRIORITY 1: Always check if this lead already has a fingerprint (for profile unlocks)
 	if existingFpID := s.FindFingerprintByLeadID(profile.LeadID, tenantCtx); existingFpID != nil {
 		fingerprintID = *existingFpID
 	} else {
-		// Check if session has an existing fingerprint
+		// PRIORITY 2: No existing lead fingerprint, check if session has one (for new profile creation)
 		if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); exists {
 			fingerprintID = existingSession.FingerprintID
+			// Link this fingerprint to the new lead
+			if err := s.UpdateFingerprintLeadID(fingerprintID, &profile.LeadID, tenantCtx); err != nil {
+				s.logger.System().Error("Failed to link fingerprint to lead", "error", err, "fingerprintId", fingerprintID, "leadId", profile.LeadID)
+				return nil, fmt.Errorf("failed to link session to profile")
+			}
 		} else {
-			// Create new fingerprint
+			// PRIORITY 3: No existing fingerprint anywhere, generate new one
 			fingerprintID = security.GenerateULID()
 		}
 	}
 
 	// Ensure fingerprint exists in database
-	if err := s.CreateFingerprint(fingerprintID, &profile.LeadID, tenantCtx); err != nil {
-		if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return nil, fmt.Errorf("failed to create fingerprint: %w", err)
+	if exists, err := s.FingerprintExists(fingerprintID, tenantCtx); err == nil && !exists {
+		if err := s.CreateFingerprint(fingerprintID, &profile.LeadID, tenantCtx); err != nil {
+			// Check if it's a UNIQUE constraint error (race condition)
+			if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+				s.logger.System().Error("Failed to create fingerprint", "error", err, "fingerprintId", fingerprintID)
+				return nil, fmt.Errorf("fingerprint creation failed")
+			}
 		}
+	} else if err != nil {
+		s.logger.System().Error("Error checking fingerprint existence", "error", err, "fingerprintId", fingerprintID)
 	}
 
-	// Create visit
+	// Handle visit creation/reuse
 	visitID, err := s.HandleVisitCreation(fingerprintID, true, tenantCtx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create visit: %w", err)
+		s.logger.System().Error("Failed to create visit", "error", err, "fingerprintId", fingerprintID)
+		return nil, fmt.Errorf("visit creation failed")
 	}
 
-	// Update session data with LeadID field
+	// Update session data with lead information
 	sessionData := &types.SessionData{
 		SessionID:     sessionID,
 		FingerprintID: fingerprintID,
@@ -517,7 +529,7 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		FingerprintID: fingerprintID,
 		LeadID:        &profile.LeadID,
 		HeldBeliefs:   make(map[string][]string),
-		HeldBadges:    make(map[string]string), // Changed from Badges to HeldBadges
+		HeldBadges:    make(map[string]string),
 		LastActivity:  time.Now().UTC(),
 	}
 	tenantCtx.CacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
@@ -538,4 +550,26 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		Fingerprint: fingerprintID,
 		VisitID:     visitID,
 	}, nil
+}
+
+func (s *SessionService) UpdateFingerprintLeadID(fingerprintID string, leadID *string, tenantCtx *tenant.Context) error {
+	query := `UPDATE fingerprints SET lead_id = ? WHERE id = ?`
+	_, err := tenantCtx.Database.Conn.Exec(query, leadID, fingerprintID)
+	if err != nil {
+		return fmt.Errorf("failed to update fingerprint lead ID: %w", err)
+	}
+	return nil
+}
+
+func (s *SessionService) FingerprintExists(fingerprintID string, tenantCtx *tenant.Context) (bool, error) {
+	query := `SELECT 1 FROM fingerprints WHERE id = ? LIMIT 1`
+	var exists int
+	err := tenantCtx.Database.Conn.QueryRow(query, fingerprintID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to check fingerprint existence: %w", err)
+	}
+	return true, nil
 }

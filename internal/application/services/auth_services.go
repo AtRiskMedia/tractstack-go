@@ -47,19 +47,27 @@ type ProfileDecodeResult struct {
 	Valid   bool `json:"valid"`
 }
 
+// CreateLeadResult holds the result of a lead creation operation
+type CreateLeadResult struct {
+	Success        bool
+	Profile        *user.Profile
+	Token          string
+	EncryptedEmail string
+	EncryptedCode  string
+	Error          string
+}
+
 // DecodeProfileToken validates and decodes a JWT profile token
 func (a *AuthService) DecodeProfileToken(tokenString string, tenantCtx *tenant.Context) *ProfileDecodeResult {
 	if tokenString == "" {
 		return &ProfileDecodeResult{Profile: nil, Valid: false}
 	}
 
-	// Validate JWT token
 	claims, err := security.ValidateJWT(tokenString, tenantCtx.Config.JWTSecret)
 	if err != nil {
 		return &ProfileDecodeResult{Profile: nil, Valid: false}
 	}
 
-	// Extract profile from claims
 	profile := security.GetProfileFromClaims(claims)
 	if profile == nil {
 		return &ProfileDecodeResult{Profile: nil, Valid: false}
@@ -72,45 +80,118 @@ func (a *AuthService) DecodeProfileToken(tokenString string, tenantCtx *tenant.C
 func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Context) *AuthResult {
 	var role string
 
-	// Check against admin password
-	if tenantCtx.Config.AdminPassword != "" && password == tenantCtx.Config.AdminPassword {
-		role = "admin"
-	} else if tenantCtx.Config.EditorPassword != "" && password == tenantCtx.Config.EditorPassword {
-		role = "editor"
-	} else {
+	if tenantCtx.Config.AdminPassword != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.AdminPassword), []byte(password)); err == nil {
+			role = "admin"
+		}
+	}
+
+	if role == "" && tenantCtx.Config.EditorPassword != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.EditorPassword), []byte(password)); err == nil {
+			role = "editor"
+		}
+	}
+
+	// Fallback for plaintext passwords during transition/testing
+	if role == "" {
+		if tenantCtx.Config.AdminPassword != "" && password == tenantCtx.Config.AdminPassword {
+			role = "admin"
+		} else if tenantCtx.Config.EditorPassword != "" && password == tenantCtx.Config.EditorPassword {
+			role = "editor"
+		}
+	}
+
+	if role == "" {
 		return &AuthResult{
 			Success: false,
 			Error:   "Invalid credentials",
 		}
 	}
 
-	// Generate JWT token
 	claims := jwt.MapClaims{
 		"role":     role,
 		"tenantId": tenantCtx.Config.TenantID,
 		"type":     "admin_auth",
-		"exp":      time.Now().Add(24 * time.Hour).Unix(), // 24 hour expiry
+		"exp":      time.Now().Add(24 * time.Hour).Unix(),
 		"iat":      time.Now().Unix(),
 	}
 
 	token, err := a.GenerateJWT(claims, tenantCtx.Config.JWTSecret)
 	if err != nil {
-		return &AuthResult{
-			Success: false,
-			Error:   "Token generation failed",
-		}
+		return &AuthResult{Success: false, Error: "Token generation failed"}
 	}
 
-	return &AuthResult{
-		Token:   token,
-		Role:    role,
-		Success: true,
+	return &AuthResult{Token: token, Role: role, Success: true}
+}
+
+// CreateLead handles the business logic for creating a new user profile.
+func (a *AuthService) CreateLead(email, codeword, firstName, contactPersona, shortBio string, tenantCtx *tenant.Context) (*CreateLeadResult, error) {
+	existingLead, err := a.leadRepo.FindByEmail(email)
+	if err != nil {
+		a.logger.Auth().Error("Database error checking for existing lead", "error", err, "email", email)
+		return nil, fmt.Errorf("database error checking existing email")
 	}
+	if existingLead != nil {
+		return &CreateLeadResult{Success: false, Error: "Email already registered"}, nil
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(codeword), bcrypt.DefaultCost)
+	if err != nil {
+		a.logger.Auth().Error("Password hashing failed", "error", err)
+		return nil, fmt.Errorf("password hashing failed")
+	}
+
+	encryptedEmail, err := security.Encrypt(email, tenantCtx.Config.AESKey)
+	if err != nil {
+		return nil, fmt.Errorf("encryption failed for email")
+	}
+	encryptedCode, err := security.Encrypt(codeword, tenantCtx.Config.AESKey)
+	if err != nil {
+		return nil, fmt.Errorf("encryption failed for code")
+	}
+
+	newLead := &user.Lead{
+		ID:             security.GenerateULID(),
+		FirstName:      firstName,
+		Email:          email,
+		PasswordHash:   string(hashedPassword),
+		ContactPersona: contactPersona,
+		ShortBio:       shortBio,
+		EncryptedCode:  encryptedCode,
+		EncryptedEmail: encryptedEmail,
+		CreatedAt:      time.Now().UTC(),
+		Changed:        time.Now().UTC(),
+	}
+
+	if err := a.leadRepo.Store(newLead); err != nil {
+		a.logger.Auth().Error("Failed to store new lead", "error", err, "leadId", newLead.ID)
+		return nil, fmt.Errorf("failed to create profile")
+	}
+
+	profile := &user.Profile{
+		LeadID:         newLead.ID,
+		Firstname:      newLead.FirstName,
+		Email:          newLead.Email,
+		ContactPersona: newLead.ContactPersona,
+		ShortBio:       newLead.ShortBio,
+	}
+
+	token, err := security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
+	if err != nil {
+		return nil, fmt.Errorf("token generation failed")
+	}
+
+	return &CreateLeadResult{
+		Success:        true,
+		Profile:        profile,
+		Token:          token,
+		EncryptedEmail: encryptedEmail,
+		EncryptedCode:  encryptedCode,
+	}, nil
 }
 
 // GenerateJWT creates a JWT token with given claims
 func (a *AuthService) GenerateJWT(claims jwt.MapClaims, jwtSecret string) (string, error) {
-	// Set standard claims if not present
 	if _, ok := claims["iat"]; !ok {
 		claims["iat"] = time.Now().UTC().Unix()
 	}
@@ -143,25 +224,21 @@ func (a *AuthService) ValidateTokenWithRoles(tokenString string, tenantCtx *tena
 		return false
 	}
 
-	// Check token type
 	tokenType, ok := claims["type"].(string)
 	if !ok || tokenType != "admin_auth" {
 		return false
 	}
 
-	// Check tenant ID matches
 	tokenTenantID, ok := claims["tenantId"].(string)
 	if !ok || tokenTenantID != tenantCtx.TenantID {
 		return false
 	}
 
-	// Check role
 	tokenRole, ok := claims["role"].(string)
 	if !ok {
 		return false
 	}
 
-	// Verify role is in allowed list
 	return slices.Contains(allowedRoles, tokenRole)
 }
 
@@ -199,15 +276,12 @@ func (a *AuthService) GetTokenInfo(tokenString string, tenantCtx *tenant.Context
 		Claims: claims,
 	}
 
-	// Extract common fields
 	if role, ok := claims["role"].(string); ok {
 		info.Role = role
 	}
-
 	if tenantID, ok := claims["tenantId"].(string); ok {
 		info.TenantID = tenantID
 	}
-
 	if exp, ok := claims["exp"].(float64); ok {
 		info.ExpiresAt = time.Unix(int64(exp), 0)
 	}
@@ -238,7 +312,6 @@ func (a *AuthService) ValidateEncryptedCredentials(encryptedEmail, encryptedCode
 		return nil // Invalid password
 	}
 
-	// Convert lead to profile
 	return &user.Profile{
 		LeadID:         lead.ID,
 		Firstname:      lead.FirstName,
