@@ -166,37 +166,37 @@ func (h *DatabaseHandlers) PostDatabaseTest(c *gin.Context) {
 	healthResult := h.dbService.PerformHealthCheck(tenantCtx)
 
 	// Filter results based on requested level
-	filteredTests := make(map[string]map[string]interface{})
-	if tests, ok := healthResult["tests"].(map[string]interface{}); ok {
+	filteredTests := make(map[string]map[string]any)
+	if tests, ok := healthResult["tests"].(map[string]any); ok {
 		switch testRequest.Level {
 		case "basic":
 			// Return only connectivity and tables tests
 			if result, exists := tests["connectivity"]; exists {
-				filteredTests["connectivity"] = result.(map[string]interface{})
+				filteredTests["connectivity"] = result.(map[string]any)
 			}
 			if result, exists := tests["tables"]; exists {
-				filteredTests["tables"] = result.(map[string]interface{})
+				filteredTests["tables"] = result.(map[string]any)
 			}
 		case "performance":
 			// Return performance-related tests
 			if result, exists := tests["performance"]; exists {
-				filteredTests["performance"] = result.(map[string]interface{})
+				filteredTests["performance"] = result.(map[string]any)
 			}
 			if result, exists := tests["write_read"]; exists {
-				filteredTests["write_read"] = result.(map[string]interface{})
+				filteredTests["write_read"] = result.(map[string]any)
 			}
 		case "full":
 			// Return all tests
 			for k, v := range tests {
-				filteredTests[k] = v.(map[string]interface{})
+				filteredTests[k] = v.(map[string]any)
 			}
 		default:
 			// Default to basic
 			if result, exists := tests["connectivity"]; exists {
-				filteredTests["connectivity"] = result.(map[string]interface{})
+				filteredTests["connectivity"] = result.(map[string]any)
 			}
 			if result, exists := tests["tables"]; exists {
-				filteredTests["tables"] = result.(map[string]interface{})
+				filteredTests["tables"] = result.(map[string]any)
 			}
 		}
 	}
@@ -233,39 +233,71 @@ func (h *DatabaseHandlers) PostDatabaseTest(c *gin.Context) {
 
 // DatabaseStatusResponse represents the response structure for database status
 type DatabaseStatusResponse struct {
-	TenantID       string                 `json:"tenantId"`
-	Status         string                 `json:"status"`
-	Database       map[string]interface{} `json:"database"`
-	AllTablesExist bool                   `json:"allTablesExist"`
-	TableStatus    map[string]bool        `json:"tableStatus,omitempty"`
-	ConnectionInfo string                 `json:"connectionInfo,omitempty"`
-	ResponseTime   string                 `json:"responseTime"`
-	LastChecked    time.Time              `json:"lastChecked"`
-	Error          string                 `json:"error,omitempty"`
+	TenantID       string          `json:"tenantId"`
+	Status         string          `json:"status"`
+	Database       map[string]any  `json:"database"`
+	AllTablesExist bool            `json:"allTablesExist"`
+	TableStatus    map[string]bool `json:"tableStatus,omitempty"`
+	ConnectionInfo string          `json:"connectionInfo,omitempty"`
+	ResponseTime   string          `json:"responseTime"`
+	LastChecked    time.Time       `json:"lastChecked"`
+	Error          string          `json:"error,omitempty"`
 }
 
 // HealthResponse represents the response structure for health checks
 type HealthResponse struct {
-	TenantID      string                            `json:"tenantId"`
-	OverallStatus string                            `json:"overallStatus"`
-	Tests         map[string]map[string]interface{} `json:"tests"`
-	Duration      string                            `json:"duration"`
-	StartTime     time.Time                         `json:"startTime"`
-	CompletedAt   time.Time                         `json:"completedAt"`
+	TenantID      string                    `json:"tenantId"`
+	OverallStatus string                    `json:"overallStatus"`
+	Tests         map[string]map[string]any `json:"tests"`
+	Duration      string                    `json:"duration"`
+	StartTime     time.Time                 `json:"startTime"`
+	CompletedAt   time.Time                 `json:"completedAt"`
 }
 
 // StatsResponse represents the response structure for connection stats
 type StatsResponse struct {
-	TenantID string                 `json:"tenantId"`
-	Stats    map[string]interface{} `json:"stats"`
+	TenantID string         `json:"tenantId"`
+	Stats    map[string]any `json:"stats"`
 }
 
 // TestResponse represents the response structure for database tests
 type TestResponse struct {
-	TenantID      string                            `json:"tenantId"`
-	Level         string                            `json:"level"`
-	OverallStatus string                            `json:"overallStatus"`
-	Tests         map[string]map[string]interface{} `json:"tests"`
-	Duration      string                            `json:"duration"`
-	CompletedAt   time.Time                         `json:"completedAt"`
+	TenantID      string                    `json:"tenantId"`
+	Level         string                    `json:"level"`
+	OverallStatus string                    `json:"overallStatus"`
+	Tests         map[string]map[string]any `json:"tests"`
+	Duration      string                    `json:"duration"`
+	CompletedAt   time.Time                 `json:"completedAt"`
+}
+
+// GetGeneralHealth handles GET /api/v1/health - matches legacy format exactly
+func (h *DatabaseHandlers) GetGeneralHealth(c *gin.Context) {
+	// Ensure tenant context exists before returning healthy status
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"healthy": false,
+			"error":   "tenant context unavailable",
+		})
+		return
+	}
+
+	// Verify tenant is active
+	if tenantCtx.Status != "active" {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status":  "error",
+			"healthy": false,
+			"error":   "tenant not active",
+		})
+		return
+	}
+
+	// Return healthy status in exact legacy format
+	c.JSON(http.StatusOK, gin.H{
+		"status":    "ok",
+		"healthy":   true,
+		"timestamp": time.Now().UTC().Unix(),
+		"tenantId":  tenantCtx.TenantID,
+	})
 }

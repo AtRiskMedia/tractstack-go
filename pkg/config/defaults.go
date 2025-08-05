@@ -142,6 +142,9 @@ var (
 
 	// SysOp Configuration
 	SysopPassword string
+
+	// Analytics Configuration
+	ExposeAnalytics bool
 )
 
 func init() {
@@ -197,4 +200,7 @@ func init() {
 
 	// SysOp Configuration
 	SysopPassword = getEnvString("SYSOP_PASSWORD", "storykeep")
+
+	// Analytics Configuration
+	ExposeAnalytics = getEnvBool("EXPOSE_ANALYTICS", false)
 }
