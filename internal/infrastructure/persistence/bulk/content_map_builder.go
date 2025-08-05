@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 )
@@ -262,67 +263,203 @@ func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.Conten
 		return nil, err
 	}
 
-	// Set type-specific fields
+	// Set type-specific fields directly on domain entity (like legacy does)
 	switch item.Type {
 	case "Menu":
 		if extra.Valid {
-			item.Extra = map[string]any{"theme": extra.String}
+			item.Theme = &extra.String
 		}
 	case "Pane":
 		if isContext.Valid {
-			item.Extra = map[string]any{"isContext": isContext.Bool}
+			item.IsContext = &isContext.Bool
 		}
 	case "Resource":
 		if categorySlug.Valid {
-			item.Extra = map[string]any{"categorySlug": categorySlug.String}
+			item.CategorySlug = &categorySlug.String
 		}
 	case "Belief":
 		if scale.Valid {
-			item.Extra = map[string]any{"scale": scale.String}
+			item.Scale = &scale.String
 		}
 	case "Epinet":
 		if promoted.Valid {
-			item.Extra = map[string]any{"promoted": promoted.Bool}
+			item.Promoted = &promoted.Bool
 		}
 	case "StoryFragment":
-		extra := make(map[string]any)
 		if parentID.Valid {
-			extra["parentId"] = parentID.String
+			item.ParentID = &parentID.String
 		}
 		if parentTitle.Valid {
-			extra["parentTitle"] = parentTitle.String
+			item.ParentTitle = &parentTitle.String
 		}
 		if parentSlug.Valid {
-			extra["parentSlug"] = parentSlug.String
+			item.ParentSlug = &parentSlug.String
 		}
 		if changed.Valid {
-			extra["changed"] = changed.String
+			item.Changed = &changed.String
 		}
-		if paneIDs.Valid {
-			// Parse pane_ids from GROUP_CONCAT (comma-separated string)
-			if paneIDs.String != "" {
-				extra["panes"] = strings.Split(paneIDs.String, ",")
-			} else {
-				extra["panes"] = []string{}
+		if paneIDs.Valid && paneIDs.String != "" {
+			item.Panes = strings.Split(paneIDs.String, ",")
+		}
+		if topics.Valid && topics.String != "" {
+			topicsSlice := strings.Split(topics.String, ",")
+			for i, topic := range topicsSlice {
+				topicsSlice[i] = strings.TrimSpace(topic)
 			}
+			item.Topics = topicsSlice
+		}
+		if description.Valid {
+			item.Description = &description.String
 		}
 		if socialImagePath.Valid {
-			extra["socialImagePath"] = socialImagePath.String
-			// Add thumbnail paths if social image exists
-			cmb.addThumbnailPaths(extra, socialImagePath.String)
+			item.SocialImagePath = &socialImagePath.String
+			// Generate thumbnail paths
+			cmb.addThumbnailPaths(&item, socialImagePath.String)
 		}
-		item.Extra = extra
 	case "TractStack":
 		if socialImagePath.Valid {
-			item.Extra = map[string]any{"socialImagePath": socialImagePath.String}
+			item.SocialImagePath = &socialImagePath.String
 		}
 	}
 
 	return &item, nil
 }
 
+func (cmb *ContentMapBuilder) addThumbnailPaths(item *content.ContentMapItem, socialImagePath string) {
+	if socialImagePath == "" {
+		return
+	}
+
+	basename := path.Base(socialImagePath)
+	if dotIndex := strings.LastIndex(basename, "."); dotIndex != -1 {
+		basename = basename[:dotIndex]
+	}
+
+	cacheBuster := time.Now().Unix()
+
+	thumbSrc := fmt.Sprintf("/images/thumbs/%s_1200px.webp?v=%d", basename, cacheBuster)
+	thumbSrcSet := fmt.Sprintf(
+		"/images/thumbs/%s_1200px.webp?v=%d 1200w, /images/thumbs/%s_600px.webp?v=%d 600w, /images/thumbs/%s_300px.webp?v=%d 300w",
+		basename, cacheBuster, basename, cacheBuster, basename, cacheBuster,
+	)
+
+	item.ThumbSrc = &thumbSrc
+	item.ThumbSrcSet = &thumbSrcSet
+}
+
+func convertToFullContentMapItems(contentMap []*content.ContentMapItem) []types.FullContentMapItem {
+	cacheItems := make([]types.FullContentMapItem, len(contentMap))
+
+	for i, item := range contentMap {
+		switch item.Type {
+		case "Menu":
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			if item.Theme != nil {
+				cacheItem.Theme = item.Theme
+			}
+			cacheItems[i] = cacheItem
+
+		case "Resource":
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			if item.CategorySlug != nil {
+				cacheItem.CategorySlug = item.CategorySlug
+			}
+			cacheItems[i] = cacheItem
+
+		case "Pane":
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			if item.IsContext != nil {
+				cacheItem.IsContext = item.IsContext
+			}
+			cacheItems[i] = cacheItem
+
+		case "StoryFragment":
+			cacheItem := types.FullContentMapItem{
+				ID:              item.ID,
+				Title:           item.Title,
+				Slug:            item.Slug,
+				Type:            item.Type,
+				ParentID:        item.ParentID,
+				ParentTitle:     item.ParentTitle,
+				ParentSlug:      item.ParentSlug,
+				Panes:           item.Panes,
+				Description:     item.Description,
+				Topics:          item.Topics,
+				Changed:         item.Changed,
+				SocialImagePath: item.SocialImagePath,
+				ThumbSrc:        item.ThumbSrc,
+				ThumbSrcSet:     item.ThumbSrcSet,
+			}
+			cacheItems[i] = cacheItem
+
+		case "TractStack":
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			if item.SocialImagePath != nil {
+				cacheItem.SocialImagePath = item.SocialImagePath
+			}
+			cacheItems[i] = cacheItem
+
+		case "Belief":
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			if item.Scale != nil {
+				cacheItem.Scale = item.Scale
+			}
+			cacheItems[i] = cacheItem
+
+		case "Epinet":
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			if item.Promoted != nil {
+				cacheItem.Promoted = item.Promoted
+			}
+			cacheItems[i] = cacheItem
+
+		default:
+			// Fallback for unknown types
+			cacheItem := types.FullContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
+			cacheItems[i] = cacheItem
+		}
+	}
+
+	return cacheItems
+}
+
 // addThumbnailPaths generates thumbnail URLs for social images
-func (cmb *ContentMapBuilder) addThumbnailPaths(extra map[string]any, socialImagePath string) {
+func addThumbnailPaths(extra map[string]any, socialImagePath string) {
 	if socialImagePath == "" {
 		return
 	}

@@ -40,15 +40,96 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 	marker := cms.perfTracker.StartOperation("get_content_map", tenantCtx.TenantID)
 	defer marker.Complete()
 	start := time.Now()
+
 	// Check cache first
 	if cachedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
 		convertedItems := make([]*content.ContentMapItem, len(cachedItems))
+
+		// Convert cached items with type-specific fields (FIXED)
 		for i, item := range cachedItems {
-			convertedItems[i] = &content.ContentMapItem{
-				ID:    item.ID,
-				Title: item.Title,
-				Slug:  item.Slug,
-				Type:  item.Type,
+			switch item.Type {
+			case "Resource":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:           item.ID,
+					Title:        item.Title,
+					Slug:         item.Slug,
+					Type:         item.Type,
+					CategorySlug: item.CategorySlug,
+				}
+			case "Menu":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:    item.ID,
+					Title: item.Title,
+					Slug:  item.Slug,
+					Type:  item.Type,
+					Theme: item.Theme,
+				}
+			case "Pane":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:        item.ID,
+					Title:     item.Title,
+					Slug:      item.Slug,
+					Type:      item.Type,
+					IsContext: item.IsContext,
+				}
+			case "StoryFragment":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:              item.ID,
+					Title:           item.Title,
+					Slug:            item.Slug,
+					Type:            item.Type,
+					ParentID:        item.ParentID,
+					ParentTitle:     item.ParentTitle,
+					ParentSlug:      item.ParentSlug,
+					Panes:           item.Panes,
+					Description:     item.Description,
+					Topics:          item.Topics,
+					Changed:         item.Changed,
+					SocialImagePath: item.SocialImagePath,
+					ThumbSrc:        item.ThumbSrc,
+					ThumbSrcSet:     item.ThumbSrcSet,
+				}
+			case "TractStack":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:              item.ID,
+					Title:           item.Title,
+					Slug:            item.Slug,
+					Type:            item.Type,
+					SocialImagePath: item.SocialImagePath,
+				}
+			case "Belief":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:    item.ID,
+					Title: item.Title,
+					Slug:  item.Slug,
+					Type:  item.Type,
+					Scale: item.Scale,
+				}
+			case "Epinet":
+				convertedItems[i] = &content.ContentMapItem{
+					ID:       item.ID,
+					Title:    item.Title,
+					Slug:     item.Slug,
+					Type:     item.Type,
+					Promoted: item.Promoted,
+				}
+			case "Topic":
+				// Special case for Topic items (all-topics)
+				convertedItems[i] = &content.ContentMapItem{
+					ID:     item.ID,
+					Title:  item.Title,
+					Slug:   item.Slug,
+					Type:   item.Type,
+					Topics: item.Topics,
+				}
+			default:
+				// Fallback for unknown types
+				convertedItems[i] = &content.ContentMapItem{
+					ID:    item.ID,
+					Title: item.Title,
+					Slug:  item.Slug,
+					Type:  item.Type,
+				}
 			}
 		}
 
@@ -85,22 +166,91 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 	// Current timestamp for the response
 	timestamp := time.Now().Unix()
 
-	// FIXED: Convert domain entities to cache types before storing
+	// Convert domain entities to cache types before storing
 	cacheItems := cms.convertToFullContentMapItems(contentMap)
 	cache.SetFullContentMap(tenantCtx.TenantID, cacheItems)
 
-	// Convert to response format
+	// Convert to response format with type-specific fields (FIXED)
 	convertedItems := make([]*content.ContentMapItem, len(contentMap))
 	for i, item := range contentMap {
-		convertedItems[i] = &content.ContentMapItem{
-			ID:    item.ID,
-			Title: item.Title,
-			Slug:  item.Slug,
-			Type:  item.Type,
+		switch item.Type {
+		case "Resource":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:           item.ID,
+				Title:        item.Title,
+				Slug:         item.Slug,
+				Type:         item.Type,
+				CategorySlug: item.CategorySlug,
+			}
+		case "Menu":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+				Theme: item.Theme,
+			}
+		case "Pane":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:        item.ID,
+				Title:     item.Title,
+				Slug:      item.Slug,
+				Type:      item.Type,
+				IsContext: item.IsContext,
+			}
+		case "StoryFragment":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:              item.ID,
+				Title:           item.Title,
+				Slug:            item.Slug,
+				Type:            item.Type,
+				ParentID:        item.ParentID,
+				ParentTitle:     item.ParentTitle,
+				ParentSlug:      item.ParentSlug,
+				Panes:           item.Panes,
+				Description:     item.Description,
+				Topics:          item.Topics,
+				Changed:         item.Changed,
+				SocialImagePath: item.SocialImagePath,
+				ThumbSrc:        item.ThumbSrc,
+				ThumbSrcSet:     item.ThumbSrcSet,
+			}
+		case "TractStack":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:              item.ID,
+				Title:           item.Title,
+				Slug:            item.Slug,
+				Type:            item.Type,
+				SocialImagePath: item.SocialImagePath,
+			}
+		case "Belief":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+				Scale: item.Scale,
+			}
+		case "Epinet":
+			convertedItems[i] = &content.ContentMapItem{
+				ID:       item.ID,
+				Title:    item.Title,
+				Slug:     item.Slug,
+				Type:     item.Type,
+				Promoted: item.Promoted,
+			}
+		default:
+			// Fallback for unknown types
+			convertedItems[i] = &content.ContentMapItem{
+				ID:    item.ID,
+				Title: item.Title,
+				Slug:  item.Slug,
+				Type:  item.Type,
+			}
 		}
 	}
 
-	cms.logger.Content().Info("Successfully retrieved content map", "tenantId", tenantCtx.TenantID, "itemCount", len(convertedItems), "fromCache", true, "notModified", false, "duration", time.Since(start))
+	cms.logger.Content().Info("Successfully retrieved content map", "tenantId", tenantCtx.TenantID, "itemCount", len(convertedItems), "fromCache", false, "notModified", false, "duration", time.Since(start))
 
 	marker.SetSuccess(true)
 	cms.logger.Perf().Info("Performance for GetContentMap", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
@@ -116,41 +266,25 @@ func (cms *ContentMapService) convertToFullContentMapItems(contentMap []*content
 
 	for i, item := range contentMap {
 		cacheItem := types.FullContentMapItem{
-			ID:    item.ID,
-			Title: item.Title,
-			Slug:  item.Slug,
-			Type:  item.Type,
-		}
-
-		// Copy type-specific fields based on the content type
-		switch item.Type {
-		case "Menu":
-			// Menu-specific fields would be copied here if they exist
-			// cacheItem.Theme = item.Theme (if Theme field exists)
-
-		case "Resource":
-			// Resource-specific fields would be copied here if they exist
-			// cacheItem.CategorySlug = item.CategorySlug (if CategorySlug field exists)
-
-		case "Pane":
-			// Pane-specific fields would be copied here if they exist
-			// cacheItem.IsContext = item.IsContext (if IsContext field exists)
-
-		case "StoryFragment":
-			// StoryFragment-specific fields would be copied here if they exist
-			// cacheItem.ParentID = item.ParentID (if ParentID field exists)
-
-		case "TractStack":
-			// TractStack-specific fields would be copied here if they exist
-			// cacheItem.SocialImagePath = item.SocialImagePath (if SocialImagePath field exists)
-
-		case "Belief":
-			// Belief-specific fields would be copied here if they exist
-			// cacheItem.Scale = item.Scale (if Scale field exists)
-
-		case "Epinet":
-			// Epinet-specific fields would be copied here if they exist
-			// cacheItem.Promoted = item.Promoted (if Promoted field exists)
+			ID:              item.ID,
+			Title:           item.Title,
+			Slug:            item.Slug,
+			Type:            item.Type,
+			Theme:           item.Theme,
+			CategorySlug:    item.CategorySlug,
+			IsContext:       item.IsContext,
+			ParentID:        item.ParentID,
+			ParentTitle:     item.ParentTitle,
+			ParentSlug:      item.ParentSlug,
+			Panes:           item.Panes,
+			Description:     item.Description,
+			Topics:          item.Topics,
+			Changed:         item.Changed,
+			SocialImagePath: item.SocialImagePath,
+			ThumbSrc:        item.ThumbSrc,
+			ThumbSrcSet:     item.ThumbSrcSet,
+			Scale:           item.Scale,
+			Promoted:        item.Promoted,
 		}
 
 		cacheItems[i] = cacheItem
