@@ -44,7 +44,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.PerfTracker,
 	)
 	authHandlers := handlers.NewAuthHandlers(container.AuthService, container.Logger, container.PerfTracker)
-	visitHandlers := handlers.NewVisitHandlers(container.SessionService, container.AuthService, container.Logger, container.PerfTracker)
+	visitHandlers := handlers.NewVisitHandlers(container.SessionService, container.AuthService, container.Broadcaster, container.Logger, container.PerfTracker)
 	stateHandlers := handlers.NewStateHandlers(container.StateService, container.Logger, container.PerfTracker)
 	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
@@ -88,9 +88,12 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	{
 		// Config endpoints
 		configGroup := api.Group("/config")
-		configGroup.Use(authHandlers.AuthMiddleware())
 		{
+			// Public brand config endpoint
 			configGroup.GET("/brand", configHandlers.GetBrandConfig)
+
+			// Protected config endpoints
+			configGroup.Use(authHandlers.AuthMiddleware())
 			configGroup.PUT("/brand", configHandlers.UpdateBrandConfig)
 			configGroup.GET("/advanced", configHandlers.GetAdvancedConfig)
 			configGroup.PUT("/advanced", authHandlers.AdminOnlyMiddleware(), configHandlers.UpdateAdvancedConfig)

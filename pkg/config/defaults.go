@@ -193,7 +193,7 @@ func init() {
 	SSECleanupInterval = time.Duration(getEnvInt("SSE_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 	DBPoolCleanupInterval = time.Duration(getEnvInt("DB_POOL_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 	RepositoryCleanupInterval = time.Duration(getEnvInt("REPOSITORY_CLEANUP_INTERVAL", 30)) * time.Minute
-	RepositoryCleanupVerbose = getEnvString("REPOSITORY_CLEANUP_VERBOSE", "true") == "true"
+	RepositoryCleanupVerbose = getEnvString("REPOSITORY_CLEANUP_VERBOSE", "true") == "false"
 
 	// Logging Configuration
 	LogVerbosity = getEnvString("LOG_VERBOSITY", "WARN")

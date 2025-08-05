@@ -108,35 +108,36 @@ func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Conte
 	}
 }
 
-// GenerateJWT creates a JWT token with the given claims
-func (a *AuthService) GenerateJWT(claims jwt.MapClaims, secret string) (string, error) {
-	if secret == "" {
-		return "", fmt.Errorf("JWT secret not configured")
+// GenerateJWT creates a JWT token with given claims
+func (a *AuthService) GenerateJWT(claims jwt.MapClaims, jwtSecret string) (string, error) {
+	// Set standard claims if not present
+	if _, ok := claims["iat"]; !ok {
+		claims["iat"] = time.Now().UTC().Unix()
+	}
+	if _, ok := claims["exp"]; !ok {
+		claims["exp"] = time.Now().UTC().Add(24 * time.Hour).Unix()
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(secret))
+	return token.SignedString([]byte(jwtSecret))
 }
 
-// ValidateAdminRole checks if the request has valid admin authentication
-func (a *AuthService) ValidateAdminRole(authHeader string, tenantCtx *tenant.Context) bool {
-	return a.validateRole(authHeader, tenantCtx, []string{"admin"})
+// ValidateAdminToken checks if a token belongs to an admin user
+func (a *AuthService) ValidateAdminToken(tokenString string, tenantCtx *tenant.Context) bool {
+	return a.ValidateTokenWithRoles(tokenString, tenantCtx, []string{"admin"})
 }
 
-// ValidateAdminOrEditorRole checks if the request has valid admin or editor authentication
-func (a *AuthService) ValidateAdminOrEditorRole(authHeader string, tenantCtx *tenant.Context) bool {
-	return a.validateRole(authHeader, tenantCtx, []string{"admin", "editor"})
+// ValidateAdminOrEditorToken checks if a token belongs to an admin or editor user
+func (a *AuthService) ValidateAdminOrEditorToken(tokenString string, tenantCtx *tenant.Context) bool {
+	return a.ValidateTokenWithRoles(tokenString, tenantCtx, []string{"admin", "editor"})
 }
 
-// validateRole validates JWT token and checks role membership
-func (a *AuthService) validateRole(authHeader string, tenantCtx *tenant.Context, allowedRoles []string) bool {
-	if authHeader == "" || len(authHeader) < 7 || authHeader[:7] != "Bearer " {
+// ValidateTokenWithRoles validates a token and checks if the role is in the allowed list
+func (a *AuthService) ValidateTokenWithRoles(tokenString string, tenantCtx *tenant.Context, allowedRoles []string) bool {
+	if tokenString == "" {
 		return false
 	}
 
-	tokenString := authHeader[7:]
-
-	// Validate JWT token
 	claims, err := security.ValidateJWT(tokenString, tenantCtx.Config.JWTSecret)
 	if err != nil {
 		return false

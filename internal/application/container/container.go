@@ -11,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	persistenceUser "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/user"
@@ -54,6 +55,7 @@ type Container struct {
 	ConfigService      *services.ConfigService
 	MultiTenantService *services.MultiTenantService
 	LogBroadcaster     *logging.LogBroadcaster
+	Broadcaster        messaging.Broadcaster
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -125,6 +127,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	configService := services.NewConfigService(logger, perfTracker)
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
 	logBroadcaster := logging.GetBroadcaster()
+	broadcaster := messaging.NewSSEBroadcaster(logger)
 
 	logger.Startup().Info("Dependency injection container services initialized")
 
@@ -163,6 +166,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ConfigService:      configService,
 		MultiTenantService: multiTenantService,
 		LogBroadcaster:     logBroadcaster,
+		Broadcaster:        broadcaster,
 
 		// Infrastructure
 		TenantManager:  tenantManager,
