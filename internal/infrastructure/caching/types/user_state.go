@@ -30,11 +30,11 @@ type FingerprintState struct {
 	LastActivity  time.Time           `json:"lastActivity"`
 }
 
-// VisitState represents the state of a single visit
+// VisitState represents the state of a single visit session.
+// Each visit tracks analytics and user journey data for a specific fingerprint.
 type VisitState struct {
 	VisitID       string    `json:"visitId"`
 	FingerprintID string    `json:"fingerprintId"`
-	SessionID     string    `json:"sessionId"`
 	CampaignID    *string   `json:"campaignId,omitempty"`
 	Referrer      *Referrer `json:"referrer,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
@@ -43,7 +43,8 @@ type VisitState struct {
 	CurrentPage   string    `json:"currentPage"`
 }
 
-// SessionData represents ephemeral session state
+// SessionData represents ephemeral session state and serves as the coordination hub.
+// Sessions link frontend/backend interactions and own references to both fingerprint and visit.
 type SessionData struct {
 	SessionID     string    `json:"sessionId"`
 	FingerprintID string    `json:"fingerprintId"`
@@ -56,6 +57,7 @@ type SessionData struct {
 }
 
 // SessionBeliefContext represents belief evaluation context for a session+storyfragment.
+// This enables personalized content filtering based on user's held beliefs.
 type SessionBeliefContext struct {
 	TenantID        string              `json:"tenantId"`
 	SessionID       string              `json:"sessionId"`
@@ -64,6 +66,7 @@ type SessionBeliefContext struct {
 	LastEvaluation  time.Time           `json:"lastEvaluation"`
 }
 
+// Referrer contains tracking information for visit attribution
 type Referrer struct {
 	HTTPReferrer *string `json:"httpReferrer,omitempty"`
 	UTMSource    *string `json:"utmSource,omitempty"`
