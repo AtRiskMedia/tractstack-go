@@ -20,6 +20,7 @@ document.addEventListener('alpine:init', () => {
       sysop_tenants: '/api/sysop/tenants',
       sysop_activity: '/api/sysop/activity',
       sysop_tenant_token: '/api/sysop/tenant-token',
+      sysop_orphan_analysis: '/api/sysop/orphan-analysis',
       contentMap: '/api/v1/content/full-map',
       analytics: '/api/v1/analytics/dashboard',
       nodes: {
@@ -76,22 +77,38 @@ document.addEventListener('alpine:init', () => {
       const sysOpHeaders = { 'Authorization': `Bearer ${this.sysOpToken}` };
 
       const activityEndpoint = `${this.apiEndpoints.sysop_activity}?tenant=${this.currentTenant}`;
+      const orphanEndpoint = `${this.apiEndpoints.sysop_orphan_analysis}?tenant=${this.currentTenant}`; // Add this line
+
       const fetchWithTenantToken = (endpoint) => fetch(endpoint, { headers }).then(res => { if (!res.ok) return Promise.reject(new Error(`${res.status}: ${res.statusText} on ${endpoint}`)); return res.json(); });
       const fetchWithSysOpToken = (endpoint) => fetch(endpoint, { headers: sysOpHeaders }).then(res => res.json());
 
       try {
         const nodeEndpoints = Object.values(this.apiEndpoints.nodes).map(url => fetchWithTenantToken(url));
-        const allPromises = [fetchWithTenantToken(this.apiEndpoints.contentMap), fetchWithTenantToken(this.apiEndpoints.analytics), fetchWithSysOpToken(activityEndpoint), ...nodeEndpoints];
+        const allPromises = [
+          fetchWithTenantToken(this.apiEndpoints.contentMap),
+          fetchWithTenantToken(this.apiEndpoints.analytics),
+          fetchWithSysOpToken(activityEndpoint),
+          fetchWithSysOpToken(orphanEndpoint), // Add this line
+          ...nodeEndpoints
+        ];
         const results = await Promise.allSettled(allPromises);
         const getData = (result, defaultValue) => result.status === 'fulfilled' ? result.value : defaultValue;
         const contentMap = getData(results[0], { data: { data: [] } });
         const analytics = getData(results[1], { dashboard: { status: 'offline' } });
         const activity = getData(results[2], {});
-        const nodeCountResponses = results.slice(3).map(res => getData(res, { count: 0 }));
+        const orphanAnalysis = getData(results[3], { status: 'offline' }); // Add this line
+        const nodeCountResponses = results.slice(4).map(res => getData(res, { count: 0 })); // Update index from 3 to 4
         const nodeData = Object.keys(this.apiEndpoints.nodes).reduce((acc, key, index) => { acc[key] = nodeCountResponses[index].count; return acc; }, {});
         const analyticsStatus = analytics.dashboard?.status || 'complete';
         const analyticsOverview = analytics.dashboard || {};
-        const combinedData = { contentMap: contentMap.data?.data?.length || 0, analyticsStatus, analyticsOverview, activity, nodes: nodeData };
+        const combinedData = {
+          contentMap: contentMap.data?.data?.length || 0,
+          analyticsStatus,
+          analyticsOverview,
+          activity,
+          orphanAnalysis, // Add this line
+          nodes: nodeData
+        };
 
         this.updateUI(combinedData);
         this.updateConnectionStatus('ONLINE');
@@ -106,8 +123,28 @@ document.addEventListener('alpine:init', () => {
       } catch (error) {
         console.error('Polling failed:', error);
         this.updateConnectionStatus('OFFLINE');
-        this.updateUI({ contentMap: 0, analyticsStatus: 'offline', analyticsOverview: {}, activity: {}, nodes: {} });
+        this.updateUI({ contentMap: 0, analyticsStatus: 'offline', analyticsOverview: {}, activity: {}, orphanAnalysis: { status: 'offline' }, nodes: {} });
       }
+    },
+
+    // Update the updateCacheStatus method to reflect orphan analysis status
+    updateCacheStatus(data) {
+      const el = document.getElementById('cache-status');
+      const formatCount = (label, count) => {
+        const countStr = count > 0 ? `<span class="metric-value">${count}</span>` : `<span class="metric-dim">--</span>`;
+        const labelColor = count > 0 ? "metric-label" : "metric-dim";
+        return `<span><span class="${labelColor}">${label}:</span>${countStr}</span>`;
+      };
+      const nodes = data.nodes || {};
+
+      // Update orphan analysis status display
+      const orphanStatus = data.orphanAnalysis?.status || 'offline';
+      const orphanStatusClass = orphanStatus === 'complete' ? 'status-primed' :
+        orphanStatus === 'loading' ? 'status-warming' : 'status-offline';
+
+      let html = `<span><span class="metric-label">✦ Content Map: </span><span class="metric-value">${data.contentMap || '0'} items</span></span><span><span class="metric-dim">○ Orphan Analysis: </span><span class="${orphanStatusClass}">${orphanStatus.toUpperCase()}</span></span><span><span class="metric-label">✦ cached nodes: </span></span>`;
+      html += `${formatCount('tractstacks', nodes.tractstacks)} ${formatCount('storyfragments', nodes.storyfragments)} ${formatCount('panes', nodes.panes)} ${formatCount('menus', nodes.menus)} ${formatCount('resources', nodes.resources)} ${formatCount('beliefs', nodes.beliefs)} ${formatCount('epinets', nodes.epinets)} ${formatCount('files', nodes.files)}`;
+      el.innerHTML = html;
     },
     updateUI(data) { this.updateCacheStatus(data); this.updateActivityMetrics(data.activity); this.updateAnalyticsMetrics(data.analyticsStatus); this.updateCacheDetails(data.nodes); this.updateAnalyticsDetails(data.analyticsOverview); },
     updateConnectionStatus(status) { const el = document.getElementById('status-bar-status'); el.textContent = status; el.className = `status-${status.toLowerCase()}`; document.getElementById('connection-status').innerHTML = `<span class="metric-label">Server Ping: </span><span class="status-${status.toLowerCase()}">${status}</span>`; document.getElementById('last-update').textContent = new Date().toLocaleTimeString(); },
