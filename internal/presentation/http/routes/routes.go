@@ -5,6 +5,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/container"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/handlers"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -69,12 +70,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	// Log streaming is a special case and can remain at top level
 	r.GET("/sysop-logs/stream", sysopHandlers.StreamLogs)
 
-	// Public, non-tenant-specific admin routes for provisioning.
-	tenantAPI := r.Group("/api/v1/tenant")
-	{
-		tenantAPI.POST("/provision", multiTenantHandlers.HandleProvisionTenant)
-		tenantAPI.POST("/activation", multiTenantHandlers.HandleActivateTenant)
-		tenantAPI.GET("/capacity", multiTenantHandlers.HandleGetCapacity)
+	// Public, non-tenant-specific admin routes for provisioning (conditional).
+	if config.EnableMultiTenant {
+		tenantAPI := r.Group("/api/v1/tenant")
+		{
+			tenantAPI.POST("/provision", multiTenantHandlers.HandleProvisionTenant)
+			tenantAPI.POST("/activation", multiTenantHandlers.HandleActivateTenant)
+			tenantAPI.GET("/capacity", multiTenantHandlers.HandleGetCapacity)
+		}
 	}
 
 	// API routes with tenant middleware
@@ -111,9 +114,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		// Database status
 		api.GET("/db/status", dbHandlers.GetDatabaseStatus)
 
+		// General health endpoint (legacy format)
+		api.GET("/health", dbHandlers.GetGeneralHealth)
+
 		// Analytics endpoints
 		analytics := api.Group("/analytics")
-		analytics.Use(authHandlers.AuthMiddleware())
+		if !config.ExposeAnalytics {
+			analytics.Use(authHandlers.AuthMiddleware())
+		}
 		{
 			analytics.GET("/dashboard", analyticsHandlers.HandleDashboardAnalytics)
 			analytics.GET("/epinet/:id", analyticsHandlers.HandleEpinetSankey)
