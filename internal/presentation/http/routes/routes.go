@@ -203,8 +203,8 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 				protected.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
 
 				// File endpoints
-				protected.GET("/files", imageFileHandlers.GetAllFileIDs)
 				protected.POST("/files", imageFileHandlers.GetFilesByIDs)
+				protected.GET("/files", imageFileHandlers.GetAllFileIDs)
 				protected.GET("/files/:id", imageFileHandlers.GetFileByID)
 
 				// Epinet endpoints
