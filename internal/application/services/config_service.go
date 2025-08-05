@@ -41,11 +41,11 @@ type BrandConfigUpdateRequest struct {
 	Theme        string `json:"THEME,omitempty"`
 
 	// Site Configuration Fields
-	SiteInit           bool   `json:"SITE_INIT,omitempty"`
+	SiteInit           *bool  `json:"SITE_INIT,omitempty"` // ✅ FIXED: bool to *bool
 	WordmarkMode       string `json:"WORDMARK_MODE,omitempty"`
 	HomeSlug           string `json:"HOME_SLUG,omitempty"`
 	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG,omitempty"`
-	OpenDemo           bool   `json:"OPEN_DEMO,omitempty"`
+	OpenDemo           *bool  `json:"OPEN_DEMO,omitempty"` // ✅ FIXED: bool to *bool
 	SiteURL            string `json:"SITE_URL,omitempty"`
 	Slogan             string `json:"SLOGAN,omitempty"`
 	Footer             string `json:"FOOTER,omitempty"`
@@ -80,17 +80,19 @@ type BrandConfigUpdateRequest struct {
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
 type AdvancedConfigUpdateRequest struct {
-	TursoDatabaseURL string `json:"turso_database_url,omitempty"`
-	TursoAuthToken   string `json:"turso_auth_token,omitempty"`
-	EmailHost        string `json:"email_host,omitempty"`
-	EmailPort        int    `json:"email_port,omitempty"`
-	EmailUser        string `json:"email_user,omitempty"`
-	EmailPass        string `json:"email_pass,omitempty"`
-	EmailFrom        string `json:"email_from,omitempty"`
-	AdminPassword    string `json:"admin_password,omitempty"`
-	EditorPassword   string `json:"editor_password,omitempty"`
-	AAIAPIKey        string `json:"aai_api_key,omitempty"`
-	TursoEnabled     bool   `json:"turso_enabled,omitempty"`
+	TursoDatabaseURL   string `json:"turso_database_url,omitempty"`
+	TursoAuthToken     string `json:"turso_auth_token,omitempty"`
+	EmailHost          string `json:"email_host,omitempty"`
+	EmailPort          int    `json:"email_port,omitempty"`
+	EmailUser          string `json:"email_user,omitempty"`
+	EmailPass          string `json:"email_pass,omitempty"`
+	EmailFrom          string `json:"email_from,omitempty"`
+	AdminPassword      string `json:"admin_password,omitempty"`
+	EditorPassword     string `json:"editor_password,omitempty"`
+	AAIAPIKey          string `json:"aai_api_key,omitempty"`
+	TursoEnabled       *bool  `json:"turso_enabled,omitempty"`        // ✅ FIXED: bool to *bool
+	HomeSlug           string `json:"home_slug,omitempty"`            // ✅ ADDED: Missing field
+	TractStackHomeSlug string `json:"tractstack_home_slug,omitempty"` // ✅ ADDED: Missing field
 }
 
 // ValidateAdminPermissions validates admin-only authentication
@@ -161,7 +163,7 @@ func (c *ConfigService) ProcessBrandConfigUpdate(
 		return nil, err
 	}
 
-	// Update configuration fields
+	// Update configuration fields with proper protection
 	finalConfig := c.updateBrandConfigFields(processedConfig, request)
 
 	// Update version tracking
@@ -171,8 +173,11 @@ func (c *ConfigService) ProcessBrandConfigUpdate(
 		finalConfig.StylesVer = time.Now().Unix()
 	}
 
-	// Always set SiteInit to true on update
-	finalConfig.SiteInit = true
+	// ✅ FIXED: Only set SiteInit to true if explicitly provided and true
+	// This preserves existing SiteInit state when not specified
+	if request.SiteInit != nil && *request.SiteInit {
+		finalConfig.SiteInit = true
+	}
 
 	return finalConfig, nil
 }
@@ -182,7 +187,7 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	request *AdvancedConfigUpdateRequest,
 	tenantCtx *tenant.Context,
 ) error {
-	// Update fields from request directly on tenant config
+	// ✅ FIXED: Apply updates only for provided fields (following legacy pattern)
 	if request.TursoDatabaseURL != "" {
 		tenantCtx.Config.TursoDatabase = request.TursoDatabaseURL
 	}
@@ -198,8 +203,15 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.AAIAPIKey != "" {
 		tenantCtx.Config.AAIAPIKey = request.AAIAPIKey
 	}
-	tenantCtx.Config.TursoEnabled = request.TursoEnabled
-
+	if request.HomeSlug != "" {
+		tenantCtx.Config.HomeSlug = request.HomeSlug
+	}
+	if request.TractStackHomeSlug != "" {
+		tenantCtx.Config.TractStackHomeSlug = request.TractStackHomeSlug
+	}
+	if request.TursoEnabled != nil {
+		tenantCtx.Config.TursoEnabled = *request.TursoEnabled
+	}
 	return nil
 }
 
@@ -274,8 +286,22 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Marshal and save configuration
-	data, err := json.MarshalIndent(tenantCtx.Config, "", "  ")
+	// ✅ FIXED: Use selective field mapping instead of marshalling entire config
+	// This matches the legacy pattern and prevents accidental exposure of computed fields
+	configData := map[string]interface{}{
+		"TURSO_DATABASE_URL":   tenantCtx.Config.TursoDatabase,
+		"TURSO_AUTH_TOKEN":     tenantCtx.Config.TursoToken,
+		"ADMIN_PASSWORD":       tenantCtx.Config.AdminPassword,
+		"EDITOR_PASSWORD":      tenantCtx.Config.EditorPassword,
+		"AAI_API_KEY":          tenantCtx.Config.AAIAPIKey,
+		"HOME_SLUG":            tenantCtx.Config.HomeSlug,
+		"TRACTSTACK_HOME_SLUG": tenantCtx.Config.TractStackHomeSlug,
+		"JWT_SECRET":           tenantCtx.Config.JWTSecret,
+		"AES_KEY":              tenantCtx.Config.AESKey,
+		"TURSO_ENABLED":        tenantCtx.Config.TursoEnabled,
+	}
+
+	data, err := json.MarshalIndent(configData, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
@@ -290,93 +316,107 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 // Private helper methods
 
 func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConfigUpdateRequest, currentConfig *types.BrandConfig) (*types.BrandConfig, error) {
-	updatedConfig := *currentConfig
+	// Create a copy of current config
+	config := *currentConfig
 
-	// Process each base64 asset if provided
+	// Ensure media directory exists
+	if err := os.MkdirAll(filepath.Join(mediaPath, "images/brand"), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create media directory: %w", err)
+	}
+
+	// Process direct save assets (logo, wordmark, favicon)
 	if request.LogoBase64 != "" {
-		filename, err := c.processBase64Image(mediaPath, request.LogoBase64, "logo", "images/brand")
-		if err != nil {
-			return nil, err
+		filename := "logo" + c.getExtensionFromBase64(request.LogoBase64)
+		targetDir := filepath.Join(mediaPath, "images/brand")
+
+		if strings.Contains(request.LogoBase64, "data:image/svg+xml") {
+			relativePath, err := c.processSVG(request.LogoBase64, filename, targetDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process logo SVG: %w", err)
+			}
+			config.Logo = relativePath
+		} else {
+			relativePath, err := c.processBinaryImage(request.LogoBase64, filename, targetDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process logo: %w", err)
+			}
+			config.Logo = relativePath
 		}
-		updatedConfig.Logo = filename
 	}
 
 	if request.WordmarkBase64 != "" {
-		filename, err := c.processBase64Image(mediaPath, request.WordmarkBase64, "wordmark", "images/brand")
-		if err != nil {
-			return nil, err
-		}
-		updatedConfig.Wordmark = filename
-	}
+		filename := "wordmark" + c.getExtensionFromBase64(request.WordmarkBase64)
+		targetDir := filepath.Join(mediaPath, "images/brand")
 
-	if request.OGBase64 != "" {
-		filename, err := c.processBase64Image(mediaPath, request.OGBase64, "og", "images/brand")
-		if err != nil {
-			return nil, err
+		if strings.Contains(request.WordmarkBase64, "data:image/svg+xml") {
+			relativePath, err := c.processSVG(request.WordmarkBase64, filename, targetDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process wordmark SVG: %w", err)
+			}
+			config.Wordmark = relativePath
+		} else {
+			relativePath, err := c.processBinaryImage(request.WordmarkBase64, filename, targetDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process wordmark: %w", err)
+			}
+			config.Wordmark = relativePath
 		}
-		updatedConfig.OG = filename
-	}
-
-	if request.OGLogoBase64 != "" {
-		filename, err := c.processBase64Image(mediaPath, request.OGLogoBase64, "og-logo", "images/brand")
-		if err != nil {
-			return nil, err
-		}
-		updatedConfig.OGLogo = filename
 	}
 
 	if request.FaviconBase64 != "" {
-		filename, err := c.processBase64Image(mediaPath, request.FaviconBase64, "favicon", "images/brand")
+		filename := "favicon" + c.getExtensionFromBase64(request.FaviconBase64)
+		targetDir := filepath.Join(mediaPath, "images/brand")
+
+		relativePath, err := c.processBinaryImage(request.FaviconBase64, filename, targetDir)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to process favicon: %w", err)
 		}
-		updatedConfig.Favicon = filename
+		config.Favicon = relativePath
 	}
 
-	return &updatedConfig, nil
+	// Process versioned assets (og, oglogo) - these include version numbers for cache busting
+	if request.OGBase64 != "" {
+		newVersion := time.Now().Unix()
+		filename := fmt.Sprintf("og-v%d%s", newVersion, c.getExtensionFromBase64(request.OGBase64))
+		targetDir := filepath.Join(mediaPath, "images/brand")
+
+		relativePath, err := c.processBinaryImage(request.OGBase64, filename, targetDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process OG image: %w", err)
+		}
+		config.OG = relativePath
+		config.StylesVer = newVersion
+	}
+
+	if request.OGLogoBase64 != "" {
+		newVersion := time.Now().Unix()
+		filename := fmt.Sprintf("oglogo-v%d%s", newVersion, c.getExtensionFromBase64(request.OGLogoBase64))
+		targetDir := filepath.Join(mediaPath, "images/brand")
+
+		relativePath, err := c.processBinaryImage(request.OGLogoBase64, filename, targetDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to process OG logo: %w", err)
+		}
+		config.OGLogo = relativePath
+		config.StylesVer = newVersion
+	}
+
+	return &config, nil
 }
 
-func (c *ConfigService) processBase64Image(basePath, data, filename, subdir string) (string, error) {
-	if data == "" {
-		return "", fmt.Errorf("empty base64 data")
-	}
-
-	// Extract file extension from MIME type
-	ext := c.extractExtension(data)
-	if ext == "" {
-		return "", fmt.Errorf("unsupported image format")
-	}
-
-	// Construct filename with extension
-	fullFilename := fmt.Sprintf("%s.%s", filename, ext)
-
-	// Create target directory
-	targetDir := filepath.Join(basePath, subdir)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Route to appropriate processor based on format
-	if strings.Contains(data, "image/svg+xml") {
-		return c.processSVG(data, fullFilename, targetDir)
-	} else {
-		return c.processBinaryImage(data, fullFilename, targetDir)
-	}
-}
-
-func (c *ConfigService) extractExtension(data string) string {
+func (c *ConfigService) getExtensionFromBase64(data string) string {
 	if strings.Contains(data, "data:image/svg+xml") {
-		return "svg"
+		return ".svg"
 	} else if strings.Contains(data, "data:image/png") {
-		return "png"
+		return ".png"
 	} else if strings.Contains(data, "data:image/jpeg") || strings.Contains(data, "data:image/jpg") {
-		return "jpg"
+		return ".jpg"
 	} else if strings.Contains(data, "data:image/x-icon") || strings.Contains(data, "data:image/vnd.microsoft.icon") {
-		return "ico"
+		return ".ico"
 	} else if strings.Contains(data, "data:image/webp") {
-		return "webp"
+		return ".webp"
 	}
-	return "png" // Fallback
+	return ".png" // Fallback
 }
 
 func (c *ConfigService) processSVG(data, filename, targetDir string) (string, error) {
@@ -423,19 +463,23 @@ func (c *ConfigService) processBinaryImage(data, filename, targetDir string) (st
 	return "/media/" + filepath.Join("images/brand", filename), nil
 }
 
+// ✅ FIXED: updateBrandConfigFields with proper boolean protection
 func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, request *BrandConfigUpdateRequest) *types.BrandConfig {
-	if request.SiteURL != "" {
-		config.SiteURL = request.SiteURL
-	}
-	if request.Slogan != "" {
-		config.Slogan = request.Slogan
-	}
+	// Update brand styling fields (strings protected with != "")
 	if request.BrandColours != "" {
 		config.BrandColours = request.BrandColours
 	}
 	if request.Theme != "" {
 		config.Theme = request.Theme
 	}
+	if request.SiteURL != "" {
+		config.SiteURL = request.SiteURL
+	}
+	if request.Slogan != "" {
+		config.Slogan = request.Slogan
+	}
+
+	// Update site configuration fields (strings protected with != "")
 	if request.WordmarkMode != "" {
 		config.WordmarkMode = request.WordmarkMode
 	}
@@ -448,6 +492,8 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 	if request.Footer != "" {
 		config.Footer = request.Footer
 	}
+
+	// Update SEO and social fields (strings protected with != "")
 	if request.OGTitle != "" {
 		config.OGTitle = request.OGTitle
 	}
@@ -464,7 +510,7 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 		config.Socials = request.Socials
 	}
 
-	// Handle asset URLs only when not uploading new files
+	// Handle asset URLs only when not uploading new files (strings protected with != "")
 	if request.Logo != "" && request.LogoBase64 == "" {
 		config.Logo = request.Logo
 	}
@@ -481,9 +527,15 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 		config.Favicon = request.Favicon
 	}
 
-	// Update boolean fields and known resources
-	config.SiteInit = request.SiteInit
-	config.OpenDemo = request.OpenDemo
+	// ✅ FIXED: Update boolean fields only when explicitly provided (pointers protected with != nil)
+	if request.SiteInit != nil {
+		config.SiteInit = *request.SiteInit
+	}
+	if request.OpenDemo != nil {
+		config.OpenDemo = *request.OpenDemo
+	}
+
+	// Update known resources (already properly protected with != nil)
 	if request.KnownResources != nil {
 		config.KnownResources = request.KnownResources
 	}
