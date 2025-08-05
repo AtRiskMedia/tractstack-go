@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -9,10 +10,12 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,6 +23,7 @@ import (
 type VisitHandlers struct {
 	sessionService *services.SessionService
 	authService    *services.AuthService
+	broadcaster    messaging.Broadcaster // Correct: Depends on the new interface
 	logger         *logging.ChanneledLogger
 	perfTracker    *performance.Tracker
 }
@@ -69,10 +73,11 @@ type SSEMessage struct {
 }
 
 // NewVisitHandlers creates visit handlers with injected dependencies
-func NewVisitHandlers(sessionService *services.SessionService, authService *services.AuthService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *VisitHandlers {
+func NewVisitHandlers(sessionService *services.SessionService, authService *services.AuthService, broadcaster messaging.Broadcaster, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *VisitHandlers {
 	return &VisitHandlers{
 		sessionService: sessionService,
 		authService:    authService,
+		broadcaster:    broadcaster, // Correct: Injected via constructor
 		logger:         logger,
 		perfTracker:    perfTracker,
 	}
@@ -188,7 +193,6 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 		return
 	}
 
-	start := time.Now()
 	marker := h.perfTracker.StartOperation("get_sse_request", tenantCtx.TenantID)
 	defer marker.Complete()
 	h.logger.SSE().Debug("Received SSE connection request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
@@ -214,59 +218,63 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 		return
 	}
 
-	h.logger.SSE().Debug("Starting SSE connection setup",
-		"tenantId", tenantCtx.TenantID,
-		"sessionId", sessionID,
-		"currentConnections", currentConnections)
-
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Headers", "Cache-Control")
-
-	// Create SSE connection
-	connection := &safeSSEConnection{
-		ch: make(chan string, 100), // Buffered channel
-	}
 
 	// Increment connection count
 	atomic.AddInt64(&activeSSEConnections, 1)
-	defer func() {
-		atomic.AddInt64(&activeSSEConnections, -1)
-		connection.SafeClose()
-	}()
+	connectionStart := time.Now()
 
-	// Send initial connection confirmation
-	select {
-	case connection.ch <- fmt.Sprintf("data: {\"type\":\"connected\",\"sessionId\":\"%s\",\"timestamp\":\"%s\"}\n\n", sessionID, time.Now().Format(time.RFC3339)):
-	default:
-		// Channel full, connection likely dead
-		h.logger.SSE().Warn("SSE initial message failed - channel full", "tenantId", tenantCtx.TenantID, "sessionId", sessionID)
-		return
+	// Correct: Use the injected broadcaster to manage the connection
+	connection := &safeSSEConnection{
+		ch: h.broadcaster.AddClientWithSession(tenantCtx.TenantID, sessionID),
 	}
 
-	// Get client context for connection management
-	clientCtx := c.Request.Context()
+	defer func() {
+		// Cleanup on disconnect
+		connection.SafeClose()
+		atomic.AddInt64(&activeSSEConnections, -1)
+		// Correct: Use the broadcaster for cleanup
+		h.broadcaster.RemoveClientWithSession(connection.ch, tenantCtx.TenantID, sessionID)
 
-	// Register connection with broadcaster (if you have one)
-	// This would typically register the connection.ch with your SSE broadcaster
+		h.logger.SSE().Info("SSE connection cleanup completed",
+			"tenantId", tenantCtx.TenantID,
+			"sessionId", sessionID,
+			"connectionDuration", time.Since(connectionStart),
+			"remainingConnections", atomic.LoadInt64(&activeSSEConnections))
+		marker.SetSuccess(true)
+		h.logger.Perf().Info("Performance for GetSSE request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+	}()
 
 	h.logger.SSE().Info("SSE connection established",
 		"tenantId", tenantCtx.TenantID,
 		"sessionId", sessionID,
-		"totalConnections", atomic.LoadInt64(&activeSSEConnections),
-		"setupDuration", time.Since(start))
+		"totalConnections", atomic.LoadInt64(&activeSSEConnections))
 
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for GetSSE request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+	// Send initial connection message
+	initialMessage := fmt.Sprintf("event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"tenantId\":\"%s\",\"connectionCount\":%d}\n\n",
+		sessionID, tenantCtx.TenantID, h.broadcaster.GetSessionConnectionCount(tenantCtx.TenantID, sessionID))
+	if _, err := c.Writer.WriteString(initialMessage); err != nil {
+		h.logger.SSE().Error("SSE initial message failed",
+			"tenantId", tenantCtx.TenantID,
+			"sessionId", sessionID,
+			"error", err.Error())
+		return
+	}
+	c.Writer.Flush()
 
-	// Keep connection alive and handle messages
-	ticker := time.NewTicker(30 * time.Second) // Heartbeat every 30 seconds
+	// Set up heartbeat ticker
+	ticker := time.NewTicker(time.Duration(config.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
-	connectionStart := time.Now()
+	// Context for connection management
+	clientCtx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+
+	// Message handling loop
 	for {
 		select {
 		case <-clientCtx.Done():
@@ -299,7 +307,7 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 
 		case <-ticker.C:
 			// Send heartbeat
-			heartbeat := fmt.Sprintf("data: {\"type\":\"heartbeat\",\"timestamp\":\"%s\"}\n\n", time.Now().Format(time.RFC3339))
+			heartbeat := fmt.Sprintf("event: heartbeat\ndata: {\"timestamp\":%d,\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n", time.Now().UTC().Unix(), sessionID, tenantCtx.TenantID)
 			if _, err := c.Writer.WriteString(heartbeat); err != nil {
 				h.logger.SSE().Error("SSE heartbeat failed",
 					"tenantId", tenantCtx.TenantID,

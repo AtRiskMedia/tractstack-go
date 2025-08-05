@@ -67,18 +67,19 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 	// Check for existing session first
 	if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, *req.SessionID); exists {
 		finalFpID = existingSession.FingerprintID
-		// FIXED: Check if session has lead info (without LeadID field)
-		// We'll need to look up the lead by fingerprint instead
-		if lead, err := s.GetLeadByFingerprint(finalFpID, tenantCtx); err == nil && lead != nil {
-			profile = &user.Profile{
-				Fingerprint:    finalFpID,
-				LeadID:         lead.ID,
-				Firstname:      lead.FirstName,
-				Email:          lead.Email,
-				ContactPersona: lead.ContactPersona,
-				ShortBio:       lead.ShortBio,
+		// Check if session has lead info using the new LeadID field
+		if existingSession.LeadID != nil {
+			if lead, err := s.GetLeadByID(*existingSession.LeadID, tenantCtx); err == nil && lead != nil {
+				profile = &user.Profile{
+					Fingerprint:    finalFpID,
+					LeadID:         lead.ID,
+					Firstname:      lead.FirstName,
+					Email:          lead.Email,
+					ContactPersona: lead.ContactPersona,
+					ShortBio:       lead.ShortBio,
+				}
+				hasProfile = true
 			}
-			hasProfile = true
 		}
 	} else if req.EncryptedEmail != nil && req.EncryptedCode != nil {
 		// Handle authentication with encrypted credentials
@@ -242,6 +243,7 @@ func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenan
 	return &fingerprintID
 }
 
+// GetLeadByFingerprint retrieves a lead associated with a fingerprint
 func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	query := `
 		SELECT l.id, l.first_name, l.email, l.password_hash, l.contact_persona, l.short_bio, l.encrypted_code, l.encrypted_email, l.created_at, l.changed
@@ -319,7 +321,7 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, fmt.Errorf("lead not found")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get lead by ID: %w", err)
@@ -342,24 +344,22 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 	return &lead, nil
 }
 
-// ValidateLeadCredentials validates email and password against stored lead
+// ValidateLeadCredentials validates email and password credentials
 func (s *SessionService) ValidateLeadCredentials(email, password string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	lead, err := s.GetLeadByEmail(email, tenantCtx)
-	if err != nil {
-		return nil, err
-	}
-	if lead == nil {
-		return nil, nil
+	if err != nil || lead == nil {
+		return nil, fmt.Errorf("lead not found")
 	}
 
+	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(password)); err != nil {
-		return nil, nil // Invalid password
+		return nil, fmt.Errorf("invalid password")
 	}
 
 	return lead, nil
 }
 
-// GetLeadByEmail retrieves a lead by email address
+// GetLeadByEmail retrieves a lead by email
 func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	query := `
 		SELECT id, first_name, email, password_hash, contact_persona, short_bio, encrypted_code, encrypted_email, created_at, changed
@@ -409,27 +409,27 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 	return &lead, nil
 }
 
-// updateCacheStates updates visit state, session data, and fingerprint state in cache
+// updateCacheStates updates all cache states with new session data
 func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID, fingerprintID, visitID string) {
 	cacheManager := tenantCtx.CacheManager
 
-	// FIXED: Update visit state using correct types
-	visitState := &types.VisitState{
-		VisitID:       visitID,
-		FingerprintID: fingerprintID,
-		LastActivity:  time.Now().UTC(),
-	}
-	cacheManager.SetVisitState(tenantCtx.TenantID, visitState)
-
+	// Update session data with LeadID field
 	sessionData := &types.SessionData{
 		SessionID:     sessionID,
 		FingerprintID: fingerprintID,
 		VisitID:       visitID,
+		LeadID:        nil, // Will be set if lead is associated with fingerprint
 		LastActivity:  time.Now().UTC(),
 		CreatedAt:     time.Now().UTC(),
+		ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
+		IsExpired:     false,
 	}
-	// Note: The new SessionData type doesn't have LeadID field
-	// Lead association is handled through fingerprint linking
+
+	// Check if fingerprint has an associated lead and set LeadID
+	if lead, err := s.GetLeadByFingerprint(fingerprintID, tenantCtx); err == nil && lead != nil {
+		sessionData.LeadID = &lead.ID
+	}
+
 	cacheManager.SetSession(tenantCtx.TenantID, sessionData)
 
 	// Update fingerprint state
@@ -440,12 +440,25 @@ func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID,
 	} else {
 		fingerprintState = &types.FingerprintState{
 			FingerprintID: fingerprintID,
+			LeadID:        sessionData.LeadID,
 			HeldBeliefs:   make(map[string][]string),
-			// HeldBadges:    make(map[string]string),
-			LastActivity: time.Now().UTC(),
+			HeldBadges:    make(map[string]string), // Changed from Badges to HeldBadges
+			LastActivity:  time.Now().UTC(),
 		}
 	}
 	cacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
+
+	// Create visit state with new fields
+	visitState := &types.VisitState{
+		VisitID:       visitID,
+		FingerprintID: fingerprintID,
+		SessionID:     sessionID,
+		StartTime:     time.Now().UTC(), // New field
+		CurrentPage:   "/",              // New field
+		CreatedAt:     time.Now().UTC(),
+		LastActivity:  time.Now().UTC(),
+	}
+	cacheManager.SetVisitState(tenantCtx.TenantID, visitState)
 }
 
 // SessionResponse holds session handling response data
@@ -484,17 +497,42 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		return nil, fmt.Errorf("failed to create visit: %w", err)
 	}
 
-	// FIXED: Update session data without LeadID field
+	// Update session data with LeadID field
 	sessionData := &types.SessionData{
 		SessionID:     sessionID,
 		FingerprintID: fingerprintID,
 		VisitID:       visitID,
+		LeadID:        &profile.LeadID, // Set LeadID from profile
 		LastActivity:  time.Now().UTC(),
 		CreatedAt:     time.Now().UTC(),
+		ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
+		IsExpired:     false,
 	}
 
 	// Store session in cache
 	tenantCtx.CacheManager.SetSession(tenantCtx.TenantID, sessionData)
+
+	// Update fingerprint state
+	fingerprintState := &types.FingerprintState{
+		FingerprintID: fingerprintID,
+		LeadID:        &profile.LeadID,
+		HeldBeliefs:   make(map[string][]string),
+		HeldBadges:    make(map[string]string), // Changed from Badges to HeldBadges
+		LastActivity:  time.Now().UTC(),
+	}
+	tenantCtx.CacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
+
+	// Create visit state with new fields
+	visitState := &types.VisitState{
+		VisitID:       visitID,
+		FingerprintID: fingerprintID,
+		SessionID:     sessionID,
+		StartTime:     time.Now().UTC(), // New field
+		CurrentPage:   "/",              // New field
+		CreatedAt:     time.Now().UTC(),
+		LastActivity:  time.Now().UTC(),
+	}
+	tenantCtx.CacheManager.SetVisitState(tenantCtx.TenantID, visitState)
 
 	return &SessionResponse{
 		Fingerprint: fingerprintID,
