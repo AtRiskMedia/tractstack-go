@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
@@ -80,40 +81,20 @@ func (a *AuthService) DecodeProfileToken(tokenString string, tenantCtx *tenant.C
 func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Context) *AuthResult {
 	var role string
 
-	if tenantCtx.Config.AdminPassword != "" {
-		if err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.AdminPassword), []byte(password)); err == nil {
-			role = "admin"
-		}
-	}
-
-	if role == "" && tenantCtx.Config.EditorPassword != "" {
-		if err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.EditorPassword), []byte(password)); err == nil {
-			role = "editor"
-		}
-	}
-
-	// Fallback for plaintext passwords during transition/testing
-	if role == "" {
-		if tenantCtx.Config.AdminPassword != "" && password == tenantCtx.Config.AdminPassword {
-			role = "admin"
-		} else if tenantCtx.Config.EditorPassword != "" && password == tenantCtx.Config.EditorPassword {
-			role = "editor"
-		}
-	}
-
-	if role == "" {
-		return &AuthResult{
-			Success: false,
-			Error:   "Invalid credentials",
-		}
+	if tenantCtx.Config.AdminPassword != "" && password == tenantCtx.Config.AdminPassword {
+		role = "admin"
+	} else if tenantCtx.Config.EditorPassword != "" && password == tenantCtx.Config.EditorPassword {
+		role = "editor"
+	} else {
+		return &AuthResult{Success: false, Error: "Invalid credentials"}
 	}
 
 	claims := jwt.MapClaims{
 		"role":     role,
 		"tenantId": tenantCtx.Config.TenantID,
 		"type":     "admin_auth",
-		"exp":      time.Now().Add(24 * time.Hour).Unix(),
-		"iat":      time.Now().Unix(),
+		"iat":      time.Now().UTC().Unix(),
+		"exp":      time.Now().UTC().Add(24 * time.Hour).Unix(),
 	}
 
 	token, err := a.GenerateJWT(claims, tenantCtx.Config.JWTSecret)
@@ -121,33 +102,28 @@ func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Conte
 		return &AuthResult{Success: false, Error: "Token generation failed"}
 	}
 
-	return &AuthResult{Token: token, Role: role, Success: true}
+	return &AuthResult{
+		Token:   token,
+		Role:    role,
+		Success: true,
+	}
 }
 
-// CreateLead handles the business logic for creating a new user profile.
-func (a *AuthService) CreateLead(email, codeword, firstName, contactPersona, shortBio string, tenantCtx *tenant.Context) (*CreateLeadResult, error) {
-	existingLead, err := a.leadRepo.FindByEmail(email)
-	if err != nil {
-		a.logger.Auth().Error("Database error checking for existing lead", "error", err, "email", email)
-		return nil, fmt.Errorf("database error checking existing email")
-	}
-	if existingLead != nil {
-		return &CreateLeadResult{Success: false, Error: "Email already registered"}, nil
-	}
-
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(codeword), bcrypt.DefaultCost)
-	if err != nil {
-		a.logger.Auth().Error("Password hashing failed", "error", err)
-		return nil, fmt.Errorf("password hashing failed")
-	}
-
+// CreateLead creates a new lead with encrypted credentials
+func (a *AuthService) CreateLead(firstName, email, password, contactPersona, shortBio string, tenantCtx *tenant.Context) (*CreateLeadResult, error) {
 	encryptedEmail, err := security.Encrypt(email, tenantCtx.Config.AESKey)
 	if err != nil {
-		return nil, fmt.Errorf("encryption failed for email")
+		return nil, fmt.Errorf("email encryption failed")
 	}
-	encryptedCode, err := security.Encrypt(codeword, tenantCtx.Config.AESKey)
+
+	encryptedCode, err := security.Encrypt(password, tenantCtx.Config.AESKey)
 	if err != nil {
-		return nil, fmt.Errorf("encryption failed for code")
+		return nil, fmt.Errorf("password encryption failed")
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, fmt.Errorf("password hashing failed")
 	}
 
 	newLead := &user.Lead{
@@ -219,7 +195,9 @@ func (a *AuthService) ValidateTokenWithRoles(tokenString string, tenantCtx *tena
 		return false
 	}
 
-	claims, err := security.ValidateJWT(tokenString, tenantCtx.Config.JWTSecret)
+	token := strings.TrimPrefix(tokenString, "Bearer ")
+
+	claims, err := security.ValidateJWT(token, tenantCtx.Config.JWTSecret)
 	if err != nil {
 		return false
 	}
@@ -266,7 +244,9 @@ func (a *AuthService) GetTokenInfo(tokenString string, tenantCtx *tenant.Context
 		return &TokenInfo{Valid: false}
 	}
 
-	claims, err := security.ValidateJWT(tokenString, tenantCtx.Config.JWTSecret)
+	token := strings.TrimPrefix(tokenString, "Bearer ")
+
+	claims, err := security.ValidateJWT(token, tenantCtx.Config.JWTSecret)
 	if err != nil {
 		return &TokenInfo{Valid: false}
 	}
@@ -305,11 +285,11 @@ func (a *AuthService) ValidateEncryptedCredentials(encryptedEmail, encryptedCode
 
 	lead, err := a.leadRepo.FindByEmail(decryptedEmail)
 	if err != nil || lead == nil {
-		return nil // User not found
+		return nil
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(decryptedCode)); err != nil {
-		return nil // Invalid password
+		return nil
 	}
 
 	return &user.Profile{

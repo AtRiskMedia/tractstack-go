@@ -123,7 +123,6 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for PostLogin request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
-	// FIXED: Change response format to match legacy exactly
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok", // Changed from "success": true
 		"role":   result.Role,
@@ -250,7 +249,6 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 		currentToken = authHeader[7:]
 		tokenSource = "bearer"
 	} else {
-		// Try cookies
 		if adminCookie, err := c.Cookie("admin_auth"); err == nil && adminCookie != "" {
 			currentToken = adminCookie
 			tokenSource = "admin_cookie"
@@ -322,13 +320,13 @@ func (h *AuthHandlers) AuthMiddleware() gin.HandlerFunc {
 				authenticated = true
 			}
 		} else {
-			// Check cookies
+			// Check cookies WITHOUT adding "Bearer " prefix
 			if adminCookie, err := c.Cookie("admin_auth"); err == nil {
-				if h.authService.ValidateAdminOrEditorToken("Bearer "+adminCookie, tenantCtx) {
+				if h.authService.ValidateAdminOrEditorToken(adminCookie, tenantCtx) {
 					authenticated = true
 				}
 			} else if editorCookie, err := c.Cookie("editor_auth"); err == nil {
-				if h.authService.ValidateAdminOrEditorToken("Bearer "+editorCookie, tenantCtx) {
+				if h.authService.ValidateAdminOrEditorToken(editorCookie, tenantCtx) {
 					authenticated = true
 				}
 			}
@@ -364,9 +362,8 @@ func (h *AuthHandlers) AdminOnlyMiddleware() gin.HandlerFunc {
 				authenticated = true
 			}
 		} else {
-			// Check admin cookie only
 			if adminCookie, err := c.Cookie("admin_auth"); err == nil {
-				if h.authService.ValidateAdminToken("Bearer "+adminCookie, tenantCtx) {
+				if h.authService.ValidateAdminToken(adminCookie, tenantCtx) {
 					authenticated = true
 				}
 			}
