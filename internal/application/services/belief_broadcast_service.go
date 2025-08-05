@@ -18,7 +18,7 @@ func NewBeliefBroadcastService(cacheManager interfaces.Cache) *BeliefBroadcastSe
 }
 
 func (b *BeliefBroadcastService) computeScrollTarget(
-	tenantID, sessionID, storyfragmentID, currentPaneID string,
+	tenantID, sessionID, storyfragmentID string,
 	beforeSnapshot map[string]bool,
 	affectedPanes []string,
 ) *string {
@@ -61,7 +61,7 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID strin
 		if broadcaster.HasViewingSessions(tenantID, storyfragmentID) {
 			var scrollTarget *string
 			if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
-				scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, currentPaneID, visibilitySnapshot[storyfragmentID], affectedPanes)
+				scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, visibilitySnapshot[storyfragmentID], affectedPanes)
 			} else {
 				scrollTarget = &gotoPaneID
 			}

@@ -288,7 +288,7 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 
 	// ✅ FIXED: Use selective field mapping instead of marshalling entire config
 	// This matches the legacy pattern and prevents accidental exposure of computed fields
-	configData := map[string]interface{}{
+	configData := map[string]any{
 		"TURSO_DATABASE_URL":   tenantCtx.Config.TursoDatabase,
 		"TURSO_AUTH_TOKEN":     tenantCtx.Config.TursoToken,
 		"ADMIN_PASSWORD":       tenantCtx.Config.AdminPassword,
