@@ -45,7 +45,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	)
 	authHandlers := handlers.NewAuthHandlers(container.AuthService, container.Logger, container.PerfTracker)
 	visitHandlers := handlers.NewVisitHandlers(container.SessionService, container.AuthService, container.Broadcaster, container.Logger, container.PerfTracker)
-	stateHandlers := handlers.NewStateHandlers(container.StateService, container.Logger, container.PerfTracker)
+	stateHandlers := handlers.NewStateHandlers(container.EventProcessingService, container.Broadcaster, container.Logger, container.PerfTracker)
 	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
