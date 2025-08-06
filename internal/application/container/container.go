@@ -118,6 +118,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	fragmentService := services.NewFragmentService(
 		widgetContextService,
 		sessionBeliefService,
+		beliefEvaluationService,
 		perfTracker,
 		logger,
 	)
@@ -147,7 +148,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ContentMapService:     contentMapService,
 		OrphanAnalysisService: services.NewOrphanAnalysisService(logger),
 		BeliefRegistryService: services.NewBeliefRegistryService(logger),
-		WarmingService:        services.NewWarmingService(logger, perfTracker),
+		WarmingService:        services.NewWarmingService(logger, perfTracker, beliefEvaluationService),
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,
