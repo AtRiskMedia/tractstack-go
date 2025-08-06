@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/analytics"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/cleanup"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
@@ -16,6 +18,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
+	"github.com/AtRiskMedia/tractstack-go/internal/presentation/templates"
 )
 
 const (
@@ -32,14 +35,16 @@ type EpinetAnalysis struct {
 }
 
 type WarmingService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	logger                  *logging.ChanneledLogger
+	perfTracker             *performance.Tracker
+	beliefEvaluationService *BeliefEvaluationService
 }
 
-func NewWarmingService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *WarmingService {
+func NewWarmingService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, beliefEvaluationService *BeliefEvaluationService) *WarmingService {
 	return &WarmingService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		logger:                  logger,
+		perfTracker:             perfTracker,
+		beliefEvaluationService: beliefEvaluationService,
 	}
 }
 
@@ -741,4 +746,120 @@ func (ws *WarmingService) getHourKeysForBatch(startHourOffset, endHourOffset int
 		hourKeys = append(hourKeys, hourKey)
 	}
 	return hourKeys
+}
+
+// WarmHTMLFragmentWithBeliefEvaluation generates and caches HTML with belief evaluation
+// This replicates the warmHTMLFragmentForPane logic but adds the missing belief evaluation
+func (ws *WarmingService) WarmHTMLFragmentWithBeliefEvaluation(
+	tenantCtx *tenant.Context,
+	paneNode *content.PaneNode,
+	storyFragmentID string,
+	beliefRegistry *types.StoryfragmentBeliefRegistry,
+) {
+	start := time.Now()
+
+	// Generate base HTML (same as legacy warmHTMLFragmentForPane)
+	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(paneNode)
+	if err != nil {
+		ws.logger.Cache().Warn("Failed to parse pane nodes during warming", "paneId", paneNode.ID, "error", err)
+		return
+	}
+
+	paneNodeData := &rendering.NodeRenderData{
+		ID:       paneNode.ID,
+		NodeType: "Pane",
+		PaneData: &rendering.PaneRenderData{
+			Title:           paneNode.Title,
+			Slug:            paneNode.Slug,
+			IsDecorative:    paneNode.IsDecorative,
+			BgColour:        paneNode.BgColour,
+			HeldBeliefs:     ws.convertStringMapToInterface(paneNode.HeldBeliefs),
+			WithheldBeliefs: ws.convertStringMapToInterface(paneNode.WithheldBeliefs),
+			CodeHookTarget:  paneNode.CodeHookTarget,
+			CodeHookPayload: ws.convertStringMapToInterfaceMap(paneNode.CodeHookPayload),
+		},
+	}
+	nodesData[paneNode.ID] = paneNodeData
+
+	renderCtx := &rendering.RenderContext{
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         tenantCtx.TenantID,
+		SessionID:        "", // No session during warming
+		StoryfragmentID:  storyFragmentID,
+		ContainingPaneID: paneNode.ID,
+		WidgetContext:    nil,
+	}
+
+	generator := templates.NewGenerator(renderCtx)
+	htmlContent := generator.RenderPaneFragment(paneNode.ID)
+
+	// ✅ CRITICAL ADDITION: Apply belief evaluation with empty user beliefs for default cache
+	if beliefRegistry != nil {
+		if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneNode.ID]; exists {
+			emptyUserBeliefs := make(map[string][]string) // Anonymous user = empty beliefs
+			visibility := ws.beliefEvaluationService.EvaluatePaneVisibility(paneBeliefs, emptyUserBeliefs)
+			htmlContent = ws.applyVisibilityWrapper(htmlContent, visibility)
+
+			ws.logger.Cache().Debug("Applied belief evaluation during warming",
+				"paneId", paneNode.ID,
+				"visibility", visibility,
+				"heldRequirements", len(paneBeliefs.HeldBeliefs),
+				"withheldRequirements", len(paneBeliefs.WithheldBeliefs))
+		}
+	}
+
+	// Cache the properly evaluated HTML
+	variant := types.PaneVariant{
+		BeliefMode:      "default",
+		HeldBeliefs:     []string{},
+		WithheldBeliefs: []string{},
+	}
+
+	dependencies := []string{paneNode.ID}
+	tenantCtx.CacheManager.SetHTMLChunk(tenantCtx.TenantID, paneNode.ID, variant, htmlContent, dependencies)
+
+	ws.logger.Cache().Debug("HTML fragment warmed with belief evaluation",
+		"paneId", paneNode.ID,
+		"duration", time.Since(start),
+		"htmlLength", len(htmlContent))
+}
+
+// Helper methods for new warming method
+func (ws *WarmingService) convertStringMapToInterface(input map[string][]string) map[string]any {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]any)
+	for k, v := range input {
+		result[k] = v
+	}
+	return result
+}
+
+func (ws *WarmingService) convertStringMapToInterfaceMap(input map[string]string) map[string]any {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]any)
+	for k, v := range input {
+		result[k] = v
+	}
+	return result
+}
+
+// applyVisibilityWrapper wraps content based on visibility state
+func (ws *WarmingService) applyVisibilityWrapper(htmlContent, visibility string) string {
+	switch visibility {
+	case "visible":
+		return htmlContent
+	case "hidden":
+		// Use legacy-compatible wrapper with !important specificity
+		return fmt.Sprintf(`<div style="display:none !important;">%s</div>`, htmlContent)
+	case "empty":
+		// Support for future heldBadges feature
+		return `<div style="display:none !important;"></div>`
+	default:
+		return htmlContent
+	}
 }
