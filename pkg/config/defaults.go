@@ -161,14 +161,14 @@ func init() {
 
 	// Memory Management
 	MaxTenants = getEnvInt("MAX_TENANTS", 5)
-	MaxMemoryMB = getEnvInt("MAX_MEMORY_MB", 768)
+	MaxMemoryMB = getEnvInt("MAX_MEMORY_MB", 512)
 	MaxSessionsPerTenant = getEnvInt("MAX_SESSIONS_PER_TENANT", 5000)
 
 	// Database Pool
-	DBMaxOpenConns = getEnvInt("DB_MAX_OPEN_CONNS", 10)
-	DBMaxIdleConns = getEnvInt("DB_MAX_IDLE_CONNS", 3)
-	DBConnMaxLifetimeMinutes = getEnvInt("DB_CONN_MAX_LIFETIME_MINUTES", 30)
-	DBConnMaxIdleMinutes = getEnvInt("DB_CONN_MAX_IDLE_MINUTES", 3)
+	DBMaxOpenConns = getEnvInt("DB_MAX_OPEN_CONNS", 0)
+	DBMaxIdleConns = getEnvInt("DB_MAX_IDLE_CONNS", 50)
+	DBConnMaxLifetimeMinutes = getEnvInt("DB_CONN_MAX_LIFETIME_MINUTES", 15)
+	DBConnMaxIdleMinutes = getEnvInt("DB_CONN_MAX_IDLE_MINUTES", 5)
 	SlowQueryThreshold = getEnvDuration("SLOW_QUERY_THRESHOLD", 500*time.Millisecond)
 
 	// SSE Configuration
