@@ -132,14 +132,13 @@ func (r *SQLEventRepository) StoreBeliefEvent(event *analytics.BeliefEvent) erro
 	return nil
 }
 
-// GetActionEventsInRange retrieves action events for cache warming.
-// This mirrors the cache_warmer.go getActionEventsForRange function.
-func (r *SQLEventRepository) GetActionEventsInRange(startTime, endTime time.Time, verbFilter []string) ([]*analytics.ActionEvent, error) {
+// FindActionEventsInRange retrieves action events for cache warming.
+func (r *SQLEventRepository) FindActionEventsInRange(startTime, endTime time.Time, verbFilter []string) ([]*analytics.ActionEvent, error) {
 	if len(verbFilter) == 0 {
 		return []*analytics.ActionEvent{}, nil
 	}
 
-	// Build query with verb filtering (exactly like cache_warmer.go)
+	// Build query with verb filtering
 	verbPlaceholders := ""
 	for i := range verbFilter {
 		if i > 0 {
@@ -233,14 +232,13 @@ func (r *SQLEventRepository) GetActionEventsInRange(startTime, endTime time.Time
 	return events, nil
 }
 
-// GetBeliefEventsInRange retrieves belief events for cache warming.
-// This mirrors the cache_warmer.go getBeliefEventsForRange function.
-func (r *SQLEventRepository) GetBeliefEventsInRange(startTime, endTime time.Time, valueFilter []string) ([]*analytics.BeliefEvent, error) {
+// FindBeliefEventsInRange retrieves belief events for cache warming.
+func (r *SQLEventRepository) FindBeliefEventsInRange(startTime, endTime time.Time, valueFilter []string) ([]*analytics.BeliefEvent, error) {
 	if len(valueFilter) == 0 {
 		return []*analytics.BeliefEvent{}, nil
 	}
 
-	// Build query with value filtering (exactly like cache_warmer.go)
+	// Build query with value filtering
 	valuePlaceholders := ""
 	for i := range valueFilter {
 		if i > 0 {
@@ -331,7 +329,6 @@ func (r *SQLEventRepository) GetBeliefEventsInRange(startTime, endTime time.Time
 }
 
 // CountEventsInRange returns total event count for batching decisions.
-// This mirrors the cache_warmer.go countEventsInRange function.
 func (r *SQLEventRepository) CountEventsInRange(startTime, endTime time.Time) (int, error) {
 	start := time.Now()
 	r.logger.Database().Debug("Counting events in range", "startTime", startTime, "endTime", endTime)

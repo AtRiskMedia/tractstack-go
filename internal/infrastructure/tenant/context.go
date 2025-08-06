@@ -2,10 +2,12 @@
 package tenant
 
 import (
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/analytics"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	domainUser "github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	persistenceAnalytics "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/analytics"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
@@ -80,6 +82,12 @@ func (ctx *Context) GetDatabaseInfo() string {
 // =============================================================================
 // Repository Factory Methods
 // =============================================================================
+
+// EventRepo returns an analytics event repository instance.
+func (ctx *Context) EventRepo() analytics.EventRepository {
+	db := &database.DB{DB: ctx.Database.Conn}
+	return persistenceAnalytics.NewSQLEventRepository(db, ctx.Logger)
+}
 
 // BeliefRepo returns a belief repository instance
 func (ctx *Context) BeliefRepo() repositories.BeliefRepository {

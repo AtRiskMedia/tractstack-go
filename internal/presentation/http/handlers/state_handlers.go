@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -73,12 +74,13 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 		}
 		paneID = c.PostForm("paneId")
 		gotoPaneID = c.PostForm("gotoPaneID")
-	} else { // Handle single belief event
+	} else { // Handle single belief or action event
 		var req struct {
 			BeliefID     string `form:"beliefId"`
 			BeliefType   string `form:"beliefType"`
 			BeliefValue  string `form:"beliefValue"`
 			BeliefObject string `form:"beliefObject"`
+			Duration     int    `form:"duration"`
 		}
 		if err := c.ShouldBind(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid form data"})
@@ -113,8 +115,20 @@ func convertRequestToEvent(req *struct {
 	BeliefType   string `form:"beliefType"`
 	BeliefValue  string `form:"beliefValue"`
 	BeliefObject string `form:"beliefObject"`
+	Duration     int    `form:"duration"`
 },
 ) events.Event {
+	// Handle Pane Action Events (like READ, GLOSSED)
+	if req.BeliefType == "Pane" {
+		return events.Event{
+			ID:     req.BeliefID,
+			Type:   req.BeliefType,
+			Verb:   req.BeliefValue,
+			Object: strconv.Itoa(req.Duration), // Pass duration as a string in the Object field
+		}
+	}
+
+	// Handle Belief Events (existing logic)
 	if req.BeliefObject != "" {
 		return events.Event{
 			ID:     req.BeliefID,
