@@ -4,6 +4,7 @@ package services
 import (
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -94,14 +95,14 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
 	ws.logger.Cache().Info("Starting strategic warming for tenant", "tenantId", tenantID)
 
-	// Warm the unified content map.
+	// Step 1: Warm the unified content map.
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
 	reporter.LogStepSuccess("Content Map warmed")
 	ws.logger.Cache().Debug("Content map warmed", "tenantId", tenantID)
 
-	// Bulk-load all content types into the cache.
+	// Step 2: Bulk-load all content types into the cache.
 	if _, err := NewTractStackService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 		ws.logger.Cache().Warn("Failed to warm TractStacks", "tenantId", tenantID, "error", err)
@@ -137,7 +138,7 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogStepSuccess("Content Repositories Warmed")
 	ws.logger.Cache().Debug("Content repositories warmed", "tenantId", tenantID)
 
-	// Build Belief Registries for all Storyfragments
+	// Step 3: Build Belief Registries for all Storyfragments
 	storyFragmentIDs, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx)
 	if err != nil {
 		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
@@ -209,11 +210,7 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 	}
 
 	for startHourOffset := 0; startHourOffset < fullAnalyticsRange; startHourOffset += batchSizeInHours {
-		endHourOffset := startHourOffset + batchSizeInHours
-		if endHourOffset > fullAnalyticsRange {
-			endHourOffset = fullAnalyticsRange
-		}
-
+		endHourOffset := min(startHourOffset+batchSizeInHours, fullAnalyticsRange)
 		batchStartTime := now.Add(-time.Duration(endHourOffset) * time.Hour)
 		batchEndTime := now.Add(-time.Duration(startHourOffset) * time.Hour)
 
@@ -665,28 +662,14 @@ func (ws *WarmingService) eventMatchesStep(event analytics.ActionEvent, step typ
 	if step.GateType != "commitmentAction" && step.GateType != "conversionAction" {
 		return false
 	}
-	verbMatch := false
-	for _, verb := range step.Values {
-		if verb == event.Verb {
-			verbMatch = true
-			break
-		}
-	}
-	if !verbMatch {
+	if !slices.Contains(step.Values, event.Verb) {
 		return false
 	}
 	if step.ObjectType != "" && step.ObjectType != event.ObjectType {
 		return false
 	}
 	if len(step.ObjectIds) > 0 {
-		objectMatch := false
-		for _, objID := range step.ObjectIds {
-			if objID == event.ObjectID {
-				objectMatch = true
-				break
-			}
-		}
-		return objectMatch
+		return slices.Contains(step.ObjectIds, event.ObjectID)
 	}
 	return true
 }
@@ -695,10 +678,8 @@ func (ws *WarmingService) beliefEventMatchesStep(event analytics.BeliefEvent, st
 	if step.GateType != "belief" && step.GateType != "identifyAs" {
 		return false
 	}
-	for _, val := range step.Values {
-		if event.Object != nil && val == *event.Object {
-			return true
-		}
+	if event.Object != nil {
+		return slices.Contains(step.Values, *event.Object)
 	}
 	return false
 }
@@ -749,7 +730,6 @@ func (ws *WarmingService) getHourKeysForBatch(startHourOffset, endHourOffset int
 }
 
 // WarmHTMLFragmentWithBeliefEvaluation generates and caches HTML with belief evaluation
-// This replicates the warmHTMLFragmentForPane logic but adds the missing belief evaluation
 func (ws *WarmingService) WarmHTMLFragmentWithBeliefEvaluation(
 	tenantCtx *tenant.Context,
 	paneNode *content.PaneNode,
@@ -853,7 +833,6 @@ func (ws *WarmingService) applyVisibilityWrapper(htmlContent, visibility string)
 	case "visible":
 		return htmlContent
 	case "hidden":
-		// Use legacy-compatible wrapper with !important specificity
 		return fmt.Sprintf(`<div style="display:none !important;">%s</div>`, htmlContent)
 	case "empty":
 		// Support for future heldBadges feature

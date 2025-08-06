@@ -513,14 +513,14 @@ func (ss *SessionsStore) InvalidateUserStateCache(tenantID string) {
 }
 
 // GetUserStateSummary returns cache status summary for debugging
-func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]interface{} {
+func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]any {
 	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
 	if !exists {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get_summary", "type", "user_state", "tenantId", tenantID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			"exists": false,
 		}
 	}
@@ -528,7 +528,7 @@ func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]interfa
 	cache.Mu.RLock()
 	defer cache.Mu.RUnlock()
 
-	summary := map[string]interface{}{
+	summary := map[string]any{
 		"exists":                        true,
 		"fingerprintStates":             len(cache.FingerprintStates),
 		"visitStates":                   len(cache.VisitStates),

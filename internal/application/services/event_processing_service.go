@@ -15,7 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
-// EventProcessingService contains business logic for handling events
+// EventProcessingService contains the business logic for handling events.
 type EventProcessingService struct {
 	beliefBroadcaster *BeliefBroadcastService
 	beliefEvaluator   *BeliefEvaluationService
@@ -62,7 +62,6 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 
 		case "Pane":
 			if event.Verb == "READ" || event.Verb == "GLOSSED" || event.Verb == "CLICKED" {
-				// CORRECTED: Logging level set to Debug
 				s.logger.Analytics().Debug("✅ Pane Event Received",
 					"paneId", event.ID,
 					"verb", event.Verb,
@@ -227,6 +226,7 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 	case "IDENTIFY_AS":
 		if event.Object != "" {
 			currentValues := fingerprintState.HeldBeliefs[beliefSlug]
+			// SIMPLIFIED LOOP: Use slices.Contains for clarity and efficiency.
 			if !slices.Contains(currentValues, event.Object) {
 				fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Object)
 				changed = true
