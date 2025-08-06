@@ -53,7 +53,7 @@ func (s *FragmentService) GenerateFragment(
 	tenantCtx *tenant.Context,
 	paneID, sessionID, storyfragmentID string,
 ) (string, error) {
-	s.logger.Content().Warn("🔍 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
+	s.logger.Content().Debug("🔍 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
 
 	// Load pane from repository
 	paneRepo := tenantCtx.PaneRepo()
@@ -69,7 +69,7 @@ func (s *FragmentService) GenerateFragment(
 	cacheManager := tenantCtx.CacheManager
 	beliefRegistry, hasRegistry := cacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID)
 
-	s.logger.Content().Warn("🔍 BELIEF REGISTRY CHECK",
+	s.logger.Content().Debug("🔍 BELIEF REGISTRY CHECK",
 		"paneId", paneID,
 		"hasRegistry", hasRegistry,
 		"registryPaneCount", func() int {
@@ -85,14 +85,14 @@ func (s *FragmentService) GenerateFragment(
 	var htmlContent string
 
 	if shouldBypassCache {
-		s.logger.Content().Warn("🔍 GENERATING FRESH HTML", "paneId", paneID, "reason", "cache bypass for widgets")
+		s.logger.Content().Debug("🔍 GENERATING FRESH HTML", "paneId", paneID, "reason", "cache bypass for widgets")
 		// Generate fresh HTML with widget personalization
 		htmlContent, err = s.generateFreshHTML(tenantCtx, pane, sessionID, storyfragmentID, beliefRegistry)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate fresh HTML: %w", err)
 		}
 	} else {
-		s.logger.Content().Warn("🔍 USING CACHED HTML", "paneId", paneID)
+		s.logger.Content().Debug("🔍 USING CACHED HTML", "paneId", paneID)
 		// Use cached HTML or generate and cache
 		htmlContent, err = s.getCachedOrGenerateHTML(tenantCtx, pane)
 		if err != nil {
@@ -100,20 +100,20 @@ func (s *FragmentService) GenerateFragment(
 		}
 	}
 
-	s.logger.Content().Warn("🔍 BASE HTML GENERATED", "paneId", paneID, "htmlLength", len(htmlContent))
+	s.logger.Content().Debug("🔍 BASE HTML GENERATED", "paneId", paneID, "htmlLength", len(htmlContent))
 
 	// Apply belief-based visibility wrapper if needed
 	if hasRegistry {
-		s.logger.Content().Warn("🔍 APPLYING BELIEF VISIBILITY", "paneId", paneID)
+		s.logger.Content().Debug("🔍 APPLYING BELIEF VISIBILITY", "paneId", paneID)
 		htmlContent = s.applyBeliefVisibility(tenantCtx, htmlContent, paneID, sessionID, storyfragmentID, beliefRegistry)
 	} else {
-		s.logger.Content().Warn("🔍 SKIPPING BELIEF VISIBILITY",
+		s.logger.Content().Debug("🔍 SKIPPING BELIEF VISIBILITY",
 			"paneId", paneID,
 			"hasRegistry", hasRegistry,
 			"sessionId", sessionID)
 	}
 
-	s.logger.Content().Warn("🔍 GENERATE FRAGMENT COMPLETE", "paneId", paneID, "finalHtmlLength", len(htmlContent))
+	s.logger.Content().Debug("🔍 GENERATE FRAGMENT COMPLETE", "paneId", paneID, "finalHtmlLength", len(htmlContent))
 	return htmlContent, nil
 }
 
@@ -123,7 +123,7 @@ func (s *FragmentService) GenerateFragmentBatch(
 	paneIDs []string,
 	sessionID, storyfragmentID string,
 ) (map[string]string, map[string]string, error) {
-	s.logger.Content().Warn("🔍 BATCH GENERATE START", "paneCount", len(paneIDs), "sessionId", sessionID, "storyfragmentId", storyfragmentID)
+	s.logger.Content().Debug("🔍 BATCH GENERATE START", "paneCount", len(paneIDs), "sessionId", sessionID, "storyfragmentId", storyfragmentID)
 
 	results := make(map[string]string)
 	errors := make(map[string]string)
@@ -132,7 +132,7 @@ func (s *FragmentService) GenerateFragmentBatch(
 	cacheManager := tenantCtx.CacheManager
 	beliefRegistry, hasRegistry := cacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID)
 
-	s.logger.Content().Warn("🔍 BATCH BELIEF REGISTRY",
+	s.logger.Content().Debug("🔍 BATCH BELIEF REGISTRY",
 		"hasRegistry", hasRegistry,
 		"registryPaneCount", func() int {
 			if hasRegistry {
@@ -148,7 +148,7 @@ func (s *FragmentService) GenerateFragmentBatch(
 		widgetCtx, _ = s.widgetContextService.PreResolveWidgetData(
 			tenantCtx, sessionID, storyfragmentID, paneIDs, domainRegistry,
 		)
-		s.logger.Content().Warn("🔍 BATCH WIDGET CONTEXT RESOLVED", "sessionId", sessionID)
+		s.logger.Content().Debug("🔍 BATCH WIDGET CONTEXT RESOLVED", "sessionId", sessionID)
 	}
 
 	// Process each pane
@@ -163,7 +163,7 @@ func (s *FragmentService) GenerateFragmentBatch(
 		results[paneID] = html
 	}
 
-	s.logger.Content().Warn("🔍 BATCH GENERATE COMPLETE", "successCount", len(results), "errorCount", len(errors))
+	s.logger.Content().Debug("🔍 BATCH GENERATE COMPLETE", "successCount", len(results), "errorCount", len(errors))
 	return results, errors, nil
 }
 
@@ -188,11 +188,11 @@ func (s *FragmentService) generateSingleFragment(
 
 	// Check if we should use pre-resolved widget context
 	if widgetCtx != nil && s.shouldBypassCacheForWidgets(tenantCtx, paneID, sessionID, beliefRegistry) {
-		s.logger.Content().Warn("🔍 BATCH USING FRESH HTML", "paneId", paneID)
+		s.logger.Content().Debug("🔍 BATCH USING FRESH HTML", "paneId", paneID)
 		// Generate fresh HTML with widgets
 		htmlContent = s.generateFreshHTMLWithWidgets(tenantCtx, pane, sessionID, storyfragmentID, widgetCtx)
 	} else {
-		s.logger.Content().Warn("🔍 BATCH USING CACHED HTML", "paneId", paneID)
+		s.logger.Content().Debug("🔍 BATCH USING CACHED HTML", "paneId", paneID)
 		// Use cached approach
 		htmlContent, err = s.getCachedOrGenerateHTML(tenantCtx, pane)
 		if err != nil {
@@ -214,26 +214,26 @@ func (s *FragmentService) shouldBypassCacheForWidgets(
 	paneID, sessionID string,
 	beliefRegistry *types.StoryfragmentBeliefRegistry,
 ) bool {
-	s.logger.Content().Warn("🔍 CACHE BYPASS CHECK", "paneId", paneID, "sessionId", sessionID)
+	s.logger.Content().Debug("🔍 CACHE BYPASS CHECK", "paneId", paneID, "sessionId", sessionID)
 
 	if sessionID == "" || beliefRegistry == nil {
-		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no session or registry", "paneId", paneID)
+		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no session or registry", "paneId", paneID)
 		return false
 	}
 
 	// Check if pane has widgets
 	widgetBeliefs, hasWidgets := beliefRegistry.PaneWidgetBeliefs[paneID]
 	if !hasWidgets || len(widgetBeliefs) == 0 {
-		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no widgets", "paneId", paneID)
+		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no widgets", "paneId", paneID)
 		return false
 	}
 
-	s.logger.Content().Warn("🔍 PANE HAS WIDGETS", "paneId", paneID, "widgetBeliefs", widgetBeliefs)
+	s.logger.Content().Debug("🔍 PANE HAS WIDGETS", "paneId", paneID, "widgetBeliefs", widgetBeliefs)
 
 	// Check if user has beliefs that intersect with widgets
 	if s.sessionBeliefService != nil {
 		userBeliefs, _ := s.sessionBeliefService.GetUserBeliefs(tenantCtx, sessionID)
-		s.logger.Content().Warn("🔍 USER BELIEFS FOR WIDGET CHECK",
+		s.logger.Content().Debug("🔍 USER BELIEFS FOR WIDGET CHECK",
 			"sessionId", sessionID,
 			"userBeliefsCount", len(userBeliefs),
 			"userBeliefs", userBeliefs)
@@ -241,14 +241,14 @@ func (s *FragmentService) shouldBypassCacheForWidgets(
 		if userBeliefs != nil {
 			for _, widgetBelief := range widgetBeliefs {
 				if _, hasUserBelief := userBeliefs[widgetBelief]; hasUserBelief {
-					s.logger.Content().Warn("🔍 CACHE BYPASS = TRUE", "reason", "user has widget belief", "belief", widgetBelief, "paneId", paneID)
+					s.logger.Content().Debug("🔍 CACHE BYPASS = TRUE", "reason", "user has widget belief", "belief", widgetBelief, "paneId", paneID)
 					return true
 				}
 			}
 		}
 	}
 
-	s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no belief intersection", "paneId", paneID)
+	s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no belief intersection", "paneId", paneID)
 	return false
 }
 
@@ -261,15 +261,15 @@ func (s *FragmentService) getCachedOrGenerateHTML(tenantCtx *tenant.Context, pan
 		WithheldBeliefs: []string{},
 	}
 
-	s.logger.Content().Warn("🔍 CACHE LOOKUP", "paneId", pane.ID, "variant", "default")
+	s.logger.Content().Debug("🔍 CACHE LOOKUP", "paneId", pane.ID, "variant", "default")
 
 	// Try cache first
 	if cachedHTML, exists := cacheManager.GetHTMLChunk(tenantCtx.TenantID, pane.ID, variant); exists {
-		s.logger.Content().Warn("🔍 CACHE HIT", "paneId", pane.ID, "htmlLength", len(cachedHTML.HTML))
+		s.logger.Content().Debug("🔍 CACHE HIT", "paneId", pane.ID, "htmlLength", len(cachedHTML.HTML))
 		return cachedHTML.HTML, nil
 	}
 
-	s.logger.Content().Warn("🔍 CACHE MISS - GENERATING", "paneId", pane.ID)
+	s.logger.Content().Debug("🔍 CACHE MISS - GENERATING", "paneId", pane.ID)
 
 	// Generate fresh HTML and cache it
 	htmlContent, err := s.generateBaseHTML(tenantCtx, pane)
@@ -277,7 +277,7 @@ func (s *FragmentService) getCachedOrGenerateHTML(tenantCtx *tenant.Context, pan
 		return "", err
 	}
 
-	s.logger.Content().Warn("🔍 BASE HTML GENERATED", "paneId", pane.ID, "htmlLength", len(htmlContent))
+	s.logger.Content().Debug("🔍 BASE HTML GENERATED", "paneId", pane.ID, "htmlLength", len(htmlContent))
 
 	// Cache the generated HTML
 	dependencies := []string{pane.ID}
@@ -292,7 +292,7 @@ func (s *FragmentService) getCachedOrGenerateHTML(tenantCtx *tenant.Context, pan
 	}
 
 	cacheManager.SetHTMLChunk(tenantCtx.TenantID, pane.ID, variant, htmlContent, dependencies)
-	s.logger.Content().Warn("🔍 HTML CACHED", "paneId", pane.ID, "dependencies", dependencies)
+	s.logger.Content().Debug("🔍 HTML CACHED", "paneId", pane.ID, "dependencies", dependencies)
 
 	return htmlContent, nil
 }
@@ -304,7 +304,7 @@ func (s *FragmentService) generateFreshHTML(
 	sessionID, storyfragmentID string,
 	beliefRegistry *types.StoryfragmentBeliefRegistry,
 ) (string, error) {
-	s.logger.Content().Warn("🔍 GENERATING FRESH HTML WITH WIDGETS", "paneId", pane.ID)
+	s.logger.Content().Debug("🔍 GENERATING FRESH HTML WITH WIDGETS", "paneId", pane.ID)
 
 	// Build widget context for this specific pane
 	var widgetCtx *widgets.WidgetContext
@@ -411,16 +411,16 @@ func (s *FragmentService) applyBeliefVisibility(
 ) string {
 	cacheManager := tenantCtx.CacheManager
 
-	s.logger.Content().Warn("🔍 BELIEF EVAL START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
+	s.logger.Content().Debug("🔍 BELIEF EVAL START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
 
 	// Get pane belief requirements
 	paneBeliefs, hasPaneBeliefs := beliefRegistry.PaneBeliefPayloads[paneID]
 	if !hasPaneBeliefs {
-		s.logger.Content().Warn("🔍 NO PANE BELIEFS - ALWAYS VISIBLE", "paneId", paneID)
+		s.logger.Content().Debug("🔍 NO PANE BELIEFS - ALWAYS VISIBLE", "paneId", paneID)
 		return htmlContent // No belief requirements = always visible
 	}
 
-	s.logger.Content().Warn("🔍 PANE BELIEFS FOUND",
+	s.logger.Content().Debug("🔍 PANE BELIEFS FOUND",
 		"paneId", paneID,
 		"heldCount", len(paneBeliefs.HeldBeliefs),
 		"withheldCount", len(paneBeliefs.WithheldBeliefs),
@@ -433,31 +433,31 @@ func (s *FragmentService) applyBeliefVisibility(
 	var userBeliefs map[string][]string
 	if sessionContext, exists := cacheManager.GetSessionBeliefContext(tenantCtx.TenantID, sessionID, storyfragmentID); exists {
 		userBeliefs = sessionContext.UserBeliefs
-		s.logger.Content().Warn("🔍 USING EXISTING SESSION CONTEXT",
+		s.logger.Content().Debug("🔍 USING EXISTING SESSION CONTEXT",
 			"sessionId", sessionID,
 			"userBeliefsCount", len(userBeliefs),
 			"userBeliefs", userBeliefs)
 	} else if s.sessionBeliefService != nil && s.sessionBeliefService.ShouldCreateSessionContext(tenantCtx, sessionID, storyfragmentID) {
-		s.logger.Content().Warn("🔍 CREATING NEW SESSION CONTEXT", "sessionId", sessionID)
+		s.logger.Content().Debug("🔍 CREATING NEW SESSION CONTEXT", "sessionId", sessionID)
 		// Create session context if needed
 		newContext, err := s.sessionBeliefService.CreateSessionBeliefContext(tenantCtx, sessionID, storyfragmentID)
 		if err != nil {
-			s.logger.Content().Warn("🔍 FAILED TO CREATE SESSION CONTEXT", "error", err.Error())
+			s.logger.Content().Debug("🔍 FAILED TO CREATE SESSION CONTEXT", "error", err.Error())
 			return htmlContent
 		}
 		userBeliefs = newContext.UserBeliefs
-		s.logger.Content().Warn("🔍 CREATED SESSION CONTEXT",
+		s.logger.Content().Debug("🔍 CREATED SESSION CONTEXT",
 			"userBeliefsCount", len(userBeliefs),
 			"userBeliefs", userBeliefs)
 	} else {
 		// No session context and shouldn't create one = empty beliefs
 		userBeliefs = make(map[string][]string)
-		s.logger.Content().Warn("🔍 NO SESSION CONTEXT - EMPTY USER BELIEFS", "sessionId", sessionID)
+		s.logger.Content().Debug("🔍 NO SESSION CONTEXT - EMPTY USER BELIEFS", "sessionId", sessionID)
 	}
 
 	visibility := s.beliefEvaluationService.EvaluatePaneVisibility(paneBeliefs, userBeliefs)
 
-	s.logger.Content().Warn("🔍 BELIEF EVALUATION RESULT",
+	s.logger.Content().Debug("🔍 BELIEF EVALUATION RESULT",
 		"paneId", paneID,
 		"visibility", visibility,
 		"htmlLengthBefore", len(htmlContent))
@@ -489,7 +489,7 @@ func (s *FragmentService) applyBeliefVisibility(
 		}
 	}
 
-	s.logger.Content().Warn("🔍 VISIBILITY WRAPPER APPLIED",
+	s.logger.Content().Debug("🔍 VISIBILITY WRAPPER APPLIED",
 		"paneId", paneID,
 		"visibility", visibility,
 		"htmlLengthAfter", len(result),
