@@ -88,7 +88,7 @@ func RenderToggle(ctx *rendering.RenderContext, classNames, slug, prompt string)
 }
 
 // executeToggleTemplate is a helper to render a named template and handle errors
-func executeToggleTemplate(buf *bytes.Buffer, name string, data interface{}) {
+func executeToggleTemplate(buf *bytes.Buffer, name string, data any) {
 	err := toggleWidgetTmpl.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		log.Printf("ERROR: Failed to execute toggle widget template '%s': %v", name, err)

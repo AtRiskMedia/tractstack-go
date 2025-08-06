@@ -200,10 +200,3 @@ func getIdentifyAsIndicatorColor(isSelected, isOtherSelected bool) string {
 	}
 	return "bg-orange-500"
 }
-
-func getIdentifyAsVerb(isSelected bool) string {
-	if isSelected {
-		return "UNSET"
-	}
-	return "IDENTIFY_AS"
-}

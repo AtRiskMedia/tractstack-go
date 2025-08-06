@@ -2,6 +2,8 @@
 package services
 
 import (
+	"slices"
+
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 )
 
@@ -127,8 +129,8 @@ func (s *BeliefEvaluationService) hasMatchingBelief(
 func (s *BeliefEvaluationService) CalculateEffectiveFilter(
 	paneBeliefs types.PaneBeliefData,
 	userBeliefs map[string][]string,
-) map[string]interface{} {
-	effectiveFilter := make(map[string]interface{})
+) map[string]any {
+	effectiveFilter := make(map[string]any)
 
 	for beliefSlug, requiredValues := range paneBeliefs.HeldBeliefs {
 		if s.hasMatchingBelief(userBeliefs, beliefSlug, requiredValues) {
@@ -153,4 +155,32 @@ func (s *BeliefEvaluationService) CalculateEffectiveFilter(
 	}
 
 	return effectiveFilter
+}
+
+// ExtractBeliefsToUnset extracts beliefs to unset from effectiveFilter (legacy logic)
+func (s *BeliefEvaluationService) ExtractBeliefsToUnset(
+	effectiveFilter map[string]any,
+) []string {
+	var beliefsToUnset []string
+
+	// Get all keys except MATCH-ACROSS and LINKED-BELIEFS (user's actual beliefs)
+	for key := range effectiveFilter {
+		if key != "MATCH-ACROSS" && key != "LINKED-BELIEFS" {
+			beliefsToUnset = append(beliefsToUnset, key)
+		}
+	}
+
+	// Add LINKED-BELIEFS if present (cascade unset)
+	if linkedBeliefsValue, exists := effectiveFilter["LINKED-BELIEFS"]; exists {
+		if linkedArray, ok := linkedBeliefsValue.([]string); ok {
+			for _, linkedStr := range linkedArray {
+				// Add to beliefsToUnset if not already present
+				if !slices.Contains(beliefsToUnset, linkedStr) {
+					beliefsToUnset = append(beliefsToUnset, linkedStr)
+				}
+			}
+		}
+	}
+
+	return beliefsToUnset
 }

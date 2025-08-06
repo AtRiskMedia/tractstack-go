@@ -50,6 +50,49 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 			if changed {
 				changedBeliefs = append(changedBeliefs, event.ID)
 			}
+		} else if event.Type == "StoryFragment" && event.Verb == "PAGEVIEWED" {
+			log.Printf("********************* PAGEVIEWED *********")
+			storyfragmentID := event.ID
+
+			// Check if user has existing beliefs for this storyfragment
+			if sessionContext, exists := tenantCtx.CacheManager.GetSessionBeliefContext(tenantCtx.TenantID, sessionID, storyfragmentID); exists {
+				log.Printf("********************* PAGEVIEWED: with context *********")
+				if len(sessionContext.UserBeliefs) > 0 {
+					log.Printf("********************* PAGEVIEWED: with context and beliefs *********")
+					// Get belief registry
+					if beliefRegistry, registryExists := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID); registryExists {
+
+						log.Printf("********************* PAGEVIEWED: with context and beliefs COMPUTING... *********")
+						// Create "before" snapshot (visibility with no beliefs = default state)
+						emptyBeliefs := make(map[string][]string)
+						var affectedPanes []string
+
+						for paneID, paneBeliefs := range beliefRegistry.PaneBeliefPayloads {
+							// Evaluate visibility without user beliefs (default state)
+							beforeVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, emptyBeliefs)
+							beforeVisible := (beforeVisibility == "visible")
+
+							// Evaluate visibility with current user beliefs
+							afterVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
+							afterVisible := (afterVisibility == "visible")
+
+							// Only include panes whose visibility changed
+							if beforeVisible != afterVisible {
+								affectedPanes = append(affectedPanes, paneID)
+							}
+						}
+
+						if len(affectedPanes) > 0 {
+							log.Printf("********************* PAGEVIEWED: with context and beliefs COMPUTING... WE GOT CONTACT !!!! *********")
+							// Trigger SSE broadcast to sync UI with existing belief state
+							broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, sessionID, storyfragmentID, affectedPanes, nil)
+						} else {
+							log.Printf("********************* PAGEVIEWED: with context and beliefs COMPUTING... ignoring *********")
+						}
+
+					}
+				}
+			}
 		}
 	}
 
@@ -107,85 +150,76 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 		var foundID string
 		err := tenantCtx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", event.ID).Scan(&foundID)
 		if err != nil {
-			return false, fmt.Errorf("belief not found by slug %s: %w", event.ID, err)
+			if err == sql.ErrNoRows {
+				log.Printf("WARNING: EventProcessingService - belief not found: %s", event.ID)
+				return false, nil
+			}
+			return false, fmt.Errorf("failed to query belief by slug: %w", err)
 		}
 		beliefID = foundID
 	}
+
 	sessionData, exists := cacheManager.GetSession(tenantCtx.TenantID, sessionID)
 	if !exists {
 		return false, fmt.Errorf("session not found: %s", sessionID)
 	}
-	go s.persistBelief(tenantCtx, beliefID, sessionData.FingerprintID, sessionData.VisitID, event)
-	return s.updateFingerprintCache(tenantCtx, event, sessionData.FingerprintID), nil
-}
 
-func (s *EventProcessingService) updateFingerprintCache(tenantCtx *tenant.Context, event domainEvents.Event, fingerprintID string) bool {
-	cacheManager := tenantCtx.CacheManager
-	fpState, exists := cacheManager.GetFingerprintState(tenantCtx.TenantID, fingerprintID)
+	fingerprintState, exists := cacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID)
 	if !exists {
-		return false
+		return false, fmt.Errorf("fingerprint state not found: %s", sessionData.FingerprintID)
 	}
-	beliefSlug := event.ID
-	previousValues := fpState.HeldBeliefs[beliefSlug]
-	var newValues []string
+
+	if fingerprintState.HeldBeliefs == nil {
+		fingerprintState.HeldBeliefs = make(map[string][]string)
+	}
+
+	changed := false
 	switch event.Verb {
 	case "UNSET":
-		delete(fpState.HeldBeliefs, beliefSlug)
+		if _, exists := fingerprintState.HeldBeliefs[beliefID]; exists {
+			delete(fingerprintState.HeldBeliefs, beliefID)
+			changed = true
+		}
 	case "IDENTIFY_AS":
-		newValues = []string{event.Object}
-		fpState.HeldBeliefs[beliefSlug] = newValues
+		if event.Object != "" {
+			currentValues := fingerprintState.HeldBeliefs[beliefID]
+			found := false
+			for _, v := range currentValues {
+				if v == event.Object {
+					found = true
+					break
+				}
+			}
+			if !found {
+				fingerprintState.HeldBeliefs[beliefID] = append(currentValues, event.Object)
+				changed = true
+			}
+		}
 	default:
-		newValues = []string{event.Verb}
-		fpState.HeldBeliefs[beliefSlug] = newValues
+		currentValues := fingerprintState.HeldBeliefs[beliefID]
+		found := false
+		for _, v := range currentValues {
+			if v == event.Verb {
+				found = true
+				break
+			}
+		}
+		if !found {
+			fingerprintState.HeldBeliefs[beliefID] = append(currentValues, event.Verb)
+			changed = true
+		}
 	}
-	changed := !slicesEqual(previousValues, newValues)
+
 	if changed {
-		fpState.LastActivity = time.Now().UTC()
-		cacheManager.SetFingerprintState(tenantCtx.TenantID, fpState)
-	}
-	return changed
-}
+		cacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
 
-func (s *EventProcessingService) persistBelief(tenantCtx *tenant.Context, beliefID, fingerprintID, visitID string, event domainEvents.Event) {
-	actionQuery := `INSERT INTO actions (id, object_id, object_type, visit_id, fingerprint_id, verb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := tenantCtx.Database.Conn.Exec(actionQuery, generateULID(), beliefID, event.Type, visitID, fingerprintID, event.Verb, time.Now().UTC())
-	if err != nil {
-		log.Printf("ERROR: Failed to insert action: %v", err)
-	}
-	if event.Verb == "UNSET" {
-		deleteQuery := `DELETE FROM heldbeliefs WHERE belief_id = ? AND fingerprint_id = ?`
-		_, err = tenantCtx.Database.Conn.Exec(deleteQuery, beliefID, fingerprintID)
+		actionID := ulid.MustNew(ulid.Timestamp(time.Now()), ulid.Monotonic(rand.New(rand.NewSource(time.Now().UnixNano())), 0))
+		query := `INSERT INTO actions (id, object_id, object_type, verb, visit_id, fingerprint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		_, err := tenantCtx.Database.Conn.Exec(query, actionID.String(), beliefID, event.Type, event.Verb, sessionData.VisitID, sessionData.FingerprintID, time.Now().UTC())
 		if err != nil {
-			log.Printf("ERROR: Failed to delete held belief: %v", err)
-		}
-		return
-	}
-	var existingID string
-	err = tenantCtx.Database.Conn.QueryRow(`SELECT id FROM heldbeliefs WHERE belief_id = ? AND fingerprint_id = ?`, beliefID, fingerprintID).Scan(&existingID)
-	switch {
-	case err == sql.ErrNoRows:
-		_, err = tenantCtx.Database.Conn.Exec(`INSERT INTO heldbeliefs (id, belief_id, fingerprint_id, verb, object, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, generateULID(), beliefID, fingerprintID, event.Verb, event.Object, time.Now().UTC())
-	case err == nil:
-		_, err = tenantCtx.Database.Conn.Exec(`UPDATE heldbeliefs SET verb = ?, object = ?, updated_at = ? WHERE id = ?`, event.Verb, event.Object, time.Now().UTC(), existingID)
-	}
-	if err != nil {
-		log.Printf("ERROR: Failed to upsert held belief: %v", err)
-	}
-}
-
-func slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+			log.Printf("ERROR: EventProcessingService - failed to insert action: %v", err)
 		}
 	}
-	return true
-}
 
-func generateULID() string {
-	entropy := ulid.Monotonic(rand.New(rand.NewSource(time.Now().UnixNano())), 0)
-	return ulid.MustNew(ulid.Timestamp(time.Now()), entropy).String()
+	return changed, nil
 }
