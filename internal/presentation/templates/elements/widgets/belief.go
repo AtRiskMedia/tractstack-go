@@ -100,7 +100,7 @@ func RenderBelief(ctx *rendering.RenderContext, classNames, slug, scale, extra s
 }
 
 // executeBeliefTemplate is a helper to render a named template and handle errors
-func executeBeliefTemplate(buf *bytes.Buffer, name string, data interface{}) {
+func executeBeliefTemplate(buf *bytes.Buffer, name string, data any) {
 	err := beliefWidgetTmpl.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		log.Printf("ERROR: Failed to execute belief widget template '%s': %v", name, err)

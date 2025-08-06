@@ -23,6 +23,8 @@ type FragmentService struct {
 	beliefEvaluationService *BeliefEvaluationService
 	perfTracker             *performance.Tracker
 	logger                  *logging.ChanneledLogger
+	buttonRenderer          *templates.UnsetButtonRenderer
+	scrollTargetSvc         *ScrollTargetService
 }
 
 // NewFragmentService creates a new fragment service
@@ -32,6 +34,8 @@ func NewFragmentService(
 	beliefEvaluationService *BeliefEvaluationService,
 	perfTracker *performance.Tracker,
 	logger *logging.ChanneledLogger,
+	buttonRenderer *templates.UnsetButtonRenderer,
+	scrollTargetSvc *ScrollTargetService,
 ) *FragmentService {
 	return &FragmentService{
 		widgetContextService:    widgetContextService,
@@ -39,6 +43,8 @@ func NewFragmentService(
 		beliefEvaluationService: beliefEvaluationService,
 		perfTracker:             perfTracker,
 		logger:                  logger,
+		buttonRenderer:          buttonRenderer,
+		scrollTargetSvc:         scrollTargetSvc,
 	}
 }
 
@@ -458,6 +464,30 @@ func (s *FragmentService) applyBeliefVisibility(
 
 	// Apply visibility wrapper
 	result := s.applyVisibilityWrapper(htmlContent, visibility)
+
+	if visibility == "visible" && len(userBeliefs) > 0 {
+		hasRequirements := len(paneBeliefs.HeldBeliefs) > 0 ||
+			len(paneBeliefs.WithheldBeliefs) > 0
+
+		if hasRequirements {
+			// Calculate effective filter (intersection of user beliefs + pane requirements)
+			effectiveFilter := s.beliefEvaluationService.CalculateEffectiveFilter(paneBeliefs, userBeliefs)
+
+			if len(effectiveFilter) > 0 {
+				// Extract beliefs to unset using legacy logic
+				beliefsToUnset := s.beliefEvaluationService.ExtractBeliefsToUnset(effectiveFilter)
+
+				if len(beliefsToUnset) > 0 {
+					// Find scroll target pane
+					gotoPaneID := s.scrollTargetSvc.FindScrollTargetPane(beliefsToUnset, beliefRegistry)
+
+					// Render and inject button
+					buttonHTML := s.buttonRenderer.RenderUnsetButton(paneID, beliefsToUnset, gotoPaneID)
+					result = s.buttonRenderer.InjectButtonIntoHTML(result, buttonHTML)
+				}
+			}
+		}
+	}
 
 	s.logger.Content().Warn("🔍 VISIBILITY WRAPPER APPLIED",
 		"paneId", paneID,

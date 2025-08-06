@@ -16,6 +16,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	persistenceUser "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/internal/presentation/templates"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
@@ -39,6 +40,8 @@ type Container struct {
 	SessionBeliefService *services.SessionBeliefService
 	WidgetContextService *services.WidgetContextService
 	FragmentService      *services.FragmentService
+	ScrollTargetService  *services.ScrollTargetService
+	UnsetButtonRenderer  *templates.UnsetButtonRenderer
 
 	// Analytics Services
 	AnalyticsService          *services.AnalyticsService
@@ -115,12 +118,16 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	// Initialize other services
 	sessionBeliefService := services.NewSessionBeliefService()
 	widgetContextService := services.NewWidgetContextService(sessionBeliefService)
+	scrollTargetService := services.NewScrollTargetService()
+	unsetButtonRenderer := templates.NewUnsetButtonRenderer()
 	fragmentService := services.NewFragmentService(
 		widgetContextService,
 		sessionBeliefService,
 		beliefEvaluationService,
 		perfTracker,
 		logger,
+		unsetButtonRenderer,
+		scrollTargetService,
 	)
 	contentMapService := services.NewContentMapService(logger, perfTracker)
 	authService := services.NewAuthService(logger, perfTracker, leadRepo)
@@ -154,6 +161,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		SessionBeliefService: sessionBeliefService,
 		WidgetContextService: widgetContextService,
 		FragmentService:      fragmentService,
+		ScrollTargetService:  scrollTargetService,
+		UnsetButtonRenderer:  unsetButtonRenderer,
 
 		// Analytics Services
 		AnalyticsService:          services.NewAnalyticsService(logger, perfTracker),

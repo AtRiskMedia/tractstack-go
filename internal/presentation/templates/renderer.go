@@ -97,8 +97,6 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 	switch nodeType {
 	case "Pane":
 		return nr.renderPane(nodeID)
-	case "StoryFragment":
-		return nr.renderStoryFragment(nodeID)
 	case "Markdown":
 		return nr.renderMarkdown(nodeID)
 	case "BgPane":
@@ -187,11 +185,6 @@ func (nr *NodeRendererImpl) renderBgPaneWrapper(nodeID string) string {
 	return bgPaneWrapperRenderer.Render(nodeID)
 }
 
-// Placeholder methods
-func (nr *NodeRendererImpl) renderStoryFragment(nodeID string) string {
-	return nr.renderEmptyNode()
-}
-
 func (nr *NodeRendererImpl) renderEmptyNode() string {
 	return `<div></div>`
 }
@@ -216,7 +209,6 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	}
 
 	paneData := nodeData.PaneData
-	heldBeliefs, withheldBeliefs := pr.getPaneBeliefs(nodeID)
 	isDecorative := paneData.IsDecorative
 
 	slug := pr.getPaneSlug(nodeID)
@@ -241,15 +233,13 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	}
 	pr.executeTemplate(&html, "paneWrapper", wrapperData)
 
-	if len(heldBeliefs) > 0 || len(withheldBeliefs) > 0 {
-		html.WriteString(`<!-- Filter component placeholder -->`)
-	}
-
-	codeHookPayload := pr.getCodeHookPayload(nodeID)
-	if codeHookPayload != nil {
-		pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Style: template.CSS(contentStyles)})
-		html.WriteString(`<!-- CodeHook component placeholder --></div>`)
-	} else if useFlexLayout {
+	// pane level code hooks are rendered in frontend
+	//codeHookPayload := pr.getCodeHookPayload(nodeID)
+	//if codeHookPayload != nil {
+	//	pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Style: template.CSS(contentStyles)})
+	//	html.WriteString(`Missing Code Hook here !!<!-- CodeHook component placeholder --></div>`)
+	//} else
+	if useFlexLayout {
 		flexDirection := "flex-col md:flex-row"
 		if bgNode.Position == "rightBleed" {
 			flexDirection = "flex-col md:flex-row-reverse"
@@ -310,7 +300,7 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	return html.String()
 }
 
-func (pr *PaneRenderer) executeTemplate(buf *bytes.Buffer, name string, data interface{}) {
+func (pr *PaneRenderer) executeTemplate(buf *bytes.Buffer, name string, data any) {
 	err := paneTemplates.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		log.Printf("ERROR: Failed to execute pane template '%s': %v", name, err)
@@ -388,43 +378,9 @@ func (pr *PaneRenderer) getNonBgPaneChildren(nodeID string) []string {
 	return contentChildren
 }
 
-func (pr *PaneRenderer) getCodeHookPayload(nodeID string) map[string]interface{} {
-	return nil
-}
-
-func (pr *PaneRenderer) getPaneBeliefs(nodeID string) (map[string][]string, map[string][]string) {
-	nodeData := pr.getNodeData(nodeID)
-	if nodeData == nil || nodeData.PaneData == nil {
-		return make(map[string][]string), make(map[string][]string)
-	}
-
-	heldBeliefs := make(map[string][]string)
-	withheldBeliefs := make(map[string][]string)
-
-	if nodeData.PaneData.HeldBeliefs != nil {
-		for k, v := range nodeData.PaneData.HeldBeliefs {
-			// Fix: Proper type assertion for interface{} to []string
-			if strSlice, ok := v.([]string); ok {
-				heldBeliefs[k] = strSlice
-			} else if str, ok := v.(string); ok {
-				heldBeliefs[k] = []string{str}
-			}
-		}
-	}
-
-	if nodeData.PaneData.WithheldBeliefs != nil {
-		for k, v := range nodeData.PaneData.WithheldBeliefs {
-			// Fix: Proper type assertion for interface{} to []string
-			if strSlice, ok := v.([]string); ok {
-				withheldBeliefs[k] = strSlice
-			} else if str, ok := v.(string); ok {
-				withheldBeliefs[k] = []string{str}
-			}
-		}
-	}
-
-	return heldBeliefs, withheldBeliefs
-}
+//func (pr *PaneRenderer) getCodeHookPayload(nodeID string) map[string]any {
+//	return nil
+//}
 
 func (pr *PaneRenderer) getNodeData(nodeID string) *rendering.NodeRenderData {
 	if pr.ctx.AllNodes == nil {
