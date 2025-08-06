@@ -94,14 +94,14 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
 	ws.logger.Cache().Info("Starting strategic warming for tenant", "tenantId", tenantID)
 
-	// Step 1: Warm the unified content map.
+	// Warm the unified content map.
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
 	reporter.LogStepSuccess("Content Map warmed")
 	ws.logger.Cache().Debug("Content map warmed", "tenantId", tenantID)
 
-	// Step 2: Bulk-load all content types into the cache.
+	// Bulk-load all content types into the cache.
 	if _, err := NewTractStackService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 		ws.logger.Cache().Warn("Failed to warm TractStacks", "tenantId", tenantID, "error", err)
@@ -137,7 +137,7 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogStepSuccess("Content Repositories Warmed")
 	ws.logger.Cache().Debug("Content repositories warmed", "tenantId", tenantID)
 
-	// Step 3: Build Belief Registries for all Storyfragments (THE CORE FIX)
+	// Build Belief Registries for all Storyfragments
 	storyFragmentIDs, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx)
 	if err != nil {
 		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
@@ -794,7 +794,6 @@ func (ws *WarmingService) WarmHTMLFragmentWithBeliefEvaluation(
 	generator := templates.NewGenerator(renderCtx)
 	htmlContent := generator.RenderPaneFragment(paneNode.ID)
 
-	// ✅ CRITICAL ADDITION: Apply belief evaluation with empty user beliefs for default cache
 	if beliefRegistry != nil {
 		if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneNode.ID]; exists {
 			emptyUserBeliefs := make(map[string][]string) // Anonymous user = empty beliefs

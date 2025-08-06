@@ -62,7 +62,7 @@ type ChanneledLogger struct {
 	channels map[Channel]*slog.Logger
 	config   *LoggerConfig
 	baseDir  string
-	configMu sync.RWMutex // ADDED: Mutex to protect config changes
+	configMu sync.RWMutex
 }
 
 // LoggerConfig contains configuration options for the channeled logger

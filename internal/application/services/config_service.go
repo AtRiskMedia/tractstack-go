@@ -41,11 +41,11 @@ type BrandConfigUpdateRequest struct {
 	Theme        string `json:"THEME,omitempty"`
 
 	// Site Configuration Fields
-	SiteInit           *bool  `json:"SITE_INIT,omitempty"` // ✅ FIXED: bool to *bool
+	SiteInit           *bool  `json:"SITE_INIT,omitempty"`
 	WordmarkMode       string `json:"WORDMARK_MODE,omitempty"`
 	HomeSlug           string `json:"HOME_SLUG,omitempty"`
 	TractStackHomeSlug string `json:"TRACTSTACK_HOME_SLUG,omitempty"`
-	OpenDemo           *bool  `json:"OPEN_DEMO,omitempty"` // ✅ FIXED: bool to *bool
+	OpenDemo           *bool  `json:"OPEN_DEMO,omitempty"`
 	SiteURL            string `json:"SITE_URL,omitempty"`
 	Slogan             string `json:"SLOGAN,omitempty"`
 	Footer             string `json:"FOOTER,omitempty"`
@@ -90,9 +90,9 @@ type AdvancedConfigUpdateRequest struct {
 	AdminPassword      string `json:"admin_password,omitempty"`
 	EditorPassword     string `json:"editor_password,omitempty"`
 	AAIAPIKey          string `json:"aai_api_key,omitempty"`
-	TursoEnabled       *bool  `json:"turso_enabled,omitempty"`        // ✅ FIXED: bool to *bool
-	HomeSlug           string `json:"home_slug,omitempty"`            // ✅ ADDED: Missing field
-	TractStackHomeSlug string `json:"tractstack_home_slug,omitempty"` // ✅ ADDED: Missing field
+	TursoEnabled       *bool  `json:"turso_enabled,omitempty"`
+	HomeSlug           string `json:"home_slug,omitempty"`
+	TractStackHomeSlug string `json:"tractstack_home_slug,omitempty"`
 }
 
 // ValidateAdminPermissions validates admin-only authentication
@@ -173,7 +173,6 @@ func (c *ConfigService) ProcessBrandConfigUpdate(
 		finalConfig.StylesVer = time.Now().Unix()
 	}
 
-	// ✅ FIXED: Only set SiteInit to true if explicitly provided and true
 	// This preserves existing SiteInit state when not specified
 	if request.SiteInit != nil && *request.SiteInit {
 		finalConfig.SiteInit = true
@@ -187,7 +186,6 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	request *AdvancedConfigUpdateRequest,
 	tenantCtx *tenant.Context,
 ) error {
-	// ✅ FIXED: Apply updates only for provided fields (following legacy pattern)
 	if request.TursoDatabaseURL != "" {
 		tenantCtx.Config.TursoDatabase = request.TursoDatabaseURL
 	}
@@ -286,7 +284,6 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// ✅ FIXED: Use selective field mapping instead of marshalling entire config
 	// This matches the legacy pattern and prevents accidental exposure of computed fields
 	configData := map[string]any{
 		"TURSO_DATABASE_URL":   tenantCtx.Config.TursoDatabase,
@@ -463,7 +460,6 @@ func (c *ConfigService) processBinaryImage(data, filename, targetDir string) (st
 	return "/media/" + filepath.Join("images/brand", filename), nil
 }
 
-// ✅ FIXED: updateBrandConfigFields with proper boolean protection
 func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, request *BrandConfigUpdateRequest) *types.BrandConfig {
 	// Update brand styling fields (strings protected with != "")
 	if request.BrandColours != "" {
@@ -527,7 +523,6 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 		config.Favicon = request.Favicon
 	}
 
-	// ✅ FIXED: Update boolean fields only when explicitly provided (pointers protected with != nil)
 	if request.SiteInit != nil {
 		config.SiteInit = *request.SiteInit
 	}
