@@ -113,7 +113,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
 
 	// 3. Instantiate orchestrator service, injecting its dependencies
-	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService)
+	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
 
 	// Initialize other services
 	sessionBeliefService := services.NewSessionBeliefService()

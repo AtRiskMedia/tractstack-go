@@ -4,12 +4,12 @@ package services
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"math/rand"
 	"time"
 
 	domainEvents "github.com/AtRiskMedia/tractstack-go/internal/domain/events"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/oklog/ulid/v2"
 )
@@ -18,13 +18,15 @@ import (
 type EventProcessingService struct {
 	beliefBroadcaster *BeliefBroadcastService
 	beliefEvaluator   *BeliefEvaluationService
+	logger            *logging.ChanneledLogger
 }
 
 // NewEventProcessingService creates a new event processing service with its dependencies.
-func NewEventProcessingService(broadcaster *BeliefBroadcastService, evaluator *BeliefEvaluationService) *EventProcessingService {
+func NewEventProcessingService(broadcaster *BeliefBroadcastService, evaluator *BeliefEvaluationService, logger *logging.ChanneledLogger) *EventProcessingService {
 	return &EventProcessingService{
 		beliefBroadcaster: broadcaster,
 		beliefEvaluator:   evaluator,
+		logger:            logger,
 	}
 }
 
@@ -44,52 +46,62 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 		if event.Type == "Belief" {
 			changed, err := s.processBelief(tenantCtx, sessionID, event)
 			if err != nil {
-				log.Printf("ERROR: EventProcessingService - error processing belief event %+v: %v", event, err)
+				s.logger.Content().Error("Error processing belief event",
+					"error", err.Error(),
+					"tenantId", tenantCtx.TenantID,
+					"sessionId", sessionID,
+					"event", event,
+				)
 				continue
 			}
 			if changed {
 				changedBeliefs = append(changedBeliefs, event.ID)
 			}
 		} else if event.Type == "StoryFragment" && event.Verb == "PAGEVIEWED" {
-			log.Printf("********************* PAGEVIEWED *********")
 			storyfragmentID := event.ID
 
-			// Check if user has existing beliefs for this storyfragment
-			if sessionContext, exists := tenantCtx.CacheManager.GetSessionBeliefContext(tenantCtx.TenantID, sessionID, storyfragmentID); exists {
-				log.Printf("********************* PAGEVIEWED: with context *********")
-				if len(sessionContext.UserBeliefs) > 0 {
-					log.Printf("********************* PAGEVIEWED: with context and beliefs *********")
-					// Get belief registry
-					if beliefRegistry, registryExists := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID); registryExists {
+			var currentAuthoritativeUserBeliefs map[string][]string
+			if sessionData, sessionExists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); sessionExists {
+				if fpState, fpExists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID); fpExists {
+					currentAuthoritativeUserBeliefs = fpState.HeldBeliefs
+				}
+			}
 
-						log.Printf("********************* PAGEVIEWED: with context and beliefs COMPUTING... *********")
-						// Create "before" snapshot (visibility with no beliefs = default state)
-						emptyBeliefs := make(map[string][]string)
-						var affectedPanes []string
+			if len(currentAuthoritativeUserBeliefs) > 0 {
+				s.logger.Content().Debug("PAGEVIEWED: User has beliefs, proceeding to check visibility.", "storyfragmentId", storyfragmentID)
+				if beliefRegistry, registryExists := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID); registryExists {
 
-						for paneID, paneBeliefs := range beliefRegistry.PaneBeliefPayloads {
-							// Evaluate visibility without user beliefs (default state)
-							beforeVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, emptyBeliefs)
-							beforeVisible := (beforeVisibility == "visible")
+					emptyBeliefs := make(map[string][]string)
+					var affectedPanes []string
 
-							// Evaluate visibility with current user beliefs
-							afterVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, sessionContext.UserBeliefs)
-							afterVisible := (afterVisibility == "visible")
+					for paneID, paneBeliefs := range beliefRegistry.PaneBeliefPayloads {
+						beforeVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, emptyBeliefs)
+						beforeVisible := (beforeVisibility == "visible")
 
-							// Only include panes whose visibility changed
-							if beforeVisible != afterVisible {
-								affectedPanes = append(affectedPanes, paneID)
-							}
+						afterVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, currentAuthoritativeUserBeliefs)
+						afterVisible := (afterVisibility == "visible")
+
+						s.logger.Content().Debug("🔍 PAGEVIEWED Visibility Check",
+							"paneId", paneID,
+							"storyfragmentId", storyfragmentID,
+							"paneHasHeldRequirements", len(paneBeliefs.HeldBeliefs) > 0,
+							"paneHeldRequirements", paneBeliefs.HeldBeliefs,
+							"userBeliefs", currentAuthoritativeUserBeliefs,
+							"beforeVisibility", beforeVisibility,
+							"afterVisibility", afterVisibility,
+							"visibilityDidChange", beforeVisible != afterVisible,
+						)
+
+						if beforeVisible != afterVisible {
+							affectedPanes = append(affectedPanes, paneID)
 						}
+					}
 
-						if len(affectedPanes) > 0 {
-							log.Printf("********************* PAGEVIEWED: with context and beliefs COMPUTING... WE GOT CONTACT !!!! *********")
-							// Trigger SSE broadcast to sync UI with existing belief state
-							broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, sessionID, storyfragmentID, affectedPanes, nil)
-						} else {
-							log.Printf("********************* PAGEVIEWED: with context and beliefs COMPUTING... ignoring *********")
-						}
-
+					if len(affectedPanes) > 0 {
+						s.logger.Content().Debug("PAGEVIEWED: Visibility changes detected, broadcasting SSE.", "affectedPanes", affectedPanes)
+						broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, sessionID, storyfragmentID, affectedPanes, nil)
+					} else {
+						s.logger.Content().Debug("PAGEVIEWED: No visibility changes detected, ignoring.", "storyfragmentId", storyfragmentID)
 					}
 				}
 			}
@@ -145,13 +157,14 @@ func (s *EventProcessingService) captureVisibilitySnapshot(tenantCtx *tenant.Con
 
 func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessionID string, event domainEvents.Event) (bool, error) {
 	cacheManager := tenantCtx.CacheManager
-	beliefID, exists := cacheManager.GetContentBySlug(tenantCtx.TenantID, "belief:"+event.ID)
+	beliefSlug := event.ID
+	beliefID, exists := cacheManager.GetContentBySlug(tenantCtx.TenantID, "belief:"+beliefSlug)
 	if !exists {
 		var foundID string
-		err := tenantCtx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", event.ID).Scan(&foundID)
+		err := tenantCtx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", beliefSlug).Scan(&foundID)
 		if err != nil {
 			if err == sql.ErrNoRows {
-				log.Printf("WARNING: EventProcessingService - belief not found: %s", event.ID)
+				s.logger.Content().Warn("Belief slug not found in database", "slug", beliefSlug, "tenantId", tenantCtx.TenantID)
 				return false, nil
 			}
 			return false, fmt.Errorf("failed to query belief by slug: %w", err)
@@ -176,13 +189,13 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 	changed := false
 	switch event.Verb {
 	case "UNSET":
-		if _, exists := fingerprintState.HeldBeliefs[beliefID]; exists {
-			delete(fingerprintState.HeldBeliefs, beliefID)
+		if _, exists := fingerprintState.HeldBeliefs[beliefSlug]; exists {
+			delete(fingerprintState.HeldBeliefs, beliefSlug)
 			changed = true
 		}
 	case "IDENTIFY_AS":
 		if event.Object != "" {
-			currentValues := fingerprintState.HeldBeliefs[beliefID]
+			currentValues := fingerprintState.HeldBeliefs[beliefSlug]
 			found := false
 			for _, v := range currentValues {
 				if v == event.Object {
@@ -191,12 +204,12 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 				}
 			}
 			if !found {
-				fingerprintState.HeldBeliefs[beliefID] = append(currentValues, event.Object)
+				fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Object)
 				changed = true
 			}
 		}
 	default:
-		currentValues := fingerprintState.HeldBeliefs[beliefID]
+		currentValues := fingerprintState.HeldBeliefs[beliefSlug]
 		found := false
 		for _, v := range currentValues {
 			if v == event.Verb {
@@ -205,7 +218,7 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 			}
 		}
 		if !found {
-			fingerprintState.HeldBeliefs[beliefID] = append(currentValues, event.Verb)
+			fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Verb)
 			changed = true
 		}
 	}
@@ -217,7 +230,12 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 		query := `INSERT INTO actions (id, object_id, object_type, verb, visit_id, fingerprint_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 		_, err := tenantCtx.Database.Conn.Exec(query, actionID.String(), beliefID, event.Type, event.Verb, sessionData.VisitID, sessionData.FingerprintID, time.Now().UTC())
 		if err != nil {
-			log.Printf("ERROR: EventProcessingService - failed to insert action: %v", err)
+			s.logger.Database().Error("Failed to insert analytics action for belief change",
+				"error", err.Error(),
+				"tenantId", tenantCtx.TenantID,
+				"beliefId", beliefID,
+				"verb", event.Verb,
+			)
 		}
 	}
 
