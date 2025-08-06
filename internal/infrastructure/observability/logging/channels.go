@@ -288,7 +288,7 @@ func (cl *ChanneledLogger) WithContext(channel Channel, ctx context.Context) *sl
 }
 
 // LogPerformanceMarker logs a performance marker with appropriate context
-func (cl *ChanneledLogger) LogPerformanceMarker(marker interface{}) {
+func (cl *ChanneledLogger) LogPerformanceMarker(marker any) {
 	// This would integrate with the performance package
 	// For now, we'll use a generic approach
 	cl.Perf().Info("Performance marker recorded",
