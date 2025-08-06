@@ -45,7 +45,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 	if cachedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
 		convertedItems := make([]*content.ContentMapItem, len(cachedItems))
 
-		// Convert cached items with type-specific fields (FIXED)
+		// Convert cached items with type-specific fields
 		for i, item := range cachedItems {
 			switch item.Type {
 			case "Resource":
@@ -170,7 +170,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 	cacheItems := cms.convertToFullContentMapItems(contentMap)
 	cache.SetFullContentMap(tenantCtx.TenantID, cacheItems)
 
-	// Convert to response format with type-specific fields (FIXED)
+	// Convert to response format with type-specific fields
 	convertedItems := make([]*content.ContentMapItem, len(contentMap))
 	for i, item := range contentMap {
 		switch item.Type {

@@ -70,7 +70,6 @@ func (cp *CSSProcessorImpl) getNodeRenderData(nodeID string) *rendering.NodeRend
 		return nil
 	}
 
-	// Look up node in the real data map - THIS IS THE KEY FIX
 	nodeInterface, exists := cp.ctx.AllNodes[nodeID]
 	if !exists {
 		return nil

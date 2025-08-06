@@ -4,7 +4,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
-	"slices" // ADDED: Import the slices package for Contains function
+	"slices"
 	"strconv"
 	"time"
 
@@ -15,7 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
-// EventProcessingService contains the refactored business logic for handling events.
+// EventProcessingService contains business logic for handling events
 type EventProcessingService struct {
 	beliefBroadcaster *BeliefBroadcastService
 	beliefEvaluator   *BeliefEvaluationService
@@ -227,7 +227,6 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 	case "IDENTIFY_AS":
 		if event.Object != "" {
 			currentValues := fingerprintState.HeldBeliefs[beliefSlug]
-			// SIMPLIFIED LOOP: Use slices.Contains for clarity and efficiency.
 			if !slices.Contains(currentValues, event.Object) {
 				fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Object)
 				changed = true
@@ -235,7 +234,6 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 		}
 	default:
 		currentValues := fingerprintState.HeldBeliefs[beliefSlug]
-		// SIMPLIFIED LOOP: Use slices.Contains for clarity and efficiency.
 		if !slices.Contains(currentValues, event.Verb) {
 			fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Verb)
 			changed = true

@@ -39,11 +39,10 @@ func (ss *SessionsStore) InitializeTenant(tenantID string) {
 
 	if ss.tenantCaches[tenantID] == nil {
 		ss.tenantCaches[tenantID] = &types.TenantUserStateCache{
-			FingerprintStates: make(map[string]*types.FingerprintState),
-			VisitStates:       make(map[string]*types.VisitState),
-			KnownFingerprints: make(map[string]bool),
-			SessionStates:     make(map[string]*types.SessionData),
-			// THE FIX IS HERE: This map was not being initialized.
+			FingerprintStates:             make(map[string]*types.FingerprintState),
+			VisitStates:                   make(map[string]*types.VisitState),
+			KnownFingerprints:             make(map[string]bool),
+			SessionStates:                 make(map[string]*types.SessionData),
 			StoryfragmentBeliefRegistries: make(map[string]*types.StoryfragmentBeliefRegistry),
 			SessionBeliefContexts:         make(map[string]*types.SessionBeliefContext),
 			LastLoaded:                    time.Now().UTC(),
@@ -64,7 +63,6 @@ func (ss *SessionsStore) GetTenantCache(tenantID string) (*types.TenantUserState
 }
 
 // GetAllStoryfragmentBeliefRegistryIDs returns all storyfragment IDs that have cached belief registries.
-// THIS IS THE NEWLY ADDED METHOD FOR THE REPORTER.
 func (ss *SessionsStore) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string {
 	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)
