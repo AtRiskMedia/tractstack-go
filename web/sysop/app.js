@@ -19,9 +19,10 @@ document.addEventListener('alpine:init', () => {
 
     // --- SESSION UNIVERSE STATE (for Dashboard tab) ---
     sessionStates: [],
-    sessionStats: { total: 0, lead: 0, active: 0, dormant: 0 },
+    sessionStats: { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 },
     sessionSocket: null,
     sessionSocketStatus: 'OFFLINE',
+    sessionDisplayMode: '1:1',
 
     // --- LOGS STATE (for Logs tab) ---
     logs: [],
@@ -38,7 +39,6 @@ document.addEventListener('alpine:init', () => {
       sysop_activity: '/api/sysop/activity',
       sysop_tenant_token: '/api/sysop/tenant-token',
       sysop_orphan_analysis: '/api/sysop/orphan-analysis',
-      // WebSocket URL is constructed dynamically in connectSessionSocket()
       contentMap: '/api/v1/content/full-map',
       analytics: '/api/v1/analytics/dashboard',
       nodes: {
@@ -63,23 +63,39 @@ document.addEventListener('alpine:init', () => {
       const levelMap = { 'INFO': 'status-online', 'WARN': 'status-yellow', 'ERROR': 'status-red', 'DEBUG': 'metric-dim' };
       return levelMap[level] || 'metric-dim';
     },
-    sessionBlockCharacter(state) {
-      return state === 'lead' ? '█' : '▒';
-    },
-    sessionBlockClass(state) {
-      return {
-        'lead': 'lead',
-        'active_bright': 'active-bright',
-        'active_medium': 'active-medium',
-        'active_light': 'active-light',
-        'dormant_light': 'fade-light',
-        'dormant_medium': 'fade-medium',
-        'dormant_deep': 'fade-deep'
-      }[state] || 'fade-deep';
-    },
     getPercentage(value, total) {
       if (!total || !value) return '0.0';
       return ((value / total) * 100).toFixed(1);
+    },
+    sessionBlockCharacter(state) {
+      return state.isLead ? '░' : '▒';
+    },
+    sessionBlockClass(state) {
+      const now = Date.now();
+      const lastActivity = new Date(state.lastActivity).getTime();
+      const minutesSince = (now - lastActivity) / (1000 * 60);
+
+      if (minutesSince > 45) {
+        return state.isLead ? 'lead-dormant-dim' : 'anonymous-dormant-dim';
+      }
+
+      let activity = 'light';
+      if (minutesSince <= 15) activity = 'bright';
+      else if (minutesSince <= 30) activity = 'medium';
+
+      if (state.isLead) {
+        return `lead-active-${activity}`;
+      }
+
+      const beliefSuffix = state.hasBeliefs ? '-beliefs' : '';
+      return `anonymous-active-${activity}${beliefSuffix}`;
+    },
+    sessionBlockTitle(state) {
+      const lastActivity = new Date(state.lastActivity).toLocaleTimeString();
+      let title = `Last Activity: ${lastActivity}`;
+      if (state.isLead) title += " | Type: Lead";
+      if (state.hasBeliefs) title += " | Has Beliefs";
+      return title;
     },
 
     // --- CORE METHODS ---
@@ -112,14 +128,10 @@ document.addEventListener('alpine:init', () => {
     // --- TENANT & TAB MANAGEMENT ---
     async loadTenants() { try { const response = await fetch(this.apiEndpoints.sysop_tenants, { headers: { 'Authorization': `Bearer ${this.sysOpToken}` } }); if (!response.ok) throw new Error('Failed to fetch tenants'); const data = await response.json(); this.availableTenants = data.tenants || ['default']; this.availableTenants.sort(); } catch (error) { console.warn('Could not load tenants:', error); this.availableTenants = ['default']; } },
     switchTab(tabName) {
-      // Disconnect from any active streams before switching
       this.disconnectLogStream();
       this.disconnectSessionSocket();
       this.stopPolling();
-
       this.currentTab = tabName;
-
-      // Connect to the appropriate data source for the new tab
       if (tabName === 'dashboard') {
         this.connectSessionSocket();
       } else if (tabName === 'logs') {
@@ -128,7 +140,7 @@ document.addEventListener('alpine:init', () => {
         this.startPolling();
       }
     },
-    async switchTenant(newTenant) { if (newTenant !== this.currentTenant) { this.currentTenant = newTenant; this.sessionStates = []; this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0 }; await this.fetchTenantToken(newTenant); this.switchTab(this.currentTab); } },
+    async switchTenant(newTenant) { if (newTenant !== this.currentTenant) { this.currentTenant = newTenant; this.sessionStates = []; this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 }; await this.fetchTenantToken(newTenant); this.switchTab(this.currentTab); } },
     async fetchTenantToken(tenantId) {
       this.tenantToken = null;
       try {
@@ -137,13 +149,20 @@ document.addEventListener('alpine:init', () => {
         if (data.success && data.token) { this.tenantToken = data.token; } else { throw new Error(data.error || 'Failed to get tenant token'); }
       } catch (error) { console.error(`Failed to fetch token for tenant ${tenantId}:`, error); this.updateConnectionStatus('OFFLINE'); }
     },
+    handleGlobalKeys(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+      const keyMap = { 'd': 'dashboard', 's': 'status', 'c': 'cache', 'a': 'analytics', 't': 'tenants', 'l': 'logs' };
+      if (keyMap[e.key.toLowerCase()]) {
+        e.preventDefault();
+        this.switchTab(keyMap[e.key.toLowerCase()]);
+      }
+    },
 
-    // --- POLLING LOGIC (for non-websocket tabs) ---
+    // --- POLLING LOGIC ---
     startPolling() { this.stopPolling(); this.pollData(); this.pollTimer = setInterval(() => this.pollData(), 5000); },
     stopPolling() { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; } },
     async pollData() {
       if (!this.tenantToken || !['status', 'cache', 'analytics'].includes(this.currentTab)) return;
-
       const headers = { 'Authorization': `Bearer ${this.tenantToken}`, 'X-Tenant-ID': this.currentTenant };
       const sysOpHeaders = { 'Authorization': `Bearer ${this.sysOpToken}` };
       const activityEndpoint = `${this.apiEndpoints.sysop_activity}?tenant=${this.currentTenant}`;
@@ -207,27 +226,25 @@ document.addEventListener('alpine:init', () => {
     // --- WebSocket Methods for Session Universe ---
     connectSessionSocket() {
       this.disconnectSessionSocket();
-      if (!this.sysOpToken) {
-        console.error("SysOp token not available for WebSocket connection.");
-        this.sessionSocketStatus = 'ERROR';
-        return;
-      }
-
+      if (!this.sysOpToken) { console.error("SysOp token not available."); this.sessionSocketStatus = 'ERROR'; return; }
       this.sessionSocketStatus = 'CONNECTING';
-      // CORRECTED: Append the sysOpToken to the URL for authentication.
       const url = `ws://${window.location.host}/api/sysop/ws/session-map?tenant=${this.currentTenant}&token=${this.sysOpToken}`;
       this.sessionSocket = new WebSocket(url);
-
       this.sessionSocket.onopen = () => { this.sessionSocketStatus = 'ONLINE'; };
-      this.sessionSocket.onclose = () => { this.sessionSocketStatus = 'OFFLINE'; this.sessionStates = []; this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0 }; };
+      this.sessionSocket.onclose = () => { this.sessionSocketStatus = 'OFFLINE'; this.sessionStates = []; this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 }; };
       this.sessionSocket.onerror = (error) => { console.error('WebSocket Error:', error); this.sessionSocketStatus = 'ERROR'; };
       this.sessionSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.sessionStates) {
-            this.sessionStates = data.sessionStates;
-            this.calculateSessionStats();
-          }
+          this.sessionDisplayMode = data.displayMode || '1:1';
+          this.sessionStates = data.sessionStates || [];
+          this.sessionStats = {
+            total: data.totalCount || 0,
+            lead: data.leadCount || 0,
+            active: data.activeCount || 0,
+            dormant: data.dormantCount || 0,
+            withBeliefs: data.withBeliefsCount || 0
+          };
         } catch (e) { console.error('Failed to parse session map event:', e); }
       };
     },
@@ -237,19 +254,6 @@ document.addEventListener('alpine:init', () => {
         this.sessionSocket = null;
       }
       this.sessionSocketStatus = 'OFFLINE';
-    },
-    calculateSessionStats() {
-      const stats = { total: this.sessionStates.length, lead: 0, active: 0, dormant: 0 };
-      this.sessionStates.forEach(state => {
-        if (state === 'lead') {
-          stats.lead++;
-        } else if (state.startsWith('active')) {
-          stats.active++;
-        } else if (state.startsWith('dormant')) {
-          stats.dormant++;
-        }
-      });
-      this.sessionStats = stats;
     },
 
     // --- SSE Log Methods ---
