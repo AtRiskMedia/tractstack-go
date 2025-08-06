@@ -14,19 +14,18 @@ import (
 
 // Manager coordinates tenant detection and context creation
 type Manager struct {
-	detector     *Detector
-	cacheManager *manager.Manager
-	contexts     map[string]*Context
-	mutex        sync.RWMutex
-	logger       *logging.ChanneledLogger
+	detector       *Detector
+	cacheManager   *manager.Manager
+	contexts       map[string]*Context
+	contextMutexes sync.Map // Per-tenant mutexes for fine-grained locking
+	globalMutex    sync.RWMutex
+	logger         *logging.ChanneledLogger
 }
 
 // NewManager creates and initializes a new tenant manager.
 func NewManager(logger *logging.ChanneledLogger) *Manager {
 	detector, err := NewDetector(logger)
 	if err != nil {
-		// In startup context, we can't return error, so we'll panic
-		// This should be handled by startup error handling
 		panic(fmt.Sprintf("Failed to initialize tenant detector: %v", err))
 	}
 
@@ -42,48 +41,59 @@ func NewManager(logger *logging.ChanneledLogger) *Manager {
 
 // GetContext creates or retrieves a tenant context for the request
 func (m *Manager) GetContext(c *gin.Context) (*Context, error) {
-	// Detect tenant from request
 	tenantID, err := m.detector.DetectTenant(c)
 	if err != nil {
 		return nil, fmt.Errorf("tenant detection failed: %w", err)
 	}
 
-	// Check if we have a cached context
-	m.mutex.RLock()
+	m.globalMutex.RLock()
 	if ctx, exists := m.contexts[tenantID]; exists {
-		m.mutex.RUnlock()
-		return ctx, nil
+		m.globalMutex.RUnlock()
+		if ctx.Database != nil && ctx.Database.Conn != nil {
+			return ctx, nil
+		}
+	} else {
+		m.globalMutex.RUnlock()
 	}
-	m.mutex.RUnlock()
 
-	// Create new context
+	tenantMutexInterface, _ := m.contextMutexes.LoadOrStore(tenantID, &sync.Mutex{})
+	tenantMutex := tenantMutexInterface.(*sync.Mutex)
+
+	tenantMutex.Lock()
+	defer tenantMutex.Unlock()
+
+	m.globalMutex.RLock()
+	if ctx, exists := m.contexts[tenantID]; exists {
+		m.globalMutex.RUnlock()
+		if ctx.Database != nil && ctx.Database.Conn != nil {
+			return ctx, nil
+		}
+	} else {
+		m.globalMutex.RUnlock()
+	}
+
 	return m.createContext(tenantID)
 }
 
 // NewContextFromID creates a new tenant context from a tenant ID string.
-// This is used for background tasks that are not tied to a specific HTTP request.
 func (m *Manager) NewContextFromID(tenantID string) (*Context, error) {
 	return m.createContext(tenantID)
 }
 
 // createContext creates a new tenant context
 func (m *Manager) createContext(tenantID string) (*Context, error) {
-	// Load tenant configuration using existing config loader
 	config, err := LoadTenantConfig(tenantID, m.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load tenant config: %w", err)
 	}
 
-	// Create database connection using existing database infrastructure
 	db, err := NewDatabase(config, m.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create database connection: %w", err)
 	}
 
-	// Get tenant status from detector
 	status := m.detector.GetTenantStatus(tenantID)
 
-	// Create context
 	ctx := &Context{
 		TenantID:     tenantID,
 		Config:       config,
@@ -93,17 +103,15 @@ func (m *Manager) createContext(tenantID string) (*Context, error) {
 		Logger:       m.logger,
 	}
 
-	// Cache the context
-	m.mutex.Lock()
+	m.globalMutex.Lock()
 	m.contexts[tenantID] = ctx
-	m.mutex.Unlock()
+	m.globalMutex.Unlock()
 
 	return ctx, nil
 }
 
 // PreActivateAllTenants activates all tenants in the registry during startup
 func (m *Manager) PreActivateAllTenants() error {
-	// Load the tenant registry to get all known tenants
 	registry, err := LoadTenantRegistry()
 	if err != nil {
 		return fmt.Errorf("failed to load tenant registry for pre-activation: %w", err)
@@ -113,10 +121,8 @@ func (m *Manager) PreActivateAllTenants() error {
 		return nil
 	}
 
-	// Track activation results
 	var failedTenants []string
 
-	// Pre-activate each tenant that isn't already active
 	for tenantID, tenantInfo := range registry.Tenants {
 		if tenantInfo.Status == "active" {
 			continue
@@ -128,7 +134,6 @@ func (m *Manager) PreActivateAllTenants() error {
 		}
 	}
 
-	// Update detector's registry cache after all activations
 	if err := m.detector.RefreshRegistry(); err != nil {
 		return fmt.Errorf("failed to refresh detector registry: %w", err)
 	}
@@ -142,18 +147,15 @@ func (m *Manager) PreActivateAllTenants() error {
 
 // preActivateSingleTenant activates a single tenant during startup
 func (m *Manager) preActivateSingleTenant(tenantID string) error {
-	// Create context for activation
 	ctx, err := m.createContext(tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to create context for tenant %s: %w", tenantID, err)
 	}
 
-	// Verify database connection
 	if err := ctx.Database.Conn.Ping(); err != nil {
 		return fmt.Errorf("database connection test failed for tenant %s: %w", tenantID, err)
 	}
 
-	// Update tenant status to active
 	dbType := "sqlite3"
 	if ctx.Database.UseTurso {
 		dbType = "turso"
@@ -236,12 +238,11 @@ func (m *Manager) GetDetector() *Detector {
 
 // Close cleans up all tenant contexts
 func (m *Manager) Close() error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.globalMutex.Lock()
+	defer m.globalMutex.Unlock()
 
 	for _, ctx := range m.contexts {
 		if err := ctx.Close(); err != nil {
-			// Log error but continue cleanup
 			continue
 		}
 	}
@@ -254,7 +255,6 @@ func (m *Manager) Close() error {
 func (m *Manager) SetLogger(logger *logging.ChanneledLogger) {
 	m.logger = logger
 
-	// Also update the detector's logger if it exists
 	if m.detector != nil && logger != nil {
 		m.detector.logger = logger
 	}

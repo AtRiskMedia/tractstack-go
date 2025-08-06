@@ -2,6 +2,7 @@
 package tenant
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -35,20 +36,20 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 
 	poolKey := getPoolKey(cfg)
 
-	poolMutex.Lock()
-	defer poolMutex.Unlock()
-
-	// Check for existing pooled connection
+	poolMutex.RLock()
 	if pooledConn, exists := connectionPools[poolKey]; exists {
-		logger.Database().Debug("Checking existing pooled connection", "poolKey", poolKey, "tenantID", cfg.TenantID)
-		if err := pooledConn.Ping(); err == nil {
+		poolMutex.RUnlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		if err := pooledConn.PingContext(ctx); err == nil {
 			logger.Database().Info("Reusing existing pooled database connection",
 				"tenantID", cfg.TenantID,
 				"poolKey", poolKey,
 				"useTurso", cfg.TursoDatabase != "",
 				"duration", time.Since(start))
 
-			// Add slow query detection for connection reuse
 			duration := time.Since(start)
 			if duration > config.SlowQueryThreshold {
 				logger.LogSlowQuery("DATABASE_CONNECTION_REUSE", duration, cfg.TenantID)
@@ -62,19 +63,20 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 				logger:   logger,
 			}, nil
 		}
-		logger.Database().Warn("Existing pooled connection failed ping, removing from pool",
-			"poolKey", poolKey,
-			"tenantID", cfg.TenantID,
-		)
+
+		poolMutex.Lock()
+		logger.Database().Warn("Existing pooled connection failed ping, removing from pool", "poolKey", poolKey, "tenantID", cfg.TenantID)
 		pooledConn.Close()
 		delete(connectionPools, poolKey)
+		poolMutex.Unlock()
+	} else {
+		poolMutex.RUnlock()
 	}
 
 	var conn *sql.DB
 	var err error
 	var useTurso bool
 
-	// Try Turso first if configured
 	if cfg.TursoEnabled && cfg.TursoDatabase != "" && cfg.TursoToken != "" {
 		logger.Database().Debug("Attempting Turso connection", "tenantID", cfg.TenantID, "database", cfg.TursoDatabase)
 
@@ -82,43 +84,46 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 		conn, err = sql.Open("libsql", connStr)
 		if err != nil {
 			logger.Database().Error("Turso connection failed", "error", err.Error(), "tenantID", cfg.TenantID)
-		} else if err := conn.Ping(); err != nil {
+			return nil, fmt.Errorf("turso connection failed for tenant %s: %w", cfg.TenantID, err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := conn.PingContext(ctx); err != nil {
 			logger.Database().Error("Turso ping failed", "error", err.Error(), "tenantID", cfg.TenantID)
 			conn.Close()
-			conn = nil
-		} else {
-			logger.Database().Info("Turso connection established", "tenantID", cfg.TenantID, "database", cfg.TursoDatabase)
-			useTurso = true
+			return nil, fmt.Errorf("turso ping failed for tenant %s: %w", cfg.TenantID, err)
 		}
-	}
-
-	// Fallback to SQLite if Turso failed or not configured
-	if conn == nil {
+		logger.Database().Info("Turso connection established", "tenantID", cfg.TenantID, "database", cfg.TursoDatabase)
+		useTurso = true
+	} else {
 		logger.Database().Debug("Using SQLite fallback", "tenantID", cfg.TenantID, "path", cfg.SQLitePath)
 
-		// Ensure database directory exists
 		dbDir := filepath.Dir(cfg.SQLitePath)
 		if err := os.MkdirAll(dbDir, 0755); err != nil {
 			logger.Database().Error("Failed to create database directory", "error", err.Error(), "dir", dbDir, "tenantID", cfg.TenantID)
-			return nil, fmt.Errorf("failed to create database directory: %w", err)
+			return nil, fmt.Errorf("failed to create database directory for tenant %s: %w", cfg.TenantID, err)
 		}
 
 		conn, err = sql.Open("sqlite3", cfg.SQLitePath)
 		if err != nil {
 			logger.Database().Error("SQLite fallback connection failed", "error", err.Error(), "tenantID", cfg.TenantID, "path", cfg.SQLitePath)
-			return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+			return nil, fmt.Errorf("sqlite connection failed for tenant %s: %w", cfg.TenantID, err)
 		}
 
-		if err := conn.Ping(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := conn.PingContext(ctx); err != nil {
 			logger.Database().Error("SQLite fallback ping failed", "error", err.Error(), "tenantID", cfg.TenantID)
 			conn.Close()
-			return nil, fmt.Errorf("SQLite database ping failed: %w", err)
+			return nil, fmt.Errorf("sqlite ping failed for tenant %s: %w", cfg.TenantID, err)
 		}
 		logger.Database().Info("SQLite fallback connection established", "tenantID", cfg.TenantID, "path", cfg.SQLitePath)
 		useTurso = false
 	}
 
-	// Configure connection pool settings
 	logger.Database().Debug("Configuring database connection pool",
 		"tenantID", cfg.TenantID,
 		"maxOpenConns", config.DBMaxOpenConns,
@@ -131,8 +136,10 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 	conn.SetConnMaxLifetime(time.Duration(config.DBConnMaxLifetimeMinutes) * time.Minute)
 	conn.SetConnMaxIdleTime(time.Duration(config.DBConnMaxIdleMinutes) * time.Minute)
 
-	// Add to pool
+	poolMutex.Lock()
 	connectionPools[poolKey] = conn
+	poolMutex.Unlock()
+
 	logger.Database().Info("Database connection added to pool", "poolKey", poolKey, "tenantID", cfg.TenantID)
 
 	logger.Database().Info("Database connection created successfully",
@@ -141,7 +148,6 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 		"pooled", true,
 		"duration", time.Since(start))
 
-	// Add slow query detection for new connection creation
 	duration := time.Since(start)
 	if duration > config.SlowQueryThreshold {
 		logger.LogSlowQuery("DATABASE_CONNECTION_CREATE", duration, cfg.TenantID)
@@ -205,7 +211,6 @@ func GetPoolStats() map[string]int {
 	return stats
 }
 
-// CleanupPools removes stale database connections from the pool
 func CleanupPools(logger *logging.ChanneledLogger) {
 	start := time.Now()
 	logger.Database().Debug("Starting database pool cleanup")
@@ -215,19 +220,20 @@ func CleanupPools(logger *logging.ChanneledLogger) {
 
 	removedCount := 0
 	for poolKey, conn := range connectionPools {
-		if err := conn.Ping(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := conn.PingContext(ctx); err != nil {
 			logger.Database().Warn("Removing stale connection from pool", "poolKey", poolKey, "error", err.Error())
 			conn.Close()
 			delete(connectionPools, poolKey)
 			removedCount++
 		}
+		cancel()
 	}
 
 	logger.Database().Info("Database pool cleanup completed",
 		"removedConnections", removedCount,
 		"activeConnections", len(connectionPools))
 
-	// Add slow query detection for cleanup operation
 	duration := time.Since(start)
 	if duration > config.SlowQueryThreshold {
 		logger.LogSlowQuery("DATABASE_POOL_CLEANUP", duration, "system")

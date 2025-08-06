@@ -41,7 +41,7 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 			return
 		}
 
-		tenantCtx, err := tenantManager.NewContextFromID(tenantID)
+		tenantCtx, err := tenantManager.GetContext(c)
 		if err != nil {
 			errMsg := fmt.Sprintf("tenant '%s' not found or failed to initialize", tenantID)
 			logger.Tenant().Error(errMsg, "error", err, "tenantId", tenantID)
@@ -60,12 +60,6 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 		marker.SetSuccess(true)
 
 		c.Set("tenant", tenantCtx)
-
-		defer func() {
-			if tenantCtx != nil {
-				tenantCtx.Close()
-			}
-		}()
 
 		c.Next()
 	}

@@ -2,6 +2,7 @@
 package services
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -51,6 +52,12 @@ type VisitRequest struct {
 	Consent        *string `json:"consent,omitempty"`
 }
 
+// SessionResponse holds session handling response data
+type SessionResponse struct {
+	Fingerprint string `json:"fingerprint"`
+	VisitID     string `json:"visitId"`
+}
+
 // VisitRowData represents visit data from database
 type VisitRowData struct {
 	ID            string
@@ -72,12 +79,10 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 	var hasProfile bool
 	var profile *user.Profile
 
-	// Check for existing session first
 	if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, *req.SessionID); exists {
 		finalFpID = existingSession.FingerprintID
 		finalVisitID = existingSession.VisitID
 
-		// Check if session has lead info using the new LeadID field
 		if existingSession.LeadID != nil {
 			if lead, err := s.GetLeadByID(*existingSession.LeadID, tenantCtx); err == nil && lead != nil {
 				profile = &user.Profile{
@@ -92,7 +97,6 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 			}
 		}
 	} else if req.EncryptedEmail != nil && req.EncryptedCode != nil {
-		// Handle authentication with encrypted credentials
 		result := s.processEncryptedAuthentication(*req.EncryptedEmail, *req.EncryptedCode, tenantCtx)
 		if !result.Success {
 			return result
@@ -101,7 +105,6 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 		profile = result.Profile
 		hasProfile = true
 	} else {
-		// Create anonymous fingerprint
 		finalFpID = security.GenerateULID()
 		if err := s.CreateFingerprint(finalFpID, nil, tenantCtx); err != nil {
 			if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -125,7 +128,6 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 		}
 	}
 
-	// Determine consent value
 	var consentValue string
 	if req.Consent != nil {
 		consentValue = *req.Consent
@@ -133,7 +135,6 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 		consentValue = "unknown"
 	}
 
-	// Update cache states
 	s.updateCacheStates(tenantCtx, *req.SessionID, finalFpID, finalVisitID)
 
 	var token string
@@ -141,7 +142,6 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 		generatedToken, err := security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
 		if err != nil {
 			log.Printf("Failed to generate profile token: %v", err)
-			// Don't fail the request, just log the error
 		} else {
 			token = generatedToken
 		}
@@ -160,7 +160,6 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 
 // processEncryptedAuthentication handles authentication with encrypted credentials
 func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *SessionResult {
-	// Decrypt credentials
 	decryptedEmail, err := security.Decrypt(encryptedEmail, tenantCtx.Config.AESKey)
 	if err != nil {
 		return &SessionResult{
@@ -177,7 +176,6 @@ func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encrypte
 		}
 	}
 
-	// Validate credentials
 	lead, err := s.ValidateLeadCredentials(decryptedEmail, decryptedCode, tenantCtx)
 	if err != nil || lead == nil {
 		return &SessionResult{
@@ -186,7 +184,6 @@ func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encrypte
 		}
 	}
 
-	// Check for existing fingerprint
 	var finalFpID string
 	if existingFpID := s.FindFingerprintByLeadID(lead.ID, tenantCtx); existingFpID != nil {
 		finalFpID = *existingFpID
@@ -202,7 +199,6 @@ func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encrypte
 		}
 	}
 
-	// Create or link fingerprint
 	if err := s.CreateFingerprint(finalFpID, &lead.ID, tenantCtx); err != nil {
 		if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return &SessionResult{
@@ -230,17 +226,18 @@ func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encrypte
 }
 
 func (s *SessionService) HandleVisitCreation(fingerprintID string, hasProfile bool, tenantCtx *tenant.Context) (string, error) {
-	// Check for recent visits (2-hour window) to match legacy behavior
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	if latestVisit, err := s.GetLatestVisitByFingerprint(fingerprintID, tenantCtx); err == nil && latestVisit != nil {
 		if time.Since(latestVisit.CreatedAt) < 2*time.Hour {
-			return latestVisit.ID, nil // Reuse recent visit
+			return latestVisit.ID, nil
 		}
 	}
 
-	// Only create new visit if no recent visit exists
 	visitID := security.GenerateULID()
 	query := `INSERT INTO visits (id, fingerprint_id, created_at) VALUES (?, ?, ?)`
-	_, err := tenantCtx.Database.Conn.Exec(query, visitID, fingerprintID, time.Now().UTC())
+	_, err := tenantCtx.Database.Conn.ExecContext(ctx, query, visitID, fingerprintID, time.Now().UTC())
 	if err != nil {
 		return "", fmt.Errorf("failed to create visit: %w", err)
 	}
@@ -249,13 +246,16 @@ func (s *SessionService) HandleVisitCreation(fingerprintID string, hasProfile bo
 }
 
 func (s *SessionService) GetLatestVisitByFingerprint(fingerprintID string, tenantCtx *tenant.Context) (*VisitRowData, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	query := `SELECT id, fingerprint_id, campaign_id, created_at
               FROM visits
               WHERE fingerprint_id = ?
               ORDER BY created_at DESC
               LIMIT 1`
 
-	row := tenantCtx.Database.Conn.QueryRow(query, fingerprintID)
+	row := tenantCtx.Database.Conn.QueryRowContext(ctx, query, fingerprintID)
 
 	var visit VisitRowData
 	var campaignID sql.NullString
@@ -277,16 +277,22 @@ func (s *SessionService) GetLatestVisitByFingerprint(fingerprintID string, tenan
 
 // CreateFingerprint creates a new fingerprint record
 func (s *SessionService) CreateFingerprint(fingerprintID string, leadID *string, tenantCtx *tenant.Context) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	query := `INSERT INTO fingerprints (id, lead_id, created_at) VALUES (?, ?, ?)`
-	_, err := tenantCtx.Database.Conn.Exec(query, fingerprintID, leadID, time.Now().UTC())
+	_, err := tenantCtx.Database.Conn.ExecContext(ctx, query, fingerprintID, leadID, time.Now().UTC())
 	return err
 }
 
 // FindFingerprintByLeadID finds an existing fingerprint for a lead
 func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenant.Context) *string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var fingerprintID string
 	query := `SELECT id FROM fingerprints WHERE lead_id = ? LIMIT 1`
-	err := tenantCtx.Database.Conn.QueryRow(query, leadID).Scan(&fingerprintID)
+	err := tenantCtx.Database.Conn.QueryRowContext(ctx, query, leadID).Scan(&fingerprintID)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -299,6 +305,9 @@ func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenan
 
 // GetLeadByFingerprint retrieves a lead associated with a fingerprint
 func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *tenant.Context) (*user.Lead, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	query := `
 		SELECT l.id, l.first_name, l.email, l.password_hash, l.contact_persona, l.short_bio, l.encrypted_code, l.encrypted_email, l.created_at, l.changed
 		FROM leads l
@@ -311,7 +320,7 @@ func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *t
 	var shortBio, encryptedCode, encryptedEmail sql.NullString
 	var changed sql.NullTime
 
-	err := tenantCtx.Database.Conn.QueryRow(query, fingerprintID).Scan(
+	err := tenantCtx.Database.Conn.QueryRowContext(ctx, query, fingerprintID).Scan(
 		&lead.ID,
 		&lead.FirstName,
 		&lead.Email,
@@ -331,7 +340,6 @@ func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *t
 		return nil, fmt.Errorf("failed to get lead by fingerprint: %w", err)
 	}
 
-	// Handle nullable fields
 	if shortBio.Valid {
 		lead.ShortBio = shortBio.String
 	}
@@ -350,6 +358,9 @@ func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *t
 
 // GetLeadByID retrieves a lead by ID
 func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (*user.Lead, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	query := `
 		SELECT id, first_name, email, password_hash, contact_persona, short_bio, encrypted_code, encrypted_email, created_at, changed
 		FROM leads 
@@ -361,7 +372,7 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 	var shortBio, encryptedCode, encryptedEmail sql.NullString
 	var changed sql.NullTime
 
-	err := tenantCtx.Database.Conn.QueryRow(query, leadID).Scan(
+	err := tenantCtx.Database.Conn.QueryRowContext(ctx, query, leadID).Scan(
 		&lead.ID,
 		&lead.FirstName,
 		&lead.Email,
@@ -381,7 +392,6 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 		return nil, fmt.Errorf("failed to get lead by ID: %w", err)
 	}
 
-	// Handle nullable fields
 	if shortBio.Valid {
 		lead.ShortBio = shortBio.String
 	}
@@ -405,7 +415,6 @@ func (s *SessionService) ValidateLeadCredentials(email, password string, tenantC
 		return nil, fmt.Errorf("lead not found")
 	}
 
-	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(password)); err != nil {
 		return nil, fmt.Errorf("invalid password")
 	}
@@ -415,6 +424,9 @@ func (s *SessionService) ValidateLeadCredentials(email, password string, tenantC
 
 // GetLeadByEmail retrieves a lead by email
 func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context) (*user.Lead, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	query := `
 		SELECT id, first_name, email, password_hash, contact_persona, short_bio, encrypted_code, encrypted_email, created_at, changed
 		FROM leads 
@@ -426,7 +438,7 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 	var shortBio, encryptedCode, encryptedEmail sql.NullString
 	var changed sql.NullTime
 
-	err := tenantCtx.Database.Conn.QueryRow(query, email).Scan(
+	err := tenantCtx.Database.Conn.QueryRowContext(ctx, query, email).Scan(
 		&lead.ID,
 		&lead.FirstName,
 		&lead.Email,
@@ -446,7 +458,6 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 		return nil, fmt.Errorf("failed to get lead by email: %w", err)
 	}
 
-	// Handle nullable fields
 	if shortBio.Valid {
 		lead.ShortBio = shortBio.String
 	}
@@ -463,81 +474,20 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 	return &lead, nil
 }
 
-// updateCacheStates updates all cache states with new session data
-func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID, fingerprintID, visitID string) {
-	cacheManager := tenantCtx.CacheManager
-
-	// Update session data with LeadID field
-	sessionData := &types.SessionData{
-		SessionID:     sessionID,
-		FingerprintID: fingerprintID,
-		VisitID:       visitID,
-		LeadID:        nil, // Will be set if lead is associated with fingerprint
-		LastActivity:  time.Now().UTC(),
-		CreatedAt:     time.Now().UTC(),
-		ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
-		IsExpired:     false,
-	}
-
-	// Check if fingerprint has an associated lead and set LeadID
-	if lead, err := s.GetLeadByFingerprint(fingerprintID, tenantCtx); err == nil && lead != nil {
-		sessionData.LeadID = &lead.ID
-	}
-
-	cacheManager.SetSession(tenantCtx.TenantID, sessionData)
-
-	// Update fingerprint state
-	var fingerprintState *types.FingerprintState
-	if existingFpState, exists := cacheManager.GetFingerprintState(tenantCtx.TenantID, fingerprintID); exists {
-		fingerprintState = existingFpState
-		fingerprintState.LastActivity = time.Now().UTC()
-	} else {
-		fingerprintState = &types.FingerprintState{
-			FingerprintID: fingerprintID,
-			LeadID:        sessionData.LeadID,
-			HeldBeliefs:   make(map[string][]string),
-			HeldBadges:    make(map[string]string),
-			LastActivity:  time.Now().UTC(),
-		}
-	}
-	cacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
-
-	// Create visit state
-	visitState := &types.VisitState{
-		VisitID:       visitID,
-		FingerprintID: fingerprintID,
-		StartTime:     time.Now().UTC(),
-		CurrentPage:   "/",
-		CreatedAt:     time.Now().UTC(),
-		LastActivity:  time.Now().UTC(),
-	}
-	cacheManager.SetVisitState(tenantCtx.TenantID, visitState)
-}
-
-// SessionResponse holds session handling response data
-type SessionResponse struct {
-	Fingerprint string `json:"fingerprint"`
-	VisitID     string `json:"visitId"`
-}
-
 // HandleProfileSession handles session creation/update for profile operations
 func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile *user.Profile, sessionID string) (*SessionResponse, error) {
 	var fingerprintID string
 
-	// Check if this lead already has a fingerprint
 	if existingFpID := s.FindFingerprintByLeadID(profile.LeadID, tenantCtx); existingFpID != nil {
 		fingerprintID = *existingFpID
 	} else {
-		// Check if session has an existing fingerprint
 		if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); exists {
 			fingerprintID = existingSession.FingerprintID
 		} else {
-			// Create new fingerprint
 			fingerprintID = security.GenerateULID()
 		}
 	}
 
-	// Ensure fingerprint exists in database
 	if err := s.CreateFingerprint(fingerprintID, &profile.LeadID, tenantCtx); err != nil {
 		if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return nil, fmt.Errorf("failed to create fingerprint: %w", err)
@@ -546,9 +496,8 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 
 	var visitID string
 	if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); exists {
-		visitID = existingSession.VisitID // Reuse existing visit
+		visitID = existingSession.VisitID
 	} else {
-		// Only create new visit if no existing session
 		var err error
 		visitID, err = s.HandleVisitCreation(fingerprintID, true, tenantCtx)
 		if err != nil {
@@ -556,32 +505,28 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		}
 	}
 
-	// Update session data with LeadID field
 	sessionData := &types.SessionData{
 		SessionID:     sessionID,
 		FingerprintID: fingerprintID,
 		VisitID:       visitID,
-		LeadID:        &profile.LeadID, // Set LeadID from profile
+		LeadID:        &profile.LeadID,
 		LastActivity:  time.Now().UTC(),
 		CreatedAt:     time.Now().UTC(),
 		ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
 		IsExpired:     false,
 	}
 
-	// Store session in cache
 	tenantCtx.CacheManager.SetSession(tenantCtx.TenantID, sessionData)
 
-	// Update fingerprint state
 	fingerprintState := &types.FingerprintState{
 		FingerprintID: fingerprintID,
 		LeadID:        &profile.LeadID,
 		HeldBeliefs:   make(map[string][]string),
-		HeldBadges:    make(map[string]string), // Changed from Badges to HeldBadges
+		HeldBadges:    make(map[string]string),
 		LastActivity:  time.Now().UTC(),
 	}
 	tenantCtx.CacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
 
-	// Create visit state
 	visitState := &types.VisitState{
 		VisitID:       visitID,
 		FingerprintID: fingerprintID,
@@ -596,4 +541,50 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		Fingerprint: fingerprintID,
 		VisitID:     visitID,
 	}, nil
+}
+
+// updateCacheStates updates all cache states with new session data
+func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID, fingerprintID, visitID string) {
+	cacheManager := tenantCtx.CacheManager
+
+	sessionData := &types.SessionData{
+		SessionID:     sessionID,
+		FingerprintID: fingerprintID,
+		VisitID:       visitID,
+		LeadID:        nil,
+		LastActivity:  time.Now().UTC(),
+		CreatedAt:     time.Now().UTC(),
+		ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
+		IsExpired:     false,
+	}
+
+	if lead, err := s.GetLeadByFingerprint(fingerprintID, tenantCtx); err == nil && lead != nil {
+		sessionData.LeadID = &lead.ID
+	}
+
+	cacheManager.SetSession(tenantCtx.TenantID, sessionData)
+
+	var fingerprintState *types.FingerprintState
+	if existingFpState, exists := cacheManager.GetFingerprintState(tenantCtx.TenantID, fingerprintID); exists {
+		fingerprintState = existingFpState
+		fingerprintState.LastActivity = time.Now().UTC()
+	} else {
+		fingerprintState = &types.FingerprintState{
+			FingerprintID: fingerprintID,
+			HeldBeliefs:   make(map[string][]string),
+			HeldBadges:    make(map[string]string),
+			LastActivity:  time.Now().UTC(),
+		}
+	}
+	cacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
+
+	visitState := &types.VisitState{
+		VisitID:       visitID,
+		FingerprintID: fingerprintID,
+		StartTime:     time.Now().UTC(),
+		CurrentPage:   "/",
+		CreatedAt:     time.Now().UTC(),
+		LastActivity:  time.Now().UTC(),
+	}
+	cacheManager.SetVisitState(tenantCtx.TenantID, visitState)
 }
