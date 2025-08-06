@@ -18,6 +18,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Database semaphore to limit concurrent database operations
+var dbSemaphore = make(chan struct{}, 100) // Allow 100 concurrent DB operations
+
 // SessionService handles session management, fingerprinting, and user authentication
 type SessionService struct {
 	logger      *logging.ChanneledLogger
@@ -226,6 +229,9 @@ func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encrypte
 }
 
 func (s *SessionService) HandleVisitCreation(fingerprintID string, hasProfile bool, tenantCtx *tenant.Context) (string, error) {
+	dbSemaphore <- struct{}{}
+	defer func() { <-dbSemaphore }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -277,6 +283,9 @@ func (s *SessionService) GetLatestVisitByFingerprint(fingerprintID string, tenan
 
 // CreateFingerprint creates a new fingerprint record
 func (s *SessionService) CreateFingerprint(fingerprintID string, leadID *string, tenantCtx *tenant.Context) error {
+	dbSemaphore <- struct{}{}
+	defer func() { <-dbSemaphore }()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
