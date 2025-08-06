@@ -105,17 +105,9 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	logger.Startup().Info("Channeled logger initialized successfully", "logDirectory", loggerConfig.LogDirectory)
 
 	leadRepo := persistenceUser.NewSQLLeadRepository(nil, logger)
-
-	// 1. Instantiate pure domain services first (no dependencies)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
-
-	// 2. Instantiate application services that depend on infrastructure
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
-
-	// 3. Instantiate orchestrator service, injecting its dependencies
 	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
-
-	// Initialize other services
 	sessionBeliefService := services.NewSessionBeliefService()
 	widgetContextService := services.NewWidgetContextService(sessionBeliefService)
 	scrollTargetService := services.NewScrollTargetService()

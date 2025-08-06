@@ -28,9 +28,15 @@ type EventRepository interface {
 	// StoreActionEvent saves a user action event to the persistence layer.
 	StoreActionEvent(event *ActionEvent) error
 
-	// FindActionEventsInRange retrieves all action events within a given time range.
-	FindActionEventsInRange(start, end time.Time) ([]*ActionEvent, error)
+	// StoreBeliefEvent saves a user belief event to the persistence layer.
+	StoreBeliefEvent(event *BeliefEvent) error
 
-	// FindBeliefEventsInRange retrieves all belief events within a given time range.
-	FindBeliefEventsInRange(start, end time.Time) ([]*BeliefEvent, error)
+	// FindActionEventsInRange retrieves all action events within a given time range, filtered by verb.
+	FindActionEventsInRange(start, end time.Time, verbFilter []string) ([]*ActionEvent, error)
+
+	// FindBeliefEventsInRange retrieves all belief events within a given time range, filtered by value.
+	FindBeliefEventsInRange(start, end time.Time, valueFilter []string) ([]*BeliefEvent, error)
+
+	// CountEventsInRange returns the total event count for a time range.
+	CountEventsInRange(startTime, endTime time.Time) (int, error)
 }
