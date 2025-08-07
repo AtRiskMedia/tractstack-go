@@ -50,7 +50,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	sysopHandlers := handlers.NewSysOpHandlers(container)
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
 
-	// SysOp API endpoints moved to /api/sysop to avoid conflict with static file serving
 	sysopAPI := r.Group("/api/sysop")
 	{
 		sysopAPI.GET("/auth", sysopHandlers.AuthCheck)
@@ -68,8 +67,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			sysopAPI.GET("/ws/session-map", sysopHandlers.HandleSessionMapStream)
 		}
 	}
-
-	// Log streaming is a special case and can remain at top level
 	r.GET("/sysop-logs/stream", sysopHandlers.StreamLogs)
 
 	// Multi-tenant provisioning routes (conditional)
@@ -119,7 +116,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		// Database status
 		api.GET("/db/status", dbHandlers.GetDatabaseStatus)
 
-		// General health endpoint (legacy format)
+		// General health endpoint
 		api.GET("/health", dbHandlers.GetGeneralHealth)
 
 		// Analytics endpoints
@@ -145,7 +142,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
 		}
 
-		// Fragment rendering endpoints - PUBLIC (needed for frontend)
+		// Fragment rendering endpoints
 		fragments := api.Group("/fragments")
 		{
 			fragments.GET("/panes/:id", fragmentHandlers.GetPaneFragment)
@@ -155,97 +152,76 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		// Content nodes - ALL PUBLIC for API access
 		nodes := api.Group("/nodes")
 		{
-			// Menu endpoints - ALL PUBLIC
+			// Menu endpoints
 			nodes.GET("/menus", menuHandlers.GetAllMenuIDs)
 			nodes.POST("/menus", menuHandlers.GetMenusByIDs)
 			nodes.GET("/menus/:id", menuHandlers.GetMenuByID)
+			nodes.POST("/menus/create", menuHandlers.CreateMenu)
+			nodes.PUT("/menus/:id", menuHandlers.UpdateMenu)
+			nodes.DELETE("/menus/:id", menuHandlers.DeleteMenu)
 
-			// Pane endpoints - ALL PUBLIC
+			// Pane endpoints
 			nodes.GET("/panes", paneHandlers.GetAllPaneIDs)
 			nodes.POST("/panes", paneHandlers.GetPanesByIDs)
 			nodes.GET("/panes/:id", paneHandlers.GetPaneByID)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
 			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
+			nodes.POST("/panes/create", paneHandlers.CreatePane)
+			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
+			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)
 
-			// Resource endpoints - ALL PUBLIC
+			// Resource endpoints
 			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)
 			nodes.POST("/resources", resourceHandlers.GetResourcesByIDs)
 			nodes.GET("/resources/:id", resourceHandlers.GetResourceByID)
 			nodes.GET("/resources/slug/:slug", resourceHandlers.GetResourceBySlug)
+			nodes.POST("/resources/create", resourceHandlers.CreateResource)
+			nodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
+			nodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
 
-			// Story fragment endpoints - ALL PUBLIC
+			// Story fragment endpoints
 			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
 			nodes.POST("/storyfragments", storyFragmentHandlers.GetStoryFragmentsByIDs)
 			nodes.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
 			nodes.GET("/storyfragments/home", storyFragmentHandlers.GetHomeStoryFragment)
+			nodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
+			nodes.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
+			nodes.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
 
-			// TractStack endpoints - ALL PUBLIC
+			// TractStack endpoints
 			nodes.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)
 			nodes.POST("/tractstacks", tractStackHandlers.GetTractStacksByIDs)
 			nodes.GET("/tractstacks/:id", tractStackHandlers.GetTractStackByID)
 			nodes.GET("/tractstacks/slug/:slug", tractStackHandlers.GetTractStackBySlug)
+			nodes.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
+			nodes.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
+			nodes.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
 
-			// Belief endpoints - ALL PUBLIC
+			// Belief endpoints
 			nodes.GET("/beliefs", beliefHandlers.GetAllBeliefIDs)
 			nodes.POST("/beliefs", beliefHandlers.GetBeliefsByIDs)
 			nodes.GET("/beliefs/:id", beliefHandlers.GetBeliefByID)
 			nodes.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
+			nodes.POST("/beliefs/create", beliefHandlers.CreateBelief)
+			nodes.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
+			nodes.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
 
-			// File endpoints - ALL PUBLIC
+			// File endpoints
 			nodes.GET("/files", imageFileHandlers.GetAllFileIDs)
 			nodes.POST("/files", imageFileHandlers.GetFilesByIDs)
 			nodes.GET("/files/:id", imageFileHandlers.GetFileByID)
+			nodes.POST("/files/create", imageFileHandlers.CreateFile)
+			nodes.PUT("/files/:id", imageFileHandlers.UpdateFile)
+			nodes.DELETE("/files/:id", imageFileHandlers.DeleteFile)
 
-			// Epinet endpoints - ALL PUBLIC
+			// Epinet endpoints
 			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
 			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
 			nodes.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
-		}
-
-		// CRUD Operations - PROTECTED (Admin/Editor access only)
-		crud := api.Group("/crud")
-		crud.Use(authHandlers.AuthMiddleware())
-		{
-			// Menu CRUD
-			crud.POST("/menus/create", menuHandlers.CreateMenu)
-			crud.PUT("/menus/:id", menuHandlers.UpdateMenu)
-			crud.DELETE("/menus/:id", menuHandlers.DeleteMenu)
-
-			// Resource CRUD
-			crud.POST("/resources/create", resourceHandlers.CreateResource)
-			crud.PUT("/resources/:id", resourceHandlers.UpdateResource)
-			crud.DELETE("/resources/:id", resourceHandlers.DeleteResource)
-
-			// Belief CRUD
-			crud.POST("/beliefs/create", beliefHandlers.CreateBelief)
-			crud.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
-			crud.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
-
-			// StoryFragment CRUD
-			crud.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
-			crud.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
-			crud.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
-
-			// TractStack CRUD
-			crud.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
-			crud.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
-			crud.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
-
-			// Pane CRUD
-			crud.POST("/panes/create", paneHandlers.CreatePane)
-			crud.PUT("/panes/:id", paneHandlers.UpdatePane)
-			crud.DELETE("/panes/:id", paneHandlers.DeletePane)
-
-			// ImageFile CRUD
-			crud.POST("/files/create", imageFileHandlers.CreateFile)
-			crud.PUT("/files/:id", imageFileHandlers.UpdateFile)
-			crud.DELETE("/files/:id", imageFileHandlers.DeleteFile)
-
-			// Epinet CRUD
-			crud.POST("/epinets/create", epinetHandlers.CreateEpinet)
-			crud.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
-			crud.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+			nodes.POST("/epinets/create", epinetHandlers.CreateEpinet)
+			nodes.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
+			nodes.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
 		}
 	}
 

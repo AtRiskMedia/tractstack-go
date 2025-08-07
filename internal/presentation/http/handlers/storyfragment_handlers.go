@@ -166,6 +166,12 @@ func (h *StoryFragmentHandlers) GetStoryFragmentBySlug(c *gin.Context) {
 		return
 	}
 
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	err = h.storyFragmentService.EnrichWithMetadata(tenantCtx, storyFragmentNode, sessionID)
+	if err != nil {
+		h.logger.Content().Warn("Failed to enrich storyfragment metadata", "error", err)
+	}
+
 	h.logger.Content().Info("Get story fragment by slug request completed", "slug", slug, "found", storyFragmentNode != nil, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetStoryFragmentBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
@@ -231,6 +237,12 @@ func (h *StoryFragmentHandlers) GetHomeStoryFragment(c *gin.Context) {
 	if homeStoryFragment == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "home storyfragment not found"})
 		return
+	}
+
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	err = h.storyFragmentService.EnrichWithMetadata(tenantCtx, homeStoryFragment, sessionID)
+	if err != nil {
+		h.logger.Content().Warn("Failed to enrich storyfragment metadata", "error", err)
 	}
 
 	h.logger.Content().Info("Get home story fragment request completed", "found", homeStoryFragment != nil, "duration", time.Since(start))

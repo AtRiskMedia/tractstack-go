@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -103,11 +104,11 @@ func (s *EpinetService) Create(tenantCtx *tenant.Context, epinet *content.Epinet
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_epinet", tenantCtx.TenantID)
 	defer marker.Complete()
+	if epinet.ID == "" {
+		epinet.ID = security.GenerateULID()
+	}
 	if epinet == nil {
 		return fmt.Errorf("epinet cannot be nil")
-	}
-	if epinet.ID == "" {
-		return fmt.Errorf("epinet ID cannot be empty")
 	}
 	if epinet.Title == "" {
 		return fmt.Errorf("epinet title cannot be empty")

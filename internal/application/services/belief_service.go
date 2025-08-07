@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -125,11 +126,11 @@ func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.Belief
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_belief", tenantCtx.TenantID)
 	defer marker.Complete()
+	if belief.ID == "" {
+		belief.ID = security.GenerateULID()
+	}
 	if belief == nil {
 		return fmt.Errorf("belief cannot be nil")
-	}
-	if belief.ID == "" {
-		return fmt.Errorf("belief ID cannot be empty")
 	}
 	if belief.Title == "" {
 		return fmt.Errorf("belief title cannot be empty")

@@ -139,7 +139,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		MenuService:           services.NewMenuService(logger, perfTracker, contentMapService),
 		PaneService:           services.NewPaneService(logger, perfTracker, contentMapService),
 		ResourceService:       services.NewResourceService(logger, perfTracker, contentMapService),
-		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker, contentMapService),
+		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService),
 		TractStackService:     services.NewTractStackService(logger, perfTracker, contentMapService),
 		BeliefService:         services.NewBeliefService(logger, perfTracker, contentMapService),
 		ImageFileService:      services.NewImageFileService(logger, perfTracker, contentMapService),
@@ -147,7 +147,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ContentMapService:     contentMapService,
 		OrphanAnalysisService: services.NewOrphanAnalysisService(logger),
 		BeliefRegistryService: services.NewBeliefRegistryService(logger),
-		WarmingService:        services.NewWarmingService(logger, perfTracker, beliefEvaluationService),
+		WarmingService:        services.NewWarmingService(logger, perfTracker, beliefEvaluationService, sessionBeliefService),
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,
