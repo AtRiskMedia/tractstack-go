@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/admin"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/lisp"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
-	"github.com/AtRiskMedia/tractstack-go/utils/lisp"
 )
 
 type DependencyScanner struct {
