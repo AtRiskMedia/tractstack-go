@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/admin"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
+	"github.com/AtRiskMedia/tractstack-go/utils/lisp"
 )
 
 type DependencyScanner struct {
@@ -21,6 +22,15 @@ func NewDependencyScanner(db *database.DB, logger *logging.ChanneledLogger) *Dep
 		db:     db,
 		logger: logger,
 	}
+}
+
+// BrandConfigAdapter adapts homeSlug to lisp parser interface
+type BrandConfigAdapter struct {
+	homeSlug string
+}
+
+func (b *BrandConfigAdapter) GetHomeSlug() string {
+	return b.homeSlug
 }
 
 func (ds *DependencyScanner) ScanAllContentIDs(tenantID string) (*admin.ContentIDMap, error) {
@@ -113,6 +123,7 @@ func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map
 	}
 
 	// Step 3: Menu ActionLisp references - PORT THE ACTUAL WORKING LOGIC
+	brandConfig := &BrandConfigAdapter{homeSlug: homeSlug}
 	menuRows, err := ds.db.Query("SELECT id, options_payload FROM menus")
 	if err != nil {
 		ds.logger.Database().Error("Menu query failed", "error", err.Error())
@@ -132,9 +143,19 @@ func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map
 			if err := json.Unmarshal([]byte(optionsPayload), &options); err == nil {
 				for _, option := range options {
 					if actionLisp, ok := option["actionLisp"].(string); ok && actionLisp != "" {
-						// Simple URL extraction from ActionLisp - this is a simplified version
-						// In the real implementation, this would use lisp.PreParseAction
-						slug := ds.extractSlugFromActionLisp(actionLisp, homeSlug)
+						// Parse ActionLisp using full legacy logic
+						tokens, _, err := lisp.LispLexer(actionLisp, false)
+						if err != nil {
+							continue
+						}
+
+						targetURL := lisp.PreParseAction(tokens, "", false, brandConfig)
+						if targetURL == "" {
+							continue
+						}
+
+						// Extract slug from URL
+						slug := ds.extractSlugFromURL(targetURL, homeSlug)
 						if slug != "" {
 							// Find story fragment ID by slug
 							var sfID string
@@ -291,7 +312,7 @@ func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][
 
 	ds.logger.Database().Info("File IDs loaded", "fileCount", fileCount)
 
-	// Second query: Get file dependencies from junction table
+	// Second query: Get file dependencies
 	query2 := "SELECT file_id, pane_id FROM file_panes"
 	ds.logger.Database().Debug("Executing file dependencies query", "query", query2)
 
@@ -313,23 +334,24 @@ func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][
 		}
 	}
 
-	// Third query: Get file dependencies from pane options_payload - PORT THE MISSING LOGIC
+	// Third query: pane options_payload fileId references
 	paneRows, err := ds.db.Query("SELECT id, options_payload FROM panes WHERE options_payload LIKE '%fileId%'")
 	if err != nil {
-		ds.logger.Database().Error("Pane options query failed", "error", err.Error())
-	} else {
-		defer paneRows.Close()
+		ds.logger.Database().Error("Pane fileId query failed", "error", err.Error())
+		return dependencies, nil // Continue with what we have
+	}
+	defer paneRows.Close()
 
-		for paneRows.Next() {
-			var paneID, optionsPayload string
-			if err := paneRows.Scan(&paneID, &optionsPayload); err != nil {
-				continue
-			}
+	for paneRows.Next() {
+		var paneID, optionsPayload string
+		if err := paneRows.Scan(&paneID, &optionsPayload); err != nil {
+			continue
+		}
 
-			// Check each file ID to see if it's referenced in this pane's options
-			for fileID := range dependencies {
-				if strings.Contains(optionsPayload, fmt.Sprintf(`"fileId":"%s"`, fileID)) {
-					// Check if paneID is already in the list
+		for fileID := range dependencies {
+			if strings.Contains(optionsPayload, fmt.Sprintf(`"fileId":"%s"`, fileID)) {
+				if _, exists := dependencies[fileID]; exists {
+					// Check for duplicates
 					found := false
 					for _, dep := range dependencies[fileID] {
 						if dep == paneID {
@@ -459,30 +481,6 @@ func (ds *DependencyScanner) ScanBeliefDependencies(tenantID string) (map[string
 
 	ds.logger.Database().Info("Belief dependencies scan completed", "tenantID", tenantID, "beliefCount", beliefCount, "depCount", depCount, "duration", time.Since(start))
 	return dependencies, nil
-}
-
-// Helper functions
-
-// extractSlugFromActionLisp extracts slug from ActionLisp - simplified version
-func (ds *DependencyScanner) extractSlugFromActionLisp(actionLisp, homeSlug string) string {
-	// This is a simplified version. The real implementation would use lisp.PreParseAction
-	// For now, we'll do basic string parsing to extract common patterns
-
-	// Look for common patterns like (goto "/slug") or similar
-	if strings.Contains(actionLisp, "goto") && strings.Contains(actionLisp, "/") {
-		// Extract the path - this is very basic parsing
-		start := strings.Index(actionLisp, "\"/")
-		if start != -1 {
-			start += 2 // skip "/
-			end := strings.Index(actionLisp[start:], "\"")
-			if end != -1 {
-				path := actionLisp[start : start+end]
-				return ds.extractSlugFromURL("/"+path, homeSlug)
-			}
-		}
-	}
-
-	return ""
 }
 
 // extractSlugFromURL extracts slug from URL path - ported from working logic

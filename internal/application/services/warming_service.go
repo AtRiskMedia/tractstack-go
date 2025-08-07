@@ -39,13 +39,15 @@ type WarmingService struct {
 	logger                  *logging.ChanneledLogger
 	perfTracker             *performance.Tracker
 	beliefEvaluationService *BeliefEvaluationService
+	sessionBeliefService    *SessionBeliefService
 }
 
-func NewWarmingService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, beliefEvaluationService *BeliefEvaluationService) *WarmingService {
+func NewWarmingService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, beliefEvaluationService *BeliefEvaluationService, sessionBeliefService *SessionBeliefService) *WarmingService {
 	return &WarmingService{
 		logger:                  logger,
 		perfTracker:             perfTracker,
 		beliefEvaluationService: beliefEvaluationService,
+		sessionBeliefService:    sessionBeliefService,
 	}
 }
 
@@ -95,19 +97,19 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
 	ws.logger.Cache().Info("Starting strategic warming for tenant", "tenantId", tenantID)
 
-	// Step 1: Warm the unified content map.
+	// Warm the unified content map.
 	if err := ws.warmContentMap(tenantCtx, contentMapSvc, cache); err != nil {
 		return fmt.Errorf("content map warming failed: %w", err)
 	}
 	reporter.LogStepSuccess("Content Map warmed")
 	ws.logger.Cache().Debug("Content map warmed", "tenantId", tenantID)
 
-	// Step 2: Bulk-load all content types into the cache.
+	// Bulk-load all content types into the cache.
 	if _, err := NewTractStackService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 		ws.logger.Cache().Warn("Failed to warm TractStacks", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc, ws.sessionBeliefService).GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm StoryFragments: %v", err)
 		ws.logger.Cache().Warn("Failed to warm StoryFragments", "tenantId", tenantID, "error", err)
 	}
@@ -138,15 +140,15 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogStepSuccess("Content Repositories Warmed")
 	ws.logger.Cache().Debug("Content repositories warmed", "tenantId", tenantID)
 
-	// Step 3: Build Belief Registries for all Storyfragments
-	storyFragmentIDs, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx)
+	// Build Belief Registries for all Storyfragments
+	storyFragmentIDs, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc, ws.sessionBeliefService).GetAllIDs(tenantCtx)
 	if err != nil {
 		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
 		ws.logger.Cache().Warn("Could not retrieve StoryFragment IDs for belief registry warming", "tenantId", tenantID, "error", err)
 	} else {
 		paneService := NewPaneService(ws.logger, ws.perfTracker, contentMapSvc)
 		for _, sfID := range storyFragmentIDs {
-			sf, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc).GetByID(tenantCtx, sfID)
+			sf, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc, ws.sessionBeliefService).GetByID(tenantCtx, sfID)
 			if err != nil || sf == nil {
 				continue
 			}

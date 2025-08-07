@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -22,17 +23,19 @@ type StoryFragmentFullPayload struct {
 
 // StoryFragmentService orchestrates storyfragment operations with cache-first repository pattern
 type StoryFragmentService struct {
-	logger            *logging.ChanneledLogger
-	perfTracker       *performance.Tracker
-	contentMapService *ContentMapService
+	logger               *logging.ChanneledLogger
+	perfTracker          *performance.Tracker
+	contentMapService    *ContentMapService
+	sessionBeliefService *SessionBeliefService
 }
 
 // NewStoryFragmentService creates a new storyfragment service singleton
-func NewStoryFragmentService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *StoryFragmentService {
+func NewStoryFragmentService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService, sessionBeliefService *SessionBeliefService) *StoryFragmentService {
 	return &StoryFragmentService{
-		logger:            logger,
-		perfTracker:       perfTracker,
-		contentMapService: contentMapService,
+		logger:               logger,
+		perfTracker:          perfTracker,
+		contentMapService:    contentMapService,
+		sessionBeliefService: sessionBeliefService,
 	}
 }
 
@@ -222,11 +225,11 @@ func (s *StoryFragmentService) Create(tenantCtx *tenant.Context, sf *content.Sto
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_storyfragment", tenantCtx.TenantID)
 	defer marker.Complete()
+	if sf.ID == "" {
+		sf.ID = security.GenerateULID()
+	}
 	if sf == nil {
 		return fmt.Errorf("storyfragment cannot be nil")
-	}
-	if sf.ID == "" {
-		return fmt.Errorf("storyfragment ID cannot be empty")
 	}
 	if sf.Title == "" {
 		return fmt.Errorf("storyfragment title cannot be empty")
@@ -345,6 +348,56 @@ func (s *StoryFragmentService) Delete(tenantCtx *tenant.Context, id string) erro
 	s.logger.Content().Info("Successfully deleted storyfragment", "tenantId", tenantCtx.TenantID, "storyfragmentId", id, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for DeleteStoryFragment", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", id)
+
+	return nil
+}
+
+func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, storyFragment *content.StoryFragmentNode, sessionID string) error {
+	// 1. Set IsHome flag
+	homeSlug := ""
+	if tenantCtx.Config != nil && tenantCtx.Config.BrandConfig != nil {
+		homeSlug = tenantCtx.Config.BrandConfig.HomeSlug
+	}
+	if homeSlug == "" {
+		homeSlug = "hello"
+	}
+	storyFragment.IsHome = (storyFragment.Slug == homeSlug)
+
+	// 2. Load and attach Menu
+	if storyFragment.MenuID != nil && storyFragment.Menu == nil {
+		menuRepo := tenantCtx.MenuRepo()
+		menu, err := menuRepo.FindByID(tenantCtx.TenantID, *storyFragment.MenuID)
+		if err != nil {
+			s.logger.Content().Warn("Failed to load menu for storyfragment", "menuId", *storyFragment.MenuID, "error", err)
+		} else {
+			storyFragment.Menu = menu
+		}
+	}
+
+	// 3. Extract and attach CodeHookTargets
+	if storyFragment.CodeHookTargets == nil && len(storyFragment.PaneIDs) > 0 {
+		paneRepo := tenantCtx.PaneRepo()
+		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
+		if err != nil {
+			s.logger.Content().Warn("Failed to load panes for codeHook extraction", "error", err)
+		} else {
+			codeHookTargets := make(map[string]string)
+			for _, pane := range panes {
+				if pane != nil && pane.CodeHookTarget != nil && *pane.CodeHookTarget != "" {
+					codeHookTargets[pane.ID] = *pane.CodeHookTarget
+				}
+			}
+			storyFragment.CodeHookTargets = codeHookTargets
+		}
+	}
+
+	// 4. Session belief context warming
+	if sessionID != "" {
+		_, err := s.sessionBeliefService.CreateSessionBeliefContext(tenantCtx, sessionID, storyFragment.ID)
+		if err != nil {
+			s.logger.Content().Warn("Failed to create session belief context", "error", err)
+		}
+	}
 
 	return nil
 }

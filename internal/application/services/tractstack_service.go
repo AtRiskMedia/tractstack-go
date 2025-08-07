@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -125,11 +126,11 @@ func (s *TractStackService) Create(tenantCtx *tenant.Context, ts *content.TractS
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_tractstack", tenantCtx.TenantID)
 	defer marker.Complete()
+	if ts.ID == "" {
+		ts.ID = security.GenerateULID()
+	}
 	if ts == nil {
 		return fmt.Errorf("tractstack cannot be nil")
-	}
-	if ts.ID == "" {
-		return fmt.Errorf("tractstack ID cannot be empty")
 	}
 	if ts.Title == "" {
 		return fmt.Errorf("tractstack title cannot be empty")

@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -111,11 +112,11 @@ func (s *MenuService) Create(tenantCtx *tenant.Context, menu *content.MenuNode) 
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_menu", tenantCtx.TenantID)
 	defer marker.Complete()
+	if menu.ID == "" {
+		menu.ID = security.GenerateULID()
+	}
 	if menu == nil {
 		return fmt.Errorf("menu cannot be nil")
-	}
-	if menu.ID == "" {
-		return fmt.Errorf("menu ID cannot be empty")
 	}
 	if menu.Title == "" {
 		return fmt.Errorf("menu title cannot be empty")

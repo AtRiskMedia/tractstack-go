@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -147,11 +148,11 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_resource", tenantCtx.TenantID)
 	defer marker.Complete()
+	if resource.ID == "" {
+		resource.ID = security.GenerateULID()
+	}
 	if resource == nil {
 		return fmt.Errorf("resource cannot be nil")
-	}
-	if resource.ID == "" {
-		return fmt.Errorf("resource ID cannot be empty")
 	}
 	if resource.Title == "" {
 		return fmt.Errorf("resource title cannot be empty")

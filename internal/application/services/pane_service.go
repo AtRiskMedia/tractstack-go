@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -143,11 +144,11 @@ func (s *PaneService) Create(tenantCtx *tenant.Context, pane *content.PaneNode) 
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_pane", tenantCtx.TenantID)
 	defer marker.Complete()
+	if pane.ID == "" {
+		pane.ID = security.GenerateULID()
+	}
 	if pane == nil {
 		return fmt.Errorf("pane cannot be nil")
-	}
-	if pane.ID == "" {
-		return fmt.Errorf("pane ID cannot be empty")
 	}
 	if pane.Title == "" {
 		return fmt.Errorf("pane title cannot be empty")

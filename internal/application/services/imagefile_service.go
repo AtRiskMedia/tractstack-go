@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
@@ -103,11 +104,11 @@ func (s *ImageFileService) Create(tenantCtx *tenant.Context, imageFile *content.
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_imagefile", tenantCtx.TenantID)
 	defer marker.Complete()
+	if imageFile.ID == "" {
+		imageFile.ID = security.GenerateULID()
+	}
 	if imageFile == nil {
 		return fmt.Errorf("imagefile cannot be nil")
-	}
-	if imageFile.ID == "" {
-		return fmt.Errorf("imagefile ID cannot be empty")
 	}
 	if imageFile.Filename == "" {
 		return fmt.Errorf("imagefile filename cannot be empty")
