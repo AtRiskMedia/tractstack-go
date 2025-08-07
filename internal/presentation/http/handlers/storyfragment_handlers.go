@@ -208,11 +208,63 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 		return
 	}
 
+	// === V1 COMPATIBILITY PROCESSING ===
+	var allChildNodes []interface{}
+	cleanedPanes := make([]*content.PaneNode, len(fullPayload.Panes))
+
+	for i, pane := range fullPayload.Panes {
+		if pane == nil {
+			continue
+		}
+
+		// Extract child nodes from this pane's OptionsPayload
+		if pane.OptionsPayload != nil {
+			if nodes, exists := pane.OptionsPayload["nodes"]; exists {
+				if nodesArray, ok := nodes.([]interface{}); ok {
+					allChildNodes = append(allChildNodes, nodesArray...)
+				}
+			}
+		}
+
+		// Create cleaned pane (without embedded nodes)
+		cleanedPane := *pane
+		cleanedPane.OptionsPayload = make(map[string]interface{})
+
+		// Copy all fields except "nodes"
+		if pane.OptionsPayload != nil {
+			for k, v := range pane.OptionsPayload {
+				if k != "nodes" {
+					cleanedPane.OptionsPayload[k] = v
+				}
+			}
+		}
+
+		cleanedPanes[i] = &cleanedPane
+	}
+
+	// === BUILD V1-COMPATIBLE RESPONSE ===
+	var tractStackNodes []*content.TractStackNode
+	if fullPayload.TractStack != nil {
+		tractStackNodes = []*content.TractStackNode{fullPayload.TractStack}
+	}
+
+	response := gin.H{
+		"storyfragmentNodes": []*content.StoryFragmentNode{fullPayload.StoryFragment},
+		"paneNodes":          cleanedPanes,
+		"childNodes":         allChildNodes,
+		"tractstackNodes":    tractStackNodes,
+	}
+
+	// Add menu nodes if they exist
+	if fullPayload.Menu != nil {
+		response["menuNodes"] = []*content.MenuNode{fullPayload.Menu}
+	}
+
 	h.logger.Content().Info("Get story fragment full payload request completed", "slug", slug, "found", fullPayload != nil, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetStoryFragmentFullPayloadBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
-	c.JSON(http.StatusOK, fullPayload)
+	c.JSON(http.StatusOK, response)
 }
 
 // GetHomeStoryFragment returns the home storyfragment using cache-first pattern
@@ -239,12 +291,6 @@ func (h *StoryFragmentHandlers) GetHomeStoryFragment(c *gin.Context) {
 		return
 	}
 
-	sessionID := c.GetHeader("X-TractStack-Session-ID")
-	err = h.storyFragmentService.EnrichWithMetadata(tenantCtx, homeStoryFragment, sessionID)
-	if err != nil {
-		h.logger.Content().Warn("Failed to enrich storyfragment metadata", "error", err)
-	}
-
 	h.logger.Content().Info("Get home story fragment request completed", "found", homeStoryFragment != nil, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetHomeStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
@@ -258,7 +304,7 @@ func (h *StoryFragmentHandlers) CreateStoryFragment(c *gin.Context) {
 	start := time.Now()
 	marker := h.perfTracker.StartOperation("create_storyfragment_request", tenantCtx.TenantID)
 	defer marker.Complete()
-	h.logger.Content().Debug("Received create storyfragment request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	h.logger.Content().Debug("Received create story fragment request", "method", c.Request.Method, "path", c.Request.URL.Path)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -275,7 +321,7 @@ func (h *StoryFragmentHandlers) CreateStoryFragment(c *gin.Context) {
 		return
 	}
 
-	h.logger.Content().Info("Create storyfragment request completed", "storyFragmentId", sf.ID, "title", sf.Title, "duration", time.Since(start))
+	h.logger.Content().Info("Create story fragment request completed", "storyFragmentId", sf.ID, "title", sf.Title, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for CreateStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
 
@@ -291,7 +337,7 @@ func (h *StoryFragmentHandlers) UpdateStoryFragment(c *gin.Context) {
 	start := time.Now()
 	marker := h.perfTracker.StartOperation("update_storyfragment_request", tenantCtx.TenantID)
 	defer marker.Complete()
-	h.logger.Content().Debug("Received update storyfragment request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
+	h.logger.Content().Debug("Received update story fragment request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -308,6 +354,7 @@ func (h *StoryFragmentHandlers) UpdateStoryFragment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
+
 	sf.ID = storyFragmentID
 
 	if err := h.storyFragmentService.Update(tenantCtx, &sf); err != nil {
@@ -315,13 +362,13 @@ func (h *StoryFragmentHandlers) UpdateStoryFragment(c *gin.Context) {
 		return
 	}
 
-	h.logger.Content().Info("Update storyfragment request completed", "storyFragmentId", sf.ID, "title", sf.Title, "duration", time.Since(start))
+	h.logger.Content().Info("Update story fragment request completed", "storyFragmentId", storyFragmentID, "title", sf.Title, "duration", time.Since(start))
 	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for UpdateStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
+	h.logger.Perf().Info("Performance for UpdateStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", storyFragmentID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "storyfragment updated successfully",
-		"storyFragmentId": sf.ID,
+		"storyFragmentId": storyFragmentID,
 	})
 }
 
@@ -331,7 +378,7 @@ func (h *StoryFragmentHandlers) DeleteStoryFragment(c *gin.Context) {
 	start := time.Now()
 	marker := h.perfTracker.StartOperation("delete_storyfragment_request", tenantCtx.TenantID)
 	defer marker.Complete()
-	h.logger.Content().Debug("Received delete storyfragment request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
+	h.logger.Content().Debug("Received delete story fragment request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -348,7 +395,7 @@ func (h *StoryFragmentHandlers) DeleteStoryFragment(c *gin.Context) {
 		return
 	}
 
-	h.logger.Content().Info("Delete storyfragment request completed", "storyFragmentId", storyFragmentID, "duration", time.Since(start))
+	h.logger.Content().Info("Delete story fragment request completed", "storyFragmentId", storyFragmentID, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for DeleteStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", storyFragmentID)
 

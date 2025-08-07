@@ -181,6 +181,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 			// Story fragment endpoints
 			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
+			nodes.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
 			nodes.POST("/storyfragments", storyFragmentHandlers.GetStoryFragmentsByIDs)
 			nodes.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
