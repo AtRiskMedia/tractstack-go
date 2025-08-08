@@ -6,6 +6,7 @@
     <title>TractStack SysOp</title>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         :root {
             --color-bg: #21252b;
@@ -22,6 +23,7 @@
             --color-green: #98c379;
             --color-yellow: #e5c07b;
             --color-red: #e06c75;
+            --color-orange: #d19a66;
             --color-white-bright: #ffffff;
             --color-lead-bright: #fcfcfc;
             --color-lead-medium: #8a9298;
@@ -92,6 +94,13 @@
         .anonymous-active-bright { color: var(--color-cyan-bright); }
         .anonymous-active-medium { color: var(--color-cyan); }
         .anonymous-active-light { color: var(--color-cyan-dim); }
+        
+        /* Graph styles */
+        .graph-container { background: var(--color-bg); border: 1px solid var(--color-text-dim); border-radius: 4px; min-height: 400px; overflow: hidden; position: relative; }
+        .graph-controls { margin-bottom: 15px; }
+        .graph-legend { display: flex; flex-wrap: wrap; gap: 0 2em; margin-top: 10px; }
+        .graph-legend-item { display: flex; align-items: center; gap: 6px; }
+        .graph-legend-color { width: 12px; height: 12px; border-radius: 50%; }
 
         @media (max-width: 820px) { body { font-size: 12px; } .logo-bar pre.logo { font-size: 10px; } .main-area { flex-direction: column; padding: 0 10px;} .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--color-text-dim);} .status-bar { flex-direction: column; gap: 5px; text-align: center; } }
     </style>
@@ -125,8 +134,9 @@
                 <div class="sidebar">
                     <pre class="tab-menu">SYSOP MENU</pre>
                     <pre class="tab-item" :class="{ 'active': currentTab === 'dashboard' }" @click="switchTab('dashboard')">[ D ] Dashboard</pre>
-                    <pre class="tab-item" :class="{ 'active': currentTab === 'status' }" @click="switchTab('status')">[ S ] Status</pre>
+                    <pre class="tab-item" :class="{ 'active': currentTab === 'graph' }" @click="switchTab('graph')">[ G ] Graph</pre>
                     <pre class="tab-item" :class="{ 'active': currentTab === 'cache' }" @click="switchTab('cache')">[ C ] Cache</pre>
+                    <pre class="tab-item" :class="{ 'active': currentTab === 'status' }" @click="switchTab('status')">[ S ] Status</pre>
                     <pre class="tab-item" :class="{ 'active': currentTab === 'analytics' }" @click="switchTab('analytics')">[ A ] Analytics</pre>
                     <pre class="tab-item" :class="{ 'active': currentTab === 'tenants' }" @click="switchTab('tenants')">[ T ] Tenants</pre>
                     <pre class="tab-item" :class="{ 'active': currentTab === 'logs' }" @click="switchTab('logs')">[ L ] Logs</pre>
@@ -177,6 +187,43 @@
 
                     <div id="tab-cache" x-show="currentTab === 'cache'" x-cloak><pre class="dashboard-header"><span class="header-label">CACHE DETAILS - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span></pre><div id="cache-detail-table" class="metrics-table">Loading...</div></div>
                     <div id="tab-analytics" x-show="currentTab === 'analytics'" x-cloak><pre class="dashboard-header"><span class="header-label">ANALYTICS - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span></pre><div id="analytics-detail-table" class="metrics-table">Loading...</div></div>
+                    
+                    <div id="tab-graph" x-show="currentTab === 'graph'" x-cloak>
+                        <pre class="dashboard-header"><span class="header-label">ACTIVITY GRAPH - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span><span class="header-label"> - LAST HOUR</span></pre>
+                        <div class="status-section">
+                            <div class="graph-controls">
+                                <button class="sysop-button" @click="loadGraphData()">[ refresh graph ]</button>
+                                <span class="metric-dim" x-text="graphStatus"></span>
+                            </div>
+                            <div class="graph-container" id="graph-svg-container"></div>
+                            <div class="graph-legend">
+                                <div class="graph-legend-item">
+                                    <div class="graph-legend-color" style="background-color: var(--color-cyan);"></div>
+                                    <span>Sessions</span>
+                                </div>
+                                <div class="graph-legend-item">
+                                    <div class="graph-legend-color" style="background-color: var(--color-yellow);"></div>
+                                    <span>Fingerprints</span>
+                                </div>
+                                <div class="graph-legend-item">
+                                    <div class="graph-legend-color" style="background-color: var(--color-cyan-bright);"></div>
+                                    <span>Visits</span>
+                                </div>
+                                <div class="graph-legend-item">
+                                    <div class="graph-legend-color" style="background-color: var(--color-orange);"></div>
+                                    <span>Pages</span>
+                                </div>
+                                <div class="graph-legend-item">
+                                    <div class="graph-legend-color" style="background-color: var(--color-green);"></div>
+                                    <span>Leads</span>
+                                </div>
+                                <div class="graph-legend-item">
+                                    <div class="graph-legend-color" style="background-color: var(--color-purple);"></div>
+                                    <span>Beliefs</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     
                     <div id="tab-tenants" x-show="currentTab === 'tenants'" x-cloak>
                         <pre class="dashboard-header">TENANT MANAGEMENT</pre>
