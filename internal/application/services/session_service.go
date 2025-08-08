@@ -594,7 +594,6 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		VisitID:       visitID,
 		FingerprintID: fingerprintID,
 		StartTime:     time.Now().UTC(),
-		CurrentPage:   "/",
 		CreatedAt:     time.Now().UTC(),
 		LastActivity:  time.Now().UTC(),
 	}
@@ -641,7 +640,6 @@ func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID,
 		VisitID:       visitID,
 		FingerprintID: fingerprintID,
 		StartTime:     time.Now().UTC(),
-		CurrentPage:   "/",
 		CreatedAt:     time.Now().UTC(),
 		LastActivity:  time.Now().UTC(),
 	}

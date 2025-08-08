@@ -46,7 +46,6 @@ document.addEventListener('alpine:init', () => {
       sysop_tenant_token: '/api/sysop/tenant-token',
       sysop_orphan_analysis: '/api/sysop/orphan-analysis',
       sysop_graph_realtime: '/api/sysop/graph',
-      contentMap: '/api/v1/content/full-map',
       analytics: '/api/v1/analytics/dashboard',
       nodes: {
         tractstacks: '/api/v1/nodes/tractstacks',
@@ -282,10 +281,10 @@ document.addEventListener('alpine:init', () => {
             d3.select(event.currentTarget).style('cursor', 'grab');
           }));
 
-      // --- NEW: Wireframe node rendering ---
+      // --- Wireframe node rendering focused on state relationships ---
       const symbolGenerator = d3.symbol().size(d => d.size * d.size * 2.5);
 
-      // Solid outline for Session
+      // Solid outline for Session (triangle)
       nodeGroup.filter(d => d.type === 'session')
         .append('path')
         .attr('d', symbolGenerator.type(d3.symbolTriangle))
@@ -293,7 +292,7 @@ document.addEventListener('alpine:init', () => {
         .attr('stroke', d => this.getNodeColor(d.type))
         .attr('stroke-width', 2);
 
-      // Double line for Visit
+      // Double line for Visit (triangle)
       const visitGroup = nodeGroup.filter(d => d.type === 'visit');
       visitGroup.append('path')
         .attr('d', symbolGenerator.type(d3.symbolTriangle))
@@ -306,7 +305,7 @@ document.addEventListener('alpine:init', () => {
         .attr('stroke', d => this.getNodeColor(d.type))
         .attr('stroke-width', 1);
 
-      // Dashed outline for Page
+      // Dashed outline for Page (rectangle)
       nodeGroup.filter(d => d.type === 'page')
         .append('rect')
         .attr('width', d => d.size * 1.8)
@@ -319,8 +318,16 @@ document.addEventListener('alpine:init', () => {
         .attr('stroke-width', 2)
         .attr('stroke-dasharray', '5,5');
 
-      // Dotted outline for Fingerprint
+      // SOLID CIRCLE for Fingerprint
       nodeGroup.filter(d => d.type === 'fingerprint')
+        .append('circle')
+        .attr('r', d => d.size)
+        .attr('fill', d => this.getNodeColor(d.type))
+        .attr('stroke', '#21252b')
+        .attr('stroke-width', 2);
+
+      // DOTTED CIRCLE for Belief 
+      nodeGroup.filter(d => d.type === 'belief')
         .append('circle')
         .attr('r', d => d.size)
         .attr('fill', 'transparent')
@@ -328,8 +335,8 @@ document.addEventListener('alpine:init', () => {
         .attr('stroke-width', 2)
         .attr('stroke-dasharray', '3,3');
 
-      // Solid fill for Lead and Belief (to stand out)
-      nodeGroup.filter(d => d.type === 'lead' || d.type === 'belief')
+      // Solid fill for Lead (circles)
+      nodeGroup.filter(d => d.type === 'lead')
         .append('circle')
         .attr('r', d => d.size)
         .attr('fill', d => this.getNodeColor(d.type))
@@ -365,7 +372,7 @@ document.addEventListener('alpine:init', () => {
         nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
       });
 
-      // --- NEW: Update legend to match new styles ---
+      // --- Update legend to match new styles ---
       this.updateGraphLegend();
     },
 
@@ -397,11 +404,15 @@ document.addEventListener('alpine:init', () => {
             svg.append('rect').attr('width', 16).attr('height', 16).attr('x', -8).attr('y', -8).attr('rx', 2).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
             break;
           case 'fingerprint':
+            // SOLID CIRCLE for fingerprint
+            svg.append('circle').attr('r', 8).attr('fill', color).attr('stroke', '#21252b').attr('stroke-width', 2);
+            break;
+          case 'belief':
+            // DOTTED CIRCLE for belief
             svg.append('circle').attr('r', 8).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 2).attr('stroke-dasharray', '3,3');
             break;
           case 'lead':
-          case 'belief':
-            svg.append('circle').attr('r', 8).attr('fill', color);
+            svg.append('circle').attr('r', 8).attr('fill', color).attr('stroke', '#21252b').attr('stroke-width', 2);
             break;
         }
         itemDiv.append('span').text(item.label);
@@ -416,12 +427,8 @@ document.addEventListener('alpine:init', () => {
           return `Fingerprint\n${node.id.substring(0, 8)}...`;
         case 'visit':
           return `Visit\n${node.id.substring(0, 8)}...\n${node.lastActivity || ''}`;
-        case 'page':
-          return node.pageTitle ? `${node.pageTitle}` : node.label;
         case 'lead':
           return `Lead\n${node.leadName || 'Unknown'}`;
-        case 'belief':
-          return `Belief\n${node.label}`;
         default:
           return node.label || node.id;
       }
@@ -430,20 +437,15 @@ document.addEventListener('alpine:init', () => {
     getNodeTooltip(node) {
       const typeLabels = {
         'session': 'Session', 'fingerprint': 'User Fingerprint', 'visit': 'Visit',
-        'page': 'Page Location', 'lead': 'Known Lead', 'belief': 'User Belief'
+        'lead': 'Known Lead'
       };
       let tooltip = `${typeLabels[node.type] || node.type}\nID: ${node.id}`;
       if (node.lastActivity) { tooltip += `\nLast Active: ${node.lastActivity}`; }
-      if (node.pageTitle) { tooltip += `\nTitle: ${node.pageTitle}`; }
       if (node.leadName) { tooltip += `\nName: ${node.leadName}`; }
       if (node.type === 'fingerprint') {
         tooltip += `\nBeliefs: ${node.beliefCount || 0}`;
         tooltip += `\nSessions: ${node.sessionCount || 0}`;
         tooltip += `\nAuthenticated: ${node.isAuthenticated ? 'Yes' : 'No'}`;
-      }
-      if (node.type === 'belief') {
-        const [key, value] = node.id.split(':');
-        tooltip += `\n${key} = ${value}`;
       }
       return tooltip;
     },
@@ -453,9 +455,7 @@ document.addEventListener('alpine:init', () => {
         'session': '#61AFEF',
         'visit': '#56B6C2',
         'fingerprint': '#E5C07B',
-        'page': '#E06C75',
         'lead': '#98C379',
-        'belief': '#C678DD',
       };
       return colorMap[type] || '#ABB2BF';
     },
@@ -475,14 +475,13 @@ document.addEventListener('alpine:init', () => {
 
       try {
         const nodeEndpoints = Object.values(this.apiEndpoints.nodes).map(url => fetchWithTenantToken(url));
-        const results = await Promise.allSettled([fetchWithTenantToken(this.apiEndpoints.contentMap), fetchWithTenantToken(this.apiEndpoints.analytics), fetchWithSysOpToken(activityEndpoint), fetchWithSysOpToken(orphanEndpoint), ...nodeEndpoints]);
+        const results = await Promise.allSettled([fetchWithTenantToken(this.apiEndpoints.analytics), fetchWithSysOpToken(activityEndpoint), fetchWithSysOpToken(orphanEndpoint), ...nodeEndpoints]);
         const getData = (result, def) => result.status === 'fulfilled' ? result.value : def;
 
-        const contentMap = getData(results[0], { data: { data: [] } });
-        const analytics = getData(results[1], { dashboard: {} });
-        const activity = getData(results[2], {});
-        const orphanAnalysis = getData(results[3], { status: 'offline' });
-        const nodeCounts = results.slice(4).map(res => getData(res, { count: 0 }));
+        const analytics = getData(results[0], { dashboard: {} });
+        const activity = getData(results[1], {});
+        const orphanAnalysis = getData(results[2], { status: 'offline' });
+        const nodeCounts = results.slice(3).map(res => getData(res, { count: 0 }));
         const nodes = Object.keys(this.apiEndpoints.nodes).reduce((acc, key, i) => ({ ...acc, [key]: nodeCounts[i].count }), {});
 
         this.pollDataStore = {
@@ -491,7 +490,6 @@ document.addEventListener('alpine:init', () => {
           activity,
           orphanAnalysis,
           nodes,
-          contentMapItems: contentMap.data?.data?.length || 0,
           analyticsStatus: analytics.dashboard?.status || 'complete',
           analyticsOverview: analytics.dashboard
         };
@@ -522,7 +520,7 @@ document.addEventListener('alpine:init', () => {
       const orphanCls = `status-${(orphan.status || 'offline').toLowerCase()}`;
 
       connEl.innerHTML = `Server Ping: <span class="${this.connectionStatusClass}">${this.pollDataStore.connectionStatus}</span>`;
-      cacheEl.innerHTML = `<span><span class="metric-label">✦ Content Map: </span><span class="metric-value">${data.contentMapItems || '0'} items</span></span><span><span class="metric-dim">○ Orphan Analysis: </span><span class="${orphanCls}">${orphan.status?.toUpperCase() || 'OFFLINE'}</span></span>`;
+      cacheEl.innerHTML = `<span><span class="metric-label">✦ Orphan Analysis: </span><span class="${orphanCls}">${orphan.status?.toUpperCase() || 'OFFLINE'}</span></span>`;
       nodesEl.innerHTML = Object.keys(nodes).map(k => format(k, nodes[k], 'activity-label', 'activity-value')).join(' ');
       activityEl.innerHTML = Object.keys(data.activity || {}).map(k => format(k, data.activity[k], 'activity-label', 'activity-value')).join(' ');
 
@@ -584,4 +582,3 @@ document.addEventListener('alpine:init', () => {
     disconnectLogStream() { if (this.logEvtSource) { this.logEvtSource.close(); this.logEvtSource = null; this.logConnectionStatus = 'Disconnected'; } },
   }));
 });
-

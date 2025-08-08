@@ -3,7 +3,6 @@ package services
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
@@ -100,15 +99,6 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 		"sessions", len(sessionIDs),
 		"fingerprints", len(fingerprintIDs),
 		"visits", len(visitIDs))
-
-	// Get content map for page title lookups
-	contentMap, err := s.getContentMapForTenant(tenantID)
-	if err != nil {
-		s.logger.System().Warn("Failed to get content map for page titles. Page titles will be missing.", "tenantId", tenantID, "error", err)
-		contentMap = make(map[string]string) // fallback to empty map
-	} else {
-		s.logger.System().Debug("Successfully loaded content map for page titles", "tenantId", tenantID, "map_size", len(contentMap))
-	}
 
 	nodes := []GraphNode{}
 	links := []GraphLink{}
@@ -228,34 +218,6 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 				Source: fingerprintID,
 				Target: visitID,
 				Type:   "fingerprint_visit",
-			})
-
-			// Add page node with enhanced title from content map
-			currentPage := visitState.CurrentPage
-			if currentPage == "" {
-				currentPage = "/"
-			}
-
-			pageLabel := s.getPageLabel(currentPage, contentMap)
-			pageTitle := s.getPageTitle(currentPage, contentMap)
-
-			if !nodeSet[currentPage] {
-				pageNode := GraphNode{
-					ID:        currentPage,
-					Type:      "page",
-					Label:     pageLabel,
-					Size:      14,
-					PageTitle: pageTitle,
-				}
-				nodes = append(nodes, pageNode)
-				nodeSet[currentPage] = true
-			}
-
-			// Link visit to page
-			links = append(links, GraphLink{
-				Source: visitID,
-				Target: currentPage,
-				Type:   "visit_page",
 			})
 		}
 
@@ -378,86 +340,6 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 		"success", true)
 
 	return result, nil
-}
-
-// Helper methods for enhanced node formatting
-
-// getContentMapForTenant retrieves content map for page title lookups
-func (s *SysOpService) getContentMapForTenant(tenantID string) (map[string]string, error) {
-	tenantCtx, err := s.tenantManager.NewContextFromID(tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create tenant context: %w", err)
-	}
-	defer tenantCtx.Close()
-
-	// Get content map from content map service
-	contentMapResponse, _, err := s.contentMapService.GetContentMap(tenantCtx, "", tenantCtx.CacheManager)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get content map: %w", err)
-	}
-
-	// Build slug -> title mapping
-	slugToTitle := make(map[string]string)
-	for _, item := range contentMapResponse.Data {
-		if item.Title != "" {
-			slug := item.Slug
-			// If slug is empty, it's the homepage, which has a path of "/"
-			if slug == "" {
-				slug = "/"
-			} else if !strings.HasPrefix(slug, "/") {
-				slug = "/" + slug
-			}
-			slugToTitle[slug] = item.Title
-		}
-	}
-
-	return slugToTitle, nil
-}
-
-// getPageLabel returns an enhanced page label using content map titles
-func (s *SysOpService) getPageLabel(currentPage string, contentMap map[string]string) string {
-	// Direct fix as requested for the homepage path
-	if currentPage == "/" {
-		if title, exists := contentMap["/"]; exists {
-			return title // Use the actual title if the map was fixed
-		}
-		return "Homepage" // Fallback
-	}
-
-	// Try to get title from content map
-	if title, exists := contentMap[currentPage]; exists && title != "" {
-		// Truncate long titles for label display
-		if len(title) > 20 {
-			return title[:17] + "..."
-		}
-		return title
-	}
-
-	// Fallback to path-based label
-	if len(currentPage) > 20 {
-		return "..." + currentPage[len(currentPage)-17:]
-	}
-	return currentPage
-}
-
-// getPageTitle returns the full page title from content map
-func (s *SysOpService) getPageTitle(currentPage string, contentMap map[string]string) string {
-	// Direct fix as requested for the homepage path
-	if currentPage == "/" {
-		if title, exists := contentMap["/"]; exists {
-			return title // Use the actual title if the map was fixed
-		}
-		return "Homepage" // Fallback
-	}
-
-	if title, exists := contentMap[currentPage]; exists && title != "" {
-		return title
-	}
-	// DEBUG: Only log if the map isn't empty, to avoid noise on complete failure
-	if len(contentMap) > 0 {
-		s.logger.System().Debug("Content map lookup failed, falling back to path", "key", currentPage)
-	}
-	return currentPage // fallback to path
 }
 
 // formatBeliefLabel creates a readable belief label
