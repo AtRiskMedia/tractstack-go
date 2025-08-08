@@ -5,29 +5,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TractStack SysOp</title>
     <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="app.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
         :root {
-            --color-bg: #21252b;
-            --color-bg-sidebar: #282c34;
-            --color-text-main: #abb2bf;
-            --color-text-dim: #5c6370;
-            --color-cyan: #56b6c2;
-            --color-cyan-dim: #2F5B66;
-            --color-cyan-bright: #61dafb;
-            --color-logo: #000000;
-            --color-purple: #c678dd;
-            --color-purple-dim: #8e579e;
-            --color-purple-bright: #e099ff;
-            --color-green: #98c379;
-            --color-yellow: #e5c07b;
-            --color-red: #e06c75;
-            --color-orange: #d19a66;
+           --color-bg: #000000;
+            --color-bg-sidebar: #181825; /* Catppuccin Mantle */
+            --color-text-main: #cdd6f4; /* Catppuccin Text */
+            --color-text-dim: #a6adc8;  /* Catppuccin Subtext0 */
+            --color-cyan: #89dceb;      /* Catppuccin Sky */
+            --color-cyan-dim: #458592;
+            --color-cyan-bright: #99e3f0;
+            --color-logo: rgba(200, 223, 140, 0.85); /* Unchanged as requested */
+            --color-purple: #cba6f7;    /* Catppuccin Mauve */
+            --color-purple-dim: #8c73aa;
+            --color-purple-bright: #ddb8ff;
+            --color-green: #c8df8c;      /* Your Brand Green */
+            --color-yellow: #f9e2af;    /* Catppuccin Yellow */
+            --color-red: #f38ba8;        /* Catppuccin Red */
+            --color-orange: #fab387;    /* Catppuccin Peach */
             --color-white-bright: #ffffff;
             --color-lead-bright: #fcfcfc;
-            --color-lead-medium: #8a9298;
-            --color-lead-light: #6e7681;
+            --color-lead-medium: #9399b2; /* Catppuccin Overlay2 */
+            --color-lead-light: #7f849c;  /* Catppuccin Overlay1 */ 
         }
         [x-cloak] { display: none !important; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -58,22 +59,31 @@
         .metric-dim { color: var(--color-text-dim); }
         .activity-label { color: var(--color-purple); }
         .activity-value { color: var(--color-white-bright); }
+        
+        /* Status Colors - White for positive, yellow for warning */
         .status-primed, .status-warmed { color: var(--color-yellow); }
-        .status-ready, .status-online, .status-complete, .status-hot { color: var(--color-green); }
-        .status-loading, .status-warming { color: var(--color-cyan-bright); }
+        .status-ready, .status-online, .status-complete, .status-hot { color: var(--color-white-bright); }
+        .status-loading, .status-warming, .status-connecting { color: var(--color-cyan-bright); }
         .status-offline, .status-error, .status-unavailable, .status-cold { color: var(--color-red); }
+
         .status-bar { border-top: 1px solid var(--color-text-dim); padding: 8px 20px; display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-dim); }
-        .login-screen-wrapper { display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
-        .login-message { color: var(--color-purple-dim); margin: 20px 0; font-size: 16px; }
-        .login-input { background: transparent; border: 1px solid var(--color-purple); color: var(--color-white-bright); padding: 8px 16px; font-family: inherit; font-size: 14px; margin-right: 10px; width: 250px; }
+        .status-bar-left { display: flex; gap: 1em; }
+        
+        /* Login Screen - Cyan Theme */
+        .login-screen-wrapper { background: var(--color-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-message { color: var(--color-cyan-dim); margin: 20px 0; font-size: 16px; }
+        .login-input { background: transparent; border: 1px solid var(--color-cyan-dim); color: var(--color-cyan-bright); padding: 8px 16px; font-family: inherit; font-size: 14px; margin-right: 10px; width: 250px; }
         .login-input:focus { outline: none; border-color: var(--color-cyan); }
         .sysop-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: var(--color-bg); border: 1px solid var(--color-purple); color: var(--color-white-bright); padding: 4px 8px; font-family: inherit; font-size: 14px; }
         .sysop-select:focus { outline: none; border-color: var(--color-cyan); }
-        .sysop-button { background: transparent; border: none; color: var(--color-purple); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
-        .sysop-button:hover { color: var(--color-white-bright); }
+        .sysop-button { background: transparent; border: none; color: var(--color-cyan); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
+        .sysop-button:hover { color: var(--color-cyan-bright); }
+        
+        /* Tenant Selection - Bright white for active */
         .tenant-option { color: var(--color-text-dim); padding: 4px 0; cursor: pointer; }
         .tenant-option:hover { color: var(--color-cyan-bright); }
-        .tenant-option.active { color: var(--color-green); }
+        .tenant-option.active { color: var(--color-white-bright); }
+
         .progress-bar { display: inline-block; background-color: var(--color-text-dim); white-space: pre; }
         .progress-bar-fill { display: inline-block; height: 1em; background-color: var(--color-cyan); color: var(--color-bg); }
         .bbs-table-header { color: var(--color-cyan); border-bottom: 1px solid var(--color-text-dim); padding-bottom: 4px; margin-bottom: 8px; }
@@ -98,9 +108,9 @@
         /* Graph styles */
         .graph-container { background: var(--color-bg); border: 1px solid var(--color-text-dim); border-radius: 4px; min-height: 400px; overflow: hidden; position: relative; }
         .graph-controls { margin-bottom: 15px; }
-        .graph-legend { display: flex; flex-wrap: wrap; gap: 0 2em; margin-top: 10px; }
-        .graph-legend-item { display: flex; align-items: center; gap: 6px; }
-        .graph-legend-color { width: 12px; height: 12px; border-radius: 50%; }
+        .graph-legend { display: flex; flex-wrap: wrap; gap: 1em 2em; margin-top: 15px; padding: 10px; border: 1px solid var(--color-text-dim); border-radius: 4px; }
+        .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+        .graph-legend-shape { width: 14px; height: 14px; }
 
         @media (max-width: 820px) { body { font-size: 12px; } .logo-bar pre.logo { font-size: 10px; } .main-area { flex-direction: column; padding: 0 10px;} .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--color-text-dim);} .status-bar { flex-direction: column; gap: 5px; text-align: center; } }
     </style>
@@ -181,7 +191,8 @@
                         <pre class="dashboard-header"><span class="header-label">SYSTEM STATUS - </span><span class="header-highlight">TENANT: </span><span x-text="currentTenant"></span></pre>
                         <div class="status-section"><pre class="section-title">CONNECTION</pre><pre id="connection-status" class="metrics-table">--</pre></div>
                         <div class="status-section"><pre class="section-title">CACHE STATUS</pre><div id="cache-status" class="metrics-wrapper">--</div></div>
-                        <div class="status-section"><pre class="section-title">ACTIVITY</pre><div id="activity-metrics" class="metrics-wrapper">--</div></div>
+                        <div class="status-section"><pre class="section-title">NODES IN CACHE</pre><div id="nodes-in-cache-metrics" class="metrics-wrapper">--</div></div>
+                        <div class="status-section"><pre class="section-title">LIVE ACTIVITY</pre><div id="activity-metrics" class="metrics-wrapper">--</div></div>
                         <div class="status-section"><pre class="section-title">ANALYTICS</pre><pre id="analytics-metrics" class="metrics-table">--</pre></div>
                     </div>
 
@@ -197,30 +208,14 @@
                             </div>
                             <div class="graph-container" id="graph-svg-container"></div>
                             <div class="graph-legend">
-                                <div class="graph-legend-item">
-                                    <div class="graph-legend-color" style="background-color: var(--color-cyan);"></div>
-                                    <span>Sessions</span>
-                                </div>
-                                <div class="graph-legend-item">
-                                    <div class="graph-legend-color" style="background-color: var(--color-yellow);"></div>
-                                    <span>Fingerprints</span>
-                                </div>
-                                <div class="graph-legend-item">
-                                    <div class="graph-legend-color" style="background-color: var(--color-cyan-bright);"></div>
-                                    <span>Visits</span>
-                                </div>
-                                <div class="graph-legend-item">
-                                    <div class="graph-legend-color" style="background-color: var(--color-orange);"></div>
-                                    <span>Pages</span>
-                                </div>
-                                <div class="graph-legend-item">
-                                    <div class="graph-legend-color" style="background-color: var(--color-green);"></div>
-                                    <span>Leads</span>
-                                </div>
-                                <div class="graph-legend-item">
-                                    <div class="graph-legend-color" style="background-color: var(--color-purple);"></div>
-                                    <span>Beliefs</span>
-                                </div>
+                                <template x-for="item in graphLegendItems" :key="item.type">
+                                    <div class="graph-legend-item">
+                                        <svg class="graph-legend-shape" viewBox="-10 -10 20 20">
+                                            <path :d="item.shape" :fill="item.color"></path>
+                                        </svg>
+                                        <span x-text="item.label"></span>
+                                    </div>
+                                </template>
                             </div>
                         </div>
                     </div>
@@ -267,12 +262,13 @@
             </div>
 
             <div class="status-bar">
-                <pre>Last Update: <span id="last-update">--:--:--</span>  Status: <span id="status-bar-status">CONNECTING</span></pre>
+                <div class="status-bar-left">
+                    <pre>Status: <span :class="connectionStatusClass" x-text="statusBarContent.status">CONNECTING</span></pre>
+                    <pre x-show="statusBarContent.details" x-html="statusBarContent.details"></pre>
+                </div>
                 <pre>TractStack SysOp v1.0</pre>
             </div>
         </div>
     </div>
-    
-    <script src="app.js"></script>
 </body>
 </html>

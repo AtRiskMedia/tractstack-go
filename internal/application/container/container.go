@@ -60,6 +60,7 @@ type Container struct {
 	LogBroadcaster         *logging.LogBroadcaster
 	Broadcaster            messaging.Broadcaster
 	SysOpBroadcaster       *messaging.SysOpBroadcaster
+	SysOpService           *services.SysOpService
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -123,13 +124,19 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	)
 	contentMapService := services.NewContentMapService(logger, perfTracker)
 	authService := services.NewAuthService(logger, perfTracker, leadRepo)
-	// MODIFIED: Inject BeliefBroadcastService into SessionService for restoration logic
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
 	logBroadcaster := logging.GetBroadcaster()
 	broadcaster := messaging.NewSSEBroadcaster(logger)
+	sysOpService := services.NewSysOpService(
+		cacheManager,
+		tenantManager,
+		contentMapService,
+		logger,
+		perfTracker,
+	)
 	sysOpBroadcaster := messaging.NewSysOpBroadcaster(tenantManager, cacheManager)
 	go sysOpBroadcaster.Run()
 
@@ -173,6 +180,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		MultiTenantService:     multiTenantService,
 		LogBroadcaster:         logBroadcaster,
 		Broadcaster:            broadcaster,
+		SysOpService:           sysOpService,
 		SysOpBroadcaster:       sysOpBroadcaster,
 
 		// Infrastructure
