@@ -40,7 +40,6 @@ type VisitState struct {
 	CreatedAt     time.Time `json:"createdAt"`
 	LastActivity  time.Time `json:"lastActivity"`
 	StartTime     time.Time `json:"startTime"`
-	CurrentPage   string    `json:"currentPage"`
 }
 
 // SessionData represents ephemeral session state and serves as the coordination hub.
