@@ -39,6 +39,7 @@ func NewEventProcessingService(
 func (s *EventProcessingService) ProcessEventsWithSSE(
 	tenantCtx *tenant.Context,
 	sessionID string,
+	storyfragmentID string, // ADDED: storyfragmentID parameter to match handler call
 	events []domainEvents.Event,
 	currentPaneID string,
 	gotoPaneID string,
@@ -96,43 +97,35 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 			}
 
 		case "StoryFragment":
-			if event.Verb == "PAGEVIEWED" {
-				storyfragmentID := event.ID
+			// CLEANED UP: PAGEVIEWED is now PURE ANALYTICS ONLY - no synchronization logic
+			if event.Verb == "PAGEVIEWED" || event.Verb == "ENTERED" {
+				s.logger.Analytics().Debug("✅ StoryFragment Event Received (Pure Analytics)",
+					"storyFragmentId", event.ID,
+					"verb", event.Verb,
+					"sessionId", sessionID,
+					"tenantId", tenantCtx.TenantID,
+				)
 
-				var currentAuthoritativeUserBeliefs map[string][]string
-				if sessionData, sessionExists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); sessionExists {
-					if fpState, fpExists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID); fpExists {
-						currentAuthoritativeUserBeliefs = fpState.HeldBeliefs
-					}
+				sessionData, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
+				if !exists {
+					s.logger.Analytics().Warn("Could not find session to process StoryFragment event", "sessionId", sessionID)
+					continue
 				}
 
-				if len(currentAuthoritativeUserBeliefs) > 0 {
-					if beliefRegistry, registryExists := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID); registryExists {
-						emptyBeliefs := make(map[string][]string)
-						var affectedPanes []string
+				actionEvent := &analytics.ActionEvent{
+					ObjectID:      event.ID,
+					ObjectType:    event.Type,
+					Verb:          event.Verb,
+					FingerprintID: sessionData.FingerprintID,
+					VisitID:       sessionData.VisitID,
+					Duration:      0, // Duration is not applicable for this event type
+					CreatedAt:     time.Now().UTC(),
+				}
 
-						for paneID, paneBeliefs := range beliefRegistry.PaneBeliefPayloads {
-							beforeVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, emptyBeliefs)
-							beforeVisible := (beforeVisibility == "visible")
-
-							afterVisibility := s.beliefEvaluator.EvaluatePaneVisibility(paneBeliefs, currentAuthoritativeUserBeliefs)
-							afterVisible := (afterVisibility == "visible")
-
-							s.logger.Content().Debug("🔍 PAGEVIEWED Visibility Check",
-								"paneId", paneID, "storyfragmentId", storyfragmentID, "paneHasHeldRequirements", len(paneBeliefs.HeldBeliefs) > 0,
-								"paneHeldRequirements", paneBeliefs.HeldBeliefs, "userBeliefs", currentAuthoritativeUserBeliefs,
-								"beforeVisibility", beforeVisibility, "afterVisibility", afterVisibility, "visibilityDidChange", beforeVisible != afterVisible)
-
-							if beforeVisible != afterVisible {
-								affectedPanes = append(affectedPanes, paneID)
-							}
-						}
-
-						if len(affectedPanes) > 0 {
-							s.logger.Content().Debug("PAGEVIEWED: Visibility changes detected, broadcasting SSE.", "affectedPanes", affectedPanes)
-							broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, sessionID, storyfragmentID, affectedPanes, nil)
-						}
-					}
+				eventRepo := tenantCtx.EventRepo()
+				if err := eventRepo.StoreActionEvent(actionEvent); err != nil {
+					s.logger.Database().Error("Failed to store StoryFragment action event",
+						"error", err.Error(), "tenantId", tenantCtx.TenantID, "storyFragmentId", event.ID)
 				}
 			}
 		}

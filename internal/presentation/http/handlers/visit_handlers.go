@@ -13,13 +13,13 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
-// VisitHandlers contains all visit and session-related HTTP handlers
 type VisitHandlers struct {
 	sessionService *services.SessionService
 	authService    *services.AuthService
@@ -28,7 +28,6 @@ type VisitHandlers struct {
 	perfTracker    *performance.Tracker
 }
 
-// ProfileRequest represents the structure for profile requests
 type ProfileRequest struct {
 	SessionID      *string `json:"sessionId,omitempty"`
 	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
@@ -41,7 +40,6 @@ type ProfileRequest struct {
 	IsUpdate       bool    `json:"isUpdate"`
 }
 
-// ProfileResponse represents the response structure for profile requests
 type ProfileResponse struct {
 	Success        bool          `json:"success"`
 	Profile        *user.Profile `json:"profile,omitempty"`
@@ -55,7 +53,6 @@ type ProfileResponse struct {
 	Error          string        `json:"error,omitempty"`
 }
 
-// VisitResponse represents the response structure for visit requests
 type VisitResponse struct {
 	Fingerprint string        `json:"fingerprint"`
 	VisitID     string        `json:"visitId"`
@@ -65,7 +62,6 @@ type VisitResponse struct {
 	Consent     string        `json:"consent"`
 }
 
-// SSEMessage represents the structure for SSE messages
 type SSEMessage struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionId,omitempty"`
@@ -73,7 +69,6 @@ type SSEMessage struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// NewVisitHandlers creates visit handlers with injected dependencies
 func NewVisitHandlers(sessionService *services.SessionService, authService *services.AuthService, broadcaster messaging.Broadcaster, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *VisitHandlers {
 	return &VisitHandlers{
 		sessionService: sessionService,
@@ -84,13 +79,11 @@ func NewVisitHandlers(sessionService *services.SessionService, authService *serv
 	}
 }
 
-// Global SSE connection tracking
 var (
 	activeSSEConnections int64
-	maxSSEConnections    = int64(1000) // Default max connections
+	maxSSEConnections    = int64(1000)
 )
 
-// safeSSEConnection wraps SSE channel with safe closing
 type safeSSEConnection struct {
 	ch     chan string
 	closed int32
@@ -104,7 +97,6 @@ func (sc *safeSSEConnection) SafeClose() bool {
 	return false
 }
 
-// PostVisit handles POST /api/v1/auth/visit - creates/updates visits and sessions
 func (h *VisitHandlers) PostVisit(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -117,26 +109,37 @@ func (h *VisitHandlers) PostVisit(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received post visit request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	// Parse visit request
 	var req services.VisitRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Auth().Error("Visit request JSON binding failed", "tenantId", tenantCtx.TenantID, "error", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
-		return
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			h.logger.Auth().Error("Visit request JSON binding failed", "tenantId", tenantCtx.TenantID, "error", err.Error())
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
+			return
+		}
 	}
 
-	// Log the request details for debugging
+	storyfragmentID := "unknown"
+	if req.StoryfragmentID != nil {
+		storyfragmentID = *req.StoryfragmentID
+	}
+
+	if req.SessionID == nil {
+		newSessionID := security.GenerateULID()
+		req.SessionID = &newSessionID
+		h.logger.Auth().Debug("No session ID in request, generated new one for warming", "sessionId", newSessionID, "tenantId", tenantCtx.TenantID)
+	}
+
 	h.logger.Auth().Debug("Processing visit request",
 		"tenantId", tenantCtx.TenantID,
+		"storyfragmentId", storyfragmentID,
 		"hasSessionId", req.SessionID != nil,
 		"hasEncryptedEmail", req.EncryptedEmail != nil,
 		"hasEncryptedCode", req.EncryptedCode != nil,
+		"hasCloneRequest", req.TractStackSessionID != nil,
 		"hasConsent", req.Consent != nil)
 
-	// Use session service to process the visit request
-	result := h.sessionService.ProcessVisitRequest(&req, tenantCtx)
+	result := h.sessionService.ProcessVisitRequest(&req, storyfragmentID, tenantCtx)
 
-	// Handle the result
 	if !result.Success {
 		h.logger.Auth().Error("Visit processing failed",
 			"tenantId", tenantCtx.TenantID,
@@ -145,48 +148,34 @@ func (h *VisitHandlers) PostVisit(c *gin.Context) {
 		marker.SetSuccess(false)
 		h.logger.Perf().Info("Performance for PostVisit request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", false)
 
-		// Return appropriate HTTP status based on error type
+		status := http.StatusInternalServerError
 		switch result.Error {
 		case "session ID required":
-			c.JSON(http.StatusBadRequest, gin.H{"error": result.Error})
+			status = http.StatusBadRequest
 		case "invalid credentials":
-			c.JSON(http.StatusUnauthorized, gin.H{"error": result.Error})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error})
+			status = http.StatusUnauthorized
+		case "failed to decrypt email", "failed to decrypt code":
+			status = http.StatusBadRequest
 		}
+		c.JSON(status, gin.H{"error": result.Error, "success": false})
 		return
-	}
-
-	// Build response
-	response := gin.H{
-		"fingerprint": result.FingerprintID,
-		"visitId":     result.VisitID,
-		"hasProfile":  result.HasProfile,
-		"consent":     result.Consent,
-	}
-
-	// Add profile and token if present
-	if result.HasProfile && result.Profile != nil {
-		response["profile"] = result.Profile
-		if result.Token != "" {
-			response["token"] = result.Token
-		}
 	}
 
 	h.logger.Auth().Info("Visit processing completed",
 		"tenantId", tenantCtx.TenantID,
+		"sessionId", result.SessionID,
 		"fingerprintId", result.FingerprintID,
 		"visitId", result.VisitID,
 		"hasProfile", result.HasProfile,
+		"wasRestored", result.Restored,
 		"duration", time.Since(start))
 
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for PostVisit request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, result)
 }
 
-// GetSSE handles GET /api/v1/auth/sse - establishes Server-Sent Events connection
 func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -205,7 +194,13 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 		return
 	}
 
-	// Check connection limits
+	storyfragmentID := c.Query("storyfragmentId")
+	if storyfragmentID == "" {
+		h.logger.SSE().Error("SSE connection request missing storyfragment ID", "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Storyfragment ID required for SSE connection"})
+		return
+	}
+
 	currentConnections := atomic.LoadInt64(&activeSSEConnections)
 	if currentConnections >= maxSSEConnections {
 		h.logger.SSE().Warn("SSE connection limit reached",
@@ -219,23 +214,19 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 		return
 	}
 
-	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
 
-	// Increment connection count
 	atomic.AddInt64(&activeSSEConnections, 1)
 	connectionStart := time.Now()
 
-	// Use the injected broadcaster to manage the connection
 	connection := &safeSSEConnection{
 		ch: h.broadcaster.AddClientWithSession(tenantCtx.TenantID, sessionID),
 	}
 
 	defer func() {
-		// Cleanup on disconnect
 		connection.SafeClose()
 		atomic.AddInt64(&activeSSEConnections, -1)
 		h.broadcaster.RemoveClientWithSession(connection.ch, tenantCtx.TenantID, sessionID)
@@ -252,9 +243,9 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	h.logger.SSE().Info("SSE connection established",
 		"tenantId", tenantCtx.TenantID,
 		"sessionId", sessionID,
+		"storyfragmentId", storyfragmentID,
 		"totalConnections", atomic.LoadInt64(&activeSSEConnections))
 
-	// Send initial connection message
 	initialMessage := fmt.Sprintf("event: connected\ndata: {\"status\":\"ready\",\"sessionId\":\"%s\",\"tenantId\":\"%s\",\"connectionCount\":%d}\n\n",
 		sessionID, tenantCtx.TenantID, h.broadcaster.GetSessionConnectionCount(tenantCtx.TenantID, sessionID))
 	if _, err := c.Writer.WriteString(initialMessage); err != nil {
@@ -266,19 +257,15 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	}
 	c.Writer.Flush()
 
-	// Set up heartbeat ticker
 	ticker := time.NewTicker(time.Duration(config.SSEHeartbeatIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
-	// Create a new context with a long timeout for the SSE connection
 	clientCtx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(config.SSEConnectionTimeoutMinutes)*time.Minute)
 	defer cancel()
 
-	// Message handling loop
 	for {
 		select {
 		case <-clientCtx.Done():
-			// Client disconnected or timeout reached
 			h.logger.SSE().Info("SSE connection closing",
 				"tenantId", tenantCtx.TenantID,
 				"sessionId", sessionID,
@@ -287,14 +274,12 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 
 		case message, ok := <-connection.ch:
 			if !ok {
-				// Channel closed by the broadcaster
 				h.logger.SSE().Info("SSE connection channel closed",
 					"tenantId", tenantCtx.TenantID,
 					"sessionId", sessionID)
 				return
 			}
 
-			// Send message to client
 			if _, err := c.Writer.WriteString(message); err != nil {
 				h.logger.SSE().Error("SSE write failed",
 					"tenantId", tenantCtx.TenantID,
@@ -305,7 +290,6 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 			c.Writer.Flush()
 
 		case <-ticker.C:
-			// Send heartbeat
 			heartbeat := fmt.Sprintf("event: heartbeat\ndata: {\"timestamp\":%d,\"sessionId\":\"%s\",\"tenantId\":\"%s\"}\n\n", time.Now().UTC().Unix(), sessionID, tenantCtx.TenantID)
 			if _, err := c.Writer.WriteString(heartbeat); err != nil {
 				h.logger.SSE().Error("SSE heartbeat failed",
@@ -319,7 +303,6 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	}
 }
 
-// PostProfile handles POST /api/v1/auth/profile - creates/updates user profiles
 func (h *VisitHandlers) PostProfile(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -401,12 +384,10 @@ func (h *VisitHandlers) PostProfile(c *gin.Context) {
 	}
 }
 
-// validateEncryptedCredentials validates encrypted email and code
 func (h *VisitHandlers) validateEncryptedCredentials(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *user.Profile {
 	return h.authService.ValidateEncryptedCredentials(encryptedEmail, encryptedCode, tenantCtx)
 }
 
-// handleProfileValidation handles profile validation with encrypted credentials
 func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *tenant.Context) *ProfileResponse {
 	profile := h.validateEncryptedCredentials(*req.EncryptedEmail, *req.EncryptedCode, tenantCtx)
 	if profile == nil {
@@ -454,7 +435,6 @@ func (h *VisitHandlers) handleProfileValidation(req *ProfileRequest, tenantCtx *
 	}
 }
 
-// handleProfileUpdate handles the logic for a user logging in with email/password.
 func (h *VisitHandlers) handleProfileUpdate(req *ProfileRequest, tenantCtx *tenant.Context) *ProfileResponse {
 	lead, err := h.sessionService.ValidateLeadCredentials(req.Email, req.Codeword, tenantCtx)
 	if err != nil {

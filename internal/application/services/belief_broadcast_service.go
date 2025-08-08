@@ -17,6 +17,34 @@ func NewBeliefBroadcastService(cacheManager interfaces.Cache) *BeliefBroadcastSe
 	return &BeliefBroadcastService{cacheManager: cacheManager}
 }
 
+// CalculateBeliefDiff determines which panes change visibility between two belief states.
+func (b *BeliefBroadcastService) CalculateBeliefDiff(tenantID, storyfragmentID string, beforeBeliefs, afterBeliefs map[string][]string) []string {
+	// Get the storyfragment belief registry - same as PAGEVIEWED logic
+	beliefRegistry, registryExists := b.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+	if !registryExists {
+		return nil
+	}
+
+	var affectedPanes []string
+
+	// Create belief evaluator
+	beliefEngine := NewBeliefEvaluationService()
+
+	for paneID, paneBeliefs := range beliefRegistry.PaneBeliefPayloads {
+		beforeVisibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, beforeBeliefs)
+		beforeVisible := (beforeVisibility == "visible")
+
+		afterVisibility := beliefEngine.EvaluatePaneVisibility(paneBeliefs, afterBeliefs)
+		afterVisible := (afterVisibility == "visible")
+
+		if beforeVisible != afterVisible {
+			affectedPanes = append(affectedPanes, paneID)
+		}
+	}
+
+	return affectedPanes
+}
+
 func (b *BeliefBroadcastService) computeScrollTarget(
 	tenantID, sessionID, storyfragmentID string,
 	beforeSnapshot map[string]bool,
@@ -32,7 +60,6 @@ func (b *BeliefBroadcastService) computeScrollTarget(
 	}
 	var newlyRevealed []string
 
-	// CORRECTED: Call the correct constructor
 	beliefEngine := NewBeliefEvaluationService()
 
 	for _, paneID := range affectedPanes {

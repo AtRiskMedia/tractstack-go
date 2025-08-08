@@ -18,50 +18,48 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Database semaphore to limit concurrent database operations
-var dbSemaphore = make(chan struct{}, 100) // Allow 100 concurrent DB operations
-
-// SessionService handles session management, fingerprinting, and user authentication
 type SessionService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	beliefBroadcaster *BeliefBroadcastService
+	logger            *logging.ChanneledLogger
+	perfTracker       *performance.Tracker
 }
 
-// NewSessionService creates a new session service
-func NewSessionService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *SessionService {
+func NewSessionService(beliefBroadcaster *BeliefBroadcastService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *SessionService {
 	return &SessionService{
-		logger:      logger,
-		perfTracker: perfTracker,
+		beliefBroadcaster: beliefBroadcaster,
+		logger:            logger,
+		perfTracker:       perfTracker,
 	}
 }
 
-// SessionResult holds the result of session operations
 type SessionResult struct {
 	FingerprintID string        `json:"fingerprint"`
 	VisitID       string        `json:"visitId"`
+	SessionID     string        `json:"sessionId"`
 	HasProfile    bool          `json:"hasProfile"`
 	Profile       *user.Profile `json:"profile,omitempty"`
 	Token         string        `json:"token,omitempty"`
 	Consent       string        `json:"consent"`
+	Restored      bool          `json:"restored"`
+	AffectedPanes []string      `json:"affectedPanes"`
 	Success       bool          `json:"success"`
 	Error         string        `json:"error,omitempty"`
 }
 
-// VisitRequest represents the structure for visit creation requests
 type VisitRequest struct {
-	SessionID      *string `json:"sessionId,omitempty"`
-	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
-	EncryptedCode  *string `json:"encryptedCode,omitempty"`
-	Consent        *string `json:"consent,omitempty"`
+	SessionID           *string `json:"sessionId,omitempty"`
+	StoryfragmentID     *string `json:"storyfragmentId,omitempty"`
+	EncryptedEmail      *string `json:"encryptedEmail,omitempty"`
+	EncryptedCode       *string `json:"encryptedCode,omitempty"`
+	TractStackSessionID *string `json:"tractstack_session_id,omitempty"`
+	Consent             *string `json:"consent,omitempty"`
 }
 
-// SessionResponse holds session handling response data
 type SessionResponse struct {
 	Fingerprint string `json:"fingerprint"`
 	VisitID     string `json:"visitId"`
 }
 
-// VisitRowData represents visit data from database
 type VisitRowData struct {
 	ID            string
 	FingerprintID string
@@ -69,67 +67,11 @@ type VisitRowData struct {
 	CreatedAt     time.Time
 }
 
-// ProcessVisitRequest handles the complete visit creation workflow
-func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenant.Context) *SessionResult {
+func (s *SessionService) ProcessVisitRequest(req *VisitRequest, storyfragmentID string, tenantCtx *tenant.Context) *SessionResult {
 	if req.SessionID == nil {
-		return &SessionResult{
-			Success: false,
-			Error:   "session ID required",
-		}
+		return &SessionResult{Success: false, Error: "session ID required"}
 	}
-
-	var finalFpID, finalVisitID string
-	var hasProfile bool
-	var profile *user.Profile
-
-	if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, *req.SessionID); exists {
-		finalFpID = existingSession.FingerprintID
-		finalVisitID = existingSession.VisitID
-
-		if existingSession.LeadID != nil {
-			if lead, err := s.GetLeadByID(*existingSession.LeadID, tenantCtx); err == nil && lead != nil {
-				profile = &user.Profile{
-					Fingerprint:    finalFpID,
-					LeadID:         lead.ID,
-					Firstname:      lead.FirstName,
-					Email:          lead.Email,
-					ContactPersona: lead.ContactPersona,
-					ShortBio:       lead.ShortBio,
-				}
-				hasProfile = true
-			}
-		}
-	} else if req.EncryptedEmail != nil && req.EncryptedCode != nil {
-		result := s.processEncryptedAuthentication(*req.EncryptedEmail, *req.EncryptedCode, tenantCtx)
-		if !result.Success {
-			return result
-		}
-		finalFpID = result.FingerprintID
-		profile = result.Profile
-		hasProfile = true
-	} else {
-		finalFpID = security.GenerateULID()
-		if err := s.CreateFingerprint(finalFpID, nil, tenantCtx); err != nil {
-			if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
-				return &SessionResult{
-					Success: false,
-					Error:   "failed to create fingerprint",
-				}
-			}
-		}
-		hasProfile = false
-	}
-
-	if finalVisitID == "" {
-		var err error
-		finalVisitID, err = s.HandleVisitCreation(finalFpID, hasProfile, tenantCtx)
-		if err != nil {
-			return &SessionResult{
-				Success: false,
-				Error:   "failed to create visit",
-			}
-		}
-	}
+	sessionID := *req.SessionID
 
 	var consentValue string
 	if req.Consent != nil {
@@ -138,100 +80,222 @@ func (s *SessionService) ProcessVisitRequest(req *VisitRequest, tenantCtx *tenan
 		consentValue = "unknown"
 	}
 
-	s.updateCacheStates(tenantCtx, *req.SessionID, finalFpID, finalVisitID)
-
-	var token string
-	if hasProfile && profile != nil {
-		generatedToken, err := security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
-		if err != nil {
-			log.Printf("Failed to generate profile token: %v", err)
-		} else {
-			token = generatedToken
-		}
+	// Priority 1: Profile unlock (encrypted credentials provided)
+	if req.EncryptedEmail != nil && req.EncryptedCode != nil {
+		return s.processProfileUnlock(sessionID, storyfragmentID, *req.EncryptedEmail, *req.EncryptedCode, consentValue, tenantCtx)
 	}
 
+	// Priority 2: Cross-tab session cloning (different session ID provided)
+	if req.TractStackSessionID != nil {
+		return s.processSessionCloning(sessionID, storyfragmentID, *req.TractStackSessionID, consentValue, tenantCtx)
+	}
+
+	// Priority 3: Existing session - check for same-session restoration
+	if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); exists {
+		return s.processExistingSession(existingSession, sessionID, storyfragmentID, consentValue, tenantCtx)
+	}
+
+	// Priority 4: New session warming
+	return s.processSessionWarming(sessionID, consentValue, tenantCtx)
+}
+
+func (s *SessionService) processExistingSession(session *types.SessionData, sessionID, storyfragmentID, consent string, tenantCtx *tenant.Context) *SessionResult {
+	profile, hasProfile := s.getProfileFromSession(session, tenantCtx)
+
+	var token string
+	if profile != nil {
+		token, _ = security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
+	}
+
+	// For existing sessions, check if user has beliefs that affect this storyfragment
+	beforeBeliefs := make(map[string][]string) // Page always renders empty initially
+	afterBeliefs := make(map[string][]string)  // User's actual beliefs
+
+	if fpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, session.FingerprintID); exists {
+		afterBeliefs = fpState.HeldBeliefs
+
+		// ADD THIS DEBUG LOG
+		s.logger.Auth().Warn("Existing session belief check",
+			"sessionId", sessionID,
+			"storyfragmentId", storyfragmentID,
+			"userBeliefs", afterBeliefs,
+			"hasBeliefs", len(afterBeliefs) > 0)
+	}
+
+	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
+	restored := len(affectedPanes) > 0
+
+	// ADD THIS DEBUG LOG TOO
+	s.logger.Auth().Debug("Restoration calculation result",
+		"sessionId", sessionID,
+		"storyfragmentId", storyfragmentID,
+		"affectedPanes", affectedPanes,
+		"restored", restored)
+
 	return &SessionResult{
-		FingerprintID: finalFpID,
-		VisitID:       finalVisitID,
+		Success:       true,
+		SessionID:     sessionID,
+		FingerprintID: session.FingerprintID,
+		VisitID:       session.VisitID,
 		HasProfile:    hasProfile,
 		Profile:       profile,
 		Token:         token,
-		Consent:       consentValue,
-		Success:       true,
+		Consent:       consent,
+		Restored:      restored,
+		AffectedPanes: affectedPanes,
 	}
 }
 
-// processEncryptedAuthentication handles authentication with encrypted credentials
-func (s *SessionService) processEncryptedAuthentication(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *SessionResult {
+func (s *SessionService) getProfileFromSession(session *types.SessionData, tenantCtx *tenant.Context) (*user.Profile, bool) {
+	if session.LeadID != nil {
+		if lead, err := s.GetLeadByID(*session.LeadID, tenantCtx); err == nil && lead != nil {
+			profile := &user.Profile{
+				Fingerprint:    session.FingerprintID,
+				LeadID:         lead.ID,
+				Firstname:      lead.FirstName,
+				Email:          lead.Email,
+				ContactPersona: lead.ContactPersona,
+				ShortBio:       lead.ShortBio,
+			}
+			return profile, true
+		}
+	}
+	return nil, false
+}
+
+func (s *SessionService) processSessionWarming(sessionID, consent string, tenantCtx *tenant.Context) *SessionResult {
+	fingerprintID := security.GenerateULID()
+	if err := s.CreateFingerprint(fingerprintID, nil, tenantCtx); err != nil {
+		if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return &SessionResult{Success: false, Error: "failed to create fingerprint"}
+		}
+	}
+
+	visitID, err := s.HandleVisitCreation(fingerprintID, false, tenantCtx)
+	if err != nil {
+		return &SessionResult{Success: false, Error: "failed to create visit"}
+	}
+
+	s.updateCacheStates(tenantCtx, sessionID, fingerprintID, visitID, nil)
+
+	return &SessionResult{
+		Success:       true,
+		SessionID:     sessionID,
+		FingerprintID: fingerprintID,
+		VisitID:       visitID,
+		HasProfile:    false,
+		Consent:       consent,
+		Restored:      false,
+	}
+}
+
+func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryptedEmail, encryptedCode, consent string, tenantCtx *tenant.Context) *SessionResult {
 	decryptedEmail, err := security.Decrypt(encryptedEmail, tenantCtx.Config.AESKey)
 	if err != nil {
-		return &SessionResult{
-			Success: false,
-			Error:   "failed to decrypt email",
-		}
+		return &SessionResult{Success: false, Error: "failed to decrypt email"}
 	}
-
 	decryptedCode, err := security.Decrypt(encryptedCode, tenantCtx.Config.AESKey)
 	if err != nil {
-		return &SessionResult{
-			Success: false,
-			Error:   "failed to decrypt code",
-		}
+		return &SessionResult{Success: false, Error: "failed to decrypt code"}
 	}
-
 	lead, err := s.ValidateLeadCredentials(decryptedEmail, decryptedCode, tenantCtx)
 	if err != nil || lead == nil {
-		return &SessionResult{
-			Success: false,
-			Error:   "invalid credentials",
+		return &SessionResult{Success: false, Error: "invalid credentials"}
+	}
+
+	fingerprintID := s.FindFingerprintByLeadID(lead.ID, tenantCtx)
+	if fingerprintID == nil {
+		newFpID := security.GenerateULID()
+		if err := s.CreateFingerprint(newFpID, &lead.ID, tenantCtx); err != nil {
+			return &SessionResult{Success: false, Error: "failed to create fingerprint for existing lead"}
 		}
+		fingerprintID = &newFpID
 	}
 
-	var finalFpID string
-	if existingFpID := s.FindFingerprintByLeadID(lead.ID, tenantCtx); existingFpID != nil {
-		finalFpID = *existingFpID
-	} else {
-		finalFpID = security.GenerateULID()
+	beforeBeliefs := make(map[string][]string)
+	afterBeliefs := make(map[string][]string)
+	if fpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, *fingerprintID); exists {
+		afterBeliefs = fpState.HeldBeliefs
 	}
 
-	finalVisitID, err := s.HandleVisitCreation(finalFpID, true, tenantCtx)
+	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
+
+	visitID, err := s.HandleVisitCreation(*fingerprintID, true, tenantCtx)
 	if err != nil {
-		return &SessionResult{
-			Success: false,
-			Error:   "failed to create visit",
-		}
+		return &SessionResult{Success: false, Error: "failed to create visit for profile"}
 	}
 
-	if err := s.CreateFingerprint(finalFpID, &lead.ID, tenantCtx); err != nil {
-		if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
-			return &SessionResult{
-				Success: false,
-				Error:   "failed to create fingerprint",
-			}
-		}
-	}
+	s.updateCacheStates(tenantCtx, sessionID, *fingerprintID, visitID, &lead.ID)
 
 	profile := &user.Profile{
-		Fingerprint:    finalFpID,
+		Fingerprint:    *fingerprintID,
 		LeadID:         lead.ID,
 		Firstname:      lead.FirstName,
 		Email:          lead.Email,
 		ContactPersona: lead.ContactPersona,
 		ShortBio:       lead.ShortBio,
 	}
+	token, _ := security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
 
 	return &SessionResult{
-		FingerprintID: finalFpID,
-		VisitID:       finalVisitID,
-		Profile:       profile,
 		Success:       true,
+		SessionID:     sessionID,
+		FingerprintID: *fingerprintID,
+		VisitID:       visitID,
+		HasProfile:    true,
+		Profile:       profile,
+		Token:         token,
+		Consent:       consent,
+		Restored:      len(affectedPanes) > 0,
+		AffectedPanes: affectedPanes,
+	}
+}
+
+func (s *SessionService) processSessionCloning(newSessionID, storyfragmentID, oldSessionID, consent string, tenantCtx *tenant.Context) *SessionResult {
+	oldSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, oldSessionID)
+	if !exists {
+		return s.processSessionWarming(newSessionID, consent, tenantCtx)
+	}
+
+	fingerprintID := oldSession.FingerprintID
+	leadID := oldSession.LeadID
+
+	beforeBeliefs := make(map[string][]string)
+	afterBeliefs := make(map[string][]string)
+	if fpState, fpExists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, fingerprintID); fpExists {
+		afterBeliefs = fpState.HeldBeliefs
+	}
+
+	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
+
+	visitID, err := s.HandleVisitCreation(fingerprintID, leadID != nil, tenantCtx)
+	if err != nil {
+		return &SessionResult{Success: false, Error: "failed to create visit for cloned session"}
+	}
+
+	s.updateCacheStates(tenantCtx, newSessionID, fingerprintID, visitID, leadID)
+
+	profile, hasProfile := s.getProfileFromSession(oldSession, tenantCtx)
+	var token string
+	if profile != nil {
+		token, _ = security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
+	}
+
+	return &SessionResult{
+		Success:       true,
+		SessionID:     newSessionID,
+		FingerprintID: fingerprintID,
+		VisitID:       visitID,
+		HasProfile:    hasProfile,
+		Profile:       profile,
+		Token:         token,
+		Consent:       consent,
+		Restored:      len(affectedPanes) > 0,
+		AffectedPanes: affectedPanes,
 	}
 }
 
 func (s *SessionService) HandleVisitCreation(fingerprintID string, hasProfile bool, tenantCtx *tenant.Context) (string, error) {
-	dbSemaphore <- struct{}{}
-	defer func() { <-dbSemaphore }()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -281,11 +345,7 @@ func (s *SessionService) GetLatestVisitByFingerprint(fingerprintID string, tenan
 	return &visit, nil
 }
 
-// CreateFingerprint creates a new fingerprint record
 func (s *SessionService) CreateFingerprint(fingerprintID string, leadID *string, tenantCtx *tenant.Context) error {
-	dbSemaphore <- struct{}{}
-	defer func() { <-dbSemaphore }()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -294,7 +354,6 @@ func (s *SessionService) CreateFingerprint(fingerprintID string, leadID *string,
 	return err
 }
 
-// FindFingerprintByLeadID finds an existing fingerprint for a lead
 func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenant.Context) *string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -312,7 +371,6 @@ func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenan
 	return &fingerprintID
 }
 
-// GetLeadByFingerprint retrieves a lead associated with a fingerprint
 func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -365,14 +423,13 @@ func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *t
 	return &lead, nil
 }
 
-// GetLeadByID retrieves a lead by ID
 func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `
 		SELECT id, first_name, email, password_hash, contact_persona, short_bio, encrypted_code, encrypted_email, created_at, changed
-		FROM leads 
+		FROM leads
 		WHERE id = ?
 		LIMIT 1
 	`
@@ -417,7 +474,6 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 	return &lead, nil
 }
 
-// ValidateLeadCredentials validates email and password credentials
 func (s *SessionService) ValidateLeadCredentials(email, password string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	lead, err := s.GetLeadByEmail(email, tenantCtx)
 	if err != nil || lead == nil {
@@ -431,14 +487,13 @@ func (s *SessionService) ValidateLeadCredentials(email, password string, tenantC
 	return lead, nil
 }
 
-// GetLeadByEmail retrieves a lead by email
 func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `
 		SELECT id, first_name, email, password_hash, contact_persona, short_bio, encrypted_code, encrypted_email, created_at, changed
-		FROM leads 
+		FROM leads
 		WHERE email = ?
 		LIMIT 1
 	`
@@ -483,7 +538,6 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 	return &lead, nil
 }
 
-// HandleProfileSession handles session creation/update for profile operations
 func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile *user.Profile, sessionID string) (*SessionResponse, error) {
 	var fingerprintID string
 
@@ -552,23 +606,18 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 	}, nil
 }
 
-// updateCacheStates updates all cache states with new session data
-func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID, fingerprintID, visitID string) {
+func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID, fingerprintID, visitID string, leadID *string) {
 	cacheManager := tenantCtx.CacheManager
 
 	sessionData := &types.SessionData{
 		SessionID:     sessionID,
 		FingerprintID: fingerprintID,
 		VisitID:       visitID,
-		LeadID:        nil,
+		LeadID:        leadID,
 		LastActivity:  time.Now().UTC(),
 		CreatedAt:     time.Now().UTC(),
 		ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
 		IsExpired:     false,
-	}
-
-	if lead, err := s.GetLeadByFingerprint(fingerprintID, tenantCtx); err == nil && lead != nil {
-		sessionData.LeadID = &lead.ID
 	}
 
 	cacheManager.SetSession(tenantCtx.TenantID, sessionData)
@@ -580,6 +629,7 @@ func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID,
 	} else {
 		fingerprintState = &types.FingerprintState{
 			FingerprintID: fingerprintID,
+			LeadID:        leadID,
 			HeldBeliefs:   make(map[string][]string),
 			HeldBadges:    make(map[string]string),
 			LastActivity:  time.Now().UTC(),
