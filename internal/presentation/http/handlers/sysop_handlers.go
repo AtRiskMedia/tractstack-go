@@ -383,7 +383,6 @@ func (h *SysOpHandlers) clientWritePump(client *messaging.SysOpClient) {
 	}
 }
 
-// GetActivityGraph returns real-time session/fingerprint/belief graph data from cache (last hour)
 func (h *SysOpHandlers) GetActivityGraph(c *gin.Context) {
 	tenantID := c.Query("tenant")
 	if tenantID == "" {
@@ -391,233 +390,21 @@ func (h *SysOpHandlers) GetActivityGraph(c *gin.Context) {
 		return
 	}
 
-	cacheManager := h.container.CacheManager
-	now := time.Now()
-	oneHourAgo := now.Add(-1 * time.Hour)
+	h.container.Logger.System().Debug("Received activity graph request",
+		"tenantId", tenantID,
+		"method", c.Request.Method,
+		"path", c.Request.URL.Path)
 
-	// Get all session and fingerprint IDs from cache
-	sessionIDs := cacheManager.GetAllSessionIDs(tenantID)
-	fingerprintIDs := cacheManager.GetAllFingerprintIDs(tenantID)
-	visitIDs := cacheManager.GetAllVisitIDs(tenantID)
-
-	type GraphNode struct {
-		ID       string `json:"id"`
-		Type     string `json:"type"`
-		Label    string `json:"label"`
-		Size     int    `json:"size"`
-		LeadName string `json:"leadName,omitempty"`
+	// Delegate to SysOpService for business logic
+	result, err := h.container.SysOpService.GetActivityGraph(tenantID)
+	if err != nil {
+		h.container.Logger.System().Error("Activity graph generation failed",
+			"tenantId", tenantID,
+			"error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
-	type GraphLink struct {
-		Source string `json:"source"`
-		Target string `json:"target"`
-		Type   string `json:"type"`
-	}
-
-	nodes := []GraphNode{}
-	links := []GraphLink{}
-	nodeSet := make(map[string]bool) // Track unique nodes
-
-	// Process sessions -> fingerprints (last hour only)
-	for _, sessionID := range sessionIDs {
-		if sessionData, exists := cacheManager.GetSession(tenantID, sessionID); exists {
-			// Skip if session activity is older than 1 hour
-			if sessionData.LastActivity.Before(oneHourAgo) {
-				continue
-			}
-
-			// Add session node
-			sessionLabel := sessionID
-			if len(sessionID) > 8 {
-				sessionLabel = sessionID[:8] + "..."
-			}
-
-			if !nodeSet[sessionID] {
-				nodes = append(nodes, GraphNode{
-					ID:    sessionID,
-					Type:  "session",
-					Label: sessionLabel,
-					Size:  10,
-				})
-				nodeSet[sessionID] = true
-			}
-
-			// Add fingerprint node
-			fingerprintID := sessionData.FingerprintID
-			fingerprintLabel := fingerprintID
-			if len(fingerprintID) > 8 {
-				fingerprintLabel = fingerprintID[:8] + "..."
-			}
-
-			if !nodeSet[fingerprintID] {
-				nodes = append(nodes, GraphNode{
-					ID:    fingerprintID,
-					Type:  "fingerprint",
-					Label: fingerprintLabel,
-					Size:  12,
-				})
-				nodeSet[fingerprintID] = true
-			}
-
-			// Link session to fingerprint
-			links = append(links, GraphLink{
-				Source: sessionID,
-				Target: fingerprintID,
-				Type:   "session_fingerprint",
-			})
-
-			// Add visit node and link fingerprint -> visit
-			visitID := sessionData.VisitID
-			if visitState, exists := cacheManager.GetVisitState(tenantID, visitID); exists {
-				// Skip if visit activity is older than 1 hour
-				if visitState.LastActivity.Before(oneHourAgo) {
-					continue
-				}
-
-				visitLabel := visitID
-				if len(visitID) > 8 {
-					visitLabel = visitID[:8] + "..."
-				}
-
-				if !nodeSet[visitID] {
-					nodes = append(nodes, GraphNode{
-						ID:    visitID,
-						Type:  "visit",
-						Label: visitLabel,
-						Size:  8,
-					})
-					nodeSet[visitID] = true
-				}
-
-				// Link fingerprint to visit
-				links = append(links, GraphLink{
-					Source: fingerprintID,
-					Target: visitID,
-					Type:   "fingerprint_visit",
-				})
-
-				// Add page node and link visit -> page
-				currentPage := visitState.CurrentPage
-				if currentPage == "" {
-					currentPage = "/"
-				}
-
-				pageLabel := currentPage
-				if len(currentPage) > 20 {
-					pageLabel = "..." + currentPage[len(currentPage)-17:]
-				}
-
-				if !nodeSet[currentPage] {
-					nodes = append(nodes, GraphNode{
-						ID:    currentPage,
-						Type:  "page",
-						Label: pageLabel,
-						Size:  14,
-					})
-					nodeSet[currentPage] = true
-				}
-
-				// Link visit to page
-				links = append(links, GraphLink{
-					Source: visitID,
-					Target: currentPage,
-					Type:   "visit_page",
-				})
-			}
-
-			// Add lead node if this fingerprint has a lead (separate from fingerprint)
-			if sessionData.LeadID != nil && *sessionData.LeadID != "" {
-				leadID := *sessionData.LeadID
-
-				// Try to get lead name from database
-				leadName := "Unknown Lead"
-				if tenantCtx, err := h.container.TenantManager.NewContextFromID(tenantID); err == nil {
-					if lead, err := tenantCtx.LeadRepo().FindByID(leadID); err == nil && lead != nil {
-						leadName = lead.FirstName
-						if lead.Email != "" {
-							leadName += " (" + lead.Email + ")"
-						}
-					}
-					tenantCtx.Close()
-				}
-
-				leadLabel := leadName
-				if len(leadLabel) > 20 {
-					leadLabel = leadLabel[:17] + "..."
-				}
-
-				if !nodeSet[leadID] {
-					nodes = append(nodes, GraphNode{
-						ID:       leadID,
-						Type:     "lead",
-						Label:    leadLabel,
-						Size:     12,
-						LeadName: leadName,
-					})
-					nodeSet[leadID] = true
-				}
-
-				// Link fingerprint to lead
-				links = append(links, GraphLink{
-					Source: fingerprintID,
-					Target: leadID,
-					Type:   "fingerprint_lead",
-				})
-			}
-		}
-	}
-
-	// Process fingerprints -> beliefs (last hour only)
-	for _, fingerprintID := range fingerprintIDs {
-		if fpState, exists := cacheManager.GetFingerprintState(tenantID, fingerprintID); exists {
-			// Skip if fingerprint activity is older than 1 hour
-			if fpState.LastActivity.Before(oneHourAgo) {
-				continue
-			}
-
-			// Process held beliefs
-			for beliefKey, beliefValues := range fpState.HeldBeliefs {
-				for _, beliefValue := range beliefValues {
-					beliefNodeID := beliefKey + ":" + beliefValue
-					beliefLabel := beliefKey
-					if len(beliefKey) > 12 {
-						beliefLabel = beliefKey[:12] + "..."
-					}
-
-					if !nodeSet[beliefNodeID] {
-						nodes = append(nodes, GraphNode{
-							ID:    beliefNodeID,
-							Type:  "belief",
-							Label: beliefLabel,
-							Size:  8,
-						})
-						nodeSet[beliefNodeID] = true
-					}
-
-					// Link fingerprint to belief
-					links = append(links, GraphLink{
-						Source: fingerprintID,
-						Target: beliefNodeID,
-						Type:   "fingerprint_belief",
-					})
-				}
-			}
-		}
-	}
-
-	// Calculate stats
-	stats := gin.H{
-		"sessions":     len(sessionIDs),
-		"fingerprints": len(fingerprintIDs),
-		"visits":       len(visitIDs),
-		"nodes":        len(nodes),
-		"links":        len(links),
-		"timeframe":    "last_hour",
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"nodes": nodes,
-		"links": links,
-		"stats": stats,
-	})
+	// Return the enhanced graph data
+	c.JSON(http.StatusOK, result)
 }
