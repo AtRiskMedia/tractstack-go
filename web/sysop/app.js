@@ -325,7 +325,7 @@ document.addEventListener('alpine:init', () => {
 
         // Set dynamic size based on the new capped calculation
         this.graphData.nodes.forEach(node => {
-          const typeMultiplier = { 'session': 1.0, 'fingerprint': 1.2, 'lead': 1.3, 'belief': 0.9 };
+          const typeMultiplier = { 'session': 1.0, 'fingerprint': 1.2, 'lead': 1.3, 'belief': 0.9, 'storyfragment': 1.1 };
           node.dynamicSize = Math.max(1.5, cappedRadius * (typeMultiplier[node.type] || 1.0));
         });
 
@@ -343,7 +343,12 @@ document.addEventListener('alpine:init', () => {
 
         const link = svg.append('g').selectAll('line').data(validLinks).enter().append('line')
           .attr('stroke', '#a6adc8').attr('stroke-opacity', 0.7)
-          .attr('stroke-width', 1.5);
+          .attr('stroke-width', d => {
+            // Make ENTERED links thicker than PAGEVIEWED links
+            if (d.type === 'fingerprint_entered') return 3;
+            if (d.type === 'fingerprint_pageviewed') return 1.5;
+            return 1.5; // default
+          });
 
         const nodeGroup = svg.append('g').selectAll('g').data(this.graphData.nodes).enter().append('g')
           .style('cursor', 'grab')
@@ -352,12 +357,20 @@ document.addEventListener('alpine:init', () => {
             .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
             .on('end', (event, d) => { if (!event.active) this.simulation.alphaTarget(0); d.fx = null; d.fy = null; d3.select(event.currentTarget).style('cursor', 'grab'); }));
 
+        // Render beliefs as squares
         nodeGroup.filter(d => d.type === 'belief').append('rect')
           .attr('width', d => d.dynamicSize * 2).attr('height', d => d.dynamicSize * 2)
           .attr('x', d => -d.dynamicSize).attr('y', d => -d.dynamicSize)
           .attr('rx', 2).attr('fill', d => this.getNodeColor(d.type)).attr('opacity', 0.9);
 
-        nodeGroup.filter(d => d.type !== 'belief').append('circle')
+        // Render storyfragments as hexagons
+        nodeGroup.filter(d => d.type === 'storyfragment').append('path')
+          .attr('d', d => this.createHexagonPath(d.dynamicSize))
+          .attr('fill', d => this.getNodeColor(d.type))
+          .attr('opacity', 0.9);
+
+        // Render other nodes as circles
+        nodeGroup.filter(d => d.type !== 'belief' && d.type !== 'storyfragment').append('circle')
           .attr('r', d => d.dynamicSize).attr('fill', d => this.getNodeColor(d.type))
           .attr('opacity', 0.9);
 
@@ -401,16 +414,30 @@ document.addEventListener('alpine:init', () => {
       });
     },
 
+    // Create hexagon path for storyfragment nodes
+    createHexagonPath(radius) {
+      const points = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i;
+        const x = radius * Math.cos(angle);
+        const y = radius * Math.sin(angle);
+        points.push([x, y]);
+      }
+      return `M${points.map(p => p.join(',')).join('L')}Z`;
+    },
+
     getNodeTooltip(node) {
       const typeLabels = {
         'session': 'Session',
         'fingerprint': 'User Fingerprint',
         'lead': 'Known Lead',
-        'belief': 'Stored Belief'
+        'belief': 'Stored Belief',
+        'storyfragment': 'Page'
       };
       let tooltip = `${typeLabels[node.type] || node.type}\nID: ${node.id}`;
       if (node.lastActivity) { tooltip += `\nLast Active: ${node.lastActivity}`; }
       if (node.leadName) { tooltip += `\nName: ${node.leadName}`; }
+      if (node.pageTitle) { tooltip += `\nPage: ${node.pageTitle}`; }
       if (node.type === 'fingerprint') {
         tooltip += `\nBeliefs: ${node.beliefCount || 0}`;
         tooltip += `\nSessions: ${node.sessionCount || 0}`;
@@ -424,7 +451,8 @@ document.addEventListener('alpine:init', () => {
         'session': 'var(--color-cyan-2-bright)',
         'fingerprint': 'var(--color-purple-2-bright)',
         'lead': 'var(--color-red)',
-        'belief': 'var(--color-yellow)'
+        'belief': 'var(--color-yellow)',
+        'storyfragment': 'var(--color-storyfragment)'
       };
       return colorMap[type] || '#ABB2BF';
     },

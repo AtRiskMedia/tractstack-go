@@ -3,6 +3,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
@@ -70,6 +71,7 @@ type ActivityGraphResponse struct {
 type GraphStats struct {
 	Sessions           int    `json:"sessions"`
 	Fingerprints       int    `json:"fingerprints"`
+	StoryFragments     int    `json:"storyfragments"`
 	Nodes              int    `json:"nodes"`
 	Links              int    `json:"links"`
 	AuthenticatedUsers int    `json:"authenticatedUsers"`
@@ -120,245 +122,312 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 		}
 
 		stats.Sessions++
-
-		// Count sessions per fingerprint
 		fingerprintSessionCounts[sessionData.FingerprintID]++
 
-		// Add session node with enhanced metadata
-		timeAgo := s.formatTimeAgo(sessionData.LastActivity)
-		sessionLabel := fmt.Sprintf("Session\n%s\n%s", sessionID, timeAgo)
-
+		// Add session node
 		if !nodeSet[sessionID] {
-			sessionNode := GraphNode{
-				ID:            sessionID,
-				Type:          "session",
-				Label:         sessionLabel,
-				Size:          10,
-				LastActivity:  timeAgo,
-				ActivityLevel: s.getActivityLevel(sessionData.LastActivity),
-			}
-
-			if sessionData.LeadID != nil {
-				sessionNode.IsAuthenticated = true
-			}
-
-			nodes = append(nodes, sessionNode)
+			nodes = append(nodes, GraphNode{
+				ID:   sessionID,
+				Type: "session",
+				Size: 3,
+			})
 			nodeSet[sessionID] = true
 		}
 
-		// Add fingerprint node with enhanced metadata
-		fingerprintID := sessionData.FingerprintID
-		fingerprintLabel := fingerprintID
-		if len(fingerprintID) > 8 {
-			fingerprintLabel = fingerprintID[:8] + "..."
-		}
+		// Add fingerprint node and link
+		if !nodeSet[sessionData.FingerprintID] {
+			fingerprintState, fpExists := s.cacheManager.GetFingerprintState(tenantID, sessionData.FingerprintID)
+			isAuthenticated := sessionData.LeadID != nil
+			if isAuthenticated {
+				stats.AuthenticatedUsers++
+			}
 
-		if !nodeSet[fingerprintID] {
-			fingerprintNode := GraphNode{
-				ID:              fingerprintID,
+			beliefCount := 0
+			if fpExists && fingerprintState.HeldBeliefs != nil {
+				beliefCount = len(fingerprintState.HeldBeliefs)
+				stats.TotalBeliefs += beliefCount
+			}
+
+			nodes = append(nodes, GraphNode{
+				ID:              sessionData.FingerprintID,
 				Type:            "fingerprint",
-				Label:           fingerprintLabel,
-				Size:            12,
-				IsAuthenticated: sessionData.LeadID != nil,
-			}
-
-			// Get fingerprint state for belief count and activity
-			if fpState, exists := s.cacheManager.GetFingerprintState(tenantID, fingerprintID); exists {
-				beliefCount := 0
-				for _, beliefValues := range fpState.HeldBeliefs {
-					beliefCount += len(beliefValues)
-				}
-				fingerprintNode.BeliefCount = beliefCount
-				fingerprintNode.LastActivity = s.formatTimeAgo(fpState.LastActivity)
-				fingerprintNode.ActivityLevel = s.getActivityLevel(fpState.LastActivity)
-			}
-
-			nodes = append(nodes, fingerprintNode)
-			nodeSet[fingerprintID] = true
+				Size:            5,
+				IsAuthenticated: isAuthenticated,
+				BeliefCount:     beliefCount,
+			})
+			nodeSet[sessionData.FingerprintID] = true
 			stats.Fingerprints++
 		}
 
 		// Link session to fingerprint
 		links = append(links, GraphLink{
 			Source: sessionID,
-			Target: fingerprintID,
+			Target: sessionData.FingerprintID,
 			Type:   "session_fingerprint",
 		})
 
-		// Add lead node if this fingerprint has a lead
-		if sessionData.LeadID != nil && *sessionData.LeadID != "" {
+		// Add lead node if authenticated
+		if sessionData.LeadID != nil {
 			leadID := *sessionData.LeadID
-
-			// Try to get lead name from database
-			leadName := "Unknown Lead"
-			if tenantCtx, err := s.tenantManager.NewContextFromID(tenantID); err == nil {
-				if lead, err := tenantCtx.LeadRepo().FindByID(leadID); err == nil && lead != nil {
-					leadName = lead.FirstName
-					if lead.Email != "" {
-						leadName += " (" + lead.Email + ")"
-					}
-				}
-				tenantCtx.Close()
-			}
-
-			leadLabel := leadName
-			if len(leadLabel) > 20 {
-				leadLabel = leadLabel[:17] + "..."
-			}
-
 			if !nodeSet[leadID] {
-				leadNode := GraphNode{
-					ID:       leadID,
-					Type:     "lead",
-					Label:    leadLabel,
-					Size:     12,
-					LeadName: leadName,
-				}
-				nodes = append(nodes, leadNode)
+				nodes = append(nodes, GraphNode{
+					ID:   leadID,
+					Type: "lead",
+					Size: 6,
+				})
 				nodeSet[leadID] = true
-				stats.AuthenticatedUsers++
 			}
 
 			// Link fingerprint to lead
 			links = append(links, GraphLink{
-				Source: fingerprintID,
+				Source: sessionData.FingerprintID,
 				Target: leadID,
 				Type:   "fingerprint_lead",
 			})
 		}
 	}
 
-	// Update fingerprint nodes with session counts
-	for i := range nodes {
-		if nodes[i].Type == "fingerprint" {
-			nodes[i].SessionCount = fingerprintSessionCounts[nodes[i].ID]
+	// Process fingerprint beliefs
+	for _, fingerprintID := range fingerprintIDs {
+		fingerprintState, exists := s.cacheManager.GetFingerprintState(tenantID, fingerprintID)
+		if !exists || fingerprintState.HeldBeliefs == nil {
+			continue
+		}
+
+		// Only include fingerprints with recent activity
+		if fingerprintState.LastActivity.Before(oneHourAgo) {
+			continue
+		}
+
+		for beliefSlug := range fingerprintState.HeldBeliefs {
+			beliefNodeID := "belief_" + beliefSlug
+			if !nodeSet[beliefNodeID] {
+				nodes = append(nodes, GraphNode{
+					ID:    beliefNodeID,
+					Type:  "belief",
+					Label: beliefSlug,
+					Size:  4,
+				})
+				nodeSet[beliefNodeID] = true
+			}
+
+			// Link fingerprint to belief
+			links = append(links, GraphLink{
+				Source: fingerprintID,
+				Target: beliefNodeID,
+				Type:   "fingerprint_belief",
+			})
 		}
 	}
 
-	// Process fingerprints -> beliefs (last hour only)
-	for _, fingerprintID := range fingerprintIDs {
-		fpState, exists := s.cacheManager.GetFingerprintState(tenantID, fingerprintID)
-		if !exists {
-			continue
+	// NEW: Process StoryFragment activity from hourly epinet bins
+	storyFragmentActivity, err := s.extractStoryFragmentActivity(tenantID, oneHourAgo)
+	if err != nil {
+		s.logger.System().Warn("Failed to extract StoryFragment activity", "tenantId", tenantID, "error", err)
+	} else {
+		// Get content map for StoryFragment titles
+		contentMap, err := s.getContentMap(tenantID)
+		if err != nil {
+			s.logger.System().Warn("Failed to get content map for StoryFragments", "tenantId", tenantID, "error", err)
+			contentMap = make(map[string]struct{ Title, Slug string }) // fallback to empty map
 		}
 
-		// Skip if fingerprint activity is older than 1 hour
-		if fpState.LastActivity.Before(oneHourAgo) {
-			continue
-		}
+		// Add StoryFragment nodes and links
+		for storyfragmentID, fingerprintActivity := range storyFragmentActivity {
+			sfNodeID := "storyfragment_" + storyfragmentID
 
-		// Process held beliefs
-		for beliefKey, beliefValues := range fpState.HeldBeliefs {
-			stats.TotalBeliefs += len(beliefValues)
-
-			for _, beliefValue := range beliefValues {
-				beliefNodeID := beliefKey + ":" + beliefValue
-				beliefLabel := s.formatBeliefLabel(beliefKey, beliefValue)
-
-				if !nodeSet[beliefNodeID] {
-					beliefNode := GraphNode{
-						ID:    beliefNodeID,
-						Type:  "belief",
-						Label: beliefLabel,
-						Size:  8,
-					}
-					nodes = append(nodes, beliefNode)
-					nodeSet[beliefNodeID] = true
+			// Add StoryFragment node if not already added
+			if !nodeSet[sfNodeID] {
+				title := contentMap[storyfragmentID].Title
+				slug := contentMap[storyfragmentID].Slug
+				if title == "" {
+					title = storyfragmentID // fallback if title not found
+				}
+				if slug == "" {
+					slug = storyfragmentID // fallback if slug not found
 				}
 
-				// Link fingerprint to belief
-				links = append(links, GraphLink{
-					Source: fingerprintID,
-					Target: beliefNodeID,
-					Type:   "fingerprint_belief",
+				nodes = append(nodes, GraphNode{
+					ID:        sfNodeID,
+					Type:      "storyfragment",
+					Label:     "/" + slug, // Show slug with leading slash
+					PageTitle: title,      // Keep full title for tooltip
+					Size:      7,          // Larger than beliefs but smaller than leads
 				})
+				nodeSet[sfNodeID] = true
+				stats.StoryFragments++
+			}
+
+			// Add links from fingerprints to StoryFragments
+			for fingerprintID, verbSet := range fingerprintActivity {
+				// Only link if fingerprint is in our active set
+				if !nodeSet[fingerprintID] {
+					continue
+				}
+
+				// Create one link per verb type to avoid duplicates
+				hasEntered := verbSet["ENTERED"]
+				hasPageviewed := verbSet["PAGEVIEWED"]
+
+				if hasEntered {
+					links = append(links, GraphLink{
+						Source: fingerprintID,
+						Target: sfNodeID,
+						Type:   "fingerprint_entered",
+					})
+				}
+				if hasPageviewed {
+					links = append(links, GraphLink{
+						Source: fingerprintID,
+						Target: sfNodeID,
+						Type:   "fingerprint_pageviewed",
+					})
+				}
 			}
 		}
 	}
 
-	// Final stats
+	// Update final stats
 	stats.Nodes = len(nodes)
 	stats.Links = len(links)
 
-	result := &ActivityGraphResponse{
-		Nodes: nodes,
-		Links: links,
-		Stats: stats,
-	}
-
-	marker.SetSuccess(true)
-	s.logger.System().Info("Activity graph generation completed",
+	s.logger.System().Debug("Activity graph generation completed",
 		"tenantId", tenantID,
 		"nodes", stats.Nodes,
 		"links", stats.Links,
-		"sessions", stats.Sessions,
-		"fingerprints", stats.Fingerprints,
-		"authenticatedUsers", stats.AuthenticatedUsers,
-		"totalBeliefs", stats.TotalBeliefs,
+		"storyfragments", stats.StoryFragments,
 		"duration", time.Since(start))
 
-	s.logger.Perf().Info("Performance for GetActivityGraph",
-		"duration", marker.Duration,
-		"tenantId", tenantID,
-		"success", true)
-
-	return result, nil
+	return &ActivityGraphResponse{
+		Nodes: nodes,
+		Links: links,
+		Stats: stats,
+	}, nil
 }
 
-// formatBeliefLabel creates a readable belief label
-func (s *SysOpService) formatBeliefLabel(beliefKey, beliefValue string) string {
-	// Create a more readable belief label
-	label := fmt.Sprintf("%s:%s", beliefKey, beliefValue)
-	if len(label) > 15 {
-		if len(beliefKey) > 8 {
-			beliefKey = beliefKey[:8] + "..."
-		}
-		if len(beliefValue) > 6 {
-			beliefValue = beliefValue[:6] + "..."
-		}
-		label = fmt.Sprintf("%s:%s", beliefKey, beliefValue)
+// extractStoryFragmentActivity extracts StoryFragment activity from hourly epinet bins
+func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo time.Time) (map[string]map[string]map[string]bool, error) {
+	// Structure: storyfragmentID -> fingerprintID -> verb -> bool
+	activity := make(map[string]map[string]map[string]bool)
+
+	// Get recent hour keys (current hour and previous hour)
+	now := time.Now().UTC()
+	currentHour := now.Format("2006-01-02-15")
+	previousHour := now.Add(-1 * time.Hour).Format("2006-01-02-15")
+	hourKeys := []string{currentHour, previousHour}
+
+	// Get all epinets for this tenant
+	epinets, err := s.getEpinets(tenantID)
+	if err != nil {
+		return activity, err
 	}
-	return label
+
+	// Process each epinet's hourly bins
+	for _, epinetID := range epinets {
+		for _, hourKey := range hourKeys {
+			bin, exists := s.cacheManager.GetHourlyEpinetBin(tenantID, epinetID, hourKey)
+			if !exists {
+				continue
+			}
+
+			// Process each step in the bin
+			for nodeID, stepData := range bin.Data.Steps {
+				// Parse nodeID to extract StoryFragment activity
+				// Format: "commitmentAction_StoryFragment_VERB_storyfragmentID"
+				if !strings.Contains(nodeID, "StoryFragment") {
+					continue
+				}
+
+				parts := strings.Split(nodeID, "_")
+				if len(parts) < 4 {
+					continue
+				}
+
+				// Extract verb and storyfragmentID
+				verb := parts[len(parts)-2]
+				storyfragmentID := parts[len(parts)-1]
+
+				// Only process ENTERED and PAGEVIEWED verbs
+				if verb != "ENTERED" && verb != "PAGEVIEWED" {
+					continue
+				}
+
+				// Initialize nested maps if needed
+				if activity[storyfragmentID] == nil {
+					activity[storyfragmentID] = make(map[string]map[string]bool)
+				}
+
+				// Process each visitor (fingerprintID) for this step
+				for fingerprintID := range stepData.Visitors {
+					// Check if fingerprint has recent activity (within our time window)
+					fingerprintState, exists := s.cacheManager.GetFingerprintState(tenantID, fingerprintID)
+					if !exists || fingerprintState.LastActivity.Before(oneHourAgo) {
+						continue
+					}
+
+					if activity[storyfragmentID][fingerprintID] == nil {
+						activity[storyfragmentID][fingerprintID] = make(map[string]bool)
+					}
+					activity[storyfragmentID][fingerprintID][verb] = true
+				}
+			}
+		}
+	}
+
+	return activity, nil
 }
 
-// formatTimeAgo formats a time as "X minutes ago", "X hours ago", or "now"
-func (s *SysOpService) formatTimeAgo(t time.Time) string {
-	now := time.Now()
-	duration := now.Sub(t)
+// getContentMap retrieves StoryFragment titles and slugs from content map using correct cache access
+func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title, Slug string }, error) {
+	contentMap := make(map[string]struct{ Title, Slug string })
 
-	if duration < time.Minute {
-		return "now"
-	} else if duration < time.Hour {
-		minutes := int(duration.Minutes())
-		if minutes == 1 {
-			return "1 min ago"
-		}
-		return fmt.Sprintf("%d mins ago", minutes)
-	} else if duration < 24*time.Hour {
-		hours := int(duration.Hours())
-		if hours == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", hours)
-	} else {
-		days := int(duration.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
+	// Create tenant context to access content map properly
+	tenantCtx, err := s.tenantManager.NewContextFromID(tenantID)
+	if err != nil {
+		return contentMap, fmt.Errorf("failed to create tenant context: %w", err)
 	}
+	defer tenantCtx.Close()
+
+	// Use content map service to get cached content map
+	response, _, err := s.contentMapService.GetContentMap(tenantCtx, "", tenantCtx.CacheManager)
+	if err != nil {
+		return contentMap, fmt.Errorf("failed to get content map: %w", err)
+	}
+
+	// Extract StoryFragment titles and slugs
+	for _, item := range response.Data {
+		if item.Type == "StoryFragment" {
+			contentMap[item.ID] = struct{ Title, Slug string }{
+				Title: item.Title,
+				Slug:  item.Slug,
+			}
+		}
+	}
+
+	return contentMap, nil
 }
 
-// getActivityLevel determines activity level based on last activity time
-func (s *SysOpService) getActivityLevel(lastActivity time.Time) string {
-	now := time.Now()
-	duration := now.Sub(lastActivity)
-
-	if duration < 5*time.Minute {
-		return "active"
-	} else if duration < 30*time.Minute {
-		return "recent"
-	} else {
-		return "dormant"
+// getEpinets retrieves epinet IDs for the tenant
+func (s *SysOpService) getEpinets(tenantID string) ([]string, error) {
+	// Create tenant context to access epinet repository
+	tenantCtx, err := s.tenantManager.NewContextFromID(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create tenant context: %w", err)
 	}
+	defer tenantCtx.Close()
+
+	epinetRepo := tenantCtx.EpinetRepo()
+	epinets, err := epinetRepo.FindAll(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get epinets: %w", err)
+	}
+
+	epinetIDs := make([]string, 0, len(epinets))
+	for _, epinet := range epinets {
+		if epinet != nil {
+			epinetIDs = append(epinetIDs, epinet.ID)
+		}
+	}
+
+	return epinetIDs, nil
 }
