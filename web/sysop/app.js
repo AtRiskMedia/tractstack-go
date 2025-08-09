@@ -67,7 +67,6 @@ document.addEventListener('alpine:init', () => {
     },
 
     get statusBarContent() {
-      const defaultStatus = { status: this.sessionSocketStatus, details: `<span>Last Update: <span id="last-update">${this.pollDataStore.lastUpdate || '--:--:--'}</span></span>` };
       switch (this.currentTab) {
         case 'status':
         case 'cache':
@@ -105,7 +104,7 @@ document.addEventListener('alpine:init', () => {
       return ((value / total) * 100).toFixed(1);
     },
     sessionBlockCharacter(state) {
-      return state.isLead ? '░' : '▒';
+      return state.isLead ? '█' : '▓';
     },
     sessionBlockClass(state) {
       const now = Date.now();
@@ -348,22 +347,22 @@ document.addEventListener('alpine:init', () => {
         .attr('stroke', '#21252b')
         .attr('stroke-width', 2);
 
-      const labels = nodeGroup.append('text')
-        .attr('font-size', '10px')
-        .attr('font-family', 'monospace')
-        .attr('fill', '#abb2bf')
-        .attr('text-anchor', 'middle')
-        .attr('y', d => d.size + 15)
-        .style('pointer-events', 'none')
-        .each(function (d) {
-          const lines = d.label.split('\n');
-          for (let i = 0; i < lines.length; i++) {
-            d3.select(this).append('tspan')
-              .attr('x', 0)
-              .attr('dy', i === 0 ? 0 : '1.2em')
-              .text(lines[i]);
-          }
-        });
+      //const labels = nodeGroup.append('text')
+      //  .attr('font-size', '10px')
+      //  .attr('font-family', 'monospace')
+      //  .attr('fill', '#abb2bf')
+      //  .attr('text-anchor', 'middle')
+      //  .attr('y', d => d.size + 15)
+      //  .style('pointer-events', 'none')
+      //  .each(function (d) {
+      //    const lines = d.label.split('\n');
+      //    for (let i = 0; i < lines.length; i++) {
+      //      d3.select(this).append('tspan')
+      //        .attr('x', 0)
+      //        .attr('dy', i === 0 ? 0 : '1.2em')
+      //        .text(lines[i]);
+      //    }
+      //  });
 
       nodeGroup.append('title')
         .text(d => this.getNodeTooltip(d));

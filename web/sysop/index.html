@@ -9,123 +9,125 @@
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
-        :root {
+       :root {
            --color-bg: #000000;
-            --color-bg-sidebar: #181825; /* Catppuccin Mantle */
-            --color-text-main: #cdd6f4; /* Catppuccin Text */
-            --color-text-dim: #a6adc8;  /* Catppuccin Subtext0 */
-            --color-cyan: #89dceb;      /* Catppuccin Sky */
-            --color-cyan-dim: #458592;
-            --color-cyan-bright: #99e3f0;
-            --color-logo: rgba(200, 223, 140, 0.85); /* Unchanged as requested */
-            --color-purple: #cba6f7;    /* Catppuccin Mauve */
-            --color-purple-dim: #8c73aa;
-            --color-purple-bright: #ddb8ff;
-            --color-green: #c8df8c;      /* Your Brand Green */
-            --color-yellow: #f9e2af;    /* Catppuccin Yellow */
-            --color-red: #f38ba8;        /* Catppuccin Red */
-            --color-orange: #fab387;    /* Catppuccin Peach */
-            --color-white-bright: #ffffff;
-            --color-lead-bright: #fcfcfc;
-            --color-lead-medium: #9399b2; /* Catppuccin Overlay2 */
-            --color-lead-light: #7f849c;  /* Catppuccin Overlay1 */ 
-        }
-        [x-cloak] { display: none !important; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace; background: var(--color-bg); color: var(--color-text-main); font-size: 14px; line-height: 1.4; overflow-x: hidden; min-height: 100vh; }
-        pre { font-family: inherit; white-space: pre; }
-        .bbs-container { display: flex; flex-direction: column; min-height: 100vh; }
-        .logo-bar { text-align: center; padding-top: 20px; padding-bottom: 5px; }
-        .logo-bar pre.logo { padding: 0; margin: 0; color: var(--color-logo); font-size: 18px; line-height: 1.2; letter-spacing: -1px; }
-        .attribution { color: var(--color-text-dim); font-size: 11px; margin-top: 5px; padding-bottom: 10px; }
-        .main-area { display: flex; flex: 1; padding: 0 20px; }
-        .sidebar { width: 200px; padding: 15px 10px; }
-        .tab-menu { color: var(--color-cyan-dim); font-weight: bold; margin-bottom: 10px; }
-        .tab-item { color: var(--color-text-dim); cursor: pointer; padding: 4px 0; transition: color 0.2s; }
-        .tab-item:hover { color: var(--color-cyan); }
-        .tab-item.active { color: var(--color-cyan-bright); font-weight: bold; }
-        .content-area { flex: 1; padding: 15px; overflow-y: auto; }
-        .bbs-art-background { background-color: #10120d; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAABNJREFUCB1jZGD4z8DAwMiAAwA1NQECJvJSOwAAAABJRU5ErkJggg=='); background-repeat: repeat; }
-        .dashboard-header { margin-bottom: 20px; padding-bottom: 5px; border-bottom: 1px solid var(--color-text-dim); }
-        .dashboard-header .header-label { color: var(--color-cyan-dim); }
-        .dashboard-header .header-highlight { color: var(--color-cyan); }
-        .status-section { margin-bottom: 25px; }
-        .section-title { color: var(--color-cyan-dim); text-transform: uppercase; margin-bottom: 8px; }
-        .metrics-table { color: var(--color-text-main); line-height: 1.6; }
-        .metrics-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
-        .metrics-wrapper > span { white-space: pre; }
-        .metric-label { color: var(--color-cyan); }
-        .metric-value { color: var(--color-cyan-bright); }
-        .metric-dim { color: var(--color-text-dim); }
-        .activity-label { color: var(--color-purple); }
-        .activity-value { color: var(--color-white-bright); }
-        
-        /* Status Colors - White for positive, yellow for warning */
-        .status-primed, .status-warmed { color: var(--color-yellow); }
-        .status-ready, .status-online, .status-complete, .status-hot { color: var(--color-white-bright); }
-        .status-loading, .status-warming, .status-connecting { color: var(--color-cyan-bright); }
-        .status-offline, .status-error, .status-unavailable, .status-cold { color: var(--color-red); }
-
-        .status-bar { border-top: 1px solid var(--color-text-dim); padding: 8px 20px; display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-dim); }
-        .status-bar-left { display: flex; gap: 1em; }
-        
-        /* Login Screen - Cyan Theme */
-        .login-screen-wrapper { background: var(--color-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
-        .login-message { color: var(--color-cyan-dim); margin: 20px 0; font-size: 16px; }
-        .login-input { background: transparent; border: 1px solid var(--color-cyan-dim); color: var(--color-cyan-bright); padding: 8px 16px; font-family: inherit; font-size: 14px; margin-right: 10px; width: 250px; }
-        .login-input:focus { outline: none; border-color: var(--color-cyan); }
-        .sysop-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: var(--color-bg); border: 1px solid var(--color-purple); color: var(--color-white-bright); padding: 4px 8px; font-family: inherit; font-size: 14px; }
-        .sysop-select:focus { outline: none; border-color: var(--color-cyan); }
-        .sysop-button { background: transparent; border: none; color: var(--color-cyan); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
-        .sysop-button:hover { color: var(--color-cyan-bright); }
-        
-        /* Tenant Selection - Bright white for active */
-        .tenant-option { color: var(--color-text-dim); padding: 4px 0; cursor: pointer; }
-        .tenant-option:hover { color: var(--color-cyan-bright); }
-        .tenant-option.active { color: var(--color-white-bright); }
-
-        .progress-bar { display: inline-block; background-color: var(--color-text-dim); white-space: pre; }
-        .progress-bar-fill { display: inline-block; height: 1em; background-color: var(--color-cyan); color: var(--color-bg); }
-        .bbs-table-header { color: var(--color-cyan); border-bottom: 1px solid var(--color-text-dim); padding-bottom: 4px; margin-bottom: 8px; }
-        .log-level-grid { display: grid; grid-template-columns: 200px repeat(4, 1fr); gap: 4px 12px; margin-top: 10px; }
-        .log-level-channel { color: var(--color-cyan); }
-        .log-level-option { cursor: default; color: var(--color-text-dim); }
-        .log-level-option.active { color: var(--color-white-bright); font-weight: bold; }
-        .session-universe-map { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; line-height: 1; user-select: none; }
-        .session-universe-legend { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
-        .session-stats-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
-
-        /* Lead colors - white spectrum for leads */
-        .lead-active-ultra { color: var(--color-white-bright); } /* Ultra-bright white for <1 min */
-        .lead-active-bright { color: var(--color-lead-bright); }
-        .lead-active-medium { color: var(--color-lead-medium); }
-        .lead-active-light { color: var(--color-lead-light); }
-        .lead-dormant-dim { color: var(--color-text-dim); }
-        
-        /* Anonymous with beliefs - purple spectrum */
-        .anonymous-active-ultra-beliefs { color: var(--color-purple-bright); } /* Ultra-bright purple for <1 min */
-        .anonymous-active-bright-beliefs { color: var(--color-purple-bright); }
-        .anonymous-active-medium-beliefs { color: var(--color-purple); }
-        .anonymous-active-light-beliefs { color: var(--color-purple-dim); }
-        
-        /* Anonymous without beliefs - cyan spectrum */
-        .anonymous-active-ultra { color: var(--color-cyan-bright); } /* Ultra-bright cyan for <1 min */
-        .anonymous-active-bright { color: var(--color-cyan-bright); }
-        .anonymous-active-medium { color: var(--color-cyan); }
-        .anonymous-active-light { color: var(--color-cyan-dim); }
-        
-        /* Dormant (unchanged) */
-        .anonymous-dormant-dim { color: var(--color-text-dim); }
+           --color-bg-sidebar: #181825; /* Catppuccin Mantle */
+           --color-text-main: #cdd6f4; /* Catppuccin Text */
+           --color-text-dim: #a6adc8;  /* Catppuccin Subtext0 */
+           --color-cyan: #89dceb;      /* Catppuccin Sky - Medium */
+           --color-cyan-dim: #458592;  /* Catppuccin Sky - Light */
+           --color-cyan-bright: #99e3f0; /* Catppuccin Sky - Bright */
+           --color-cyan-ultra: #b8f2ff; /* NEW: Catppuccin Sky - Ultra */
+           --color-logo: rgba(200, 223, 140, 0.85);
+           --color-purple: #cba6f7;    /* Catppuccin Mauve - Medium */
+           --color-purple-dim: #8c73aa;  /* Catppuccin Mauve - Light */
+           --color-purple-bright: #ddb8ff; /* Catppuccin Mauve - Bright */
+           --color-purple-ultra: #e7c7ff;  /* NEW: Catppuccin Mauve - Ultra */
+           --color-green: #c8df8c;      /* Your Brand Green */
+           --color-yellow: #f9e2af;    /* Catppuccin Yellow */
+           --color-red: #f38ba8;        /* Catppuccin Red */
+           --color-orange: #fab387;    /* Catppuccin Peach */
+           --color-white-bright: #ffffff;
+           --color-lead-bright: #fcfcfc;
+           --color-lead-medium: #9399b2; /* Catppuccin Overlay2 */
+           --color-lead-light: #7f849c;  /* Catppuccin Overlay1 */ 
+       }
+       [x-cloak] { display: none !important; }
+       * { margin: 0; padding: 0; box-sizing: border-box; }
+       body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace; background: var(--color-bg); color: var(--color-text-main); font-size: 14px; line-height: 1.4; overflow-x: hidden; min-height: 100vh; }
+       pre { font-family: inherit; white-space: pre; }
+       .bbs-container { display: flex; flex-direction: column; min-height: 100vh; }
+       .logo-bar { text-align: center; padding-top: 20px; padding-bottom: 5px; }
+       .logo-bar pre.logo { padding: 0; margin: 0; color: var(--color-logo); font-size: 18px; line-height: 1.2; letter-spacing: -1px; }
+       .attribution { color: var(--color-text-dim); font-size: 11px; margin-top: 5px; padding-bottom: 10px; }
+       .main-area { display: flex; flex: 1; padding: 0 20px; }
+       .sidebar { width: 200px; padding: 15px 10px; }
+       .tab-menu { color: var(--color-cyan-dim); font-weight: bold; margin-bottom: 10px; }
+       .tab-item { color: var(--color-text-dim); cursor: pointer; padding: 4px 0; transition: color 0.2s; }
+       .tab-item:hover { color: var(--color-cyan); }
+       .tab-item.active { color: var(--color-cyan-bright); font-weight: bold; }
+       .content-area { flex: 1; padding: 15px; overflow-y: auto; }
+       .bbs-art-background { background-color: #10120d; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAABNJREFUCB1jZGD4z8DAwMiAAwA1NQECJvJSOwAAAABJRU5ErkJggg=='); background-repeat: repeat; }
+       .dashboard-header { margin-bottom: 20px; padding-bottom: 5px; border-bottom: 1px solid var(--color-text-dim); }
+       .dashboard-header .header-label { color: var(--color-cyan-dim); }
+       .dashboard-header .header-highlight { color: var(--color-cyan); }
+       .status-section { margin-bottom: 25px; }
+       .section-title { color: var(--color-cyan-dim); text-transform: uppercase; margin-bottom: 8px; }
+       .metrics-table { color: var(--color-text-main); line-height: 1.6; }
+       .metrics-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
+       .metrics-wrapper > span { white-space: pre; }
+       .metric-label { color: var(--color-cyan); }
+       .metric-value { color: var(--color-cyan-bright); }
+       .metric-dim { color: var(--color-text-dim); }
+       .activity-label { color: var(--color-purple); }
+       .activity-value { color: var(--color-white-bright); }
        
-        /* Graph styles */
-        .graph-container { background: var(--color-bg); border: 1px solid var(--color-text-dim); border-radius: 4px; min-height: 400px; overflow: hidden; position: relative; }
-        .graph-controls { margin-bottom: 15px; }
-        .graph-legend { display: flex; flex-wrap: wrap; gap: 1em 2em; margin-top: 15px; padding: 10px; border: 1px solid var(--color-text-dim); border-radius: 4px; }
-        .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-        .graph-legend-shape { width: 14px; height: 14px; }
-
-        @media (max-width: 820px) { body { font-size: 12px; } .logo-bar pre.logo { font-size: 10px; } .main-area { flex-direction: column; padding: 0 10px;} .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--color-text-dim);} .status-bar { flex-direction: column; gap: 5px; text-align: center; } }
-    </style>
+       /* Status Colors - White for positive, yellow for warning */
+       .status-primed, .status-warmed { color: var(--color-yellow); }
+       .status-ready, .status-online, .status-complete, .status-hot { color: var(--color-white-bright); }
+       .status-loading, .status-warming, .status-connecting { color: var(--color-cyan-bright); }
+       .status-offline, .status-error, .status-unavailable, .status-cold { color: var(--color-red); }
+   
+       .status-bar { border-top: 1px solid var(--color-text-dim); padding: 8px 20px; display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-dim); }
+       .status-bar-left { display: flex; gap: 1em; }
+       
+       /* Login Screen - Cyan Theme */
+       .login-screen-wrapper { background: var(--color-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
+       .login-message { color: var(--color-cyan-dim); margin: 20px 0; font-size: 16px; }
+       .login-input { background: transparent; border: 1px solid var(--color-cyan-dim); color: var(--color-cyan-bright); padding: 8px 16px; font-family: inherit; font-size: 14px; margin-right: 10px; width: 250px; }
+       .login-input:focus { outline: none; border-color: var(--color-cyan); }
+       .sysop-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: var(--color-bg); border: 1px solid var(--color-purple); color: var(--color-white-bright); padding: 4px 8px; font-family: inherit; font-size: 14px; }
+       .sysop-select:focus { outline: none; border-color: var(--color-cyan); }
+       .sysop-button { background: transparent; border: none; color: var(--color-cyan); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
+       .sysop-button:hover { color: var(--color-cyan-bright); }
+       
+       /* Tenant Selection - Bright white for active */
+       .tenant-option { color: var(--color-text-dim); padding: 4px 0; cursor: pointer; }
+       .tenant-option:hover { color: var(--color-cyan-bright); }
+       .tenant-option.active { color: var(--color-white-bright); }
+   
+       .progress-bar { display: inline-block; background-color: var(--color-text-dim); white-space: pre; }
+       .progress-bar-fill { display: inline-block; height: 1em; background-color: var(--color-cyan); color: var(--color-bg); }
+       .bbs-table-header { color: var(--color-cyan); border-bottom: 1px solid var(--color-text-dim); padding-bottom: 4px; margin-bottom: 8px; }
+       .log-level-grid { display: grid; grid-template-columns: 200px repeat(4, 1fr); gap: 4px 12px; margin-top: 10px; }
+       .log-level-channel { color: var(--color-cyan); }
+       .log-level-option { cursor: default; color: var(--color-text-dim); }
+       .log-level-option.active { color: var(--color-white-bright); font-weight: bold; }
+       .session-universe-map { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; line-height: 1; user-select: none; }
+       .session-universe-legend { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
+       .session-stats-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
+   
+       /* Lead colors - white spectrum for leads */
+       .lead-active-ultra { color: var(--color-white-bright); }
+       .lead-active-bright { color: var(--color-lead-bright); }
+       .lead-active-medium { color: var(--color-lead-medium); }
+       .lead-active-light { color: var(--color-lead-light); }
+       .lead-dormant-dim { color: var(--color-text-dim); }
+       
+       /* Anonymous with beliefs - purple spectrum - FIXED */
+       .anonymous-active-ultra-beliefs { color: var(--color-purple-ultra); }
+       .anonymous-active-bright-beliefs { color: var(--color-purple-bright); }
+       .anonymous-active-medium-beliefs { color: var(--color-purple); }
+       .anonymous-active-light-beliefs { color: var(--color-purple-dim); }
+       
+       /* Anonymous without beliefs - cyan spectrum - FIXED */
+       .anonymous-active-ultra { color: var(--color-cyan-ultra); }
+       .anonymous-active-bright { color: var(--color-cyan-bright); }
+       .anonymous-active-medium { color: var(--color-cyan); }
+       .anonymous-active-light { color: var(--color-cyan-dim); }
+       
+       /* Dormant (unchanged) */
+       .anonymous-dormant-dim { color: var(--color-text-dim); }
+      
+       /* Graph styles */
+       .graph-container { background: var(--color-bg); border: 1px solid var(--color-text-dim); border-radius: 4px; min-height: 400px; overflow: hidden; position: relative; }
+       .graph-controls { margin-bottom: 15px; }
+       .graph-legend { display: flex; flex-wrap: wrap; gap: 1em 2em; margin-top: 15px; padding: 10px; border: 1px solid var(--color-text-dim); border-radius: 4px; }
+       .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+       .graph-legend-shape { width: 14px; height: 14px; }
+   
+       @media (max-width: 820px) { body { font-size: 12px; } .logo-bar pre.logo { font-size: 10px; } .main-area { flex-direction: column; padding: 0 10px;} .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--color-text-dim);} .status-bar { flex-direction: column; gap: 5px; text-align: center; } }
+    </style> 
 </head>
 <body x-data="sysOpApp()">
     <div id="login-screen" x-show="!authenticated" x-cloak>
@@ -181,10 +183,10 @@
                         <div class="status-section">
                             <pre class="section-title">LEGEND</pre>
                             <div class="session-universe-legend">
-                                <pre> <span class="lead-active-bright">░</span> Known Lead</pre>
-                                <pre><span class="anonymous-active-bright-beliefs">▒</span> Active w/Beliefs</pre>
-                                <pre><span class="anonymous-active-bright">▒</span> Active</pre>
-                                <pre><span class="anonymous-dormant-dim">▒</span> Dormant</pre>
+                                <pre> <span class="lead-active-bright">█</span> Known Lead</pre>
+                                <pre><span class="anonymous-active-bright-beliefs">█</span> Active w/Beliefs</pre>
+                                <pre><span class="anonymous-active-bright">█</span> Active</pre>
+                                <pre><span class="anonymous-dormant-dim">█</span> Dormant</pre>
                             </div>
                         </div>
                         <div class="status-section">
