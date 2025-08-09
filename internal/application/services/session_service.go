@@ -113,19 +113,11 @@ func (s *SessionService) processExistingSession(session *types.SessionData, sess
 
 	if fpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, session.FingerprintID); exists {
 		afterBeliefs = fpState.HeldBeliefs
-
-		// ADD THIS DEBUG LOG
-		s.logger.Auth().Warn("Existing session belief check",
-			"sessionId", sessionID,
-			"storyfragmentId", storyfragmentID,
-			"userBeliefs", afterBeliefs,
-			"hasBeliefs", len(afterBeliefs) > 0)
 	}
 
 	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
 	restored := len(affectedPanes) > 0
 
-	// ADD THIS DEBUG LOG TOO
 	s.logger.Auth().Debug("Restoration calculation result",
 		"sessionId", sessionID,
 		"storyfragmentId", storyfragmentID,

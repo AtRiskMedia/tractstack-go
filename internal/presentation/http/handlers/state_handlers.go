@@ -55,12 +55,11 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 		return
 	}
 
-	// Read the story fragment ID from the header to provide context
 	storyFragmentID := c.GetHeader("X-StoryFragment-ID")
-	if storyFragmentID == "" {
-		h.logger.System().Warn("Missing StoryFragment ID in state request", "sessionId", sessionID, "tenantId", tenantCtx.TenantID)
-		storyFragmentID = "unknown"
-	}
+	h.logger.System().Debug("🚨 UNSET DEBUG: Headers received",
+		"sessionId", sessionID,
+		"storyFragmentId", storyFragmentID,
+		"tenantId", tenantCtx.TenantID)
 
 	var eventList []events.Event
 	var paneID, gotoPaneID string
@@ -90,32 +89,31 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 			Duration     int    `form:"duration"`
 		}
 		if err := c.ShouldBind(&req); err != nil {
-			h.logger.System().Error("Invalid form data in state request", "error", err.Error(), "sessionId", sessionID, "tenantId", tenantCtx.TenantID)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid form data"})
 			return
 		}
 
 		if req.BeliefID == "" || req.BeliefType == "" {
-			h.logger.System().Error("Missing required fields in state request", "beliefId", req.BeliefID, "beliefType", req.BeliefType, "sessionId", sessionID, "tenantId", tenantCtx.TenantID)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "beliefId and beliefType are required"})
 			return
 		}
 		eventList = append(eventList, convertRequestToEvent(&req))
 		paneID = c.PostForm("paneId")
-		gotoPaneID = c.PostForm("gotoPaneID")
 	}
 
-	h.logger.System().Debug("Processing state events",
+	if unsetBeliefIds := c.PostForm("unsetBeliefIds"); unsetBeliefIds != "" {
+		h.logger.System().Debug("🚨 UNSET DEBUG: Processing UNSET request",
+			"unsetBeliefIds", unsetBeliefIds,
+			"storyFragmentId", storyFragmentID,
+			"eventCount", len(eventList))
+	}
+	h.logger.System().Debug("🚨 UNSET DEBUG: Calling ProcessEventsWithSSE",
 		"sessionId", sessionID,
 		"storyFragmentId", storyFragmentID,
-		"eventCount", len(eventList),
-		"paneId", paneID,
-		"gotoPaneId", gotoPaneID,
-		"tenantId", tenantCtx.TenantID)
+		"eventCount", len(eventList))
 
-	// Delegate all business logic to the application service
 	if err := h.eventProcessor.ProcessEventsWithSSE(tenantCtx, sessionID, storyFragmentID, eventList, paneID, gotoPaneID, h.broadcaster); err != nil {
-		h.logger.System().Error("State processing failed", "error", err, "sessionId", sessionID, "storyFragmentId", storyFragmentID, "tenantId", tenantCtx.TenantID)
+		h.logger.System().Error("State processing failed", "error", err, "tenantId", tenantCtx.TenantID)
 		marker.SetError(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Event processing failed"})
 		return

@@ -45,6 +45,10 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 	gotoPaneID string,
 	broadcaster messaging.Broadcaster,
 ) error {
+	s.logger.System().Debug("🚨 BROADCAST DEBUG: ProcessEventsWithSSE called",
+		"sessionId", sessionID,
+		"storyfragmentId", storyfragmentID,
+		"eventCount", len(events))
 	var changedBeliefs []string
 	visibilitySnapshot := s.captureVisibilitySnapshot(tenantCtx, sessionID, events)
 
@@ -53,7 +57,7 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 		case "Belief":
 			changed, err := s.processBelief(tenantCtx, sessionID, event)
 			if err != nil {
-				s.logger.Content().Error("Error processing belief event",
+				s.logger.Content().Debug("Error processing belief event",
 					"error", err.Error(), "tenantId", tenantCtx.TenantID, "sessionId", sessionID, "event", event)
 				continue
 			}
@@ -131,8 +135,20 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 		}
 	}
 
+	s.logger.System().Debug("🚨 BROADCAST DEBUG: Events processed",
+		"changedBeliefs", changedBeliefs,
+		"willBroadcast", len(changedBeliefs) > 0)
+
 	if len(changedBeliefs) > 0 {
-		s.beliefBroadcaster.BroadcastBeliefChange(tenantCtx.TenantID, sessionID, changedBeliefs, visibilitySnapshot, currentPaneID, gotoPaneID, broadcaster)
+		s.beliefBroadcaster.BroadcastBeliefChange(tenantCtx.TenantID, sessionID, storyfragmentID, changedBeliefs, visibilitySnapshot, currentPaneID, gotoPaneID, broadcaster)
+	}
+
+	if len(changedBeliefs) > 0 {
+		s.logger.System().Debug("🚨 BROADCAST DEBUG: Calling BroadcastBeliefChange",
+			"tenantId", tenantCtx.TenantID,
+			"sessionId", sessionID,
+			"storyfragmentId", storyfragmentID,
+			"changedBeliefs", changedBeliefs)
 	}
 
 	return nil
