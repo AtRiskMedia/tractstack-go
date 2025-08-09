@@ -22,6 +22,18 @@ var (
 	once              sync.Once
 )
 
+// StoryfragmentUpdate represents an update for a single storyfragment
+type StoryfragmentUpdate struct {
+	StoryfragmentID string   `json:"storyfragmentId"`
+	AffectedPanes   []string `json:"affectedPanes"`
+	GotoPaneID      *string  `json:"gotoPaneId,omitempty"`
+}
+
+// BatchUpdate represents a batch of storyfragment updates
+type BatchUpdate struct {
+	Updates []StoryfragmentUpdate `json:"updates"`
+}
+
 // NewSSEBroadcaster creates the singleton SSEBroadcaster instance.
 func NewSSEBroadcaster(logger *logging.ChanneledLogger) *SSEBroadcaster {
 	once.Do(func() {
@@ -101,15 +113,24 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 		}
 	}()
 
-	paneIDsJSON, _ := json.Marshal(paneIDs)
-	var message string
-	if scrollTarget != nil && *scrollTarget != "" {
-		message = fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s,\"gotoPaneId\":\"%s\"}\n\n",
-			storyfragmentID, paneIDsJSON, *scrollTarget)
-	} else {
-		message = fmt.Sprintf("event: panes_updated\ndata: {\"storyfragmentId\":\"%s\",\"affectedPanes\":%s}\n\n",
-			storyfragmentID, paneIDsJSON)
+	// Create batch format with single update
+	update := StoryfragmentUpdate{
+		StoryfragmentID: storyfragmentID,
+		AffectedPanes:   paneIDs,
+		GotoPaneID:      scrollTarget,
 	}
+
+	batchUpdate := BatchUpdate{
+		Updates: []StoryfragmentUpdate{update},
+	}
+
+	dataJSON, err := json.Marshal(batchUpdate)
+	if err != nil {
+		b.logger.SSE().Error("Failed to marshal batch update", "error", err, "tenantId", tenantID, "sessionId", sessionID)
+		return
+	}
+
+	message := fmt.Sprintf("event: panes_updated\ndata: %s\n\n", string(dataJSON))
 
 	b.logger.SSE().Debug("Broadcasting to session", "message", strings.ReplaceAll(message, "\n", "\\n"), "tenantId", tenantID, "sessionId", sessionID)
 
@@ -128,6 +149,8 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 		}
 	}
 }
+
+// Remove the BroadcastBatchToSpecificSession method - not needed
 
 // HasViewingSessions checks if any sessions are viewing a specific storyfragment.
 func (b *SSEBroadcaster) HasViewingSessions(tenantID, storyfragmentID string) bool {

@@ -17,6 +17,18 @@ func NewBeliefBroadcastService(cacheManager interfaces.Cache) *BeliefBroadcastSe
 	return &BeliefBroadcastService{cacheManager: cacheManager}
 }
 
+// StoryfragmentUpdate represents an update for a single storyfragment
+type StoryfragmentUpdate struct {
+	StoryfragmentID string   `json:"storyfragmentId"`
+	AffectedPanes   []string `json:"affectedPanes"`
+	GotoPaneID      *string  `json:"gotoPaneId,omitempty"`
+}
+
+// BatchUpdate represents a batch of storyfragment updates
+type BatchUpdate struct {
+	Updates []StoryfragmentUpdate `json:"updates"`
+}
+
 // CalculateBeliefDiff determines which panes change visibility between two belief states.
 func (b *BeliefBroadcastService) CalculateBeliefDiff(tenantID, storyfragmentID string, beforeBeliefs, afterBeliefs map[string][]string) []string {
 	// Get the storyfragment belief registry - same as PAGEVIEWED logic
@@ -79,21 +91,33 @@ func (b *BeliefBroadcastService) computeScrollTarget(
 	return &firstRevealed
 }
 
-func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID, gotoPaneID string, broadcaster messaging.Broadcaster) {
-	affectedStoryfragments := b.FindAffectedStoryfragments(tenantID, changedBeliefs)
-	if len(affectedStoryfragments) == 0 {
+func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, storyfragmentID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID, gotoPaneID string, broadcaster messaging.Broadcaster) {
+	// Only check the current storyfragment, not all storyfragments
+	registry, exists := b.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+	if !exists {
 		return
 	}
-	for storyfragmentID, affectedPanes := range affectedStoryfragments {
-		if broadcaster.HasViewingSessions(tenantID, storyfragmentID) {
-			var scrollTarget *string
-			if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
-				scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, visibilitySnapshot[storyfragmentID], affectedPanes)
-			} else {
-				scrollTarget = &gotoPaneID
-			}
-			broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes, scrollTarget)
+
+	var affectedPanes []string
+	beliefSet := make(map[string]bool)
+	for _, belief := range changedBeliefs {
+		beliefSet[belief] = true
+	}
+
+	for paneID, paneBeliefData := range registry.PaneBeliefPayloads {
+		if b.paneUsesChangedBeliefs(paneBeliefData, beliefSet) {
+			affectedPanes = append(affectedPanes, paneID)
 		}
+	}
+
+	if len(affectedPanes) > 0 && broadcaster.HasViewingSessions(tenantID, storyfragmentID) {
+		var scrollTarget *string
+		if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
+			scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, visibilitySnapshot[storyfragmentID], affectedPanes)
+		} else if gotoPaneID != "" {
+			scrollTarget = &gotoPaneID
+		}
+		broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes, scrollTarget)
 	}
 }
 
