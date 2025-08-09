@@ -9,133 +9,360 @@
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
+       /* --- 1. ROOT VARIABLES & THEME --- */
        :root {
+           /* Base Catppuccin Palette */
            --color-bg: #000000;
-           --color-bg-sidebar: #181825; /* Catppuccin Mantle */
-           --color-text-main: #cdd6f4; /* Catppuccin Text */
-           --color-text-dim: #a6adc8;  /* Catppuccin Subtext0 */
-           --color-cyan: #89dceb;      /* Catppuccin Sky - Medium */
-           --color-cyan-dim: #458592;  /* Catppuccin Sky - Light */
-           --color-cyan-bright: #99e3f0; /* Catppuccin Sky - Bright */
-           --color-cyan-ultra: #b8f2ff; /* NEW: Catppuccin Sky - Ultra */
+           --color-bg-sidebar: #181825;
+           --color-text-main: #cdd6f4;
+           --color-text-dim: #a6adc8;
            --color-logo: rgba(200, 223, 140, 0.85);
-           --color-purple: #cba6f7;    /* Catppuccin Mauve - Medium */
-           --color-purple-dim: #8c73aa;  /* Catppuccin Mauve - Light */
-           --color-purple-bright: #ddb8ff; /* Catppuccin Mauve - Bright */
-           --color-purple-ultra: #e7c7ff;  /* NEW: Catppuccin Mauve - Ultra */
-           --color-green: #c8df8c;      /* Your Brand Green */
-           --color-yellow: #f9e2af;    /* Catppuccin Yellow */
-           --color-red: #f38ba8;        /* Catppuccin Red */
-           --color-orange: #fab387;    /* Catppuccin Peach */
-           --color-white-bright: #ffffff;
-           --color-lead-bright: #fcfcfc;
-           --color-lead-medium: #9399b2; /* Catppuccin Overlay2 */
-           --color-lead-light: #7f849c;  /* Catppuccin Overlay1 */ 
+           --color-green: #c8df8c;
+           --color-yellow: #f9e2af;
+           --color-red: #f38ba8;
+           --color-orange: #fab387;
+
+           /* --- REVISED & EXPANDED SESSION COLOR RAMPS --- */
+           /* A clear, 5-tier decay from Ultra Active to Dormant. */
+
+           /* Tier 1: Ultra (<1m) - Purest/Brightest */
+           --color-lead-1-ultra:   #ffffff;
+           --color-purple-1-ultra: #e7c7ff;
+           --color-cyan-1-ultra:   #b8f2ff;
+
+           /* Tier 2: Bright (<=15m) - Distinctly active */
+           --color-lead-2-bright:   #cdd6f4;
+           --color-purple-2-bright: #cba6f7;
+           --color-cyan-2-bright:   #89dceb;
+
+           /* Tier 3: Medium (<=30m) - Noticeably dimmer */
+           --color-lead-3-medium:   #a6adc8;
+           --color-purple-3-medium: #8c73aa;
+           --color-cyan-3-medium:   #458592;
+
+           /* Tier 4: Light (<=45m) - Fading out */
+           --color-lead-4-light:   #9399b2;
+           --color-purple-4-light: #6c5880;
+           --color-cyan-4-light:   #386a76;
+
+           /* Tier 5: Dormant (>45m) - Darkest, hue is preserved */
+           --color-lead-5-dormant:   #7f849c;
+           --color-purple-5-dormant: #584469;
+           --color-cyan-5-dormant:   #2b4f58;
        }
+
+       /* --- 2. GLOBAL STYLES & RESETS --- */
        [x-cloak] { display: none !important; }
        * { margin: 0; padding: 0; box-sizing: border-box; }
-       body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace; background: var(--color-bg); color: var(--color-text-main); font-size: 14px; line-height: 1.4; overflow: hidden; min-height: 100vh; }
-       pre { font-family: inherit; white-space: pre; }
-       .bbs-container { display: flex; flex-direction: column; min-height: calc(100vh - 5px); }
-       .logo-bar { text-align: center; padding-top: 20px; padding-bottom: 5px; }
-       .logo-bar pre.logo { padding: 0; margin: 0; color: var(--color-logo); font-size: 18px; line-height: 1.2; letter-spacing: -1px; }
-       .attribution { color: var(--color-text-dim); font-size: 11px; margin-top: 5px; padding-bottom: 10px; }
-       .main-area { display: flex; flex: 1; padding: 0 20px 5px; overflow: hidden; }
-       .sidebar { width: 200px; padding: 15px 10px; }
-       .tab-menu { color: var(--color-cyan-dim); font-weight: bold; margin-bottom: 10px; }
-       .tab-item { color: var(--color-text-dim); cursor: pointer; padding: 4px 0; transition: color 0.2s; }
-       .tab-item:hover { color: var(--color-cyan); }
-       .tab-item.active { color: var(--color-cyan-bright); font-weight: bold; }
-       .content-area { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column;}
-       .bbs-art-background { background-color: #10120d; background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAABNJREFUCB1jZGD4z8DAwMiAAwA1NQECJvJSOwAAAABJRU5ErkJggg=='); background-repeat: repeat; }
-       .dashboard-header { margin-bottom: 20px; padding-bottom: 5px; border-bottom: 1px solid var(--color-text-dim); }
-       .dashboard-header .header-label { color: var(--color-cyan-dim); }
-       .dashboard-header .header-highlight { color: var(--color-cyan); }
-       .status-section { margin-bottom: 25px; }
-       .section-title { color: var(--color-cyan-dim); text-transform: uppercase; margin-bottom: 8px; }
-       .metrics-table { color: var(--color-text-main); line-height: 1.6; }
-       .metrics-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
-       .metrics-wrapper > span { white-space: pre; }
-       .metric-label { color: var(--color-cyan); }
-       .metric-value { color: var(--color-cyan-bright); }
-       .metric-dim { color: var(--color-text-dim); }
-       .activity-label { color: var(--color-purple); }
-       .activity-value { color: var(--color-white-bright); }
-       
-       /* Status Colors - White for positive, yellow for warning */
-       .status-primed, .status-warmed { color: var(--color-yellow); }
-       .status-ready, .status-online, .status-complete, .status-hot { color: var(--color-white-bright); }
-       .status-loading, .status-warming, .status-connecting { color: var(--color-cyan-bright); }
-       .status-offline, .status-error, .status-unavailable, .status-cold { color: var(--color-red); }
-   
-       .status-bar { border-top: 1px solid var(--color-text-dim); padding: 8px 20px; display: flex; justify-content: space-between; font-size: 12px; color: var(--color-text-dim); }
+
+       body {
+           font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+           background: var(--color-bg);
+           color: var(--color-text-main);
+           font-size: 14px;
+           line-height: 1.4;
+           overflow: hidden;
+           min-height: 100vh;
+       }
+
+       pre {
+           font-family: inherit;
+           white-space: pre;
+       }
+
+       /* --- 3. LAYOUT STRUCTURE --- */
+       .bbs-container {
+           display: flex;
+           flex-direction: column;
+           height: 100vh;
+       }
+
+       .logo-bar {
+           text-align: center;
+           padding: 20px 0 5px;
+           flex-shrink: 0;
+       }
+
+       .main-area {
+           display: flex;
+           flex: 1;
+           padding: 0 20px 5px;
+           overflow: hidden;
+           min-height: 0;
+       }
+
+       .sidebar {
+           width: 200px;
+           padding: 15px 10px;
+           flex-shrink: 0;
+       }
+
+       .content-area {
+           flex: 1;
+           padding: 15px;
+           overflow-y: auto;
+           display: flex;
+           flex-direction: column;
+           background-color: #10120d;
+           background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAAXNSR0IArs4c6QAAABNJREFUCB1jZGD4z8DAwMiAAwA1NQECJvJSOwAAAABJRU5ErkJggg==');
+           background-repeat: repeat;
+           min-height: 0;
+       }
+
+       .status-bar {
+           border-top: 1px solid var(--color-text-dim);
+           padding: 8px 20px;
+           display: flex;
+           justify-content: space-between;
+           font-size: 12px;
+           color: var(--color-text-dim);
+           flex-shrink: 0;
+       }
        .status-bar-left { display: flex; gap: 1em; }
-       
-       /* Login Screen - Cyan Theme */
-       .login-screen-wrapper { background: var(--color-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
-       .login-message { color: var(--color-cyan-dim); margin: 20px 0; font-size: 16px; }
-       .login-input { background: transparent; border: 1px solid var(--color-cyan-dim); color: var(--color-cyan-bright); padding: 8px 16px; font-family: inherit; font-size: 14px; margin-right: 10px; width: 250px; }
-       .login-input:focus { outline: none; border-color: var(--color-cyan); }
-       .sysop-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: var(--color-bg); border: 1px solid var(--color-purple); color: var(--color-white-bright); padding: 4px 8px; font-family: inherit; font-size: 14px; }
-       .sysop-select:focus { outline: none; border-color: var(--color-cyan); }
-       .sysop-button { background: transparent; border: none; color: var(--color-cyan); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
-       .sysop-button:hover { color: var(--color-cyan-bright); }
-       
-       /* Tenant Selection - Bright white for active */
-       .tenant-option { color: var(--color-text-dim); padding: 4px 0; cursor: pointer; }
-       .tenant-option:hover { color: var(--color-cyan-bright); }
-       .tenant-option.active { color: var(--color-white-bright); }
-   
-       .progress-bar { display: inline-block; background-color: var(--color-text-dim); white-space: pre; }
-       .progress-bar-fill { display: inline-block; height: 1em; background-color: var(--color-cyan); color: var(--color-bg); }
-       .bbs-table-header { color: var(--color-cyan); border-bottom: 1px solid var(--color-text-dim); padding-bottom: 4px; margin-bottom: 8px; }
-       .log-level-grid { display: grid; grid-template-columns: 200px repeat(4, 1fr); gap: 4px 12px; margin-top: 10px; }
-       .log-level-channel { color: var(--color-cyan); }
-       .log-level-option { cursor: default; color: var(--color-text-dim); }
-       .log-level-option.active { color: var(--color-white-bright); font-weight: bold; }
+
+
+       /* --- 4. TYPOGRAPHY & SHARED ELEMENTS --- */
+       .logo-bar pre.logo {
+           padding: 0;
+           margin: 0;
+           color: var(--color-logo);
+           font-size: 18px;
+           line-height: 1.2;
+           letter-spacing: -1px;
+       }
+
+       .attribution {
+           color: var(--color-text-dim);
+           font-size: 11px;
+           margin-top: 5px;
+           padding-bottom: 10px;
+       }
+
+       .section-title {
+           color: var(--color-text-dim);
+           text-transform: uppercase;
+           margin-bottom: 8px;
+       }
+
+       .metrics-wrapper, .session-universe-legend, .session-stats-wrapper {
+           display: flex;
+           flex-wrap: wrap;
+           gap: 0 1.5em;
+           line-height: 1.6;
+       }
+       .metrics-wrapper > span { white-space: pre; }
+       .metrics-table { color: var(--color-text-main); line-height: 1.6; }
+
+       /* --- 5. COMPONENT-SPECIFIC STYLES --- */
+
+       /* Tabs & Menu */
+       .tab-menu { color: var(--color-text-dim); font-weight: bold; margin-bottom: 10px; }
+       .tab-item { color: var(--color-text-dim); cursor: pointer; padding: 4px 0; transition: color 0.2s; }
+       .tab-item:hover { color: var(--color-cyan-1-ultra); }
+       .tab-item.active { color: var(--color-cyan-1-ultra); font-weight: bold; }
+
+       /* Dashboard & Session Map */
+       .dashboard-header { margin-bottom: 20px; padding-bottom: 5px; border-bottom: 1px solid var(--color-text-dim); }
+       .dashboard-header .header-label { color: var(--color-text-dim); }
+       .dashboard-header .header-highlight { color: var(--color-cyan-2-bright); }
+       .status-section { margin-bottom: 25px; }
        .session-universe-map { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; line-height: 1; user-select: none; }
-       .session-universe-legend { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
-       .session-stats-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
-   
-       /* Lead colors - white spectrum for leads */
-       .lead-active-ultra { color: var(--color-white-bright); }
-       .lead-active-bright { color: var(--color-lead-bright); }
-       .lead-active-medium { color: var(--color-lead-medium); }
-       .lead-active-light { color: var(--color-lead-light); }
-       .lead-dormant-dim { color: var(--color-text-dim); }
+       /* Helper class for the new robust legend */
+       .legend-set { display: contents; }
        
-       /* Anonymous with beliefs - purple spectrum - FIXED */
-       .anonymous-active-ultra-beliefs { color: var(--color-purple-ultra); }
-       .anonymous-active-bright-beliefs { color: var(--color-purple-bright); }
-       .anonymous-active-medium-beliefs { color: var(--color-purple); }
-       .anonymous-active-light-beliefs { color: var(--color-purple-dim); }
-       
-       /* Anonymous without beliefs - cyan spectrum - FIXED */
-       .anonymous-active-ultra { color: var(--color-cyan-ultra); }
-       .anonymous-active-bright { color: var(--color-cyan-bright); }
-       .anonymous-active-medium { color: var(--color-cyan); }
-       .anonymous-active-light { color: var(--color-cyan-dim); }
-       
-       /* Dormant (unchanged) */
-       .anonymous-dormant-dim { color: var(--color-text-dim); }
-      
-       /* Graph styles */
-       #tab-graph { display: flex; flex-direction: column; height: 100%; }
-       .graph-container { background: var(--color-bg); border: 1px solid var(--color-text-dim); border-radius: 4px; overflow: hidden; position: relative; flex-grow: 1; min-height: 200px; }
-       .graph-controls { margin-bottom: 15px; }
-       .graph-legend { display: flex; flex-wrap: wrap; gap: 1em 2em; margin-top: 15px; padding: 10px; border: 1px solid var(--color-text-dim); border-radius: 4px; }
+       /* Login Screen */
+       .login-screen-wrapper { background: var(--color-bg); display: flex; flex-direction: column; justify-content: center; align-items: center; min-height: 100vh; }
+       .login-message { color: var(--color-lead-2-bright); margin: 20px 0; padding: 0 24px; font-size: 16px; }
+       .login-input { background: transparent; border: 1px solid var(--color-text-dim); color: var(--color-cyan-1-ultra); padding: 8px 16px; font-family: inherit; font-size: 14px; margin-right: 10px; width: 250px; }
+       .login-input:focus { outline: none; border-color: var(--color-cyan-2-bright); }
+       .sysop-button { background: transparent; border: none; color: var(--color-cyan-2-bright); padding: 8px 0; font-family: inherit; font-size: 14px; cursor: pointer; transition: color 0.2s; }
+       .sysop-button:hover { color: var(--color-cyan-1-ultra); }
+
+       /* Forms & Controls */
+       .sysop-select { -webkit-appearance: none; -moz-appearance: none; appearance: none; background: var(--color-bg); border: 1px solid var(--color-purple-2-bright); color: var(--color-lead-1-ultra); padding: 4px 8px; font-family: inherit; font-size: 14px; }
+       .sysop-select:focus { outline: none; border-color: var(--color-cyan-2-bright); }
+       .progress-bar { display: inline-block; background-color: var(--color-text-dim); white-space: pre; }
+       .progress-bar-fill { display: inline-block; height: 1em; background-color: var(--color-cyan-2-bright); color: var(--color-bg); }
+
+       /* Tables & Logs */
+       .bbs-table-header { color: var(--color-cyan-2-bright); border-bottom: 1px solid var(--color-text-dim); padding-bottom: 4px; margin-bottom: 8px; }
+       .log-level-grid { display: grid; grid-template-columns: 200px repeat(4, 1fr); gap: 4px 12px; margin-top: 10px; }
+
+       /* Graph */
+       #tab-graph { 
+           display: flex; 
+           flex-direction: column; 
+           height: 100%; 
+           min-height: 0;
+       }
+       .graph-container { 
+           background: var(--color-bg); 
+           border: 1px solid var(--color-text-dim); 
+           border-radius: 4px; 
+           overflow: hidden; 
+           position: relative; 
+           flex: 1; 
+           min-height: 300px;
+       }
+       .graph-controls { margin-bottom: 15px; flex-shrink: 0; }
+       .graph-legend { 
+           display: flex; 
+           flex-wrap: wrap; 
+           gap: 1em 2em; 
+           margin-top: 15px; 
+           padding: 10px; 
+           border: 1px solid var(--color-text-dim); 
+           border-radius: 4px; 
+           flex-shrink: 0;
+       }
        .graph-legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; }
        .graph-legend-shape { width: 14px; height: 14px; border-radius: 50%; }
        .graph-legend-shape.square { border-radius: 2px; }
-   
-       @media (max-width: 820px) { body { font-size: 12px; } .logo-bar pre.logo { font-size: 10px; } .main-area { flex-direction: column; padding: 0 10px;} .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--color-text-dim);} .status-bar { flex-direction: column; gap: 5px; text-align: center; } }
+
+       /* --- START: Added for Graph Loading State --- */
+       .graph-loading-overlay {
+           position: absolute;
+           top: 0;
+           left: 0;
+           right: 0;
+           bottom: 0;
+           background-color: rgba(16, 18, 13, 0.85); /* Fades towards the content area background color */
+           display: flex;
+           justify-content: center;
+           align-items: center;
+           z-index: 10; /* Ensures it's on top of the SVG */
+       }
+
+       .spinner {
+           width: 40px;
+           height: 40px;
+           border: 4px solid var(--color-text-dim);
+           border-top-color: var(--color-cyan-2-bright);
+           border-radius: 50%;
+           animation: spin 1s linear infinite;
+       }
+
+       @keyframes spin {
+           to {
+               transform: rotate(360deg);
+           }
+       }
+       /* --- END: Added for Graph Loading State --- */
+
+
+       /* --- 6. DYNAMIC STATE COLORS --- */
+
+       /* General Statuses (Online, Offline, etc.) */
+       .metric-label { color: var(--color-cyan-2-bright); }
+       .metric-value { color: var(--color-lead-2-bright); }
+       .metric-dim { color: var(--color-text-dim); }
+       .activity-label { color: var(--color-purple-2-bright); }
+       .activity-value { color: var(--color-lead-1-ultra); }
+       .status-online, .status-complete, .status-hot, .status-ready { color: var(--color-lead-1-ultra); }
+       .status-primed, .status-warmed, .status-yellow { color: var(--color-yellow); }
+       .status-loading, .status-warming, .status-connecting { color: var(--color-cyan-1-ultra); }
+       .status-offline, .status-error, .status-unavailable, .status-cold { color: var(--color-red); }
+
+       /* Tenant Selection */
+       .tenant-option { color: var(--color-text-dim); padding: 4px 0; cursor: pointer; }
+       .tenant-option:hover { color: var(--color-cyan-1-ultra); }
+       .tenant-option.active { color: var(--color-lead-1-ultra); }
+
+       /* Log Levels */
+       .log-level-channel { color: var(--color-cyan-2-bright); }
+       .log-level-option { cursor: default; color: var(--color-text-dim); }
+       .log-level-option.active { color: var(--color-lead-1-ultra); font-weight: bold; }
+
+       /* --- SESSION ACTIVITY DECAY COLORS --- */
+       /* Uses the 5-tier color ramp defined in :root */
+       
+       /* Known Lead (White/Grey Ramp) */
+       .lead-active-ultra    { color: var(--color-lead-1-ultra); }
+       .lead-active-bright   { color: var(--color-lead-2-bright); }
+       .lead-active-medium   { color: var(--color-lead-3-medium); }
+       .lead-active-light    { color: var(--color-lead-4-light); }
+       .lead-dormant-dim     { color: var(--color-lead-5-dormant); }
+       
+       /* Anonymous w/Beliefs (Purple Ramp) */
+       .anonymous-active-ultra-beliefs    { color: var(--color-purple-1-ultra); }
+       .anonymous-active-bright-beliefs   { color: var(--color-purple-2-bright); }
+       .anonymous-active-medium-beliefs   { color: var(--color-purple-3-medium); }
+       .anonymous-active-light-beliefs    { color: var(--color-purple-4-light); }
+       
+       /* Anonymous (Cyan Ramp) */
+       .anonymous-active-ultra    { color: var(--color-cyan-1-ultra); }
+       .anonymous-active-bright   { color: var(--color-cyan-2-bright); }
+       .anonymous-active-medium   { color: var(--color-cyan-3-medium); }
+       .anonymous-active-light    { color: var(--color-cyan-4-light); }
+       
+       /* Dormant (Unified rule, uses hue-specific vars) */
+       .anonymous-dormant-dim.has-beliefs { color: var(--color-purple-5-dormant); }
+       .anonymous-dormant-dim             { color: var(--color-cyan-5-dormant); }
+
+
+       /* --- 7. RESPONSIVE DESIGN --- */
+       @media (max-width: 820px) {
+           body { font-size: 12px; }
+           .logo-bar pre.logo { font-size: 10px; }
+           
+           .bbs-container {
+               height: 100vh;
+               height: 100dvh; /* Use dynamic viewport height if supported */
+           }
+           
+           .main-area { 
+               flex-direction: column; 
+               padding: 0 10px;
+               overflow: hidden;
+           }
+           
+           .status-bar { 
+               flex-direction: column; 
+               gap: 5px; 
+               text-align: center; 
+           }
+
+           /* -- MODIFIED FOR 2-COLUMN MOBILE MENU -- */
+           .sidebar {
+               width: 100%;
+               border-right: none;
+               border-bottom: 1px solid var(--color-text-dim);
+               display: grid;
+               grid-template-columns: repeat(2, 1fr);
+               gap: 0 15px; /* Add horizontal gap between columns */
+               padding-bottom: 15px;
+               flex-shrink: 0;
+           }
+           .sidebar .tab-menu {
+               grid-column: 1 / span 2; /* Make title span both columns */
+           }
+           
+           /* Mobile Graph Specific */
+           .content-area {
+               overflow: hidden; /* Prevent scrolling on mobile for graph */
+           }
+           
+           .graph-container {
+               min-height: 250px; /* Smaller minimum on mobile */
+           }
+           
+           .graph-legend {
+               margin-top: 10px;
+               padding: 8px;
+               gap: 0.5em 1em;
+           }
+           
+           .graph-legend-item {
+               font-size: 11px;
+           }
+       }
     </style> 
 </head>
 <body x-data="sysOpApp()">
     <div id="login-screen" x-show="!authenticated" x-cloak>
         <div class="login-screen-wrapper">
             <div class="logo-bar"><pre class="logo">
- ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄
+  ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄
   ██  ██ ██ ▀▀ ██ ██ ▀▀ ██ ██ ▀▀ ██ ▀▀ ██ ██ ▀▀ ██ ██
   ██  ██▀█▄ ██▀██ ██ ▄▄ ██ ▀▀▀██ ██ ██▀██ ██ ▄▄ ██▀█▄
   ██  ██ ██ ██▄██ ██▄██ ██ ██▄██ ██ ██▄██ ██▄██ ██ ██
@@ -149,7 +376,7 @@
     <div id="app-wrapper" x-show="authenticated" x-cloak class="bbs-container">
         <div class="logo-bar">
             <pre class="logo">
- ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄
+  ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄
   ██  ██ ██ ▀▀ ██ ██ ▀▀ ██ ██ ▀▀ ██ ▀▀ ██ ██ ▀▀ ██ ██
   ██  ██▀█▄ ██▀██ ██ ▄▄ ██ ▀▀▀██ ██ ██▀██ ██ ▄▄ ██▀█▄
   ██  ██ ██ ██▄██ ██▄██ ██ ██▄██ ██ ██▄██ ██▄██ ██ ██
@@ -186,10 +413,18 @@
                     <div class="status-section">
                         <pre class="section-title">LEGEND</pre>
                         <div class="session-universe-legend">
-                            <pre> <span class="lead-active-bright">█</span> Known Lead</pre>
-                            <pre><span class="anonymous-active-bright-beliefs">█</span> Active w/Beliefs</pre>
-                            <pre><span class="anonymous-active-bright">█</span> Active</pre>
-                            <pre><span class="anonymous-dormant-dim">█</span> Dormant</pre>
+                            <div class="legend-set" x-show="sessionDisplayMode === '1:1'" x-cloak>
+                                <pre><span class="lead-active-bright">█</span> Known Lead</pre>
+                                <pre><span class="anonymous-active-bright-beliefs">█</span> Active w/Beliefs</pre>
+                                <pre><span class="anonymous-active-bright">█</span> Active</pre>
+                                <pre><span class="anonymous-dormant-dim has-beliefs">█</span> Dormant</pre>
+                            </div>
+                            <div class="legend-set" x-show="sessionDisplayMode === 'PROPORTIONAL'" x-cloak>
+                                <pre><span class="anonymous-active-ultra">█</span> Happening Now (&lt;1m)</pre>
+                                <pre><span class="anonymous-active-bright">█</span> Recent (&lt;15m)</pre>
+                                <pre><span class="anonymous-active-light">█</span> Active (&lt;45m)</pre>
+                                <pre><span class="anonymous-dormant-dim">█</span> Awhile Ago (&gt;45m)</pre>
+                            </div>
                         </div>
                     </div>
                     <div class="status-section">
@@ -197,7 +432,6 @@
                         <div class="session-stats-wrapper">
                             <pre>TOTAL: <span class="metric-value" x-text="sessionStats.total || '0'"></span></pre>
                             <pre>| KNOWN: <span class="metric-value" x-text="sessionStats.lead || '0'"></span> (<span x-text="getPercentage(sessionStats.lead, sessionStats.total)"></span>%)</pre>
-                            <!-- === THIS IS THE CORRECTED LINE === -->
                             <pre>| W/BELIEFS: <span class="metric-value" x-text="sessionStats.withBeliefs || '0'"></span> (<span x-text="getPercentage(sessionStats.withBeliefs, sessionStats.total)"></span>%)</pre>
                             <pre>| ACTIVE: <span class="metric-value" x-text="sessionStats.active || '0'"></span> (<span x-text="getPercentage(sessionStats.active, sessionStats.total)"></span>%)</pre>
                             <pre>| DORMANT: <span class="metric-value" x-text="sessionStats.dormant || '0'"></span> (<span x-text="getPercentage(sessionStats.dormant, sessionStats.total)"></span>%)</pre>
@@ -223,22 +457,26 @@
                         <button class="sysop-button" @click="loadGraphData()">[ refresh graph ]</button>
                         <span class="metric-dim" x-text="graphStatus"></span>
                     </div>
-                    <div class="graph-container" id="graph-svg-container"></div>
+                    <div class="graph-container" id="graph-svg-container">
+                        <div class="graph-loading-overlay" x-show="isGraphLoading" x-transition.opacity>
+                            <div class="spinner"></div>
+                        </div>
+                    </div>
                     <div class="graph-legend">
                         <div class="graph-legend-item">
-                            <div class="graph-legend-shape" style="background-color: #89dceb;"></div>
+                            <div class="graph-legend-shape" style="background-color: var(--color-cyan-2-bright);"></div>
                             <span>Session</span>
                         </div>
                         <div class="graph-legend-item">
-                            <div class="graph-legend-shape" style="background-color: #cba6f7;"></div>
+                            <div class="graph-legend-shape" style="background-color: var(--color-purple-2-bright);"></div>
                             <span>Fingerprint</span>
                         </div>
                         <div class="graph-legend-item">
-                            <div class="graph-legend-shape square" style="background-color: #f9e2af;"></div>
+                            <div class="graph-legend-shape square" style="background-color: var(--color-yellow);"></div>
                             <span>Belief</span>
                         </div>
                          <div class="graph-legend-item">
-                            <div class="graph-legend-shape" style="background-color: #f38ba8;"></div>
+                            <div class="graph-legend-shape" style="background-color: var(--color-red);"></div>
                             <span>Lead</span>
                         </div>
                     </div>
@@ -295,4 +533,3 @@
     </div>
 </body>
 </html>
-

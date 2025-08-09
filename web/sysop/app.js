@@ -28,6 +28,7 @@ document.addEventListener('alpine:init', () => {
     graphData: { nodes: [], links: [] },
     graphStatus: 'Ready',
     simulation: null,
+    isGraphLoading: false, // Tracks the loading/rendering state
 
     // --- LOGS STATE (for Logs tab) ---
     logs: [],
@@ -35,6 +36,9 @@ document.addEventListener('alpine:init', () => {
     logConnectionStatus: 'Disconnected',
     logEvtSource: null,
     maxLogEntries: 500,
+
+    // --- RESPONSIVE STATE ---
+    resizeDebounceTimer: null,
 
     // --- CONFIG ---
     apiEndpoints: {
@@ -110,13 +114,18 @@ document.addEventListener('alpine:init', () => {
       const lastActivity = new Date(state.lastActivity).getTime();
       const minutesSince = (now - lastActivity) / (1000 * 60);
 
+      // --- MODIFIED FOR DORMANT HUE ---
       if (minutesSince > 45) {
-        return state.isLead ? 'lead-dormant-dim' : 'anonymous-dormant-dim';
+        if (state.isLead) {
+          return 'lead-dormant-dim';
+        }
+        // Add .has-beliefs class to allow CSS to select correct dormant color
+        return state.hasBeliefs ? 'anonymous-dormant-dim has-beliefs' : 'anonymous-dormant-dim';
       }
 
       let activity = 'light';
       if (minutesSince < 1) {
-        activity = 'ultra'; // Ultra-bright tier for <1 minute
+        activity = 'ultra';
       } else if (minutesSince <= 15) {
         activity = 'bright';
       } else if (minutesSince <= 30) {
@@ -142,7 +151,31 @@ document.addEventListener('alpine:init', () => {
     init() {
       this.checkAuth();
       this.setupEventListeners();
+      this.setupGraphResizeHandling();
       this.$watch('logFilters', () => { if (this.currentTab === 'logs') this.connectLogStream(); });
+    },
+
+    setupGraphResizeHandling() {
+      const handleResize = () => {
+        if (this.resizeDebounceTimer) {
+          clearTimeout(this.resizeDebounceTimer);
+        }
+
+        this.resizeDebounceTimer = setTimeout(() => {
+          if (this.currentTab === 'graph' && this.graphData.nodes.length > 0) {
+            console.log('Window resized, re-rendering graph');
+            this.isGraphLoading = true; // Show loader on resize
+            this.renderGraph();
+          }
+        }, 250);
+      };
+
+      window.addEventListener('resize', handleResize);
+
+      // Handle orientation change on mobile
+      window.addEventListener('orientationchange', () => {
+        setTimeout(handleResize, 500); // Delay for orientation change completion
+      });
     },
 
     // --- AUTHENTICATION FLOW ---
@@ -204,6 +237,7 @@ document.addEventListener('alpine:init', () => {
     async loadGraphData() {
       if (!this.sysOpToken) return;
       this.graphStatus = 'Loading...';
+      this.isGraphLoading = true; // Show loader on data fetch
 
       try {
         const response = await fetch(`${this.apiEndpoints.sysop_graph_realtime}?tenant=${this.currentTenant}`, {
@@ -215,10 +249,18 @@ document.addEventListener('alpine:init', () => {
 
         this.graphData = data;
         this.graphStatus = `${data.stats.nodes} nodes, ${data.stats.links} links`;
-        this.renderGraph();
+        this.renderGraph(); // renderGraph will hide the loader
       } catch (error) {
         console.error('Graph load failed:', error);
         this.graphStatus = 'Error loading graph';
+        this.isGraphLoading = false; // Hide loader on error
+      }
+    },
+
+    cleanupGraph() {
+      if (this.simulation) {
+        this.simulation.stop();
+        this.simulation = null;
       }
     },
 
@@ -227,15 +269,24 @@ document.addEventListener('alpine:init', () => {
       if (!container) return;
 
       this.$nextTick(() => {
-        d3.select(container).selectAll('*').remove();
+        // Clean up existing simulation
+        this.cleanupGraph();
 
-        const width = container.clientWidth;
-        const height = container.clientHeight;
+        // Clear existing SVG
+        d3.select(container).selectAll('svg').remove();
 
-        if (width <= 0 || height <= 0 || !this.graphData.nodes.length) {
-          this.graphStatus = this.graphData.nodes.length ? 'Error: container not visible' : 'Ready';
+        // Get current dimensions with validation
+        const containerRect = container.getBoundingClientRect();
+        const width = Math.max(containerRect.width, 200);
+        const height = Math.max(containerRect.height, 200);
+
+        if (width <= 200 || height <= 200 || !this.graphData.nodes.length) {
+          this.graphStatus = this.graphData.nodes.length ? 'Container too small or not visible' : 'Ready';
+          this.isGraphLoading = false; // Hide loader if render aborts
           return;
         }
+
+        console.log(`Rendering graph: ${width}x${height}, ${this.graphData.nodes.length} nodes`);
 
         const nodeCount = this.graphData.nodes.length;
         const svg = d3.select(container)
@@ -344,7 +395,9 @@ document.addEventListener('alpine:init', () => {
           nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
         });
 
+        this.graphStatus = `Rendered ${nodeCount} nodes, ${validLinks.length} links`;
         console.log(`Graph rendered with final physics: ${nodeCount} nodes`);
+        this.isGraphLoading = false; // Hide loader on successful render
       });
     },
 
@@ -368,10 +421,10 @@ document.addEventListener('alpine:init', () => {
 
     getNodeColor(type) {
       const colorMap = {
-        'session': '#89dceb',      // Catppuccin Sky/Cyan
-        'fingerprint': '#cba6f7',  // Catppuccin Mauve/Purple  
-        'lead': '#f38ba8',         // Catppuccin Red
-        'belief': '#f9e2af'        // Catppuccin Yellow
+        'session': 'var(--color-cyan-2-bright)',
+        'fingerprint': 'var(--color-purple-2-bright)',
+        'lead': 'var(--color-red)',
+        'belief': 'var(--color-yellow)'
       };
       return colorMap[type] || '#ABB2BF';
     },
@@ -498,4 +551,3 @@ document.addEventListener('alpine:init', () => {
     disconnectLogStream() { if (this.logEvtSource) { this.logEvtSource.close(); this.logEvtSource = null; this.logConnectionStatus = 'Disconnected'; } },
   }));
 });
-

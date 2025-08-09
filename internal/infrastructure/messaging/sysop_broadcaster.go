@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"math"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,7 +65,7 @@ func NewSysOpBroadcaster(tm *tenant.Manager, cm *manager.Manager) *SysOpBroadcas
 
 // Run starts the broadcaster's main loop. This should be run as a goroutine.
 func (b *SysOpBroadcaster) Run() {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(20 * time.Second) // Slowed down as requested
 	defer ticker.Stop()
 
 	for {
@@ -178,6 +180,7 @@ func (b *SysOpBroadcaster) preparePayload(fullStateList []SessionState) SessionS
 	var displayStates []SessionState
 	displayMode := "1:1"
 
+	// Switch to proportional mode if session count is high
 	if stats.Total > 200 {
 		displayMode = "PROPORTIONAL"
 		displayStates = b.calculateProportionalStates(fullStateList, 200)
@@ -216,89 +219,111 @@ func (b *SysOpBroadcaster) calculateStats(fullStateList []SessionState) (stats s
 	return stats
 }
 
-// calculateProportionalStates creates a representative sample of states for large session counts.
+// REFACTORED: This function now calculates proportions based on the 5-tier activity decay.
 func (b *SysOpBroadcaster) calculateProportionalStates(fullStateList []SessionState, displayCount int) []SessionState {
 	total := len(fullStateList)
 	if total == 0 {
 		return []SessionState{}
 	}
 
-	// Detailed category counts for accurate proportions
-	counts := make(map[string]int)
 	now := time.Now()
+	// Representative timestamps for each activity tier to trigger the correct CSS on the frontend.
+	timeTiers := map[string]time.Time{
+		"ultra":   now,
+		"bright":  now.Add(-10 * time.Minute),
+		"medium":  now.Add(-20 * time.Minute),
+		"light":   now.Add(-40 * time.Minute),
+		"dormant": now.Add(-60 * time.Minute),
+	}
+
+	// 1. Group sessions into detailed buckets based on type and activity tier.
+	counts := make(map[string]int)
 	for _, s := range fullStateList {
 		minutesSince := now.Sub(s.LastActivity).Minutes()
-		isActive := minutesSince <= 45
 
-		var category string
-		if s.IsLead {
-			if isActive {
-				category = "leadActive"
-			} else {
-				category = "leadDormant"
-			}
+		var tier string
+		if minutesSince < 1 {
+			tier = "ultra"
+		} else if minutesSince <= 15 {
+			tier = "bright"
+		} else if minutesSince <= 30 {
+			tier = "medium"
+		} else if minutesSince <= 45 {
+			tier = "light"
 		} else {
-			if isActive && s.HasBeliefs {
-				category = "anonActiveBeliefs"
-			}
-			if isActive && !s.HasBeliefs {
-				category = "anonActiveNoBeliefs"
-			}
-			if !isActive {
-				category = "anonDormant"
-			} // Dormant is always one category now
+			tier = "dormant"
 		}
-		counts[category]++
+
+		var categoryPrefix string
+		if s.IsLead {
+			categoryPrefix = "lead"
+		} else if s.HasBeliefs {
+			categoryPrefix = "anonBeliefs"
+		} else {
+			categoryPrefix = "anon"
+		}
+		counts[categoryPrefix+"_"+tier]++
 	}
 
+	// 2. Build the final list of 200 states based on the calculated proportions.
 	proportionalStates := make([]SessionState, 0, displayCount)
-
-	// Helper to append a slice of states
-	appendStates := func(states []SessionState) {
-		proportionalStates = append(proportionalStates, states...)
+	categoryOrder := []string{ // Define order for consistent display
+		"lead_ultra", "lead_bright", "lead_medium", "lead_light", "lead_dormant",
+		"anonBeliefs_ultra", "anonBeliefs_bright", "anonBeliefs_medium", "anonBeliefs_light", "anonBeliefs_dormant",
+		"anon_ultra", "anon_bright", "anon_medium", "anon_light", "anon_dormant",
 	}
 
-	// This function modernizes the loop by creating a pre-sized slice and filling it.
-	repeatState := func(num int, state SessionState) []SessionState {
-		if num <= 0 {
-			return nil
+	// Helper to create multiple copies of a state
+	repeatState := func(num int, state SessionState) {
+		for i := 0; i < num; i++ {
+			proportionalStates = append(proportionalStates, state)
 		}
-		slice := make([]SessionState, num)
-		for i := range slice {
-			slice[i] = state
-		}
-		return slice
 	}
 
-	// Calculate and append states for each category
-	appendStates(repeatState(
-		int(math.Round((float64(counts["leadActive"])/float64(total))*float64(displayCount))),
-		SessionState{IsLead: true, HasBeliefs: true, LastActivity: now},
-	))
-	appendStates(repeatState(
-		int(math.Round((float64(counts["anonActiveBeliefs"])/float64(total))*float64(displayCount))),
-		SessionState{IsLead: false, HasBeliefs: true, LastActivity: now},
-	))
-	appendStates(repeatState(
-		int(math.Round((float64(counts["anonActiveNoBeliefs"])/float64(total))*float64(displayCount))),
-		SessionState{IsLead: false, HasBeliefs: false, LastActivity: now},
-	))
+	for _, category := range categoryOrder {
+		categoryCount := counts[category]
+		if categoryCount == 0 {
+			continue
+		}
 
-	// For dormant, use an old timestamp to trigger the correct styles
-	oldTime := now.Add(-60 * time.Minute)
-	appendStates(repeatState(
-		int(math.Round((float64(counts["leadDormant"])/float64(total))*float64(displayCount))),
-		SessionState{IsLead: true, HasBeliefs: true, LastActivity: oldTime},
-	))
-	appendStates(repeatState(
-		int(math.Round((float64(counts["anonDormant"])/float64(total))*float64(displayCount))),
-		SessionState{IsLead: false, HasBeliefs: false, LastActivity: oldTime},
-	))
+		// Determine the representative SessionState template for this category
+		var template SessionState
+		switch {
+		case strings.HasPrefix(category, "lead"):
+			template.IsLead = true
+			template.HasBeliefs = true // Leads inherently have belief data
+		case strings.HasPrefix(category, "anonBeliefs"):
+			template.HasBeliefs = true
+		default: // "anon"
+			// IsLead and HasBeliefs are already false
+		}
 
-	// Adjust for rounding errors to ensure exactly `displayCount` items
+		tier := strings.Split(category, "_")[1]
+		template.LastActivity = timeTiers[tier]
+
+		// Calculate how many blocks this category gets and add them to the list
+		numBlocks := int(math.Round((float64(categoryCount) / float64(total)) * float64(displayCount)))
+		if numBlocks > 0 {
+			repeatState(numBlocks, template)
+		}
+	}
+
+	// 3. Shuffle and adjust for rounding errors to ensure a clean visual mix and exact count.
+	sort.SliceStable(proportionalStates, func(i, j int) bool {
+		// A simple sort to group types, which looks better than pure random
+		if proportionalStates[i].IsLead != proportionalStates[j].IsLead {
+			return proportionalStates[i].IsLead
+		}
+		return proportionalStates[i].HasBeliefs
+	})
+
+	if len(proportionalStates) > displayCount {
+		return proportionalStates[:displayCount]
+	}
 	for len(proportionalStates) < displayCount {
-		proportionalStates = append(proportionalStates, SessionState{IsLead: false, HasBeliefs: false, LastActivity: oldTime})
+		// Pad with the most common "anonymous dormant" state if we're short due to rounding
+		proportionalStates = append(proportionalStates, SessionState{LastActivity: timeTiers["dormant"]})
 	}
 
-	return proportionalStates[:displayCount]
+	return proportionalStates
 }
