@@ -209,7 +209,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 	}
 
 	// === V1 COMPATIBILITY PROCESSING ===
-	var allChildNodes []interface{}
+	var allChildNodes []any
 	cleanedPanes := make([]*content.PaneNode, len(fullPayload.Panes))
 
 	for i, pane := range fullPayload.Panes {
@@ -220,7 +220,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 		// Extract child nodes from this pane's OptionsPayload
 		if pane.OptionsPayload != nil {
 			if nodes, exists := pane.OptionsPayload["nodes"]; exists {
-				if nodesArray, ok := nodes.([]interface{}); ok {
+				if nodesArray, ok := nodes.([]any); ok {
 					allChildNodes = append(allChildNodes, nodesArray...)
 				}
 			}
@@ -228,7 +228,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 
 		// Create cleaned pane (without embedded nodes)
 		cleanedPane := *pane
-		cleanedPane.OptionsPayload = make(map[string]interface{})
+		cleanedPane.OptionsPayload = make(map[string]any)
 
 		// Copy all fields except "nodes"
 		if pane.OptionsPayload != nil {
@@ -279,23 +279,23 @@ func (h *StoryFragmentHandlers) GetHomeStoryFragment(c *gin.Context) {
 		return
 	}
 
-	// Call GetHome method (not GetHomeStoryFragment)
-	homeStoryFragment, err := h.storyFragmentService.GetHome(tenantCtx)
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	storyFragmentNode, err := h.storyFragmentService.GetHome(tenantCtx, sessionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	if homeStoryFragment == nil {
+	if storyFragmentNode == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "home storyfragment not found"})
 		return
 	}
 
-	h.logger.Content().Info("Get home story fragment request completed", "found", homeStoryFragment != nil, "duration", time.Since(start))
+	h.logger.Content().Info("Get home story fragment request completed", "found", storyFragmentNode != nil, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetHomeStoryFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
-	c.JSON(http.StatusOK, homeStoryFragment)
+	c.JSON(http.StatusOK, storyFragmentNode)
 }
 
 // CreateStoryFragment creates a new storyfragment

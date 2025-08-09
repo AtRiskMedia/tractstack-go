@@ -194,7 +194,7 @@ func (s *StoryFragmentService) GetFullPayloadBySlug(tenantCtx *tenant.Context, s
 }
 
 // GetHome returns the home storyfragment by reading the home slug from the tenant's configuration.
-func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.StoryFragmentNode, error) {
+func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context, sessionID string) (*content.StoryFragmentNode, error) {
 	if tenantCtx == nil || tenantCtx.Config == nil || tenantCtx.Config.BrandConfig == nil {
 		return nil, fmt.Errorf("tenant context or configuration is not available")
 	}
@@ -211,6 +211,12 @@ func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context) (*content.Stor
 	storyFragment, err := storyFragmentRepo.FindBySlug(tenantCtx.TenantID, homeSlug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home storyfragment by slug '%s': %w", homeSlug, err)
+	}
+
+	// Enrich with metadata (menu, isHome flag, etc.)
+	err = s.EnrichWithMetadata(tenantCtx, storyFragment, sessionID)
+	if err != nil {
+		s.logger.Content().Warn("Failed to enrich home storyfragment metadata", "error", err)
 	}
 
 	s.logger.Content().Info("Successfully retrieved home storyfragment", "tenantId", tenantCtx.TenantID, "homeSlug", homeSlug, "found", storyFragment != nil, "duration", time.Since(start))
