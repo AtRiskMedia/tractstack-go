@@ -14,7 +14,6 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
-	persistenceUser "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/templates"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
@@ -105,7 +104,6 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	}
 	logger.Startup().Info("Channeled logger initialized successfully", "logDirectory", loggerConfig.LogDirectory)
 
-	leadRepo := persistenceUser.NewSQLLeadRepository(nil, logger)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
 	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
@@ -123,7 +121,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		scrollTargetService,
 	)
 	contentMapService := services.NewContentMapService(logger, perfTracker)
-	authService := services.NewAuthService(logger, perfTracker, leadRepo)
+	authService := services.NewAuthService(logger, perfTracker)
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
@@ -184,11 +182,10 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		SysOpBroadcaster:       sysOpBroadcaster,
 
 		// Infrastructure
-		TenantManager:  tenantManager,
-		CacheManager:   cacheManager,
-		Logger:         logger,
-		PerfTracker:    perfTracker,
-		EmailService:   emailService,
-		LeadRepository: leadRepo,
+		TenantManager: tenantManager,
+		CacheManager:  cacheManager,
+		Logger:        logger,
+		PerfTracker:   perfTracker,
+		EmailService:  emailService,
 	}
 }

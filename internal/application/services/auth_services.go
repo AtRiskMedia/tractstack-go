@@ -22,15 +22,13 @@ import (
 type AuthService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
-	leadRepo    user.LeadRepository
 }
 
 // NewAuthService creates a new authentication service
-func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, leadRepo user.LeadRepository) *AuthService {
+func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AuthService {
 	return &AuthService{
 		logger:      logger,
 		perfTracker: perfTracker,
-		leadRepo:    leadRepo,
 	}
 }
 
@@ -111,6 +109,7 @@ func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Conte
 
 // CreateLead creates a new lead with encrypted credentials
 func (a *AuthService) CreateLead(firstName, email, password, contactPersona, shortBio string, tenantCtx *tenant.Context) (*CreateLeadResult, error) {
+	leadRepo := tenantCtx.LeadRepo()
 	encryptedEmail, err := security.Encrypt(email, tenantCtx.Config.AESKey)
 	if err != nil {
 		return nil, fmt.Errorf("email encryption failed")
@@ -139,7 +138,7 @@ func (a *AuthService) CreateLead(firstName, email, password, contactPersona, sho
 		Changed:        time.Now().UTC(),
 	}
 
-	if err := a.leadRepo.Store(newLead); err != nil {
+	if err := leadRepo.Store(newLead); err != nil {
 		a.logger.Auth().Error("Failed to store new lead", "error", err, "leadId", newLead.ID)
 		return nil, fmt.Errorf("failed to create profile")
 	}
@@ -271,6 +270,7 @@ func (a *AuthService) GetTokenInfo(tokenString string, tenantCtx *tenant.Context
 
 // ValidateEncryptedCredentials validates profile credentials using encrypted data
 func (a *AuthService) ValidateEncryptedCredentials(encryptedEmail, encryptedCode string, tenantCtx *tenant.Context) *user.Profile {
+	leadRepo := tenantCtx.LeadRepo()
 	decryptedEmail, err := security.Decrypt(encryptedEmail, tenantCtx.Config.AESKey)
 	if err != nil {
 		a.logger.Auth().Warn("Failed to decrypt email for credential validation", "tenantId", tenantCtx.TenantID)
@@ -283,7 +283,7 @@ func (a *AuthService) ValidateEncryptedCredentials(encryptedEmail, encryptedCode
 		return nil
 	}
 
-	lead, err := a.leadRepo.FindByEmail(decryptedEmail)
+	lead, err := leadRepo.FindByEmail(decryptedEmail)
 	if err != nil || lead == nil {
 		return nil
 	}

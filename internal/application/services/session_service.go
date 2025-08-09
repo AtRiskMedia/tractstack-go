@@ -475,15 +475,22 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 }
 
 func (s *SessionService) ValidateLeadCredentials(email, password string, tenantCtx *tenant.Context) (*user.Lead, error) {
+	s.logger.Auth().Info("Validating lead credentials", "email", email)
+
 	lead, err := s.GetLeadByEmail(email, tenantCtx)
 	if err != nil || lead == nil {
+		s.logger.Auth().Error("Lead lookup failed", "email", email, "error", err)
 		return nil, fmt.Errorf("lead not found")
 	}
 
+	s.logger.Auth().Info("Lead found, checking password", "email", email, "leadId", lead.ID)
+
 	if err := bcrypt.CompareHashAndPassword([]byte(lead.PasswordHash), []byte(password)); err != nil {
+		s.logger.Auth().Error("Password validation failed", "email", email, "leadId", lead.ID, "error", err)
 		return nil, fmt.Errorf("invalid password")
 	}
 
+	s.logger.Auth().Info("Lead credentials validated successfully", "email", email, "leadId", lead.ID)
 	return lead, nil
 }
 
