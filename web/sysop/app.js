@@ -117,8 +117,13 @@ document.addEventListener('alpine:init', () => {
       }
 
       let activity = 'light';
-      if (minutesSince <= 15) activity = 'bright';
-      else if (minutesSince <= 30) activity = 'medium';
+      if (minutesSince < 1) {
+        activity = 'ultra'; // Ultra-bright tier for <1 minute
+      } else if (minutesSince <= 15) {
+        activity = 'bright';
+      } else if (minutesSince <= 30) {
+        activity = 'medium';
+      }
 
       if (state.isLead) {
         return `lead-active-${activity}`;

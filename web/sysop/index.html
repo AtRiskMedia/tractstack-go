@@ -94,17 +94,29 @@
         .session-universe-map { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; line-height: 1; user-select: none; }
         .session-universe-legend { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
         .session-stats-wrapper { display: flex; flex-wrap: wrap; gap: 0 1.5em; line-height: 1.6; }
+
+        /* Lead colors - white spectrum for leads */
+        .lead-active-ultra { color: var(--color-white-bright); } /* Ultra-bright white for <1 min */
         .lead-active-bright { color: var(--color-lead-bright); }
         .lead-active-medium { color: var(--color-lead-medium); }
         .lead-active-light { color: var(--color-lead-light); }
-        .lead-dormant-dim, .anonymous-dormant-dim { color: var(--color-text-dim); }
+        .lead-dormant-dim { color: var(--color-text-dim); }
+        
+        /* Anonymous with beliefs - purple spectrum */
+        .anonymous-active-ultra-beliefs { color: var(--color-purple-bright); } /* Ultra-bright purple for <1 min */
         .anonymous-active-bright-beliefs { color: var(--color-purple-bright); }
         .anonymous-active-medium-beliefs { color: var(--color-purple); }
         .anonymous-active-light-beliefs { color: var(--color-purple-dim); }
+        
+        /* Anonymous without beliefs - cyan spectrum */
+        .anonymous-active-ultra { color: var(--color-cyan-bright); } /* Ultra-bright cyan for <1 min */
         .anonymous-active-bright { color: var(--color-cyan-bright); }
         .anonymous-active-medium { color: var(--color-cyan); }
         .anonymous-active-light { color: var(--color-cyan-dim); }
         
+        /* Dormant (unchanged) */
+        .anonymous-dormant-dim { color: var(--color-text-dim); }
+       
         /* Graph styles */
         .graph-container { background: var(--color-bg); border: 1px solid var(--color-text-dim); border-radius: 4px; min-height: 400px; overflow: hidden; position: relative; }
         .graph-controls { margin-bottom: 15px; }
