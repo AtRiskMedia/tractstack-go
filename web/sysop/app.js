@@ -1,7 +1,7 @@
 /**
  * TractStack SysOp Dashboard
  * A retro BBS-style monitoring interface for the modern web.
- * Alpine.js component for the entire dashboard.
+ * Alpine.js component with optimized D3 graph rendering.
  */
 document.addEventListener('alpine:init', () => {
   Alpine.data('sysOpApp', () => ({
@@ -28,7 +28,6 @@ document.addEventListener('alpine:init', () => {
     graphData: { nodes: [], links: [] },
     graphStatus: 'Ready',
     simulation: null,
-    graphLegendItems: [],
 
     // --- LOGS STATE (for Logs tab) ---
     logs: [],
@@ -143,7 +142,6 @@ document.addEventListener('alpine:init', () => {
     init() {
       this.checkAuth();
       this.setupEventListeners();
-      this.setupGraphLegend();
       this.$watch('logFilters', () => { if (this.currentTab === 'logs') this.connectLogStream(); });
     },
 
@@ -202,11 +200,7 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // --- GRAPH METHODS ---
-    setupGraphLegend() {
-      // This will be dynamically generated in renderGraph now
-      this.graphLegendItems = [];
-    },
+    // --- OPTIMIZED GRAPH METHODS ---
     async loadGraphData() {
       if (!this.sysOpToken) return;
       this.graphStatus = 'Loading...';
@@ -230,218 +224,136 @@ document.addEventListener('alpine:init', () => {
 
     renderGraph() {
       const container = document.getElementById('graph-svg-container');
-      if (!container || !this.graphData.nodes.length) return;
+      if (!container) return;
 
-      d3.select(container).selectAll('*').remove();
+      this.$nextTick(() => {
+        d3.select(container).selectAll('*').remove();
 
-      const width = container.clientWidth;
-      const nodeCount = this.graphData.nodes.length;
-      const minHeight = 400;
-      const maxHeight = 800;
-      const optimalHeight = Math.max(minHeight, Math.min(maxHeight, nodeCount * 25 + 200));
-      const height = optimalHeight;
+        const width = container.clientWidth;
+        const height = container.clientHeight;
 
-      container.style.height = height + 'px';
-
-      const svg = d3.select(container)
-        .append('svg')
-        .attr('width', width)
-        .attr('height', height);
-
-      const linkDistance = nodeCount > 20 ? 60 : 80;
-      const chargeStrength = nodeCount > 20 ? -200 : -300;
-
-      this.simulation = d3.forceSimulation(this.graphData.nodes)
-        .force('link', d3.forceLink(this.graphData.links).id(d => d.id).distance(linkDistance))
-        .force('charge', d3.forceManyBody().strength(chargeStrength))
-        .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(d => d.size + 5));
-
-      const link = svg.append('g')
-        .selectAll('line')
-        .data(this.graphData.links)
-        .enter().append('line')
-        .attr('stroke', '#5c6370')
-        .attr('stroke-opacity', 0.6)
-        .attr('stroke-width', 1.5);
-
-      const nodeGroup = svg.append('g')
-        .selectAll('g')
-        .data(this.graphData.nodes)
-        .enter().append('g')
-        .style('cursor', 'grab')
-        .call(d3.drag()
-          .on('start', (event, d) => {
-            if (!event.active) this.simulation.alphaTarget(0.3).restart();
-            d.fx = d.x;
-            d.fy = d.y;
-            d3.select(event.currentTarget).style('cursor', 'grabbing');
-          })
-          .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
-          .on('end', (event, d) => {
-            if (!event.active) this.simulation.alphaTarget(0);
-            d.fx = null;
-            d.fy = null;
-            d3.select(event.currentTarget).style('cursor', 'grab');
-          }));
-
-      // --- Wireframe node rendering focused on state relationships ---
-      const symbolGenerator = d3.symbol().size(d => d.size * d.size * 2.5);
-
-      // Solid outline for Session (triangle)
-      nodeGroup.filter(d => d.type === 'session')
-        .append('path')
-        .attr('d', symbolGenerator.type(d3.symbolTriangle))
-        .attr('fill', 'transparent')
-        .attr('stroke', d => this.getNodeColor(d.type))
-        .attr('stroke-width', 2);
-
-      // Double line for Visit (triangle)
-      const visitGroup = nodeGroup.filter(d => d.type === 'visit');
-      visitGroup.append('path')
-        .attr('d', symbolGenerator.type(d3.symbolTriangle))
-        .attr('fill', 'transparent')
-        .attr('stroke', d => this.getNodeColor(d.type))
-        .attr('stroke-width', 2.5);
-      visitGroup.append('path')
-        .attr('d', d3.symbol().size(d => d.size * d.size * 1.2).type(d3.symbolTriangle))
-        .attr('fill', 'transparent')
-        .attr('stroke', d => this.getNodeColor(d.type))
-        .attr('stroke-width', 1);
-
-      // Dashed outline for Page (rectangle)
-      nodeGroup.filter(d => d.type === 'page')
-        .append('rect')
-        .attr('width', d => d.size * 1.8)
-        .attr('height', d => d.size * 1.8)
-        .attr('x', d => -d.size * 0.9)
-        .attr('y', d => -d.size * 0.9)
-        .attr('rx', 2)
-        .attr('fill', 'transparent')
-        .attr('stroke', d => this.getNodeColor(d.type))
-        .attr('stroke-width', 2)
-        .attr('stroke-dasharray', '5,5');
-
-      // SOLID CIRCLE for Fingerprint
-      nodeGroup.filter(d => d.type === 'fingerprint')
-        .append('circle')
-        .attr('r', d => d.size)
-        .attr('fill', d => this.getNodeColor(d.type))
-        .attr('stroke', '#21252b')
-        .attr('stroke-width', 2);
-
-      // DOTTED CIRCLE for Belief 
-      nodeGroup.filter(d => d.type === 'belief')
-        .append('circle')
-        .attr('r', d => d.size)
-        .attr('fill', 'transparent')
-        .attr('stroke', d => this.getNodeColor(d.type))
-        .attr('stroke-width', 2)
-        .attr('stroke-dasharray', '3,3');
-
-      // Solid fill for Lead (circles)
-      nodeGroup.filter(d => d.type === 'lead')
-        .append('circle')
-        .attr('r', d => d.size)
-        .attr('fill', d => this.getNodeColor(d.type))
-        .attr('stroke', '#21252b')
-        .attr('stroke-width', 2);
-
-      //const labels = nodeGroup.append('text')
-      //  .attr('font-size', '10px')
-      //  .attr('font-family', 'monospace')
-      //  .attr('fill', '#abb2bf')
-      //  .attr('text-anchor', 'middle')
-      //  .attr('y', d => d.size + 15)
-      //  .style('pointer-events', 'none')
-      //  .each(function (d) {
-      //    const lines = d.label.split('\n');
-      //    for (let i = 0; i < lines.length; i++) {
-      //      d3.select(this).append('tspan')
-      //        .attr('x', 0)
-      //        .attr('dy', i === 0 ? 0 : '1.2em')
-      //        .text(lines[i]);
-      //    }
-      //  });
-
-      nodeGroup.append('title')
-        .text(d => this.getNodeTooltip(d));
-
-      this.simulation.on('tick', () => {
-        link
-          .attr('x1', d => d.source.x)
-          .attr('y1', d => d.source.y)
-          .attr('x2', d => d.target.x)
-          .attr('y2', d => d.target.y);
-        nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
-      });
-
-      // --- Update legend to match new styles ---
-      this.updateGraphLegend();
-    },
-
-    updateGraphLegend() {
-      const legendContainer = d3.select('.graph-legend').html(''); // Clear existing legend
-      const items = [
-        { type: 'session', label: 'Sessions' },
-        { type: 'visit', label: 'Visits' },
-        { type: 'page', label: 'Pages' },
-        { type: 'fingerprint', label: 'Fingerprints' },
-        { type: 'lead', label: 'Leads' },
-        { type: 'belief', label: 'Beliefs' }
-      ];
-
-      items.forEach(item => {
-        const itemDiv = legendContainer.append('div').attr('class', 'graph-legend-item');
-        const svg = itemDiv.append('svg').attr('class', 'graph-legend-shape').attr('viewBox', '-10 -10 20 20');
-        const color = this.getNodeColor(item.type);
-
-        switch (item.type) {
-          case 'session':
-            svg.append('path').attr('d', d3.symbol().type(d3.symbolTriangle).size(100)()).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 2);
-            break;
-          case 'visit':
-            svg.append('path').attr('d', d3.symbol().type(d3.symbolTriangle).size(100)()).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 2.5);
-            svg.append('path').attr('d', d3.symbol().type(d3.symbolTriangle).size(50)()).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 1);
-            break;
-          case 'page':
-            svg.append('rect').attr('width', 16).attr('height', 16).attr('x', -8).attr('y', -8).attr('rx', 2).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 2).attr('stroke-dasharray', '5,5');
-            break;
-          case 'fingerprint':
-            // SOLID CIRCLE for fingerprint
-            svg.append('circle').attr('r', 8).attr('fill', color).attr('stroke', '#21252b').attr('stroke-width', 2);
-            break;
-          case 'belief':
-            // DOTTED CIRCLE for belief
-            svg.append('circle').attr('r', 8).attr('fill', 'transparent').attr('stroke', color).attr('stroke-width', 2).attr('stroke-dasharray', '3,3');
-            break;
-          case 'lead':
-            svg.append('circle').attr('r', 8).attr('fill', color).attr('stroke', '#21252b').attr('stroke-width', 2);
-            break;
+        if (width <= 0 || height <= 0 || !this.graphData.nodes.length) {
+          this.graphStatus = this.graphData.nodes.length ? 'Error: container not visible' : 'Ready';
+          return;
         }
-        itemDiv.append('span').text(item.label);
-      });
-    },
 
-    getNodeLabel(node) {
-      switch (node.type) {
-        case 'session':
-          return `Session\n${node.id.substring(0, 8)}...\n${node.lastActivity || ''}`;
-        case 'fingerprint':
-          return `Fingerprint\n${node.id.substring(0, 8)}...`;
-        case 'visit':
-          return `Visit\n${node.id.substring(0, 8)}...\n${node.lastActivity || ''}`;
-        case 'lead':
-          return `Lead\n${node.leadName || 'Unknown'}`;
-        default:
-          return node.label || node.id;
-      }
+        const nodeCount = this.graphData.nodes.length;
+        const svg = d3.select(container)
+          .append('svg')
+          .attr('width', width)
+          .attr('height', height);
+
+        // --- DATA RESILIENCE: Filter out orphan links to prevent crashes ---
+        const nodeIds = new Set(this.graphData.nodes.map(n => n.id));
+        const validLinks = this.graphData.links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
+
+        // Smart, Adaptive Sizing using a Logarithmic Scale
+        const fillScale = d3.scaleLog()
+          .domain([10, 1500])
+          .range([0.5, 0.1])
+          .clamp(true);
+
+        const totalArea = width * height;
+        const targetFillRatio = fillScale(nodeCount);
+        const areaPerNode = (totalArea * targetFillRatio) / nodeCount;
+        const nodeBaseRadius = Math.sqrt(areaPerNode / Math.PI);
+
+        const maxRadius = 40;
+        const cappedRadius = Math.min(nodeBaseRadius, maxRadius);
+
+        // Tiered forces remain
+        let linkDistance, chargeStrength;
+
+        if (nodeCount > 500) {
+          chargeStrength = -20; linkDistance = 10;
+        } else if (nodeCount > 250) {
+          chargeStrength = -50; linkDistance = 20;
+        } else {
+          chargeStrength = -100; linkDistance = 50;
+        }
+
+        // Set dynamic size based on the new capped calculation
+        this.graphData.nodes.forEach(node => {
+          const typeMultiplier = { 'session': 1.0, 'fingerprint': 1.2, 'lead': 1.3, 'belief': 0.9 };
+          node.dynamicSize = Math.max(1.5, cappedRadius * (typeMultiplier[node.type] || 1.0));
+        });
+
+        // --- MODIFIED PHYSICS ---
+        // The simulation now uses X and Y forces for containment instead of a single center force.
+        this.simulation = d3.forceSimulation(this.graphData.nodes)
+          .force('link', d3.forceLink(validLinks).id(d => d.id).distance(linkDistance).strength(0.5))
+          .force('charge', d3.forceManyBody().strength(chargeStrength))
+          .force('x', d3.forceX(width / 2).strength(0.05)) // Gently pull nodes to the vertical center
+          .force('y', d3.forceY(height / 2).strength(0.05)) // Gently pull nodes to the horizontal center
+          .force('collision', d3.forceCollide().radius(d => d.dynamicSize + 2).strength(1));
+
+        // Run the simulation in the background to "warm it up"
+        this.simulation.tick(120);
+
+        const link = svg.append('g').selectAll('line').data(validLinks).enter().append('line')
+          .attr('stroke', '#a6adc8').attr('stroke-opacity', 0.7)
+          .attr('stroke-width', 1.5);
+
+        const nodeGroup = svg.append('g').selectAll('g').data(this.graphData.nodes).enter().append('g')
+          .style('cursor', 'grab')
+          .call(d3.drag()
+            .on('start', (event, d) => { if (!event.active) this.simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; d3.select(event.currentTarget).style('cursor', 'grabbing'); })
+            .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+            .on('end', (event, d) => { if (!event.active) this.simulation.alphaTarget(0); d.fx = null; d.fy = null; d3.select(event.currentTarget).style('cursor', 'grab'); }));
+
+        nodeGroup.filter(d => d.type === 'belief').append('rect')
+          .attr('width', d => d.dynamicSize * 2).attr('height', d => d.dynamicSize * 2)
+          .attr('x', d => -d.dynamicSize).attr('y', d => -d.dynamicSize)
+          .attr('rx', 2).attr('fill', d => this.getNodeColor(d.type)).attr('opacity', 0.9);
+
+        nodeGroup.filter(d => d.type !== 'belief').append('circle')
+          .attr('r', d => d.dynamicSize).attr('fill', d => this.getNodeColor(d.type))
+          .attr('opacity', 0.9);
+
+        nodeGroup.append('title').text(d => this.getNodeTooltip(d));
+
+        // Bouncy Walls Logic (kept as a hard boundary)
+        const damping = 0.4;
+        this.simulation.on('tick', () => {
+          nodeGroup.each(d => {
+            const radius = d.dynamicSize;
+            if (d.x - radius < 0) {
+              d.x = radius;
+              d.vx *= -damping;
+            }
+            if (d.x + radius > width) {
+              d.x = width - radius;
+              d.vx *= -damping;
+            }
+            if (d.y - radius < 0) {
+              d.y = radius;
+              d.vy *= -damping;
+            }
+            if (d.y + radius > height) {
+              d.y = height - radius;
+              d.vy *= -damping;
+            }
+          });
+
+          link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+
+          nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        console.log(`Graph rendered with final physics: ${nodeCount} nodes`);
+      });
     },
 
     getNodeTooltip(node) {
       const typeLabels = {
-        'session': 'Session', 'fingerprint': 'User Fingerprint', 'visit': 'Visit',
-        'lead': 'Known Lead'
+        'session': 'Session',
+        'fingerprint': 'User Fingerprint',
+        'lead': 'Known Lead',
+        'belief': 'Stored Belief'
       };
       let tooltip = `${typeLabels[node.type] || node.type}\nID: ${node.id}`;
       if (node.lastActivity) { tooltip += `\nLast Active: ${node.lastActivity}`; }
@@ -456,10 +368,10 @@ document.addEventListener('alpine:init', () => {
 
     getNodeColor(type) {
       const colorMap = {
-        'session': '#61AFEF',
-        'visit': '#56B6C2',
-        'fingerprint': '#E5C07B',
-        'lead': '#98C379',
+        'session': '#89dceb',      // Catppuccin Sky/Cyan
+        'fingerprint': '#cba6f7',  // Catppuccin Mauve/Purple  
+        'lead': '#f38ba8',         // Catppuccin Red
+        'belief': '#f9e2af'        // Catppuccin Yellow
       };
       return colorMap[type] || '#ABB2BF';
     },
@@ -586,3 +498,4 @@ document.addEventListener('alpine:init', () => {
     disconnectLogStream() { if (this.logEvtSource) { this.logEvtSource.close(); this.logEvtSource = null; this.logConnectionStatus = 'Disconnected'; } },
   }));
 });
+

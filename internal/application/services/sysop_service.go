@@ -70,7 +70,6 @@ type ActivityGraphResponse struct {
 type GraphStats struct {
 	Sessions           int    `json:"sessions"`
 	Fingerprints       int    `json:"fingerprints"`
-	Visits             int    `json:"visits"`
 	Nodes              int    `json:"nodes"`
 	Links              int    `json:"links"`
 	AuthenticatedUsers int    `json:"authenticatedUsers"`
@@ -92,13 +91,11 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 	// Get all session and fingerprint IDs from cache
 	sessionIDs := s.cacheManager.GetAllSessionIDs(tenantID)
 	fingerprintIDs := s.cacheManager.GetAllFingerprintIDs(tenantID)
-	visitIDs := s.cacheManager.GetAllVisitIDs(tenantID)
 
 	s.logger.System().Debug("Retrieved cache IDs",
 		"tenantId", tenantID,
 		"sessions", len(sessionIDs),
-		"fingerprints", len(fingerprintIDs),
-		"visits", len(visitIDs))
+		"fingerprints", len(fingerprintIDs))
 
 	nodes := []GraphNode{}
 	links := []GraphLink{}
@@ -187,39 +184,6 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 			Target: fingerprintID,
 			Type:   "session_fingerprint",
 		})
-
-		// Add visit node and link fingerprint -> visit
-		visitID := sessionData.VisitID
-		if visitState, exists := s.cacheManager.GetVisitState(tenantID, visitID); exists {
-			// Skip if visit activity is older than 1 hour
-			if visitState.LastActivity.Before(oneHourAgo) {
-				continue
-			}
-
-			stats.Visits++
-			visitTimeAgo := s.formatTimeAgo(visitState.LastActivity)
-			visitLabel := fmt.Sprintf("Visit\n%s\n%s", visitID, visitTimeAgo)
-
-			if !nodeSet[visitID] {
-				visitNode := GraphNode{
-					ID:            visitID,
-					Type:          "visit",
-					Label:         visitLabel,
-					Size:          8,
-					LastActivity:  visitTimeAgo,
-					ActivityLevel: s.getActivityLevel(visitState.LastActivity),
-				}
-				nodes = append(nodes, visitNode)
-				nodeSet[visitID] = true
-			}
-
-			// Link fingerprint to visit
-			links = append(links, GraphLink{
-				Source: fingerprintID,
-				Target: visitID,
-				Type:   "fingerprint_visit",
-			})
-		}
 
 		// Add lead node if this fingerprint has a lead
 		if sessionData.LeadID != nil && *sessionData.LeadID != "" {
@@ -329,7 +293,6 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 		"links", stats.Links,
 		"sessions", stats.Sessions,
 		"fingerprints", stats.Fingerprints,
-		"visits", stats.Visits,
 		"authenticatedUsers", stats.AuthenticatedUsers,
 		"totalBeliefs", stats.TotalBeliefs,
 		"duration", time.Since(start))
