@@ -81,7 +81,7 @@ document.addEventListener('alpine:init', () => {
         case 'graph':
           return {
             status: this.graphData.nodes.length > 0 ? 'ONLINE' : 'CONNECTING',
-            details: `<span>Nodes: <span class="metric-value">${this.graphData.nodes.length}</span></span><span>Links: <span class="metric-value">${this.graphData.links.length}</span></span>`
+            details: `<span>Nodes: <span class="metric-value">${this.graphData.nodes.length}</span></span> <span>Links: <span class="metric-value">${this.graphData.links.length}</span></span> <span>Last Update: <span id="last-update">${this.pollDataStore.lastUpdate || '--:--:--'}</span></span>`
           };
         case 'dashboard':
           return {
@@ -210,6 +210,7 @@ document.addEventListener('alpine:init', () => {
       } else if (tabName === 'logs') {
         this.connectLogStream();
       } else if (tabName === 'graph') {
+        this.startPolling();
         this.loadGraphData();
       } else if (['status', 'cache', 'analytics'].includes(tabName)) {
         this.startPolling();
@@ -458,10 +459,10 @@ document.addEventListener('alpine:init', () => {
     },
 
     // --- POLLING LOGIC ---
-    startPolling() { this.stopPolling(); this.pollData(); this.pollTimer = setInterval(() => this.pollData(), 5000); },
+    startPolling() { this.stopPolling(); this.pollData(); this.pollTimer = setInterval(() => this.pollData(), 20000); },
     stopPolling() { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; } },
     async pollData() {
-      if (!this.tenantToken || !['status', 'cache', 'analytics'].includes(this.currentTab)) return;
+      if (!this.tenantToken || !['status', 'cache', 'analytics', 'graph'].includes(this.currentTab)) return;
       const headers = { 'Authorization': `Bearer ${this.tenantToken}`, 'X-Tenant-ID': this.currentTenant };
       const sysOpHeaders = { 'Authorization': `Bearer ${this.sysOpToken}` };
       const activityEndpoint = `${this.apiEndpoints.sysop_activity}?tenant=${this.currentTenant}`;

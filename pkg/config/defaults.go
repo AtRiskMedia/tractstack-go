@@ -183,7 +183,7 @@ func init() {
 	UserStateTTL = time.Duration(getEnvInt("USER_STATE_TTL_HOURS", 168)) * time.Hour
 	HTMLChunkTTL = time.Duration(getEnvInt("HTML_CHUNK_TTL_HOURS", 1)) * time.Hour
 	AnalyticsBinTTL = time.Duration(getEnvInt("ANALYTICS_BIN_TTL_DAYS", 28)) * 24 * time.Hour
-	CurrentHourTTL = time.Duration(getEnvInt("CURRENT_HOUR_TTL_MINUTES", 15)) * time.Minute
+	CurrentHourTTL = time.Duration(getEnvInt("CURRENT_HOUR_TTL_MINUTES", 5)) * time.Minute
 	LeadMetricsTTL = time.Duration(getEnvInt("LEAD_METRICS_TTL_MINUTES", 5)) * time.Minute
 	DashboardTTL = time.Duration(getEnvInt("DASHBOARD_TTL_MINUTES", 10)) * time.Minute
 

@@ -81,13 +81,13 @@ type GraphStats struct {
 
 // GetActivityGraph returns enhanced real-time session/fingerprint/belief graph data
 func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse, error) {
-	start := time.Now()
+	start := time.Now().UTC()
 	marker := s.perfTracker.StartOperation("get_activity_graph", tenantID)
 	defer marker.Complete()
 
 	s.logger.System().Debug("Starting activity graph generation", "tenantId", tenantID)
 
-	now := time.Now()
+	now := time.Now().UTC()
 	oneHourAgo := now.Add(-1 * time.Hour)
 
 	// Get all session and fingerprint IDs from cache
@@ -232,9 +232,17 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 			contentMap = make(map[string]struct{ Title, Slug string }) // fallback to empty map
 		}
 
+		s.logger.System().Warn("STORY FRAGMENT ACTIVITY EXTRACTED",
+			"tenantId", tenantID,
+			"storyfragmentCount", len(storyFragmentActivity))
+
 		// Add StoryFragment nodes and links
 		for storyfragmentID, fingerprintActivity := range storyFragmentActivity {
 			sfNodeID := "storyfragment_" + storyfragmentID
+
+			s.logger.System().Warn("Processing StoryFragment",
+				"storyfragmentId", storyfragmentID,
+				"fingerprintCount", len(fingerprintActivity))
 
 			// Add StoryFragment node if not already added
 			if !nodeSet[sfNodeID] {
@@ -256,12 +264,25 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 				})
 				nodeSet[sfNodeID] = true
 				stats.StoryFragments++
+
+				s.logger.System().Warn("StoryFragment node added",
+					"storyfragmentId", storyfragmentID,
+					"slug", slug,
+					"title", title)
 			}
 
 			// Add links from fingerprints to StoryFragments
 			for fingerprintID, verbSet := range fingerprintActivity {
+				s.logger.System().Warn("Checking fingerprint for linking",
+					"fingerprintId", fingerprintID,
+					"storyfragmentId", storyfragmentID,
+					"inActiveSet", nodeSet[fingerprintID])
+
 				// Only link if fingerprint is in our active set
 				if !nodeSet[fingerprintID] {
+					s.logger.System().Warn("Fingerprint not in active set - skipping link",
+						"fingerprintId", fingerprintID,
+						"storyfragmentId", storyfragmentID)
 					continue
 				}
 
@@ -275,6 +296,10 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 						Target: sfNodeID,
 						Type:   "fingerprint_entered",
 					})
+					s.logger.System().Warn("Link created",
+						"type", "fingerprint_entered",
+						"source", fingerprintID,
+						"target", sfNodeID)
 				}
 				if hasPageviewed {
 					links = append(links, GraphLink{
@@ -282,6 +307,10 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 						Target: sfNodeID,
 						Type:   "fingerprint_pageviewed",
 					})
+					s.logger.System().Warn("Link created",
+						"type", "fingerprint_pageviewed",
+						"source", fingerprintID,
+						"target", sfNodeID)
 				}
 			}
 		}
@@ -329,6 +358,20 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 			if !exists {
 				continue
 			}
+			if exists {
+				s.logger.System().Warn("EPINET BIN CONTENTS",
+					"epinetId", epinetID,
+					"hourKey", hourKey,
+					"totalSteps", len(bin.Data.Steps))
+
+				for nodeID, stepData := range bin.Data.Steps {
+					if strings.Contains(nodeID, "StoryFragment") {
+						s.logger.System().Warn("StoryFragment step found",
+							"nodeId", nodeID,
+							"visitorCount", len(stepData.Visitors))
+					}
+				}
+			}
 
 			// Process each step in the bin
 			for nodeID, stepData := range bin.Data.Steps {
@@ -359,11 +402,29 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 
 				// Process each visitor (fingerprintID) for this step
 				for fingerprintID := range stepData.Visitors {
+					s.logger.System().Warn("Processing visitor",
+						"storyfragmentId", storyfragmentID,
+						"fingerprintId", fingerprintID,
+						"verb", verb)
+
 					// Check if fingerprint has recent activity (within our time window)
 					fingerprintState, exists := s.cacheManager.GetFingerprintState(tenantID, fingerprintID)
-					if !exists || fingerprintState.LastActivity.Before(oneHourAgo) {
+					if !exists {
+						s.logger.System().Warn("Fingerprint not found",
+							"fingerprintId", fingerprintID)
 						continue
 					}
+					if fingerprintState.LastActivity.Before(oneHourAgo) {
+						s.logger.System().Warn("Fingerprint filtered out - too old",
+							"fingerprintId", fingerprintID,
+							"lastActivity", fingerprintState.LastActivity,
+							"oneHourAgo", oneHourAgo)
+						continue
+					}
+
+					s.logger.System().Warn("Fingerprint accepted",
+						"fingerprintId", fingerprintID,
+						"lastActivity", fingerprintState.LastActivity)
 
 					if activity[storyfragmentID][fingerprintID] == nil {
 						activity[storyfragmentID][fingerprintID] = make(map[string]bool)
