@@ -354,7 +354,7 @@ func (h *VisitHandlers) PostProfile(c *gin.Context) {
 			return
 		}
 
-		result, err := h.authService.CreateLead(req.Email, req.Codeword, req.FirstName, req.ContactPersona, req.ShortBio, tenantCtx)
+		result, err := h.authService.CreateLead(req.FirstName, req.Email, req.Codeword, req.ContactPersona, req.ShortBio, tenantCtx)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
