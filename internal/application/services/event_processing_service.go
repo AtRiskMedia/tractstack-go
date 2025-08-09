@@ -219,9 +219,9 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 	case "IDENTIFY_AS":
 		if event.Object != "" {
 			currentValues := fingerprintState.HeldBeliefs[beliefSlug]
-			// SIMPLIFIED LOOP: Use slices.Contains for clarity and efficiency.
-			if !slices.Contains(currentValues, event.Object) {
-				fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Object)
+			// For IDENTIFY_AS beliefs, replace the entire array with the new single value
+			if len(currentValues) == 0 || currentValues[0] != event.Object {
+				fingerprintState.HeldBeliefs[beliefSlug] = []string{event.Object}
 				changed = true
 			}
 		}
