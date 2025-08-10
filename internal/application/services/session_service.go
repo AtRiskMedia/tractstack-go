@@ -196,6 +196,12 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 	}
 
 	fingerprintID := s.FindFingerprintByLeadID(lead.ID, tenantCtx)
+	s.logger.Auth().Debug("Profile unlock fingerprint lookup",
+		"sessionId", sessionID,
+		"leadId", lead.ID,
+		"foundFingerprintId", fingerprintID,
+		"fingerprintExists", fingerprintID != nil)
+
 	if fingerprintID == nil {
 		newFpID := security.GenerateULID()
 		if err := s.CreateFingerprint(newFpID, &lead.ID, tenantCtx); err != nil {
@@ -209,6 +215,9 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 	if fpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, *fingerprintID); exists {
 		afterBeliefs = fpState.HeldBeliefs
 	}
+	s.logger.Auth().Debug("Profile unlock cache state check",
+		"fingerprintId", *fingerprintID,
+		"heldBeliefsCount", len(afterBeliefs))
 
 	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
 
@@ -538,33 +547,74 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 }
 
 func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile *user.Profile, sessionID string) (*SessionResponse, error) {
+	s.logger.Auth().Debug("HandleProfileSession ENTRY",
+		"sessionId", sessionID,
+		"leadId", profile.LeadID,
+		"tenantId", tenantCtx.TenantID)
+
 	var fingerprintID string
 
 	if existingFpID := s.FindFingerprintByLeadID(profile.LeadID, tenantCtx); existingFpID != nil {
 		fingerprintID = *existingFpID
+		s.logger.Auth().Debug("HandleProfileSession EXISTING_FINGERPRINT_FOUND",
+			"sessionId", sessionID,
+			"leadId", profile.LeadID,
+			"existingFingerprintId", fingerprintID)
 	} else {
 		if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); exists {
 			fingerprintID = existingSession.FingerprintID
+			s.logger.Auth().Debug("HandleProfileSession USING_SESSION_FINGERPRINT",
+				"sessionId", sessionID,
+				"leadId", profile.LeadID,
+				"sessionFingerprintId", fingerprintID)
 		} else {
 			fingerprintID = security.GenerateULID()
+			s.logger.Auth().Debug("HandleProfileSession GENERATED_NEW_FINGERPRINT",
+				"sessionId", sessionID,
+				"leadId", profile.LeadID,
+				"newFingerprintId", fingerprintID)
 		}
 	}
 
 	if err := s.CreateFingerprint(fingerprintID, &profile.LeadID, tenantCtx); err != nil {
 		if !strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			s.logger.Auth().Debug("HandleProfileSession CREATE_FINGERPRINT_FAILED",
+				"sessionId", sessionID,
+				"leadId", profile.LeadID,
+				"fingerprintId", fingerprintID,
+				"error", err.Error())
 			return nil, fmt.Errorf("failed to create fingerprint: %w", err)
 		}
+		s.logger.Auth().Debug("HandleProfileSession FINGERPRINT_ALREADY_EXISTS",
+			"sessionId", sessionID,
+			"leadId", profile.LeadID,
+			"fingerprintId", fingerprintID)
 	}
 
 	var visitID string
 	if existingSession, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID); exists {
 		visitID = existingSession.VisitID
+		s.logger.Auth().Debug("HandleProfileSession USING_EXISTING_VISIT",
+			"sessionId", sessionID,
+			"leadId", profile.LeadID,
+			"fingerprintId", fingerprintID,
+			"existingVisitId", visitID)
 	} else {
 		var err error
 		visitID, err = s.HandleVisitCreation(fingerprintID, true, tenantCtx)
 		if err != nil {
+			s.logger.Auth().Debug("HandleProfileSession VISIT_CREATION_FAILED",
+				"sessionId", sessionID,
+				"leadId", profile.LeadID,
+				"fingerprintId", fingerprintID,
+				"error", err.Error())
 			return nil, fmt.Errorf("failed to create visit: %w", err)
 		}
+		s.logger.Auth().Debug("HandleProfileSession CREATED_NEW_VISIT",
+			"sessionId", sessionID,
+			"leadId", profile.LeadID,
+			"fingerprintId", fingerprintID,
+			"newVisitId", visitID)
 	}
 
 	sessionData := &types.SessionData{
@@ -579,15 +629,52 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 	}
 
 	tenantCtx.CacheManager.SetSession(tenantCtx.TenantID, sessionData)
+	s.logger.Auth().Debug("HandleProfileSession SESSION_CACHE_UPDATED",
+		"sessionId", sessionID,
+		"leadId", profile.LeadID,
+		"fingerprintId", fingerprintID,
+		"visitId", visitID)
 
-	fingerprintState := &types.FingerprintState{
-		FingerprintID: fingerprintID,
-		LeadID:        &profile.LeadID,
-		HeldBeliefs:   make(map[string][]string),
-		HeldBadges:    make(map[string]string),
-		LastActivity:  time.Now().UTC(),
+	var fingerprintState *types.FingerprintState
+	if existingFpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, fingerprintID); exists {
+		fingerprintState = existingFpState
+		fingerprintState.LastActivity = time.Now().UTC()
+		s.logger.Auth().Debug("HandleProfileSession PRESERVED_EXISTING_BELIEFS",
+			"fingerprintId", fingerprintID,
+			"existingBeliefCount", len(existingFpState.HeldBeliefs))
+	} else {
+		// Cache miss - load beliefs from database if this is an existing user
+		beliefs := make(map[string][]string)
+		if profile.LeadID != "" {
+			loadedBeliefs, err := tenantCtx.EventRepo().LoadFingerprintBeliefs(fingerprintID)
+			if err != nil {
+				s.logger.Auth().Debug("HandleProfileSession FAILED_TO_LOAD_DB_BELIEFS",
+					"error", err.Error(),
+					"fingerprintId", fingerprintID,
+					"leadId", profile.LeadID)
+			} else {
+				beliefs = loadedBeliefs
+				s.logger.Auth().Debug("HandleProfileSession LOADED_DB_BELIEFS",
+					"fingerprintId", fingerprintID,
+					"beliefCount", len(beliefs))
+			}
+		}
+
+		fingerprintState = &types.FingerprintState{
+			FingerprintID: fingerprintID,
+			LeadID:        &profile.LeadID,
+			HeldBeliefs:   beliefs,
+			HeldBadges:    make(map[string]string),
+			LastActivity:  time.Now().UTC(),
+		}
 	}
+
 	tenantCtx.CacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
+	s.logger.Auth().Debug("HandleProfileSession FINGERPRINT_CACHE_UPDATED",
+		"sessionId", sessionID,
+		"leadId", profile.LeadID,
+		"fingerprintId", fingerprintID,
+		"heldBeliefsCount", len(fingerprintState.HeldBeliefs))
 
 	visitState := &types.VisitState{
 		VisitID:       visitID,
@@ -597,6 +684,17 @@ func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile
 		LastActivity:  time.Now().UTC(),
 	}
 	tenantCtx.CacheManager.SetVisitState(tenantCtx.TenantID, visitState)
+	s.logger.Auth().Debug("HandleProfileSession VISIT_CACHE_UPDATED",
+		"sessionId", sessionID,
+		"leadId", profile.LeadID,
+		"fingerprintId", fingerprintID,
+		"visitId", visitID)
+
+	s.logger.Auth().Debug("HandleProfileSession COMPLETE_SUCCESS",
+		"sessionId", sessionID,
+		"leadId", profile.LeadID,
+		"fingerprintId", fingerprintID,
+		"visitId", visitID)
 
 	return &SessionResponse{
 		Fingerprint: fingerprintID,
@@ -625,10 +723,27 @@ func (s *SessionService) updateCacheStates(tenantCtx *tenant.Context, sessionID,
 		fingerprintState = existingFpState
 		fingerprintState.LastActivity = time.Now().UTC()
 	} else {
+		// Cache miss - load beliefs from database if this is an existing user
+		beliefs := make(map[string][]string)
+		if leadID != nil {
+			loadedBeliefs, err := tenantCtx.EventRepo().LoadFingerprintBeliefs(fingerprintID)
+			if err != nil {
+				s.logger.Auth().Error("Failed to load fingerprint beliefs from database",
+					"error", err.Error(),
+					"fingerprintId", fingerprintID,
+					"leadId", *leadID)
+			} else {
+				beliefs = loadedBeliefs
+				s.logger.Auth().Debug("Loaded fingerprint beliefs from database",
+					"fingerprintId", fingerprintID,
+					"beliefCount", len(beliefs))
+			}
+		}
+
 		fingerprintState = &types.FingerprintState{
 			FingerprintID: fingerprintID,
 			LeadID:        leadID,
-			HeldBeliefs:   make(map[string][]string),
+			HeldBeliefs:   beliefs,
 			HeldBadges:    make(map[string]string),
 			LastActivity:  time.Now().UTC(),
 		}
