@@ -203,7 +203,7 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 
 	currentConnections := atomic.LoadInt64(&activeSSEConnections)
 	if currentConnections >= maxSSEConnections {
-		h.logger.SSE().Warn("SSE connection limit reached",
+		h.logger.SSE().Debug("SSE connection limit reached",
 			"tenantId", tenantCtx.TenantID,
 			"sessionId", sessionID,
 			"currentConnections", currentConnections,

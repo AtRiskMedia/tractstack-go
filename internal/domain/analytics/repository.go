@@ -39,4 +39,7 @@ type EventRepository interface {
 
 	// CountEventsInRange returns the total event count for a time range.
 	CountEventsInRange(startTime, endTime time.Time) (int, error)
+
+	// LoadFingerprintBeliefs reconstructs the belief state for a fingerprint from the heldbeliefs table.
+	LoadFingerprintBeliefs(fingerprintID string) (map[string][]string, error)
 }

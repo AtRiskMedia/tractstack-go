@@ -9,7 +9,9 @@
 package analytics
 
 import (
+	"database/sql"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/analytics"
@@ -392,4 +394,71 @@ func (r *SQLEventRepository) parseTimestamp(timestampStr string) (time.Time, err
 	}
 
 	return time.Time{}, fmt.Errorf("unable to parse timestamp format: %s", timestampStr)
+}
+
+// LoadFingerprintBeliefs reconstructs the belief state for a fingerprint from the heldbeliefs table
+func (r *SQLEventRepository) LoadFingerprintBeliefs(fingerprintID string) (map[string][]string, error) {
+	const query = `
+   	SELECT b.slug, hb.verb, hb.object
+   	FROM heldbeliefs hb
+   	JOIN beliefs b ON hb.belief_id = b.id
+   	WHERE hb.fingerprint_id = ?
+   	ORDER BY hb.updated_at ASC`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading fingerprint beliefs from database", "fingerprintId", fingerprintID)
+
+	rows, err := r.db.Query(query, fingerprintID)
+	if err != nil {
+		r.logger.Database().Error("Failed to query fingerprint beliefs", "error", err.Error(), "fingerprintId", fingerprintID)
+		return nil, fmt.Errorf("failed to query fingerprint beliefs: %w", err)
+	}
+	defer rows.Close()
+
+	beliefs := make(map[string][]string)
+	for rows.Next() {
+		var beliefSlug, verb string
+		var object sql.NullString
+
+		err := rows.Scan(&beliefSlug, &verb, &object)
+		if err != nil {
+			r.logger.Database().Error("Failed to scan belief row", "error", err.Error(), "fingerprintId", fingerprintID)
+			continue
+		}
+
+		// Reconstruct belief state based on verb type
+		switch verb {
+		case "UNSET":
+			// Remove the belief entirely
+			delete(beliefs, beliefSlug)
+		case "IDENTIFY_AS":
+			// For IDENTIFY_AS, replace with the object value
+			if object.Valid && object.String != "" {
+				beliefs[beliefSlug] = []string{object.String}
+			}
+		default:
+			// For other verbs, add the verb to the belief array
+			currentValues := beliefs[beliefSlug]
+			if !slices.Contains(currentValues, verb) {
+				beliefs[beliefSlug] = append(currentValues, verb)
+			}
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		r.logger.Database().Error("Row iteration error for fingerprint beliefs", "error", err.Error(), "fingerprintId", fingerprintID)
+		return nil, err
+	}
+
+	r.logger.Database().Info("Fingerprint beliefs loaded from database",
+		"fingerprintId", fingerprintID,
+		"beliefCount", len(beliefs),
+		"duration", time.Since(start))
+
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
+
+	return beliefs, nil
 }
