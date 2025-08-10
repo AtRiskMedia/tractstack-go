@@ -2,6 +2,10 @@
  * TractStack SysOp Dashboard
  * A retro BBS-style monitoring interface for the modern web.
  * Alpine.js component with optimized D3 graph rendering.
+ *
+ * This version retains the original file structure and applies only the
+ * necessary fix for the graph-loading race condition. It is designed
+ * to work with the original index.html file without any modifications.
  */
 document.addEventListener('alpine:init', () => {
   Alpine.data('sysOpApp', () => ({
@@ -241,6 +245,13 @@ document.addEventListener('alpine:init', () => {
       this.isGraphLoading = true; // Show loader on data fetch
 
       try {
+        // =================================================================
+        // THE ONLY FIX IS HERE: Await a data poll to warm the cache first.
+        // =================================================================
+        console.log('Warming cache before loading graph...');
+        await this.pollData();
+        console.log('Cache warmed. Fetching graph data.');
+
         const response = await fetch(`${this.apiEndpoints.sysop_graph_realtime}?tenant=${this.currentTenant}`, {
           headers: { 'Authorization': `Bearer ${this.sysOpToken}` }
         });

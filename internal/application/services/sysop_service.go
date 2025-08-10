@@ -232,7 +232,7 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 			contentMap = make(map[string]struct{ Title, Slug string }) // fallback to empty map
 		}
 
-		s.logger.System().Warn("STORY FRAGMENT ACTIVITY EXTRACTED",
+		s.logger.System().Debug("STORY FRAGMENT ACTIVITY EXTRACTED",
 			"tenantId", tenantID,
 			"storyfragmentCount", len(storyFragmentActivity))
 
@@ -240,7 +240,7 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 		for storyfragmentID, fingerprintActivity := range storyFragmentActivity {
 			sfNodeID := "storyfragment_" + storyfragmentID
 
-			s.logger.System().Warn("Processing StoryFragment",
+			s.logger.System().Debug("Processing StoryFragment",
 				"storyfragmentId", storyfragmentID,
 				"fingerprintCount", len(fingerprintActivity))
 
@@ -265,7 +265,7 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 				nodeSet[sfNodeID] = true
 				stats.StoryFragments++
 
-				s.logger.System().Warn("StoryFragment node added",
+				s.logger.System().Debug("StoryFragment node added",
 					"storyfragmentId", storyfragmentID,
 					"slug", slug,
 					"title", title)
@@ -273,14 +273,14 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 
 			// Add links from fingerprints to StoryFragments
 			for fingerprintID, verbSet := range fingerprintActivity {
-				s.logger.System().Warn("Checking fingerprint for linking",
+				s.logger.System().Debug("Checking fingerprint for linking",
 					"fingerprintId", fingerprintID,
 					"storyfragmentId", storyfragmentID,
 					"inActiveSet", nodeSet[fingerprintID])
 
 				// Only link if fingerprint is in our active set
 				if !nodeSet[fingerprintID] {
-					s.logger.System().Warn("Fingerprint not in active set - skipping link",
+					s.logger.System().Debug("Fingerprint not in active set - skipping link",
 						"fingerprintId", fingerprintID,
 						"storyfragmentId", storyfragmentID)
 					continue
@@ -296,7 +296,7 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 						Target: sfNodeID,
 						Type:   "fingerprint_entered",
 					})
-					s.logger.System().Warn("Link created",
+					s.logger.System().Debug("Link created",
 						"type", "fingerprint_entered",
 						"source", fingerprintID,
 						"target", sfNodeID)
@@ -307,7 +307,7 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 						Target: sfNodeID,
 						Type:   "fingerprint_pageviewed",
 					})
-					s.logger.System().Warn("Link created",
+					s.logger.System().Debug("Link created",
 						"type", "fingerprint_pageviewed",
 						"source", fingerprintID,
 						"target", sfNodeID)
@@ -359,14 +359,14 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 				continue
 			}
 			if exists {
-				s.logger.System().Warn("EPINET BIN CONTENTS",
+				s.logger.System().Debug("EPINET BIN CONTENTS",
 					"epinetId", epinetID,
 					"hourKey", hourKey,
 					"totalSteps", len(bin.Data.Steps))
 
 				for nodeID, stepData := range bin.Data.Steps {
 					if strings.Contains(nodeID, "StoryFragment") {
-						s.logger.System().Warn("StoryFragment step found",
+						s.logger.System().Debug("StoryFragment step found",
 							"nodeId", nodeID,
 							"visitorCount", len(stepData.Visitors))
 					}
@@ -402,7 +402,7 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 
 				// Process each visitor (fingerprintID) for this step
 				for fingerprintID := range stepData.Visitors {
-					s.logger.System().Warn("Processing visitor",
+					s.logger.System().Debug("Processing visitor",
 						"storyfragmentId", storyfragmentID,
 						"fingerprintId", fingerprintID,
 						"verb", verb)
@@ -410,19 +410,19 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 					// Check if fingerprint has recent activity (within our time window)
 					fingerprintState, exists := s.cacheManager.GetFingerprintState(tenantID, fingerprintID)
 					if !exists {
-						s.logger.System().Warn("Fingerprint not found",
+						s.logger.System().Debug("Fingerprint not found",
 							"fingerprintId", fingerprintID)
 						continue
 					}
 					if fingerprintState.LastActivity.Before(oneHourAgo) {
-						s.logger.System().Warn("Fingerprint filtered out - too old",
+						s.logger.System().Debug("Fingerprint filtered out - too old",
 							"fingerprintId", fingerprintID,
 							"lastActivity", fingerprintState.LastActivity,
 							"oneHourAgo", oneHourAgo)
 						continue
 					}
 
-					s.logger.System().Warn("Fingerprint accepted",
+					s.logger.System().Debug("Fingerprint accepted",
 						"fingerprintId", fingerprintID,
 						"lastActivity", fingerprintState.LastActivity)
 
