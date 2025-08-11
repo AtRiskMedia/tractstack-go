@@ -10,8 +10,8 @@ import (
 )
 
 type SankeyNode struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type SankeyLink struct {
@@ -140,7 +140,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 			title = item.Title
 		}
 		finalNodeIndexMap[nodeID] = len(finalNodes)
-		finalNodes = append(finalNodes, SankeyNode{ID: nodeID, Title: title})
+		finalNodes = append(finalNodes, SankeyNode{ID: nodeID, Name: title})
 	}
 
 	var finalLinks []SankeyLink
