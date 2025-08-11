@@ -313,16 +313,19 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 // Private helper methods
 
 func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConfigUpdateRequest, currentConfig *types.BrandConfig) (*types.BrandConfig, error) {
-	// Create a copy of current config
 	config := *currentConfig
 
-	// Ensure media directory exists
 	if err := os.MkdirAll(filepath.Join(mediaPath, "images/brand"), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create media directory: %w", err)
 	}
 
-	// Process direct save assets (logo, wordmark, favicon)
-	if request.LogoBase64 != "" {
+	if request.LogoBase64 == "" {
+		if config.Logo != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Logo, "/media/"))
+			os.Remove(oldPath)
+		}
+		config.Logo = ""
+	} else {
 		filename := "logo" + c.getExtensionFromBase64(request.LogoBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
 
@@ -341,7 +344,13 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		}
 	}
 
-	if request.WordmarkBase64 != "" {
+	if request.WordmarkBase64 == "" {
+		if config.Wordmark != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Wordmark, "/media/"))
+			os.Remove(oldPath)
+		}
+		config.Wordmark = ""
+	} else {
 		filename := "wordmark" + c.getExtensionFromBase64(request.WordmarkBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
 
@@ -360,7 +369,13 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		}
 	}
 
-	if request.FaviconBase64 != "" {
+	if request.FaviconBase64 == "" {
+		if config.Favicon != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Favicon, "/media/"))
+			os.Remove(oldPath)
+		}
+		config.Favicon = ""
+	} else {
 		filename := "favicon" + c.getExtensionFromBase64(request.FaviconBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
 
@@ -371,8 +386,13 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		config.Favicon = relativePath
 	}
 
-	// Process versioned assets (og, oglogo) - these include version numbers for cache busting
-	if request.OGBase64 != "" {
+	if request.OGBase64 == "" {
+		if config.OG != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OG, "/media/"))
+			os.Remove(oldPath)
+		}
+		config.OG = ""
+	} else {
 		newVersion := time.Now().Unix()
 		filename := fmt.Sprintf("og-v%d%s", newVersion, c.getExtensionFromBase64(request.OGBase64))
 		targetDir := filepath.Join(mediaPath, "images/brand")
@@ -385,7 +405,13 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		config.StylesVer = newVersion
 	}
 
-	if request.OGLogoBase64 != "" {
+	if request.OGLogoBase64 == "" {
+		if config.OGLogo != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OGLogo, "/media/"))
+			os.Remove(oldPath)
+		}
+		config.OGLogo = ""
+	} else {
 		newVersion := time.Now().Unix()
 		filename := fmt.Sprintf("oglogo-v%d%s", newVersion, c.getExtensionFromBase64(request.OGLogoBase64))
 		targetDir := filepath.Join(mediaPath, "images/brand")

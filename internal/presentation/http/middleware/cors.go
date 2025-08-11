@@ -11,10 +11,13 @@ func CORSMiddleware() gin.HandlerFunc {
 		AllowOrigins: []string{
 			"http://localhost:3000",
 			"http://localhost:4321",
+			"http://localhost:4320",
 			"http://127.0.0.1:3000",
 			"http://127.0.0.1:4321",
+			"http://127.0.0.1:4320",
 			"http://[::1]:3000", // IPv6 localhost
 			"http://[::1]:4321", // IPv6 localhost
+			"http://[::1]:4320", // IPv6 localhost
 		},
 		AllowMethods: []string{
 			"GET", "POST", "PUT", "DELETE", "OPTIONS",
