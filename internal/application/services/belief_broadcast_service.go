@@ -92,32 +92,44 @@ func (b *BeliefBroadcastService) computeScrollTarget(
 }
 
 func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, storyfragmentID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID, gotoPaneID string, broadcaster messaging.Broadcaster) {
-	// Only check the current storyfragment, not all storyfragments
-	registry, exists := b.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+	// Get session data to find fingerprint
+	sessionData, exists := b.cacheManager.GetSession(tenantID, sessionID)
 	if !exists {
 		return
 	}
 
-	var affectedPanes []string
-	beliefSet := make(map[string]bool)
-	for _, belief := range changedBeliefs {
-		beliefSet[belief] = true
+	// Find ALL sessions using this fingerprint (cross-browser sync!)
+	allSessionIDs := b.cacheManager.GetSessionsByFingerprint(tenantID, sessionData.FingerprintID)
+
+	// Find ALL storyfragments affected by these belief changes
+	affectedStoryfragments := b.FindAffectedStoryfragments(tenantID, changedBeliefs)
+
+	if len(affectedStoryfragments) == 0 || len(allSessionIDs) == 0 {
+		return
 	}
 
-	for paneID, paneBeliefData := range registry.PaneBeliefPayloads {
-		if b.paneUsesChangedBeliefs(paneBeliefData, beliefSet) {
-			affectedPanes = append(affectedPanes, paneID)
+	// Broadcast to ALL sessions using this fingerprint
+	for _, targetSessionID := range allSessionIDs {
+		// For each session, invalidate belief contexts for all affected storyfragments
+		for affectedStoryfragmentID := range affectedStoryfragments {
+			b.cacheManager.InvalidateSessionBeliefContext(tenantID, targetSessionID, affectedStoryfragmentID)
 		}
-	}
 
-	if len(affectedPanes) > 0 && broadcaster.HasViewingSessions(tenantID, storyfragmentID) {
-		var scrollTarget *string
-		if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
-			scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, visibilitySnapshot[storyfragmentID], affectedPanes)
-		} else if gotoPaneID != "" {
-			scrollTarget = &gotoPaneID
+		// For each affected storyfragment, send individual broadcasts
+		for affectedStoryfragmentID, affectedPanes := range affectedStoryfragments {
+			var scrollTarget *string
+
+			// Only add scroll target for the original triggering session and storyfragment
+			if targetSessionID == sessionID && affectedStoryfragmentID == storyfragmentID {
+				if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
+					scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, visibilitySnapshot[storyfragmentID], affectedPanes)
+				} else if gotoPaneID != "" {
+					scrollTarget = &gotoPaneID
+				}
+			}
+
+			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
 		}
-		broadcaster.BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID, affectedPanes, scrollTarget)
 	}
 }
 

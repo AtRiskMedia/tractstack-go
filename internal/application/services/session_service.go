@@ -11,6 +11,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
@@ -182,6 +183,13 @@ func (s *SessionService) processSessionWarming(sessionID, consent string, tenant
 }
 
 func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryptedEmail, encryptedCode, consent string, tenantCtx *tenant.Context) *SessionResult {
+	s.logger.Auth().Debug("processProfileUnlock ENTRY",
+		"sessionId", sessionID,
+		"storyfragmentId", storyfragmentID,
+		"hasEncryptedEmail", encryptedEmail != "",
+		"hasEncryptedCode", encryptedCode != "",
+		"consent", consent)
+
 	decryptedEmail, err := security.Decrypt(encryptedEmail, tenantCtx.Config.AESKey)
 	if err != nil {
 		return &SessionResult{Success: false, Error: "failed to decrypt email"}
@@ -210,23 +218,74 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 		fingerprintID = &newFpID
 	}
 
-	beforeBeliefs := make(map[string][]string)
-	afterBeliefs := make(map[string][]string)
-	if fpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, *fingerprintID); exists {
-		afterBeliefs = fpState.HeldBeliefs
-	}
-	s.logger.Auth().Debug("Profile unlock cache state check",
-		"fingerprintId", *fingerprintID,
-		"heldBeliefsCount", len(afterBeliefs))
-
-	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
-
 	visitID, err := s.HandleVisitCreation(*fingerprintID, true, tenantCtx)
 	if err != nil {
 		return &SessionResult{Success: false, Error: "failed to create visit for profile"}
 	}
 
 	s.updateCacheStates(tenantCtx, sessionID, *fingerprintID, visitID, &lead.ID)
+	tenantCtx.CacheManager.InvalidateSessionBeliefContext(tenantCtx.TenantID, sessionID, storyfragmentID)
+
+	beforeBeliefs := make(map[string][]string)
+	afterBeliefs := make(map[string][]string)
+	if fpState, exists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, *fingerprintID); exists {
+		afterBeliefs = fpState.HeldBeliefs
+	}
+	s.logger.Auth().Debug("Profile unlock cache state check AFTER cache update",
+		"fingerprintId", *fingerprintID,
+		"heldBeliefsCount", len(afterBeliefs))
+
+	affectedPanes := s.beliefBroadcaster.CalculateBeliefDiff(tenantCtx.TenantID, storyfragmentID, beforeBeliefs, afterBeliefs)
+
+	s.logger.Auth().Debug("Profile unlock belief diff calculation result",
+		"sessionId", sessionID,
+		"storyfragmentId", storyfragmentID,
+		"affectedPanesCount", len(affectedPanes),
+		"affectedPanes", affectedPanes)
+
+	broadcastCount := 0
+	allSessionIDs := tenantCtx.CacheManager.GetSessionsByFingerprint(tenantCtx.TenantID, *fingerprintID)
+
+	if len(afterBeliefs) > 0 && len(allSessionIDs) > 0 {
+		broadcaster := messaging.NewSSEBroadcaster(s.logger)
+
+		var changedBeliefs []string
+		for beliefSlug := range afterBeliefs {
+			changedBeliefs = append(changedBeliefs, beliefSlug)
+		}
+
+		s.logger.Auth().Warn("Cross-browser sync: finding affected storyfragments",
+			"fingerprintId", *fingerprintID,
+			"changedBeliefsCount", len(changedBeliefs),
+			"sessionCount", len(allSessionIDs))
+
+		affectedStoryfragments := s.beliefBroadcaster.FindAffectedStoryfragments(tenantCtx.TenantID, changedBeliefs)
+
+		s.logger.Auth().Warn("Cross-browser sync: broadcasting to all sessions",
+			"fingerprintId", *fingerprintID,
+			"affectedStoryfragmentsCount", len(affectedStoryfragments),
+			"sessionIds", allSessionIDs)
+
+		for _, targetSessionID := range allSessionIDs {
+			for affectedStoryfragmentID, storyfragmentAffectedPanes := range affectedStoryfragments {
+				tenantCtx.CacheManager.InvalidateSessionBeliefContext(tenantCtx.TenantID, targetSessionID, affectedStoryfragmentID)
+
+				s.logger.Auth().Warn("Sending cross-browser SSE broadcast",
+					"targetSessionId", targetSessionID,
+					"affectedStoryfragmentId", affectedStoryfragmentID,
+					"affectedPanes", storyfragmentAffectedPanes)
+
+				broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, targetSessionID, affectedStoryfragmentID, storyfragmentAffectedPanes, nil)
+				broadcastCount++
+			}
+		}
+	}
+
+	s.logger.Auth().Warn("DIAGNOSIS: Cross-browser broadcast summary",
+		"fingerprintId", *fingerprintID,
+		"sessionsFound", len(allSessionIDs),
+		"sessionIds", allSessionIDs,
+		"broadcastsSent", broadcastCount)
 
 	profile := &user.Profile{
 		Fingerprint:    *fingerprintID,
