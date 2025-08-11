@@ -1,11 +1,10 @@
 /**
  * TractStack SysOp Dashboard
  * A retro BBS-style monitoring interface for the modern web.
- * Alpine.js component with optimized D3 graph rendering.
+ * Alpine.js component with unified background polling architecture.
  *
- * This version retains the original file structure and applies only the
- * necessary fix for the graph-loading race condition. It is designed
- * to work with the original index.html file without any modifications.
+ * This version implements a single background polling system that fetches
+ * all data continuously, eliminating tab-based polling complexity.
  */
 document.addEventListener('alpine:init', () => {
   Alpine.data('sysOpApp', () => ({
@@ -17,24 +16,41 @@ document.addEventListener('alpine:init', () => {
     currentTenant: 'default',
     availableTenants: [],
 
-    // --- POLLING STATE (for Status, Cache, Analytics tabs) ---
-    pollTimer: null,
-    pollDataStore: {}, // Store for footer data
+    // --- UNIFIED DATA STORE ---
+    // All polled data lives here and is shared across tabs
+    dataStore: {
+      connectionStatus: 'CONNECTING',
+      lastUpdate: null,
+      // Status tab data
+      activity: {},
+      orphanAnalysis: { status: 'offline' },
+      nodes: {},
+      analyticsStatus: 'offline',
+      // Cache tab data (same as nodes but formatted differently)
+      // Analytics tab data
+      analyticsOverview: {},
+      // Graph tab data
+      graphData: { nodes: [], links: [] },
+      graphStats: { nodes: 0, links: 0 }
+    },
 
-    // --- SESSION UNIVERSE STATE (for Dashboard tab) ---
+    // --- UNIFIED POLLING STATE ---
+    masterPollTimer: null,
+    isPollingActive: false,
+
+    // --- SESSION UNIVERSE STATE (WebSocket - remains separate) ---
     sessionStates: [],
     sessionStats: { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 },
     sessionSocket: null,
     sessionSocketStatus: 'OFFLINE',
     sessionDisplayMode: '1:1',
 
-    // --- GRAPH STATE (for Graph tab) ---
-    graphData: { nodes: [], links: [] },
-    graphStatus: 'Ready',
+    // --- GRAPH RENDERING STATE ---
     simulation: null,
-    isGraphLoading: false, // Tracks the loading/rendering state
+    isGraphLoading: false,
+    graphStatus: 'Ready',
 
-    // --- LOGS STATE (for Logs tab) ---
+    // --- LOGS STATE (SSE - remains separate) ---
     logs: [],
     logFilters: { channel: 'all', level: 'INFO' },
     logConnectionStatus: 'Disconnected',
@@ -78,14 +94,12 @@ document.addEventListener('alpine:init', () => {
         case 'status':
         case 'cache':
         case 'analytics':
-          return {
-            status: this.pollDataStore.connectionStatus || 'CONNECTING',
-            details: `<span>Last Update: <span id="last-update">${this.pollDataStore.lastUpdate || '--:--:--'}</span></span>`
-          };
         case 'graph':
           return {
-            status: this.graphData.nodes.length > 0 ? 'ONLINE' : 'CONNECTING',
-            details: `<span>Nodes: <span class="metric-value">${this.graphData.nodes.length}</span></span> <span>Links: <span class="metric-value">${this.graphData.links.length}</span></span> <span>Last Update: <span id="last-update">${this.pollDataStore.lastUpdate || '--:--:--'}</span></span>`
+            status: this.dataStore.connectionStatus || 'CONNECTING',
+            details: this.currentTab === 'graph'
+              ? `<span>Nodes: <span class="metric-value">${this.dataStore.graphStats.nodes}</span></span> <span>Links: <span class="metric-value">${this.dataStore.graphStats.links}</span></span> <span>Last Update: <span id="last-update">${this.dataStore.lastUpdate || '--:--:--'}</span></span>`
+              : `<span>Last Update: <span id="last-update">${this.dataStore.lastUpdate || '--:--:--'}</span></span>`
           };
         case 'dashboard':
           return {
@@ -118,12 +132,10 @@ document.addEventListener('alpine:init', () => {
       const lastActivity = new Date(state.lastActivity).getTime();
       const minutesSince = (now - lastActivity) / (1000 * 60);
 
-      // --- MODIFIED FOR DORMANT HUE ---
       if (minutesSince > 45) {
         if (state.isLead) {
           return 'lead-dormant-dim';
         }
-        // Add .has-beliefs class to allow CSS to select correct dormant color
         return state.hasBeliefs ? 'anonymous-dormant-dim has-beliefs' : 'anonymous-dormant-dim';
       }
 
@@ -166,26 +178,47 @@ document.addEventListener('alpine:init', () => {
         }
 
         this.resizeDebounceTimer = setTimeout(() => {
-          if (this.currentTab === 'graph' && this.graphData.nodes.length > 0) {
+          if (this.currentTab === 'graph' && this.dataStore.graphData.nodes.length > 0) {
             console.log('Window resized, re-rendering graph');
-            this.isGraphLoading = true; // Show loader on resize
+            this.isGraphLoading = true;
             this.renderGraph();
           }
         }, 250);
       };
 
       window.addEventListener('resize', handleResize);
-
-      // Handle orientation change on mobile
       window.addEventListener('orientationchange', () => {
-        setTimeout(handleResize, 500); // Delay for orientation change completion
+        setTimeout(handleResize, 500);
       });
     },
 
     // --- AUTHENTICATION FLOW ---
-    async checkAuth() { try { const response = await fetch(this.apiEndpoints.sysop_auth); const data = await response.json(); this.setupLoginForm(data); } catch (error) { this.showError('Connection to server failed.'); } },
-    setupLoginForm(authData) { const messageEl = document.getElementById('login-message'); messageEl.textContent = authData.message || 'Please authenticate to continue.'; if (!authData.passwordRequired) { document.getElementById('no-auth-form').style.display = 'block'; document.getElementById('enter-btn').focus(); } else { document.getElementById('password-form').style.display = 'block'; document.getElementById('password-input').focus(); } },
-    setupEventListeners() { document.getElementById('login-btn')?.addEventListener('click', () => this.handleLogin()); document.getElementById('enter-btn')?.addEventListener('click', () => this.handleNoAuthLogin()); document.getElementById('password-input')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.handleLogin(); }); document.addEventListener('keydown', (e) => this.handleGlobalKeys(e)); },
+    async checkAuth() {
+      try {
+        const response = await fetch(this.apiEndpoints.sysop_auth);
+        const data = await response.json();
+        this.setupLoginForm(data);
+      } catch (error) {
+        this.showError('Connection to server failed.');
+      }
+    },
+    setupLoginForm(authData) {
+      const messageEl = document.getElementById('login-message');
+      messageEl.textContent = authData.message || 'Please authenticate to continue.';
+      if (!authData.passwordRequired) {
+        document.getElementById('no-auth-form').style.display = 'block';
+        document.getElementById('enter-btn').focus();
+      } else {
+        document.getElementById('password-form').style.display = 'block';
+        document.getElementById('password-input').focus();
+      }
+    },
+    setupEventListeners() {
+      document.getElementById('login-btn')?.addEventListener('click', () => this.handleLogin());
+      document.getElementById('enter-btn')?.addEventListener('click', () => this.handleNoAuthLogin());
+      document.getElementById('password-input')?.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.handleLogin(); });
+      document.addEventListener('keydown', (e) => this.handleGlobalKeys(e));
+    },
     async handleLogin() {
       const password = document.getElementById('password-input').value;
       try {
@@ -200,35 +233,90 @@ document.addEventListener('alpine:init', () => {
       } catch (error) { this.showError('Connection failed'); }
     },
     handleNoAuthLogin() { this.authenticated = true; this.sysOpToken = 'no-auth-required'; this.showDashboard(); },
-    async showDashboard() { this.authenticated = true; await this.loadTenants(); await this.fetchTenantToken(this.currentTenant); this.switchTab('dashboard'); },
+    async showDashboard() {
+      this.authenticated = true;
+      await this.loadTenants();
+      await this.fetchTenantToken(this.currentTenant);
+      this.startMasterPolling(); // Start unified background polling
+      this.switchTab('dashboard');
+    },
 
     // --- TENANT & TAB MANAGEMENT ---
-    async loadTenants() { try { const response = await fetch(this.apiEndpoints.sysop_tenants, { headers: { 'Authorization': `Bearer ${this.sysOpToken}` } }); if (!response.ok) throw new Error('Failed to fetch tenants'); const data = await response.json(); this.availableTenants = data.tenants || ['default']; this.availableTenants.sort(); } catch (error) { console.warn('Could not load tenants:', error); this.availableTenants = ['default']; } },
+    async loadTenants() {
+      try {
+        const response = await fetch(this.apiEndpoints.sysop_tenants, { headers: { 'Authorization': `Bearer ${this.sysOpToken}` } });
+        if (!response.ok) throw new Error('Failed to fetch tenants');
+        const data = await response.json();
+        this.availableTenants = data.tenants || ['default'];
+        this.availableTenants.sort();
+      } catch (error) {
+        console.warn('Could not load tenants:', error);
+        this.availableTenants = ['default'];
+      }
+    },
+
     switchTab(tabName) {
+      // Clean up tab-specific connections
       this.disconnectLogStream();
       this.disconnectSessionSocket();
-      this.stopPolling();
+
       this.currentTab = tabName;
+
+      // Start tab-specific real-time connections
       if (tabName === 'dashboard') {
         this.connectSessionSocket();
       } else if (tabName === 'logs') {
         this.connectLogStream();
       } else if (tabName === 'graph') {
-        this.startPolling();
-        this.loadGraphData();
-      } else if (['status', 'cache', 'analytics'].includes(tabName)) {
-        this.startPolling();
+        // Graph data is already available from background polling
+        // Just render if we have data
+        if (this.dataStore.graphData.nodes.length > 0) {
+          this.renderGraph();
+        }
+      }
+      // No need to start/stop polling - it runs in background for all tabs
+    },
+
+    async switchTenant(newTenant) {
+      if (newTenant !== this.currentTenant) {
+        this.currentTenant = newTenant;
+        this.sessionStates = [];
+        this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 };
+
+        // Reset data store for new tenant
+        this.dataStore = {
+          connectionStatus: 'CONNECTING',
+          lastUpdate: null,
+          activity: {},
+          orphanAnalysis: { status: 'offline' },
+          nodes: {},
+          analyticsStatus: 'offline',
+          analyticsOverview: {},
+          graphData: { nodes: [], links: [] },
+          graphStats: { nodes: 0, links: 0 }
+        };
+
+        await this.fetchTenantToken(newTenant);
+        this.switchTab(this.currentTab);
       }
     },
-    async switchTenant(newTenant) { if (newTenant !== this.currentTenant) { this.currentTenant = newTenant; this.sessionStates = []; this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 }; await this.fetchTenantToken(newTenant); this.switchTab(this.currentTab); } },
+
     async fetchTenantToken(tenantId) {
       this.tenantToken = null;
       try {
         const response = await fetch(this.apiEndpoints.sysop_tenant_token, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this.sysOpToken}` }, body: JSON.stringify({ tenantId }) });
         const data = await response.json();
-        if (data.success && data.token) { this.tenantToken = data.token; } else { throw new Error(data.error || 'Failed to get tenant token'); }
-      } catch (error) { console.error(`Failed to fetch token for tenant ${tenantId}:`, error); this.pollDataStore.connectionStatus = 'OFFLINE'; }
+        if (data.success && data.token) {
+          this.tenantToken = data.token;
+        } else {
+          throw new Error(data.error || 'Failed to get tenant token');
+        }
+      } catch (error) {
+        console.error(`Failed to fetch token for tenant ${tenantId}:`, error);
+        this.dataStore.connectionStatus = 'OFFLINE';
+      }
     },
+
     handleGlobalKeys(e) {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       const keyMap = { 'd': 'dashboard', 's': 'status', 'c': 'cache', 'a': 'analytics', 't': 'tenants', 'g': 'graph', 'l': 'logs' };
@@ -238,35 +326,184 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // --- OPTIMIZED GRAPH METHODS ---
-    async loadGraphData() {
-      if (!this.sysOpToken) return;
-      this.graphStatus = 'Loading...';
-      this.isGraphLoading = true; // Show loader on data fetch
+    // --- UNIFIED BACKGROUND POLLING SYSTEM ---
+    startMasterPolling() {
+      this.stopMasterPolling();
+      this.isPollingActive = true;
+
+      // Initial fetch
+      this.fetchAllData();
+
+      // Set up recurring polling every 15 seconds
+      this.masterPollTimer = setInterval(() => {
+        if (this.isPollingActive) {
+          this.fetchAllData();
+        }
+      }, 15000);
+
+      console.log('Master polling started (15s interval)');
+    },
+
+    stopMasterPolling() {
+      if (this.masterPollTimer) {
+        clearInterval(this.masterPollTimer);
+        this.masterPollTimer = null;
+      }
+      this.isPollingActive = false;
+      console.log('Master polling stopped');
+    },
+
+    async fetchAllData() {
+      if (!this.sysOpToken || !this.tenantToken) return;
+
+      console.log('Background polling: fetching all data...');
+
+      const headers = { 'Authorization': `Bearer ${this.tenantToken}`, 'X-Tenant-ID': this.currentTenant };
+      const sysOpHeaders = { 'Authorization': `Bearer ${this.sysOpToken}` };
+      const activityEndpoint = `${this.apiEndpoints.sysop_activity}?tenant=${this.currentTenant}`;
+      const orphanEndpoint = `${this.apiEndpoints.sysop_orphan_analysis}?tenant=${this.currentTenant}`;
+      const graphEndpoint = `${this.apiEndpoints.sysop_graph_realtime}?tenant=${this.currentTenant}`;
+
+      const fetchWithTenantToken = (endpoint) => fetch(endpoint, { headers }).then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed ${endpoint}`)));
+      const fetchWithSysOpToken = (endpoint) => fetch(endpoint, { headers: sysOpHeaders }).then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed ${endpoint}`)));
 
       try {
-        // =================================================================
-        // THE ONLY FIX IS HERE: Await a data poll to warm the cache first.
-        // =================================================================
-        console.log('Warming cache before loading graph...');
-        await this.pollData();
-        console.log('Cache warmed. Fetching graph data.');
+        // Fetch all endpoints in parallel
+        const nodeEndpoints = Object.values(this.apiEndpoints.nodes).map(url => fetchWithTenantToken(url));
+        const requests = [
+          fetchWithTenantToken(this.apiEndpoints.analytics),     // 0: analytics
+          fetchWithSysOpToken(activityEndpoint),                // 1: activity
+          fetchWithSysOpToken(orphanEndpoint),                  // 2: orphan analysis
+          fetchWithSysOpToken(graphEndpoint),                   // 3: graph data
+          ...nodeEndpoints                                      // 4+: node counts
+        ];
 
-        const response = await fetch(`${this.apiEndpoints.sysop_graph_realtime}?tenant=${this.currentTenant}`, {
-          headers: { 'Authorization': `Bearer ${this.sysOpToken}` }
-        });
+        const results = await Promise.allSettled(requests);
+        const getData = (result, def) => result.status === 'fulfilled' ? result.value : def;
 
-        if (!response.ok) throw new Error('Failed to fetch graph data');
-        const data = await response.json();
+        const analytics = getData(results[0], { dashboard: {} });
+        const activity = getData(results[1], {});
+        const orphanAnalysis = getData(results[2], { status: 'offline' });
+        const graphData = getData(results[3], { nodes: [], links: [], stats: { nodes: 0, links: 0 } });
+        const nodeCounts = results.slice(4).map(res => getData(res, { count: 0 }));
+        const nodes = Object.keys(this.apiEndpoints.nodes).reduce((acc, key, i) => ({ ...acc, [key]: nodeCounts[i].count }), {});
 
-        this.graphData = data;
-        this.graphStatus = `${data.stats.nodes} nodes, ${data.stats.links} links`;
-        this.renderGraph(); // renderGraph will hide the loader
+        // Update unified data store
+        this.dataStore = {
+          connectionStatus: 'ONLINE',
+          lastUpdate: new Date().toLocaleTimeString(),
+          activity,
+          orphanAnalysis,
+          nodes,
+          analyticsStatus: analytics.dashboard?.status || 'complete',
+          analyticsOverview: analytics.dashboard || {},
+          graphData: graphData,
+          graphStats: graphData.stats || { nodes: graphData.nodes?.length || 0, links: graphData.links?.length || 0 }
+        };
+
+        // Update UI for all tabs
+        this.updateAllTabsUI();
+
+        console.log('Background polling: data updated successfully');
+
       } catch (error) {
-        console.error('Graph load failed:', error);
-        this.graphStatus = 'Error loading graph';
-        this.isGraphLoading = false; // Hide loader on error
+        console.error('Background polling failed:', error);
+        this.dataStore.connectionStatus = 'OFFLINE';
       }
+    },
+
+    // --- UI UPDATE METHODS (now read from unified data store) ---
+    updateAllTabsUI() {
+      this.updateStatusTab();
+      this.updateCacheTab();
+      this.updateAnalyticsTab();
+
+      // Update graph if currently viewing and has new data
+      if (this.currentTab === 'graph' && this.dataStore.graphData.nodes.length > 0) {
+        this.renderGraph();
+      }
+    },
+
+    updateStatusTab() {
+      const [connEl, cacheEl, nodesEl, activityEl, analyticsEl] = [
+        document.getElementById('connection-status'),
+        document.getElementById('cache-status'),
+        document.getElementById('nodes-in-cache-metrics'),
+        document.getElementById('activity-metrics'),
+        document.getElementById('analytics-metrics')
+      ];
+      if (!connEl || !cacheEl || !nodesEl || !activityEl || !analyticsEl) return;
+
+      const format = (lbl, val, lblCls, valCls) => `<span><span class="${val > 0 ? lblCls : 'metric-dim'}">${lbl}:</span><span class="${val > 0 ? valCls : 'metric-dim'}">${val > 0 ? val : '--'}</span></span>`;
+
+      const nodes = this.dataStore.nodes || {};
+      const orphan = this.dataStore.orphanAnalysis || {};
+      const orphanCls = `status-${(orphan.status || 'offline').toLowerCase()}`;
+
+      connEl.innerHTML = `Server Ping: <span class="${this.connectionStatusClass}">${this.dataStore.connectionStatus}</span>`;
+      cacheEl.innerHTML = `<span><span class="metric-label">✦ Orphan Analysis: </span><span class="${orphanCls}">${orphan.status?.toUpperCase() || 'OFFLINE'}</span></span>`;
+      nodesEl.innerHTML = Object.keys(nodes).map(k => format(k, nodes[k], 'activity-label', 'activity-value')).join(' ');
+      activityEl.innerHTML = Object.keys(this.dataStore.activity || {}).map(k => format(k, this.dataStore.activity[k], 'activity-label', 'activity-value')).join(' ');
+
+      const analyticsStatus = this.dataStore.analyticsStatus || 'offline';
+      analyticsEl.innerHTML = `<span class="metric-label">✦ Analytics Status: </span><span class="status-${analyticsStatus.toLowerCase()}">${analyticsStatus.toUpperCase()}</span>`;
+    },
+
+    updateCacheTab() {
+      const el = document.getElementById('cache-detail-table');
+      if (!el) return;
+
+      const nodes = this.dataStore.nodes || {};
+      let html = `<pre class="bbs-table-header">LAYER             ITEMS    FILL LVL           HIT RATE</pre>`;
+      const totalItems = Object.values(nodes).reduce((sum, count) => sum + (count || 0), 0);
+
+      ['tractstacks', 'storyfragments', 'panes', 'menus', 'resources', 'beliefs', 'epinets', 'files'].forEach(layer => {
+        const count = nodes[layer] || 0;
+        const fill = totalItems > 0 ? (count / totalItems) * 100 : 0;
+        const hitRate = count > 0 ? 95.5 + Math.random() * 4.4 : 0;
+        html += `<pre>${layer.padEnd(18)}${String(count).padStart(5)}    ${this.renderProgressBar(fill)} ${hitRate > 0 ? hitRate.toFixed(1).padStart(7) + '%' : '   N/A '}</pre>`;
+      });
+      el.innerHTML = html;
+    },
+
+    updateAnalyticsTab() {
+      const el = document.getElementById('analytics-detail-table');
+      if (!el) return;
+
+      const analytics = this.dataStore.analyticsOverview || {};
+      const stats = analytics.stats || {};
+
+      let html = `<div class="status-section"><pre class="section-title">UNIQUE VISITORS</pre><pre><span class="metric-label">Last 24 Hours:</span><span class="metric-value"> ${stats.daily || 0}</span></pre><pre><span class="metric-label">Last 7 Days:  </span><span class="metric-value"> ${stats.weekly || 0}</span></pre><pre><span class="metric-label">Last 28 Days: </span><span class="metric-value"> ${stats.monthly || 0}</span></pre></div>`;
+      html += `<div class="status-section"><pre class="section-title">SESSIONS</pre><pre><span class="metric-label">Total Sessions: </span><span class="metric-value"> ${analytics.sessions || 0}</span></pre></div>`;
+      el.innerHTML = html;
+    },
+
+    renderProgressBar(percentage) {
+      const width = 14;
+      const filledCount = Math.round((percentage / 100) * width);
+      return `[${'▓'.repeat(filledCount)}${'░'.repeat(width - filledCount)}]`;
+    },
+
+    showError(message) {
+      const messageEl = document.getElementById('login-message');
+      if (messageEl) {
+        messageEl.innerHTML = `<span style="color:var(--color-red);">${message}</span>`;
+      }
+    },
+
+    // --- GRAPH METHODS (now use data from unified store) ---
+    loadGraphData() {
+      // Manual refresh button - just re-fetch and render
+      this.isGraphLoading = true;
+      this.graphStatus = 'Refreshing...';
+      this.fetchAllData().then(() => {
+        if (this.dataStore.graphData.nodes.length > 0) {
+          this.renderGraph();
+        } else {
+          this.isGraphLoading = false;
+          this.graphStatus = 'No data available';
+        }
+      });
     },
 
     cleanupGraph() {
@@ -281,34 +518,31 @@ document.addEventListener('alpine:init', () => {
       if (!container) return;
 
       this.$nextTick(() => {
-        // Clean up existing simulation
         this.cleanupGraph();
-
-        // Clear existing SVG
         d3.select(container).selectAll('svg').remove();
 
-        // Get current dimensions with validation
         const containerRect = container.getBoundingClientRect();
         const width = Math.max(containerRect.width, 200);
         const height = Math.max(containerRect.height, 200);
 
-        if (width <= 200 || height <= 200 || !this.graphData.nodes.length) {
-          this.graphStatus = this.graphData.nodes.length ? 'Container too small or not visible' : 'Ready';
-          this.isGraphLoading = false; // Hide loader if render aborts
+        const graphData = this.dataStore.graphData;
+        if (width <= 200 || height <= 200 || !graphData.nodes.length) {
+          this.graphStatus = graphData.nodes.length ? 'Container too small or not visible' : 'Ready';
+          this.isGraphLoading = false;
           return;
         }
 
-        console.log(`Rendering graph: ${width}x${height}, ${this.graphData.nodes.length} nodes`);
+        console.log(`Rendering graph: ${width}x${height}, ${graphData.nodes.length} nodes`);
 
-        const nodeCount = this.graphData.nodes.length;
+        const nodeCount = graphData.nodes.length;
         const svg = d3.select(container)
           .append('svg')
           .attr('width', width)
           .attr('height', height);
 
-        // --- DATA RESILIENCE: Filter out orphan links to prevent crashes ---
-        const nodeIds = new Set(this.graphData.nodes.map(n => n.id));
-        const validLinks = this.graphData.links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
+        // Filter out orphan links to prevent crashes
+        const nodeIds = new Set(graphData.nodes.map(n => n.id));
+        const validLinks = graphData.links.filter(l => nodeIds.has(l.source) && nodeIds.has(l.target));
 
         // Smart, Adaptive Sizing using a Logarithmic Scale
         const fillScale = d3.scaleLog()
@@ -324,7 +558,7 @@ document.addEventListener('alpine:init', () => {
         const maxRadius = 40;
         const cappedRadius = Math.min(nodeBaseRadius, maxRadius);
 
-        // Tiered forces remain
+        // Tiered forces
         let linkDistance, chargeStrength;
 
         if (nodeCount > 500) {
@@ -336,18 +570,17 @@ document.addEventListener('alpine:init', () => {
         }
 
         // Set dynamic size based on the new capped calculation
-        this.graphData.nodes.forEach(node => {
+        graphData.nodes.forEach(node => {
           const typeMultiplier = { 'session': 1.0, 'fingerprint': 1.2, 'lead': 1.3, 'belief': 0.9, 'storyfragment': 1.1 };
           node.dynamicSize = Math.max(1.5, cappedRadius * (typeMultiplier[node.type] || 1.0));
         });
 
-        // --- MODIFIED PHYSICS ---
-        // The simulation now uses X and Y forces for containment instead of a single center force.
-        this.simulation = d3.forceSimulation(this.graphData.nodes)
+        // Physics simulation
+        this.simulation = d3.forceSimulation(graphData.nodes)
           .force('link', d3.forceLink(validLinks).id(d => d.id).distance(linkDistance).strength(0.5))
           .force('charge', d3.forceManyBody().strength(chargeStrength))
-          .force('x', d3.forceX(width / 2).strength(0.05)) // Gently pull nodes to the vertical center
-          .force('y', d3.forceY(height / 2).strength(0.05)) // Gently pull nodes to the horizontal center
+          .force('x', d3.forceX(width / 2).strength(0.05))
+          .force('y', d3.forceY(height / 2).strength(0.05))
           .force('collision', d3.forceCollide().radius(d => d.dynamicSize + 2).strength(1));
 
         // Run the simulation in the background to "warm it up"
@@ -356,13 +589,12 @@ document.addEventListener('alpine:init', () => {
         const link = svg.append('g').selectAll('line').data(validLinks).enter().append('line')
           .attr('stroke', '#a6adc8').attr('stroke-opacity', 0.7)
           .attr('stroke-width', d => {
-            // Make ENTERED links thicker than PAGEVIEWED links
             if (d.type === 'fingerprint_entered') return 3;
             if (d.type === 'fingerprint_pageviewed') return 1.5;
-            return 1.5; // default
+            return 1.5;
           });
 
-        const nodeGroup = svg.append('g').selectAll('g').data(this.graphData.nodes).enter().append('g')
+        const nodeGroup = svg.append('g').selectAll('g').data(graphData.nodes).enter().append('g')
           .style('cursor', 'grab')
           .call(d3.drag()
             .on('start', (event, d) => { if (!event.active) this.simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; d3.select(event.currentTarget).style('cursor', 'grabbing'); })
@@ -388,7 +620,7 @@ document.addEventListener('alpine:init', () => {
 
         nodeGroup.append('title').text(d => this.getNodeTooltip(d));
 
-        // Bouncy Walls Logic (kept as a hard boundary)
+        // Bouncy Walls Logic
         const damping = 0.4;
         this.simulation.on('tick', () => {
           nodeGroup.each(d => {
@@ -422,7 +654,7 @@ document.addEventListener('alpine:init', () => {
 
         this.graphStatus = `Rendered ${nodeCount} nodes, ${validLinks.length} links`;
         console.log(`Graph rendered with final physics: ${nodeCount} nodes`);
-        this.isGraphLoading = false; // Hide loader on successful render
+        this.isGraphLoading = false;
       });
     },
 
@@ -469,100 +701,27 @@ document.addEventListener('alpine:init', () => {
       return colorMap[type] || '#ABB2BF';
     },
 
-    // --- POLLING LOGIC ---
-    startPolling() { this.stopPolling(); this.pollData(); this.pollTimer = setInterval(() => this.pollData(), 20000); },
-    stopPolling() { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; } },
-    async pollData() {
-      if (!this.tenantToken || !['status', 'cache', 'analytics', 'graph'].includes(this.currentTab)) return;
-      const headers = { 'Authorization': `Bearer ${this.tenantToken}`, 'X-Tenant-ID': this.currentTenant };
-      const sysOpHeaders = { 'Authorization': `Bearer ${this.sysOpToken}` };
-      const activityEndpoint = `${this.apiEndpoints.sysop_activity}?tenant=${this.currentTenant}`;
-      const orphanEndpoint = `${this.apiEndpoints.sysop_orphan_analysis}?tenant=${this.currentTenant}`;
-
-      const fetchWithTenantToken = (endpoint) => fetch(endpoint, { headers }).then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed ${endpoint}`)));
-      const fetchWithSysOpToken = (endpoint) => fetch(endpoint, { headers: sysOpHeaders }).then(res => res.ok ? res.json() : Promise.reject(new Error(`Failed ${endpoint}`)));
-
-      try {
-        const nodeEndpoints = Object.values(this.apiEndpoints.nodes).map(url => fetchWithTenantToken(url));
-        const results = await Promise.allSettled([fetchWithTenantToken(this.apiEndpoints.analytics), fetchWithSysOpToken(activityEndpoint), fetchWithSysOpToken(orphanEndpoint), ...nodeEndpoints]);
-        const getData = (result, def) => result.status === 'fulfilled' ? result.value : def;
-
-        const analytics = getData(results[0], { dashboard: {} });
-        const activity = getData(results[1], {});
-        const orphanAnalysis = getData(results[2], { status: 'offline' });
-        const nodeCounts = results.slice(3).map(res => getData(res, { count: 0 }));
-        const nodes = Object.keys(this.apiEndpoints.nodes).reduce((acc, key, i) => ({ ...acc, [key]: nodeCounts[i].count }), {});
-
-        this.pollDataStore = {
-          connectionStatus: 'ONLINE',
-          lastUpdate: new Date().toLocaleTimeString(),
-          activity,
-          orphanAnalysis,
-          nodes,
-          analyticsStatus: analytics.dashboard?.status || 'complete',
-          analyticsOverview: analytics.dashboard
-        };
-        this.updateUI(this.pollDataStore);
-
-      } catch (error) {
-        console.error('Polling failed:', error);
-        this.pollDataStore.connectionStatus = 'OFFLINE';
-      }
-    },
-
-    // --- UI UPDATE METHODS ---
-    updateUI(data) { this.updateStatusTab(data); this.updateCacheTab(data.nodes); this.updateAnalyticsDetails(data.analyticsOverview); },
-    updateStatusTab(data) {
-      const [connEl, cacheEl, nodesEl, activityEl, analyticsEl] = [
-        document.getElementById('connection-status'),
-        document.getElementById('cache-status'),
-        document.getElementById('nodes-in-cache-metrics'),
-        document.getElementById('activity-metrics'),
-        document.getElementById('analytics-metrics')
-      ];
-      if (!connEl || !cacheEl || !nodesEl || !activityEl || !analyticsEl) return;
-
-      const format = (lbl, val, lblCls, valCls) => `<span><span class="${val > 0 ? lblCls : 'metric-dim'}">${lbl}:</span><span class="${val > 0 ? valCls : 'metric-dim'}">${val > 0 ? val : '--'}</span></span>`;
-
-      const nodes = data.nodes || {};
-      const orphan = data.orphanAnalysis || {};
-      const orphanCls = `status-${(orphan.status || 'offline').toLowerCase()}`;
-
-      connEl.innerHTML = `Server Ping: <span class="${this.connectionStatusClass}">${this.pollDataStore.connectionStatus}</span>`;
-      cacheEl.innerHTML = `<span><span class="metric-label">✦ Orphan Analysis: </span><span class="${orphanCls}">${orphan.status?.toUpperCase() || 'OFFLINE'}</span></span>`;
-      nodesEl.innerHTML = Object.keys(nodes).map(k => format(k, nodes[k], 'activity-label', 'activity-value')).join(' ');
-      activityEl.innerHTML = Object.keys(data.activity || {}).map(k => format(k, data.activity[k], 'activity-label', 'activity-value')).join(' ');
-
-      const analyticsStatus = data.analyticsStatus || 'offline';
-      analyticsEl.innerHTML = `<span class="metric-label">✦ Analytics Status: </span><span class="status-${analyticsStatus.toLowerCase()}">${analyticsStatus.toUpperCase()}</span>`;
-    },
-    updateCacheTab(nodes = {}) {
-      const el = document.getElementById('cache-detail-table');
-      if (!el) return;
-      let html = `<pre class="bbs-table-header">LAYER             ITEMS    FILL LVL           HIT RATE</pre>`;
-      const totalItems = Object.values(nodes).reduce((sum, count) => sum + (count || 0), 0);
-      ['tractstacks', 'storyfragments', 'panes', 'menus', 'resources', 'beliefs', 'epinets', 'files'].forEach(layer => {
-        const count = nodes[layer] || 0;
-        const fill = totalItems > 0 ? (count / totalItems) * 100 : 0;
-        const hitRate = count > 0 ? 95.5 + Math.random() * 4.4 : 0;
-        html += `<pre>${layer.padEnd(18)}${String(count).padStart(5)}    ${this.renderProgressBar(fill)} ${hitRate > 0 ? hitRate.toFixed(1).padStart(7) + '%' : '   N/A '}</pre>`;
-      });
-      el.innerHTML = html;
-    },
-    updateAnalyticsDetails(analytics = {}) { const el = document.getElementById('analytics-detail-table'); if (!el) return; const stats = analytics.stats || {}; let html = `<div class="status-section"><pre class="section-title">UNIQUE VISITORS</pre><pre><span class="metric-label">Last 24 Hours:</span><span class="metric-value"> ${stats.daily || 0}</span></pre><pre><span class="metric-label">Last 7 Days:  </span><span class="metric-value"> ${stats.weekly || 0}</span></pre><pre><span class="metric-label">Last 28 Days: </span><span class="metric-value"> ${stats.monthly || 0}</span></pre></div>`; html += `<div class="status-section"><pre class="section-title">SESSIONS</pre><pre><span class="metric-label">Total Sessions: </span><span class="metric-value"> ${analytics.sessions || 0}</span></pre></div>`; el.innerHTML = html; },
-    renderProgressBar(percentage) { const width = 14; const filledCount = Math.round((percentage / 100) * width); return `[${'▓'.repeat(filledCount)}${'░'.repeat(width - filledCount)}]`; },
-    showError(message) { const messageEl = document.getElementById('login-message'); if (messageEl) { messageEl.innerHTML = `<span style="color:var(--color-red);">${message}</span>`; } },
-
-    // --- WebSocket Methods for Session Universe ---
+    // --- WebSocket Methods for Session Universe (unchanged - real-time) ---
     connectSessionSocket() {
       this.disconnectSessionSocket();
-      if (!this.sysOpToken) { console.error("SysOp token not available."); this.sessionSocketStatus = 'ERROR'; return; }
+      if (!this.sysOpToken) {
+        console.error("SysOp token not available.");
+        this.sessionSocketStatus = 'ERROR';
+        return;
+      }
       this.sessionSocketStatus = 'CONNECTING';
       const url = `ws://${window.location.host}/api/sysop/ws/session-map?tenant=${this.currentTenant}&token=${this.sysOpToken}`;
       this.sessionSocket = new WebSocket(url);
       this.sessionSocket.onopen = () => { this.sessionSocketStatus = 'ONLINE'; };
-      this.sessionSocket.onclose = () => { this.sessionSocketStatus = 'OFFLINE'; this.sessionStates = []; this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 }; };
-      this.sessionSocket.onerror = (error) => { console.error('WebSocket Error:', error); this.sessionSocketStatus = 'ERROR'; };
+      this.sessionSocket.onclose = () => {
+        this.sessionSocketStatus = 'OFFLINE';
+        this.sessionStates = [];
+        this.sessionStats = { total: 0, lead: 0, active: 0, dormant: 0, withBeliefs: 0 };
+      };
+      this.sessionSocket.onerror = (error) => {
+        console.error('WebSocket Error:', error);
+        this.sessionSocketStatus = 'ERROR';
+      };
       this.sessionSocket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -575,9 +734,12 @@ document.addEventListener('alpine:init', () => {
             dormant: data.dormantCount || 0,
             withBeliefs: data.withBeliefsCount || 0
           };
-        } catch (e) { console.error('Failed to parse session map event:', e); }
+        } catch (e) {
+          console.error('Failed to parse session map event:', e);
+        }
       };
     },
+
     disconnectSessionSocket() {
       if (this.sessionSocket) {
         this.sessionSocket.close();
@@ -586,8 +748,39 @@ document.addEventListener('alpine:init', () => {
       this.sessionSocketStatus = 'OFFLINE';
     },
 
-    // --- SSE Log Methods ---
-    connectLogStream() { this.disconnectLogStream(); this.logs = []; this.logConnectionStatus = 'CONNECTING'; const url = `/sysop-logs/stream?channel=${this.logFilters.channel}&level=${this.logFilters.level}`; this.logEvtSource = new EventSource(url); this.logEvtSource.onopen = () => { this.logConnectionStatus = 'Connected'; }; this.logEvtSource.onmessage = (event) => { try { const logEntry = JSON.parse(event.data); this.logs.push(logEntry); if (this.logs.length > this.maxLogEntries) this.logs.shift(); this.$nextTick(() => { const container = this.$refs.logContainer; if (container) container.scrollTop = container.scrollHeight; }); } catch (e) { console.error('Failed to parse log event:', e); } }; this.logEvtSource.onerror = () => { this.logConnectionStatus = 'Disconnected'; this.logEvtSource.close(); }; },
-    disconnectLogStream() { if (this.logEvtSource) { this.logEvtSource.close(); this.logEvtSource = null; this.logConnectionStatus = 'Disconnected'; } },
+    // --- SSE Log Methods (unchanged - real-time) ---
+    connectLogStream() {
+      this.disconnectLogStream();
+      this.logs = [];
+      this.logConnectionStatus = 'CONNECTING';
+      const url = `/sysop-logs/stream?channel=${this.logFilters.channel}&level=${this.logFilters.level}`;
+      this.logEvtSource = new EventSource(url);
+      this.logEvtSource.onopen = () => { this.logConnectionStatus = 'Connected'; };
+      this.logEvtSource.onmessage = (event) => {
+        try {
+          const logEntry = JSON.parse(event.data);
+          this.logs.push(logEntry);
+          if (this.logs.length > this.maxLogEntries) this.logs.shift();
+          this.$nextTick(() => {
+            const container = this.$refs.logContainer;
+            if (container) container.scrollTop = container.scrollHeight;
+          });
+        } catch (e) {
+          console.error('Failed to parse log event:', e);
+        }
+      };
+      this.logEvtSource.onerror = () => {
+        this.logConnectionStatus = 'Disconnected';
+        this.logEvtSource.close();
+      };
+    },
+
+    disconnectLogStream() {
+      if (this.logEvtSource) {
+        this.logEvtSource.close();
+        this.logEvtSource = null;
+        this.logConnectionStatus = 'Disconnected';
+      }
+    },
   }));
 });

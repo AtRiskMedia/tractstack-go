@@ -254,14 +254,14 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 			changedBeliefs = append(changedBeliefs, beliefSlug)
 		}
 
-		s.logger.Auth().Warn("Cross-browser sync: finding affected storyfragments",
+		s.logger.Auth().Debug("Cross-browser sync: finding affected storyfragments",
 			"fingerprintId", *fingerprintID,
 			"changedBeliefsCount", len(changedBeliefs),
 			"sessionCount", len(allSessionIDs))
 
 		affectedStoryfragments := s.beliefBroadcaster.FindAffectedStoryfragments(tenantCtx.TenantID, changedBeliefs)
 
-		s.logger.Auth().Warn("Cross-browser sync: broadcasting to all sessions",
+		s.logger.Auth().Debug("Cross-browser sync: broadcasting to all sessions",
 			"fingerprintId", *fingerprintID,
 			"affectedStoryfragmentsCount", len(affectedStoryfragments),
 			"sessionIds", allSessionIDs)
@@ -270,7 +270,7 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 			for affectedStoryfragmentID, storyfragmentAffectedPanes := range affectedStoryfragments {
 				tenantCtx.CacheManager.InvalidateSessionBeliefContext(tenantCtx.TenantID, targetSessionID, affectedStoryfragmentID)
 
-				s.logger.Auth().Warn("Sending cross-browser SSE broadcast",
+				s.logger.Auth().Debug("Sending cross-browser SSE broadcast",
 					"targetSessionId", targetSessionID,
 					"affectedStoryfragmentId", affectedStoryfragmentID,
 					"affectedPanes", storyfragmentAffectedPanes)
@@ -281,7 +281,7 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 		}
 	}
 
-	s.logger.Auth().Warn("DIAGNOSIS: Cross-browser broadcast summary",
+	s.logger.Auth().Debug("DIAGNOSIS: Cross-browser broadcast summary",
 		"fingerprintId", *fingerprintID,
 		"sessionsFound", len(allSessionIDs),
 		"sessionIds", allSessionIDs,
