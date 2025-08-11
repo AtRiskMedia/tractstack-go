@@ -121,8 +121,8 @@ type SankeyDiagram struct {
 
 // SankeyNode represents a node in a Sankey diagram.
 type SankeyNode struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // SankeyLink represents a link between nodes in a Sankey diagram.
