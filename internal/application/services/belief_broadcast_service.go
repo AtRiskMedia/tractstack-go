@@ -110,11 +110,6 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 
 	// Broadcast to ALL sessions using this fingerprint
 	for _, targetSessionID := range allSessionIDs {
-		// For each session, invalidate belief contexts for all affected storyfragments
-		for affectedStoryfragmentID := range affectedStoryfragments {
-			b.cacheManager.InvalidateSessionBeliefContext(tenantID, targetSessionID, affectedStoryfragmentID)
-		}
-
 		// For each affected storyfragment, send individual broadcasts
 		for affectedStoryfragmentID, affectedPanes := range affectedStoryfragments {
 			var scrollTarget *string
@@ -129,6 +124,9 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 			}
 
 			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
+
+			// Invalidate belief context AFTER broadcasting (so computeScrollTarget can use it)
+			b.cacheManager.InvalidateSessionBeliefContext(tenantID, targetSessionID, affectedStoryfragmentID)
 		}
 	}
 }
