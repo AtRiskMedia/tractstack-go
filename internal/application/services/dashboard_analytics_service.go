@@ -143,18 +143,67 @@ func (s *DashboardAnalyticsService) computeLineData(tenantCtx *tenant.Context, e
 func (s *DashboardAnalyticsService) computeHotContent(tenantCtx *tenant.Context, epinets []EpinetConfig, hourKeys []string) []HotItem {
 	contentCounts := make(map[string]int)
 
+	// ADD: Debug logging for input parameters
+	s.logger.Analytics().Debug("computeHotContent started",
+		"tenantId", tenantCtx.TenantID,
+		"epinetCount", len(epinets),
+		"hourKeyCount", len(hourKeys),
+		"hourKeys", hourKeys)
+
+	totalStepsProcessed := 0
+	storyFragmentStepsFound := 0
+	validContentIDs := 0
+
 	for _, epinet := range epinets {
 		for _, hourKey := range hourKeys {
 			if bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey); exists {
+
+				s.logger.Analytics().Debug("Processing epinet bin",
+					"epinetId", epinet.ID,
+					"hourKey", hourKey,
+					"stepCount", len(bin.Data.Steps))
+
 				for stepID, stepData := range bin.Data.Steps {
+					totalStepsProcessed++
+
+					s.logger.Analytics().Debug("Processing step",
+						"stepID", stepID,
+						"visitorCount", len(stepData.Visitors))
+
 					contentID := s.extractContentIDFromNodeID(stepID)
-					if contentID != "" && s.isStoryFragmentStep(stepID) {
+					isStoryFragmentStep := s.isStoryFragmentStep(stepID)
+
+					s.logger.Analytics().Debug("Step extraction results",
+						"stepID", stepID,
+						"extractedContentID", contentID,
+						"isStoryFragmentStep", isStoryFragmentStep)
+
+					if contentID != "" && isStoryFragmentStep {
+						storyFragmentStepsFound++
+						validContentIDs++
 						contentCounts[contentID] += len(stepData.Visitors)
+
+						s.logger.Analytics().Debug("Valid StoryFragment step found",
+							"stepID", stepID,
+							"contentID", contentID,
+							"visitorCount", len(stepData.Visitors),
+							"runningTotal", contentCounts[contentID])
 					}
 				}
+			} else {
+				s.logger.Analytics().Debug("No epinet bin found",
+					"epinetId", epinet.ID,
+					"hourKey", hourKey)
 			}
 		}
 	}
+
+	s.logger.Analytics().Debug("computeHotContent processing summary",
+		"totalStepsProcessed", totalStepsProcessed,
+		"storyFragmentStepsFound", storyFragmentStepsFound,
+		"validContentIDs", validContentIDs,
+		"uniqueContentItems", len(contentCounts),
+		"contentCounts", contentCounts)
 
 	var sortedContent []HotItem
 	for id, totalEvents := range contentCounts {
@@ -176,11 +225,15 @@ func (s *DashboardAnalyticsService) computeHotContent(tenantCtx *tenant.Context,
 		sortedContent = sortedContent[:10]
 	}
 
+	s.logger.Analytics().Debug("computeHotContent final result",
+		"resultCount", len(sortedContent),
+		"result", sortedContent)
+
 	return sortedContent
 }
 
 func (s *DashboardAnalyticsService) extractContentIDFromNodeID(nodeID string) string {
-	parts := strings.Split(nodeID, "-")
+	parts := strings.Split(nodeID, "_")
 	if len(parts) >= 1 {
 		return parts[len(parts)-1]
 	}
@@ -188,7 +241,7 @@ func (s *DashboardAnalyticsService) extractContentIDFromNodeID(nodeID string) st
 }
 
 func (s *DashboardAnalyticsService) isStoryFragmentStep(stepID string) bool {
-	return strings.Contains(stepID, "storyfragment")
+	return strings.Contains(stepID, "StoryFragment")
 }
 
 func (s *DashboardAnalyticsService) createEmptyDashboardAnalytics() *DashboardAnalytics {
