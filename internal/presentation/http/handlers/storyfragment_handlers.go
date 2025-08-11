@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -21,14 +22,16 @@ type StoryFragmentIDsRequest struct {
 // StoryFragmentHandlers contains all storyfragment-related HTTP handlers
 type StoryFragmentHandlers struct {
 	storyFragmentService *services.StoryFragmentService
+	fragmentService      *services.FragmentService
 	logger               *logging.ChanneledLogger
 	perfTracker          *performance.Tracker
 }
 
 // NewStoryFragmentHandlers creates storyfragment handlers with injected dependencies
-func NewStoryFragmentHandlers(storyFragmentService *services.StoryFragmentService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *StoryFragmentHandlers {
+func NewStoryFragmentHandlers(storyFragmentService *services.StoryFragmentService, fragmentService *services.FragmentService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *StoryFragmentHandlers {
 	return &StoryFragmentHandlers{
 		storyFragmentService: storyFragmentService,
+		fragmentService:      fragmentService,
 		logger:               logger,
 		perfTracker:          perfTracker,
 	}
@@ -403,4 +406,80 @@ func (h *StoryFragmentHandlers) DeleteStoryFragment(c *gin.Context) {
 		"message":         "storyfragment deleted successfully",
 		"storyFragmentId": storyFragmentID,
 	})
+}
+
+func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_storyfragment_personalized_payload_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get story fragment personalized payload request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	slug := c.Param("slug")
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+
+	var storyFragment *content.StoryFragmentNode
+	var err error
+
+	if slug == "" {
+		storyFragment, err = h.storyFragmentService.GetHome(tenantCtx, sessionID)
+	} else {
+		storyFragment, err = h.storyFragmentService.GetBySlug(tenantCtx, slug)
+		if err == nil && storyFragment != nil {
+			err = h.storyFragmentService.EnrichWithMetadata(tenantCtx, storyFragment, sessionID)
+		}
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if storyFragment == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "storyfragment not found"})
+		return
+	}
+
+	var fragmentsData map[string]string
+	if len(storyFragment.PaneIDs) > 0 {
+		results, errors, err := h.fragmentService.GenerateFragmentBatch(
+			tenantCtx, storyFragment.PaneIDs, sessionID, storyFragment.ID,
+		)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		fragmentsData = results
+
+		if len(errors) > 0 {
+			for paneID, errMsg := range errors {
+				fragmentsData[paneID] = fmt.Sprintf(`<div class="error">Failed to load pane %s: %s</div>`, paneID, errMsg)
+			}
+		}
+	} else {
+		fragmentsData = make(map[string]string)
+	}
+
+	response := gin.H{
+		"id":              storyFragment.ID,
+		"title":           storyFragment.Title,
+		"slug":            storyFragment.Slug,
+		"paneIds":         storyFragment.PaneIDs,
+		"codeHookTargets": storyFragment.CodeHookTargets,
+		"menu":            storyFragment.Menu,
+		"isHome":          storyFragment.IsHome,
+		"created":         storyFragment.Created,
+		"fragments":       fragmentsData,
+	}
+
+	h.logger.Content().Info("Get story fragment personalized payload request completed", "slug", slug, "sessionId", sessionID, "paneCount", len(storyFragment.PaneIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetStoryFragmentPersonalizedPayloadBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
+
+	c.JSON(http.StatusOK, response)
 }

@@ -23,7 +23,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	menuHandlers := handlers.NewMenuHandlers(container.MenuService, container.Logger, container.PerfTracker)
 	paneHandlers := handlers.NewPaneHandlers(container.PaneService, container.Logger, container.PerfTracker)
 	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService, container.Logger, container.PerfTracker)
-	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.Logger, container.PerfTracker)
+	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.FragmentService, container.Logger, container.PerfTracker)
 	tractStackHandlers := handlers.NewTractStackHandlers(container.TractStackService, container.Logger, container.PerfTracker)
 	beliefHandlers := handlers.NewBeliefHandlers(container.BeliefService, container.Logger, container.PerfTracker)
 	imageFileHandlers := handlers.NewImageFileHandlers(container.ImageFileService, container.Logger, container.PerfTracker)
@@ -183,6 +183,8 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			// Story fragment endpoints
 			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
 			nodes.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
+			nodes.GET("/storyfragments/slug/:slug/personalized-payload", storyFragmentHandlers.GetStoryFragmentPersonalizedPayloadBySlug)
+			nodes.GET("/storyfragments/home/personalized-payload", storyFragmentHandlers.GetStoryFragmentPersonalizedPayloadBySlug)
 			nodes.POST("/storyfragments", storyFragmentHandlers.GetStoryFragmentsByIDs)
 			nodes.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
