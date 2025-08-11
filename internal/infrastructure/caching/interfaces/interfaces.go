@@ -87,6 +87,7 @@ type UserStateCache interface {
 	LoadKnownFingerprints(tenantID string, fingerprints map[string]bool)
 	GetSession(tenantID, sessionID string) (*types.SessionData, bool)
 	SetSession(tenantID string, sessionData *types.SessionData)
+	GetSessionsByFingerprint(tenantID, fingerprintID string) []string
 	GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID string) (*types.StoryfragmentBeliefRegistry, bool)
 	SetStoryfragmentBeliefRegistry(tenantID string, registry *types.StoryfragmentBeliefRegistry)
 	InvalidateStoryfragmentBeliefRegistry(tenantID, storyfragmentID string)

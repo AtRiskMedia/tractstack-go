@@ -939,3 +939,12 @@ func (m *Manager) RemoveFileID(tenantID, id string) {
 	m.contentStore.RemoveFileID(tenantID, id)
 	m.updateTenantAccessTime(tenantID)
 }
+
+// GetSessionsByFingerprint returns all session IDs for a given fingerprint
+func (m *Manager) GetSessionsByFingerprint(tenantID, fingerprintID string) []string {
+	_, err := m.GetTenantUserStateCache(tenantID)
+	if err != nil {
+		return []string{}
+	}
+	return m.sessionsStore.GetSessionsByFingerprint(tenantID, fingerprintID)
+}

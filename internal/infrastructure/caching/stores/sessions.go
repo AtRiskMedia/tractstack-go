@@ -545,3 +545,45 @@ func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]any {
 
 	return summary
 }
+
+// GetSessionsByFingerprint returns all session IDs for a given fingerprint
+func (ss *SessionsStore) GetSessionsByFingerprint(tenantID, fingerprintID string) []string {
+	start := time.Now()
+	cache, exists := ss.GetTenantCache(tenantID)
+	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get_sessions_by_fingerprint", "type", "session", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
+		return []string{}
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	if time.Since(cache.LastLoaded) > 24*time.Hour {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "get_sessions_by_fingerprint", "type", "session", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
+		return []string{}
+	}
+
+	var sessionIDs []string
+	for sessionID, sessionData := range cache.SessionStates {
+		if sessionData.FingerprintID == fingerprintID {
+			sessionIDs = append(sessionIDs, sessionID)
+		}
+	}
+	if ss.logger != nil {
+		ss.logger.Cache().Warn("DIAGNOSIS: GetSessionsByFingerprint results",
+			"fingerprintId", fingerprintID,
+			"foundSessionCount", len(sessionIDs),
+			"foundSessionIds", sessionIDs,
+			"totalCachedSessions", len(cache.SessionStates))
+	}
+
+	if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "get_sessions_by_fingerprint", "type", "session", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", true, "sessionCount", len(sessionIDs), "duration", time.Since(start))
+	}
+
+	return sessionIDs
+}

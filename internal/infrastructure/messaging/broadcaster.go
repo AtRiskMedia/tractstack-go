@@ -150,8 +150,6 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 	}
 }
 
-// Remove the BroadcastBatchToSpecificSession method - not needed
-
 // HasViewingSessions checks if any sessions are viewing a specific storyfragment.
 func (b *SSEBroadcaster) HasViewingSessions(tenantID, storyfragmentID string) bool {
 	b.mu.Lock()
