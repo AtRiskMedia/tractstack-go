@@ -13,18 +13,31 @@ type SessionBeliefTarget struct {
 
 // TenantUserStateCache holds user state data for a single tenant
 type TenantUserStateCache struct {
-	// Persistent user state by fingerprint
-	FingerprintStates             map[string]*FingerprintState            // fingerprintId -> state
-	VisitStates                   map[string]*VisitState                  // visitId -> state
-	KnownFingerprints             map[string]bool                         // fingerprintId -> isKnown
-	StoryfragmentBeliefRegistries map[string]*StoryfragmentBeliefRegistry `json:"storyfragmentBeliefRegistries"`
-	SessionStates                 map[string]*SessionData                 // sessionId -> session data
-	SessionBeliefContexts         map[string]*SessionBeliefContext        // "sessionId:storyfragmentId" -> context
-	FingerprintToSessions         map[string][]string
+	// Fingerprint-related data with dedicated mutex
+	FingerprintStates map[string]*FingerprintState
+	KnownFingerprints map[string]bool
+	FingerprintsMu    sync.RWMutex
 
-	// Cache metadata
+	// Visit data with dedicated mutex
+	VisitStates map[string]*VisitState
+	VisitsMu    sync.RWMutex
+
+	// Session-related data with dedicated mutex
+	SessionStates         map[string]*SessionData
+	FingerprintToSessions map[string][]string
+	SessionsMu            sync.RWMutex
+
+	// Belief context data with dedicated mutex
+	SessionBeliefContexts map[string]*SessionBeliefContext
+	BeliefContextsMu      sync.RWMutex
+
+	// Belief registry data with dedicated mutex
+	StoryfragmentBeliefRegistries map[string]*StoryfragmentBeliefRegistry
+	BeliefRegistriesMu            sync.RWMutex
+
+	// Cache metadata with dedicated mutex
 	LastLoaded time.Time
-	Mu         sync.RWMutex // Exported for access
+	MetadataMu sync.RWMutex
 }
 
 // FingerprintState represents a user fingerprint's persistent state

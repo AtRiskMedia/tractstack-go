@@ -712,8 +712,8 @@ func (m *Manager) GetAllSessionIDs(tenantID string) []string {
 		return []string{}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.SessionsMu.RLock()
+	defer cache.SessionsMu.RUnlock()
 
 	sessionIDs := make([]string, 0, len(cache.SessionStates))
 	for sessionID := range cache.SessionStates {
@@ -729,8 +729,8 @@ func (m *Manager) GetAllFingerprintIDs(tenantID string) []string {
 		return []string{}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.FingerprintsMu.RLock()
+	defer cache.FingerprintsMu.RUnlock()
 
 	fingerprintIDs := make([]string, 0, len(cache.FingerprintStates))
 	for fingerprintID := range cache.FingerprintStates {
@@ -746,8 +746,8 @@ func (m *Manager) GetAllVisitIDs(tenantID string) []string {
 		return []string{}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.VisitsMu.RLock()
+	defer cache.VisitsMu.RUnlock()
 
 	visitIDs := make([]string, 0, len(cache.VisitStates))
 	for visitID := range cache.VisitStates {
@@ -780,8 +780,8 @@ func (m *Manager) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
 		return []string{}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.BeliefRegistriesMu.RLock()
+	defer cache.BeliefRegistriesMu.RUnlock()
 
 	if cache.StoryfragmentBeliefRegistries == nil {
 		return []string{}

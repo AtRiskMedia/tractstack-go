@@ -45,7 +45,7 @@ func (ss *SessionsStore) InitializeTenant(tenantID string) {
 			SessionStates:                 make(map[string]*types.SessionData),
 			StoryfragmentBeliefRegistries: make(map[string]*types.StoryfragmentBeliefRegistry),
 			SessionBeliefContexts:         make(map[string]*types.SessionBeliefContext),
-			FingerprintToSessions:         make(map[string][]string), // NEW: Inverted index
+			FingerprintToSessions:         make(map[string][]string),
 			LastLoaded:                    time.Now().UTC(),
 		}
 
@@ -78,10 +78,14 @@ func (ss *SessionsStore) IsKnownFingerprint(tenantID, fingerprintID string) bool
 		return false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.FingerprintsMu.RLock()
+	defer cache.FingerprintsMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "is_known", "type", "fingerprint", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
@@ -104,11 +108,13 @@ func (ss *SessionsStore) SetKnownFingerprint(tenantID, fingerprintID string, isK
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.FingerprintsMu.Lock()
 	cache.KnownFingerprints[fingerprintID] = isKnown
+	cache.FingerprintsMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "set_known", "type", "fingerprint", "tenantId", tenantID, "fingerprintId", fingerprintID, "isKnown", isKnown, "duration", time.Since(start))
@@ -124,14 +130,15 @@ func (ss *SessionsStore) LoadKnownFingerprints(tenantID string, fingerprints map
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
-	// Merge with existing known fingerprints
+	cache.FingerprintsMu.Lock()
 	for fpID, isKnown := range fingerprints {
 		cache.KnownFingerprints[fpID] = isKnown
 	}
+	cache.FingerprintsMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "bulk_load", "type", "fingerprints", "tenantId", tenantID, "count", len(fingerprints), "duration", time.Since(start))
@@ -153,10 +160,14 @@ func (ss *SessionsStore) GetSession(tenantID, sessionID string) (*types.SessionD
 		return nil, false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.SessionsMu.RLock()
+	defer cache.SessionsMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
@@ -179,8 +190,8 @@ func (ss *SessionsStore) SetSession(tenantID string, sessionData *types.SessionD
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
+	cache.SessionsMu.Lock()
+	defer cache.SessionsMu.Unlock()
 
 	// Check if this session already exists
 	if existingSession, exists := cache.SessionStates[sessionData.SessionID]; exists {
@@ -196,7 +207,9 @@ func (ss *SessionsStore) SetSession(tenantID string, sessionData *types.SessionD
 	// Update the inverted index
 	ss.addSessionToFingerprintIndex(cache, sessionData.FingerprintID, sessionData.SessionID)
 
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "session", "tenantId", tenantID, "sessionId", sessionData.SessionID, "fingerprintId", sessionData.FingerprintID, "duration", time.Since(start))
@@ -214,8 +227,8 @@ func (ss *SessionsStore) RemoveSession(tenantID, sessionID string) {
 		return
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
+	cache.SessionsMu.Lock()
+	defer cache.SessionsMu.Unlock()
 
 	// Get the session to find its fingerprint
 	if sessionData, exists := cache.SessionStates[sessionID]; exists {
@@ -225,7 +238,9 @@ func (ss *SessionsStore) RemoveSession(tenantID, sessionID string) {
 		// Remove from session states
 		delete(cache.SessionStates, sessionID)
 
+		cache.MetadataMu.Lock()
 		cache.LastLoaded = time.Now().UTC()
+		cache.MetadataMu.Unlock()
 
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "remove", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "fingerprintId", sessionData.FingerprintID, "duration", time.Since(start))
@@ -248,17 +263,20 @@ func (ss *SessionsStore) GetSessionsByFingerprint(tenantID, fingerprintID string
 		return []string{}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.SessionsMu.RLock()
+	defer cache.SessionsMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get_sessions_by_fingerprint", "type", "session", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
 		return []string{}
 	}
 
-	// O(1) lookup using inverted index!
 	sessionIDs, found := cache.FingerprintToSessions[fingerprintID]
 	if !found {
 		sessionIDs = []string{}
@@ -276,7 +294,7 @@ func (ss *SessionsStore) GetSessionsByFingerprint(tenantID, fingerprintID string
 }
 
 // addSessionToFingerprintIndex adds a session to the fingerprint's session list
-// MUST be called with cache.Mu.Lock() held
+// MUST be called with cache.SessionsMu.Lock() held
 func (ss *SessionsStore) addSessionToFingerprintIndex(cache *types.TenantUserStateCache, fingerprintID, sessionID string) {
 	sessions := cache.FingerprintToSessions[fingerprintID]
 
@@ -292,7 +310,7 @@ func (ss *SessionsStore) addSessionToFingerprintIndex(cache *types.TenantUserSta
 }
 
 // removeSessionFromFingerprintIndex removes a session from the fingerprint's session list
-// MUST be called with cache.Mu.Lock() held
+// MUST be called with cache.SessionsMu.Lock() held
 func (ss *SessionsStore) removeSessionFromFingerprintIndex(cache *types.TenantUserStateCache, fingerprintID, sessionID string) {
 	sessions := cache.FingerprintToSessions[fingerprintID]
 
@@ -327,10 +345,14 @@ func (ss *SessionsStore) GetStoryfragmentBeliefRegistry(tenantID, storyfragmentI
 		return nil, false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.BeliefRegistriesMu.RLock()
+	defer cache.BeliefRegistriesMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
@@ -353,11 +375,13 @@ func (ss *SessionsStore) SetStoryfragmentBeliefRegistry(tenantID string, registr
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.BeliefRegistriesMu.Lock()
 	cache.StoryfragmentBeliefRegistries[registry.StoryfragmentID] = registry
+	cache.BeliefRegistriesMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", registry.StoryfragmentID, "duration", time.Since(start))
@@ -375,11 +399,13 @@ func (ss *SessionsStore) InvalidateStoryfragmentBeliefRegistry(tenantID, storyfr
 		return
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.BeliefRegistriesMu.Lock()
 	delete(cache.StoryfragmentBeliefRegistries, storyfragmentID)
+	cache.BeliefRegistriesMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "invalidate", "type", "belief_registry", "tenantId", tenantID, "storyfragmentId", storyfragmentID, "duration", time.Since(start))
@@ -397,8 +423,8 @@ func (ss *SessionsStore) GetAllStoryfragmentBeliefRegistryIDs(tenantID string) [
 		return []string{}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.BeliefRegistriesMu.RLock()
+	defer cache.BeliefRegistriesMu.RUnlock()
 
 	if cache.StoryfragmentBeliefRegistries == nil {
 		if ss.logger != nil {
@@ -434,10 +460,14 @@ func (ss *SessionsStore) GetSessionBeliefContext(tenantID, sessionID, storyfragm
 		return nil, false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.BeliefContextsMu.RLock()
+	defer cache.BeliefContextsMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
@@ -461,12 +491,14 @@ func (ss *SessionsStore) SetSessionBeliefContext(tenantID string, context *types
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.BeliefContextsMu.Lock()
 	contextKey := context.SessionID + ":" + context.StoryfragmentID
 	cache.SessionBeliefContexts[contextKey] = context
+	cache.BeliefContextsMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "session_belief_context", "tenantId", tenantID, "sessionId", context.SessionID, "storyfragmentId", context.StoryfragmentID, "duration", time.Since(start))
@@ -484,13 +516,14 @@ func (ss *SessionsStore) InvalidateSessionBeliefContext(tenantID, sessionID, sto
 		return
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.BeliefContextsMu.Lock()
 	contextKey := sessionID + ":" + storyfragmentID
 	delete(cache.SessionBeliefContexts, contextKey)
+	cache.BeliefContextsMu.Unlock()
 
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Warn("Cache operation", "operation", "invalidate", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "duration", time.Since(start))
@@ -512,10 +545,14 @@ func (ss *SessionsStore) GetVisitState(tenantID, visitID string) (*types.VisitSt
 		return nil, false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.VisitsMu.RLock()
+	defer cache.VisitsMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "visit_state", "tenantId", tenantID, "visitId", visitID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
@@ -538,11 +575,13 @@ func (ss *SessionsStore) SetVisitState(tenantID string, state *types.VisitState)
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.VisitsMu.Lock()
 	cache.VisitStates[state.VisitID] = state
+	cache.VisitsMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "visit_state", "tenantId", tenantID, "visitId", state.VisitID, "duration", time.Since(start))
@@ -564,10 +603,14 @@ func (ss *SessionsStore) GetFingerprintState(tenantID, fingerprintID string) (*t
 		return nil, false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.FingerprintsMu.RLock()
+	defer cache.FingerprintsMu.RUnlock()
 
-	if time.Since(cache.LastLoaded) > 24*time.Hour {
+	cache.MetadataMu.RLock()
+	expired := time.Since(cache.LastLoaded) > 24*time.Hour
+	cache.MetadataMu.RUnlock()
+
+	if expired {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "get", "type", "fingerprint_state", "tenantId", tenantID, "fingerprintId", fingerprintID, "hit", false, "reason", "expired", "duration", time.Since(start))
 		}
@@ -590,11 +633,13 @@ func (ss *SessionsStore) SetFingerprintState(tenantID string, state *types.Finge
 		cache, _ = ss.GetTenantCache(tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
-
+	cache.FingerprintsMu.Lock()
 	cache.FingerprintStates[state.FingerprintID] = state
+	cache.FingerprintsMu.Unlock()
+
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "set", "type", "fingerprint_state", "tenantId", tenantID, "fingerprintId", state.FingerprintID, "duration", time.Since(start))
@@ -620,19 +665,28 @@ func (ss *SessionsStore) InvalidateUserStateCache(tenantID string) {
 		ss.logger.Cache().Debug("Invalidating all user state cache", "tenantId", tenantID)
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
+	cache.FingerprintsMu.Lock()
+	cache.SessionsMu.Lock()
+	cache.VisitsMu.Lock()
+	cache.BeliefRegistriesMu.Lock()
+	cache.BeliefContextsMu.Lock()
+	cache.MetadataMu.Lock()
 
-	// Clear all user state caches
 	cache.FingerprintStates = make(map[string]*types.FingerprintState)
-	cache.VisitStates = make(map[string]*types.VisitState)
 	cache.KnownFingerprints = make(map[string]bool)
 	cache.SessionStates = make(map[string]*types.SessionData)
+	cache.FingerprintToSessions = make(map[string][]string)
+	cache.VisitStates = make(map[string]*types.VisitState)
 	cache.SessionBeliefContexts = make(map[string]*types.SessionBeliefContext)
 	cache.StoryfragmentBeliefRegistries = make(map[string]*types.StoryfragmentBeliefRegistry)
-	cache.FingerprintToSessions = make(map[string][]string) // Clear the inverted index too
-
 	cache.LastLoaded = time.Now().UTC()
+
+	cache.MetadataMu.Unlock()
+	cache.BeliefContextsMu.Unlock()
+	cache.BeliefRegistriesMu.Unlock()
+	cache.VisitsMu.Unlock()
+	cache.SessionsMu.Unlock()
+	cache.FingerprintsMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Info("All user state cache invalidated", "tenantId", tenantID, "duration", time.Since(start))
@@ -652,8 +706,12 @@ func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]any {
 		}
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.FingerprintsMu.RLock()
+	cache.SessionsMu.RLock()
+	cache.VisitsMu.RLock()
+	cache.BeliefRegistriesMu.RLock()
+	cache.BeliefContextsMu.RLock()
+	cache.MetadataMu.RLock()
 
 	summary := map[string]any{
 		"exists":                        true,
@@ -663,9 +721,16 @@ func (ss *SessionsStore) GetUserStateSummary(tenantID string) map[string]any {
 		"sessionStates":                 len(cache.SessionStates),
 		"sessionBeliefContexts":         len(cache.SessionBeliefContexts),
 		"storyfragmentBeliefRegistries": len(cache.StoryfragmentBeliefRegistries),
-		"fingerprintToSessions":         len(cache.FingerprintToSessions), // Include inverted index stats
+		"fingerprintToSessions":         len(cache.FingerprintToSessions),
 		"lastLoaded":                    cache.LastLoaded,
 	}
+
+	cache.MetadataMu.RUnlock()
+	cache.BeliefContextsMu.RUnlock()
+	cache.BeliefRegistriesMu.RUnlock()
+	cache.VisitsMu.RUnlock()
+	cache.SessionsMu.RUnlock()
+	cache.FingerprintsMu.RUnlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Debug("Cache operation", "operation", "get_summary", "type", "user_state", "tenantId", tenantID, "hit", true, "fingerprintStates", len(cache.FingerprintStates), "visitStates", len(cache.VisitStates), "sessionStates", len(cache.SessionStates), "fingerprintToSessions", len(cache.FingerprintToSessions), "duration", time.Since(start))
@@ -690,18 +755,18 @@ func (ss *SessionsStore) RebuildFingerprintIndex(tenantID string) {
 		return
 	}
 
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
+	cache.SessionsMu.Lock()
+	defer cache.SessionsMu.Unlock()
 
-	// Clear existing index
 	cache.FingerprintToSessions = make(map[string][]string)
 
-	// Rebuild from session states
 	for sessionID, sessionData := range cache.SessionStates {
 		ss.addSessionToFingerprintIndex(cache, sessionData.FingerprintID, sessionID)
 	}
 
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Info("Fingerprint index rebuilt", "tenantId", tenantID, "sessionCount", len(cache.SessionStates), "fingerprintCount", len(cache.FingerprintToSessions), "duration", time.Since(start))
@@ -720,8 +785,8 @@ func (ss *SessionsStore) ValidateFingerprintIndex(tenantID string) bool {
 		return false
 	}
 
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
+	cache.SessionsMu.RLock()
+	defer cache.SessionsMu.RUnlock()
 
 	isValid := true
 	inconsistencies := 0
@@ -782,9 +847,8 @@ func (ss *SessionsStore) BatchInvalidateSessionBeliefContexts(tenantID string, t
 		return
 	}
 
-	// Single lock acquisition for all invalidations
-	cache.Mu.Lock()
-	defer cache.Mu.Unlock()
+	cache.BeliefContextsMu.Lock()
+	defer cache.BeliefContextsMu.Unlock()
 
 	invalidatedCount := 0
 	for _, target := range targets {
@@ -795,7 +859,9 @@ func (ss *SessionsStore) BatchInvalidateSessionBeliefContexts(tenantID string, t
 		}
 	}
 
+	cache.MetadataMu.Lock()
 	cache.LastLoaded = time.Now().UTC()
+	cache.MetadataMu.Unlock()
 
 	if ss.logger != nil {
 		ss.logger.Cache().Info("Batch cache invalidation", "operation", "batch_invalidate", "type", "session_belief_context", "tenantId", tenantID, "targetCount", len(targets), "invalidatedCount", invalidatedCount, "duration", time.Since(start))
