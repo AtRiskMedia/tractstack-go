@@ -111,12 +111,10 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	var totalCleaned int
 	now := time.Now().UTC()
 
-	// Type assert to access the Manager's methods to get underlying stores
 	manager, ok := w.cache.(*manager.Manager)
 	if !ok {
-		// Fallback for generic interface, though less efficient
 		w.cache.PurgeExpiredBins(tenantID, "expired")
-		return 1 // Conservative estimate
+		return 1
 	}
 
 	// 1. Content Cache Cleanup (24 hour TTL)
@@ -124,7 +122,6 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	if err == nil && contentCache != nil {
 		contentCache.Mu.Lock()
 		if time.Since(contentCache.LastUpdated) > w.config.ContentCacheTTL {
-			// Clear all content cache maps
 			contentCache.TractStacks = make(map[string]*content.TractStackNode)
 			contentCache.StoryFragments = make(map[string]*content.StoryFragmentNode)
 			contentCache.Panes = make(map[string]*content.PaneNode)
@@ -152,12 +149,11 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 		contentCache.Mu.Unlock()
 	}
 
-	// 2. User State Cache Cleanup (2 hour TTL) - FIXED FOR INVERTED INDEX
+	// 2. User State Cache Cleanup (2 hour TTL) - UPDATED FOR FINE-GRAINED LOCKING
 	userCache, err := manager.GetTenantUserStateCache(tenantID)
 	if err == nil && userCache != nil {
-		userCache.Mu.Lock()
-
-		// Clean expired sessions - PROPERLY maintaining inverted index
+		// Clean expired sessions with proper index maintenance
+		userCache.SessionsMu.Lock()
 		var expiredSessionIDs []string
 		for sessionID, session := range userCache.SessionStates {
 			if time.Since(session.LastActivity) > w.config.SessionCacheTTL {
@@ -165,12 +161,9 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			}
 		}
 
-		// Remove expired sessions properly (maintaining index consistency)
 		for _, sessionID := range expiredSessionIDs {
 			if sessionData, exists := userCache.SessionStates[sessionID]; exists {
-				// Remove from inverted index FIRST
 				w.removeSessionFromFingerprintIndex(userCache, sessionData.FingerprintID, sessionID)
-				// Then remove from session states
 				delete(userCache.SessionStates, sessionID)
 				totalCleaned++
 
@@ -179,49 +172,73 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 				}
 			}
 		}
+		userCache.SessionsMu.Unlock()
 
 		// Clean expired fingerprint states
+		userCache.FingerprintsMu.Lock()
 		for fingerprintID, state := range userCache.FingerprintStates {
 			if time.Since(state.LastActivity) > w.config.SessionCacheTTL {
 				delete(userCache.FingerprintStates, fingerprintID)
 				totalCleaned++
 			}
 		}
+		userCache.FingerprintsMu.Unlock()
 
 		// Clean expired visit states
+		userCache.VisitsMu.Lock()
 		for visitID, state := range userCache.VisitStates {
 			if time.Since(state.LastActivity) > w.config.SessionCacheTTL {
 				delete(userCache.VisitStates, visitID)
 				totalCleaned++
 			}
 		}
+		userCache.VisitsMu.Unlock()
 
 		// Clean expired session belief contexts
+		userCache.BeliefContextsMu.Lock()
 		for key, context := range userCache.SessionBeliefContexts {
 			if time.Since(context.LastEvaluation) > w.config.SessionCacheTTL {
 				delete(userCache.SessionBeliefContexts, key)
 				totalCleaned++
 			}
 		}
+		userCache.BeliefContextsMu.Unlock()
 
-		// Clear entire user cache if LastLoaded is too old
-		if time.Since(userCache.LastLoaded) > w.config.SessionCacheTTL {
+		// Check if entire cache needs clearing
+		userCache.MetadataMu.RLock()
+		needsFullClear := time.Since(userCache.LastLoaded) > w.config.SessionCacheTTL
+		userCache.MetadataMu.RUnlock()
+
+		if needsFullClear {
+			// Clear entire user cache - acquire all locks in order
+			userCache.FingerprintsMu.Lock()
+			userCache.SessionsMu.Lock()
+			userCache.VisitsMu.Lock()
+			userCache.BeliefRegistriesMu.Lock()
+			userCache.BeliefContextsMu.Lock()
+			userCache.MetadataMu.Lock()
+
 			userCache.FingerprintStates = make(map[string]*types.FingerprintState)
-			userCache.VisitStates = make(map[string]*types.VisitState)
 			userCache.KnownFingerprints = make(map[string]bool)
 			userCache.SessionStates = make(map[string]*types.SessionData)
+			userCache.FingerprintToSessions = make(map[string][]string)
+			userCache.VisitStates = make(map[string]*types.VisitState)
 			userCache.SessionBeliefContexts = make(map[string]*types.SessionBeliefContext)
 			userCache.StoryfragmentBeliefRegistries = make(map[string]*types.StoryfragmentBeliefRegistry)
-			userCache.FingerprintToSessions = make(map[string][]string) // FIXED: Clear inverted index too
 			userCache.LastLoaded = now
-			totalCleaned += 6 // Updated count to include FingerprintToSessions
+			totalCleaned += 7
+
+			userCache.MetadataMu.Unlock()
+			userCache.BeliefContextsMu.Unlock()
+			userCache.BeliefRegistriesMu.Unlock()
+			userCache.VisitsMu.Unlock()
+			userCache.SessionsMu.Unlock()
+			userCache.FingerprintsMu.Unlock()
 
 			if w.logger != nil {
 				w.logger.Cache().Info("Cleanup cleared entire user cache", "tenantId", tenantID, "reason", "expired_lastLoaded")
 			}
 		}
-
-		userCache.Mu.Unlock()
 	}
 
 	// 3. HTML Fragment Cache Cleanup (1 hour TTL)
@@ -242,7 +259,6 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	if err == nil && analyticsCache != nil {
 		analyticsCache.Mu.Lock()
 
-		// Clean expired epinet bins
 		for binKey, bin := range analyticsCache.EpinetBins {
 			var ttl time.Duration
 			lastColonIndex := strings.LastIndex(binKey, ":")
@@ -250,9 +266,9 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 				hourKey := binKey[lastColonIndex+1:]
 				currentHourKey := utilities.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 				if hourKey == currentHourKey {
-					ttl = 15 * time.Minute // CurrentHourTTL
+					ttl = 15 * time.Minute
 				} else {
-					ttl = w.config.AnalyticsCacheTTL // 28 days
+					ttl = w.config.AnalyticsCacheTTL
 				}
 			} else {
 				ttl = w.config.AnalyticsCacheTTL
@@ -264,7 +280,6 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			}
 		}
 
-		// Clean expired content bins
 		for binKey, bin := range analyticsCache.ContentBins {
 			if time.Since(bin.ComputedAt) > w.config.AnalyticsCacheTTL {
 				delete(analyticsCache.ContentBins, binKey)
@@ -272,7 +287,6 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			}
 		}
 
-		// Clean expired site bins
 		for binKey, bin := range analyticsCache.SiteBins {
 			if time.Since(bin.ComputedAt) > w.config.AnalyticsCacheTTL {
 				delete(analyticsCache.SiteBins, binKey)
@@ -280,7 +294,6 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			}
 		}
 
-		// Clean expired lead metrics (5 minute TTL)
 		if analyticsCache.LeadMetrics != nil {
 			if time.Since(analyticsCache.LeadMetrics.LastComputed) > 5*time.Minute {
 				analyticsCache.LeadMetrics = nil
@@ -288,7 +301,6 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			}
 		}
 
-		// Clean expired dashboard data (10 minute TTL)
 		if analyticsCache.DashboardData != nil {
 			if time.Since(analyticsCache.DashboardData.LastComputed) > 10*time.Minute {
 				analyticsCache.DashboardData = nil
@@ -303,18 +315,14 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 }
 
 // removeSessionFromFingerprintIndex removes a session from the fingerprint's session list
-// MUST be called with userCache.Mu.Lock() held
 func (w *Worker) removeSessionFromFingerprintIndex(cache *types.TenantUserStateCache, fingerprintID, sessionID string) {
 	sessions := cache.FingerprintToSessions[fingerprintID]
 
-	// Find and remove the session
 	for i, existingSessionID := range sessions {
 		if existingSessionID == sessionID {
-			// Remove by swapping with last element and truncating
 			sessions[i] = sessions[len(sessions)-1]
 			cache.FingerprintToSessions[fingerprintID] = sessions[:len(sessions)-1]
 
-			// If no sessions left for this fingerprint, remove the key
 			if len(cache.FingerprintToSessions[fingerprintID]) == 0 {
 				delete(cache.FingerprintToSessions, fingerprintID)
 			}

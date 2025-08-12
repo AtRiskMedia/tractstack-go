@@ -156,8 +156,10 @@ func (b *SysOpBroadcaster) getSessionStatesForTenant(tenantID string) []SessionS
 		return []SessionState{}
 	}
 
-	userCache.Mu.RLock()
-	defer userCache.Mu.RUnlock()
+	userCache.SessionsMu.RLock()
+	userCache.FingerprintsMu.RLock()
+	defer userCache.FingerprintsMu.RUnlock()
+	defer userCache.SessionsMu.RUnlock()
 
 	states := make([]SessionState, 0, len(userCache.SessionStates))
 	for _, session := range userCache.SessionStates {
