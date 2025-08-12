@@ -183,9 +183,9 @@ func (b *SysOpBroadcaster) preparePayload(fullStateList []SessionState) SessionS
 	displayMode := "1:1"
 
 	// Switch to proportional mode if session count is high
-	if stats.Total > 200 {
+	if stats.Total > 500 {
 		displayMode = "PROPORTIONAL"
-		displayStates = b.calculateProportionalStates(fullStateList, 200)
+		displayStates = b.calculateProportionalStates(fullStateList, 500)
 	} else {
 		displayStates = fullStateList
 	}
