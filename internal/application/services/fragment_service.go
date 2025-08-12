@@ -48,72 +48,53 @@ func NewFragmentService(
 	}
 }
 
-// GenerateFragment creates HTML fragment for a single pane with caching
 func (s *FragmentService) GenerateFragment(
 	tenantCtx *tenant.Context,
 	paneID, sessionID, storyfragmentID string,
 ) (string, error) {
-	s.logger.Content().Debug("🔍 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
+	s.logger.Content().Debug("🔍 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID)
 
-	// Load pane from repository
+	// Step 1: Load the essential static data for the pane.
 	paneRepo := tenantCtx.PaneRepo()
 	pane, err := paneRepo.FindByID(tenantCtx.TenantID, paneID)
-	if err != nil {
-		return "", fmt.Errorf("failed to load pane %s: %w", paneID, err)
-	}
-	if pane == nil {
-		return "", fmt.Errorf("pane %s not found", paneID)
+	if err != nil || pane == nil {
+		return "", fmt.Errorf("pane %s not found or failed to load: %w", paneID, err)
 	}
 
-	// Get belief registry directly from cache (built by BeliefRegistryService)
 	cacheManager := tenantCtx.CacheManager
 	beliefRegistry, hasRegistry := cacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID)
 
-	s.logger.Content().Debug("🔍 BELIEF REGISTRY CHECK",
-		"paneId", paneID,
-		"hasRegistry", hasRegistry,
-		"registryPaneCount", func() int {
-			if hasRegistry {
-				return len(beliefRegistry.PaneBeliefPayloads)
-			}
-			return 0
-		}())
+	// Step 2: Get the user's current beliefs. This is our personalization trigger.
+	userBeliefs, _ := s.sessionBeliefService.GetUserBeliefs(tenantCtx, sessionID)
+	hasBeliefs := len(userBeliefs) > 0
 
-	// Determine if we need fresh HTML generation (widgets + user beliefs)
-	shouldBypassCache := s.shouldBypassCacheForWidgets(tenantCtx, paneID, sessionID, beliefRegistry)
+	// Step 3: Determine if this specific pane has ANY belief-related logic.
+	_, hasPaneBeliefs := beliefRegistry.PaneBeliefPayloads[paneID]
 
 	var htmlContent string
 
-	if shouldBypassCache {
-		s.logger.Content().Debug("🔍 GENERATING FRESH HTML", "paneId", paneID, "reason", "cache bypass for widgets")
-		// Generate fresh HTML with widget personalization
+	// Step 4: The definitive decision.
+	// Regenerate HTML if the user has beliefs AND this pane uses beliefs in any way.
+	if hasBeliefs && hasPaneBeliefs {
+		s.logger.Content().Debug("Personalization required: User has beliefs and pane has belief logic. Generating fresh HTML.", "paneId", paneID)
 		htmlContent, err = s.generateFreshHTML(tenantCtx, pane, sessionID, storyfragmentID, beliefRegistry)
 		if err != nil {
-			return "", fmt.Errorf("failed to generate fresh HTML: %w", err)
+			return "", fmt.Errorf("failed to generate fresh HTML for session: %w", err)
 		}
 	} else {
-		s.logger.Content().Debug("🔍 USING CACHED HTML", "paneId", paneID)
-		// Use cached HTML or generate and cache
+		// Otherwise, it's safe to use the fast, cached, non-personalized version.
+		s.logger.Content().Debug("No personalization required. Using cached base HTML.", "paneId", paneID)
 		htmlContent, err = s.getCachedOrGenerateHTML(tenantCtx, pane)
 		if err != nil {
 			return "", fmt.Errorf("failed to get cached HTML: %w", err)
 		}
 	}
 
-	s.logger.Content().Debug("🔍 BASE HTML GENERATED", "paneId", paneID, "htmlLength", len(htmlContent))
-
-	// Apply belief-based visibility wrapper if needed
+	// Finally, apply the visibility wrapper (using the already-corrected logic).
 	if hasRegistry {
-		s.logger.Content().Debug("🔍 APPLYING BELIEF VISIBILITY", "paneId", paneID)
 		htmlContent = s.applyBeliefVisibility(tenantCtx, htmlContent, paneID, sessionID, storyfragmentID, beliefRegistry)
-	} else {
-		s.logger.Content().Debug("🔍 SKIPPING BELIEF VISIBILITY",
-			"paneId", paneID,
-			"hasRegistry", hasRegistry,
-			"sessionId", sessionID)
 	}
 
-	s.logger.Content().Debug("🔍 GENERATE FRAGMENT COMPLETE", "paneId", paneID, "finalHtmlLength", len(htmlContent))
 	return htmlContent, nil
 }
 
@@ -409,91 +390,45 @@ func (s *FragmentService) applyBeliefVisibility(
 	paneID, sessionID, storyfragmentID string,
 	beliefRegistry *types.StoryfragmentBeliefRegistry,
 ) string {
-	cacheManager := tenantCtx.CacheManager
-
-	s.logger.Content().Debug("🔍 BELIEF EVAL START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
-
-	// Get pane belief requirements
 	paneBeliefs, hasPaneBeliefs := beliefRegistry.PaneBeliefPayloads[paneID]
 	if !hasPaneBeliefs {
-		s.logger.Content().Debug("🔍 NO PANE BELIEFS - ALWAYS VISIBLE", "paneId", paneID)
 		return htmlContent // No belief requirements = always visible
 	}
 
-	s.logger.Content().Debug("🔍 PANE BELIEFS FOUND",
-		"paneId", paneID,
-		"heldCount", len(paneBeliefs.HeldBeliefs),
-		"withheldCount", len(paneBeliefs.WithheldBeliefs),
-		"matchAcrossCount", len(paneBeliefs.MatchAcross),
-		"heldBeliefs", paneBeliefs.HeldBeliefs,
-		"withheldBeliefs", paneBeliefs.WithheldBeliefs,
-		"matchAcross", paneBeliefs.MatchAcross)
+	// Use a safe default of empty beliefs
+	userBeliefs := make(map[string][]string)
 
-	// Get user beliefs from session context
-	var userBeliefs map[string][]string
-	if sessionContext, exists := cacheManager.GetSessionBeliefContext(tenantCtx.TenantID, sessionID, storyfragmentID); exists {
-		userBeliefs = sessionContext.UserBeliefs
-		s.logger.Content().Debug("🔍 USING EXISTING SESSION CONTEXT",
-			"sessionId", sessionID,
-			"userBeliefsCount", len(userBeliefs),
-			"userBeliefs", userBeliefs)
-	} else if s.sessionBeliefService != nil && s.sessionBeliefService.ShouldCreateSessionContext(tenantCtx, sessionID, storyfragmentID) {
-		s.logger.Content().Debug("🔍 CREATING NEW SESSION CONTEXT", "sessionId", sessionID)
-		// Create session context if needed
+	// If a session exists, create a fresh context to get the latest beliefs.
+	if sessionID != "" {
 		newContext, err := s.sessionBeliefService.CreateSessionBeliefContext(tenantCtx, sessionID, storyfragmentID)
 		if err != nil {
-			s.logger.Content().Debug("🔍 FAILED TO CREATE SESSION CONTEXT", "error", err.Error())
-			return htmlContent
+			s.logger.Content().Error("Failed to create fresh session context for visibility", "error", err)
+		} else if newContext != nil {
+			userBeliefs = newContext.UserBeliefs
 		}
-		userBeliefs = newContext.UserBeliefs
-		s.logger.Content().Debug("🔍 CREATED SESSION CONTEXT",
-			"userBeliefsCount", len(userBeliefs),
-			"userBeliefs", userBeliefs)
-	} else {
-		// No session context and shouldn't create one = empty beliefs
-		userBeliefs = make(map[string][]string)
-		s.logger.Content().Debug("🔍 NO SESSION CONTEXT - EMPTY USER BELIEFS", "sessionId", sessionID)
 	}
 
 	visibility := s.beliefEvaluationService.EvaluatePaneVisibility(paneBeliefs, userBeliefs)
-
-	s.logger.Content().Debug("🔍 BELIEF EVALUATION RESULT",
-		"paneId", paneID,
-		"visibility", visibility,
-		"htmlLengthBefore", len(htmlContent))
-
-	// Apply visibility wrapper
 	result := s.applyVisibilityWrapper(htmlContent, visibility)
+
+	// ... (rest of the function for the 'unset button' logic remains the same) ...
 
 	if visibility == "visible" && len(userBeliefs) > 0 {
 		hasRequirements := len(paneBeliefs.HeldBeliefs) > 0 ||
 			len(paneBeliefs.WithheldBeliefs) > 0
 
 		if hasRequirements {
-			// Calculate effective filter (intersection of user beliefs + pane requirements)
 			effectiveFilter := s.beliefEvaluationService.CalculateEffectiveFilter(paneBeliefs, userBeliefs)
-
 			if len(effectiveFilter) > 0 {
-				// Extract beliefs to unset using legacy logic
 				beliefsToUnset := s.beliefEvaluationService.ExtractBeliefsToUnset(effectiveFilter)
-
 				if len(beliefsToUnset) > 0 {
-					// Find scroll target pane
 					gotoPaneID := s.scrollTargetSvc.FindScrollTargetPane(beliefsToUnset, beliefRegistry)
-
-					// Render and inject button
 					buttonHTML := s.buttonRenderer.RenderUnsetButton(paneID, beliefsToUnset, gotoPaneID)
 					result = s.buttonRenderer.InjectButtonIntoHTML(result, buttonHTML)
 				}
 			}
 		}
 	}
-
-	s.logger.Content().Debug("🔍 VISIBILITY WRAPPER APPLIED",
-		"paneId", paneID,
-		"visibility", visibility,
-		"htmlLengthAfter", len(result),
-		"wasWrapped", len(result) != len(htmlContent))
 
 	return result
 }

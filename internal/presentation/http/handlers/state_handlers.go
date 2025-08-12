@@ -136,35 +136,39 @@ func convertRequestToEvent(req *struct {
 ) events.Event {
 	// Handle Pane and StoryFragment Action Events (like READ, GLOSSED, PAGEVIEWED)
 	if req.BeliefType == "Pane" || req.BeliefType == "StoryFragment" {
-		return events.Event{
+		event := events.Event{
 			ID:     req.BeliefID,
 			Type:   req.BeliefType,
 			Verb:   req.BeliefValue,
-			Object: strconv.Itoa(req.Duration), // Pass duration as a string in the Object field
+			Object: strconv.Itoa(req.Duration),
 		}
+		return event
 	}
 
 	// Handle Belief Events (existing logic)
 	if req.BeliefObject != "" {
-		return events.Event{
+		event := events.Event{
 			ID:     req.BeliefID,
 			Type:   req.BeliefType,
 			Verb:   "IDENTIFY_AS",
 			Object: req.BeliefObject,
 		}
+		return event
 	}
 	if req.BeliefValue != "" && req.BeliefValue != "0" {
-		return events.Event{
+		event := events.Event{
 			ID:     req.BeliefID,
 			Type:   req.BeliefType,
 			Verb:   req.BeliefValue,
 			Object: req.BeliefID,
 		}
+		return event
 	}
-	return events.Event{
+	event := events.Event{
 		ID:     req.BeliefID,
 		Type:   req.BeliefType,
 		Verb:   "UNSET",
 		Object: req.BeliefID,
 	}
+	return event
 }

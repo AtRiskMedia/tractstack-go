@@ -44,11 +44,20 @@ func getCurrentBeliefState(userBeliefs map[string][]string, beliefSlug string) *
 		return nil
 	}
 
-	// Parse the first belief JSON string
+	rawValue := beliefStrings[0]
+
+	// Try to parse as JSON first (for legacy/structured beliefs)
 	var belief BeliefState
-	if err := json.Unmarshal([]byte(beliefStrings[0]), &belief); err != nil {
-		return nil
+	if err := json.Unmarshal([]byte(rawValue), &belief); err == nil {
+		return &belief
 	}
 
-	return &belief
+	// If JSON parsing fails, treat as raw verb string
+	result := &BeliefState{
+		ID:     beliefSlug,
+		Verb:   rawValue,
+		Slug:   beliefSlug,
+		Object: "",
+	}
+	return result
 }

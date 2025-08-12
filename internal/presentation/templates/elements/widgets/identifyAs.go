@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"html/template"
-	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
@@ -19,12 +18,11 @@ var identifyAsTmpl = template.Must(template.New("identifyAs").Parse(
 			<button
 				type="button"
 				id="{{.ID}}"
-				class="{{.Classes}} rounded-md px-3 py-2 text-lg text-black shadow-sm ring-1 ring-inset"
+				class="{{.Classes}} rounded-md px-3 py-2 text-lg shadow-sm ring-1 ring-inset {{.TextColor}}"
 				hx-post="/api/v1/state"
 				hx-trigger="click"
 				hx-swap="none"
 				hx-vals="{{.HxVals}}"
-				hx-preserve="true"
 			>
 				<div class="flex items-center">
 					<span
@@ -47,6 +45,7 @@ type widgetWrapperData struct {
 type buttonData struct {
 	ID             string
 	Classes        string
+	TextColor      string
 	HxVals         string
 	IndicatorColor string
 	Title          string
@@ -60,10 +59,27 @@ func RenderIdentifyAs(ctx *rendering.RenderContext, classNames, slug, targets, e
 	}
 
 	userBeliefs := getUserBeliefs(ctx)
-	currentBelief := getCurrentBeliefState(userBeliefs, slug)
 
-	selectedTarget := getSelectedTarget(currentBelief)
-	isOtherSelected := isOtherTargetSelected(currentBelief, targetsList)
+	// For identifyAs widgets, directly get the raw belief value
+	var selectedTarget string
+	if beliefValues, exists := userBeliefs[slug]; exists && len(beliefValues) > 0 {
+		selectedTarget = beliefValues[0] // Raw value is the selected target
+	}
+
+	isOtherSelected := false
+	if selectedTarget != "" {
+		// Check if selected target is in our target list
+		found := false
+		for _, target := range targetsList {
+			if target == selectedTarget {
+				found = true
+				break
+			}
+		}
+		if !found {
+			isOtherSelected = true
+		}
+	}
 
 	var buf bytes.Buffer
 
@@ -97,6 +113,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 	hxValsMap := map[string]string{
 		"beliefId":     beliefSlug,
 		"beliefType":   "Belief",
+		"beliefVerb":   "IDENTIFY_AS",
 		"beliefObject": target,
 		"paneId":       ctx.ContainingPaneID,
 	}
@@ -106,6 +123,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 	data := buttonData{
 		ID:             "identifyas-" + beliefSlug + "-" + sanitizeID(target),
 		Classes:        getIdentifyAsButtonClasses(isSelected, isOtherSelected),
+		TextColor:      getIdentifyAsTextColor(isSelected, isOtherSelected),
 		HxVals:         string(hxValsBytes),
 		IndicatorColor: getIdentifyAsIndicatorColor(isSelected, isOtherSelected),
 		Title:          getButtonTitle(target, noprompt),
@@ -120,12 +138,9 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 func executeTemplate(buf *bytes.Buffer, name string, data interface{}) {
 	err := identifyAsTmpl.ExecuteTemplate(buf, name, data)
 	if err != nil {
-		log.Printf("ERROR: Failed to execute identifyAs template '%s': %v", name, err)
 		buf.WriteString("<!-- template error -->")
 	}
 }
-
-// The helper functions below do not generate HTML and remain unchanged.
 
 func parseTargets(targetsString string) []string {
 	if targetsString == "" {
@@ -143,7 +158,7 @@ func parseTargets(targetsString string) []string {
 }
 
 func getSelectedTarget(currentBelief *BeliefState) string {
-	if currentBelief == nil || currentBelief.Verb != "IDENTIFY_AS" {
+	if currentBelief == nil {
 		return ""
 	}
 	return currentBelief.Object
@@ -182,21 +197,48 @@ func sanitizeID(target string) string {
 }
 
 func getIdentifyAsButtonClasses(isSelected, isOtherSelected bool) string {
+	var classes string
 	if isSelected {
-		return "bg-gray-100 ring-lime-500"
+		// Selected: bright background with lime accent
+		classes = "bg-white ring-lime-500 border-lime-500"
+	} else if isOtherSelected {
+		// When something else is selected: muted but still interactive
+		classes = "bg-gray-200 hover:bg-gray-300 ring-gray-400 opacity-60"
+	} else {
+		// Default unselected: clean but clearly unselected
+		classes = "bg-gray-100 hover:bg-orange-100 ring-gray-300"
 	}
-	if isOtherSelected {
-		return "bg-gray-300 hover:bg-lime-200 ring-gray-500"
+
+	return classes
+}
+
+func getIdentifyAsTextColor(isSelected, isOtherSelected bool) string {
+	var textColor string
+	if isSelected {
+		// Selected: strong text contrast
+		textColor = "text-gray-900"
+	} else if isOtherSelected {
+		// When something else is selected: muted text
+		textColor = "text-gray-500"
+	} else {
+		// Default unselected: medium contrast
+		textColor = "text-gray-700"
 	}
-	return "bg-gray-100 hover:bg-orange-200 ring-orange-500"
+	return textColor
 }
 
 func getIdentifyAsIndicatorColor(isSelected, isOtherSelected bool) string {
+	var color string
 	if isSelected {
-		return "bg-lime-400"
+		// Selected: bright lime indicator
+		color = "bg-lime-400"
+	} else if isOtherSelected {
+		// When something else is selected: muted gray
+		color = "bg-gray-400"
+	} else {
+		// Default unselected: subtle orange hint
+		color = "bg-gray-300"
 	}
-	if isOtherSelected {
-		return "bg-gray-500"
-	}
-	return "bg-orange-500"
+
+	return color
 }

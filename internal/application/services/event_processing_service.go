@@ -141,9 +141,6 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 
 	if len(changedBeliefs) > 0 {
 		s.beliefBroadcaster.BroadcastBeliefChange(tenantCtx.TenantID, sessionID, storyfragmentID, changedBeliefs, visibilitySnapshot, currentPaneID, gotoPaneID, broadcaster)
-	}
-
-	if len(changedBeliefs) > 0 {
 		s.logger.System().Debug("🚨 BROADCAST DEBUG: Calling BroadcastBeliefChange",
 			"tenantId", tenantCtx.TenantID,
 			"sessionId", sessionID,
@@ -233,10 +230,18 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 			changed = true
 		}
 	case "IDENTIFY_AS":
+		s.logger.Content().Debug("processBelief IDENTIFY_AS",
+			"beliefSlug", beliefSlug,
+			"eventVerb", event.Verb,
+			"eventObject", event.Object)
 		if event.Object != "" {
 			currentValues := fingerprintState.HeldBeliefs[beliefSlug]
 			// For IDENTIFY_AS beliefs, replace the entire array with the new single value
 			if len(currentValues) == 0 || currentValues[0] != event.Object {
+				s.logger.Content().Debug("processBelief IDENTIFY_AS updating cache",
+					"beliefSlug", beliefSlug,
+					"oldValues", currentValues,
+					"newValue", event.Object)
 				fingerprintState.HeldBeliefs[beliefSlug] = []string{event.Object}
 				changed = true
 			}
