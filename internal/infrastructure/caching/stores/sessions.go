@@ -771,3 +771,33 @@ func (ss *SessionsStore) ValidateFingerprintIndex(tenantID string) bool {
 
 	return isValid
 }
+
+func (ss *SessionsStore) BatchInvalidateSessionBeliefContexts(tenantID string, targets []types.SessionBeliefTarget) {
+	start := time.Now()
+	cache, exists := ss.GetTenantCache(tenantID)
+	if !exists {
+		if ss.logger != nil {
+			ss.logger.Cache().Debug("Cache operation", "operation", "batch_invalidate", "type", "session_belief_context", "tenantId", tenantID, "reason", "tenant_not_initialized", "duration", time.Since(start))
+		}
+		return
+	}
+
+	// Single lock acquisition for all invalidations
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	invalidatedCount := 0
+	for _, target := range targets {
+		contextKey := target.SessionID + ":" + target.StoryfragmentID
+		if _, exists := cache.SessionBeliefContexts[contextKey]; exists {
+			delete(cache.SessionBeliefContexts, contextKey)
+			invalidatedCount++
+		}
+	}
+
+	cache.LastLoaded = time.Now().UTC()
+
+	if ss.logger != nil {
+		ss.logger.Cache().Info("Batch cache invalidation", "operation", "batch_invalidate", "type", "session_belief_context", "tenantId", tenantID, "targetCount", len(targets), "invalidatedCount", invalidatedCount, "duration", time.Since(start))
+	}
+}

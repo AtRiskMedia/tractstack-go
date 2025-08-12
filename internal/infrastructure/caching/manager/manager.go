@@ -953,3 +953,7 @@ func (m *Manager) RemoveSession(tenantID, sessionID string) {
 	m.sessionsStore.RemoveSession(tenantID, sessionID)
 	m.updateTenantAccessTime(tenantID)
 }
+
+func (m *Manager) BatchInvalidateSessionBeliefContexts(tenantID string, targets []types.SessionBeliefTarget) {
+	m.sessionsStore.BatchInvalidateSessionBeliefContexts(tenantID, targets)
+}

@@ -128,9 +128,23 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 		return
 	}
 
-	// Broadcast to ALL sessions using this fingerprint
+	// Collect all invalidation targets first
+	var invalidationTargets []types.SessionBeliefTarget
+
 	for _, targetSessionID := range allSessionIDs {
-		// For each affected storyfragment, send individual broadcasts
+		for affectedStoryfragmentID := range affectedStoryfragments {
+			invalidationTargets = append(invalidationTargets, types.SessionBeliefTarget{
+				SessionID:       targetSessionID,
+				StoryfragmentID: affectedStoryfragmentID,
+			})
+		}
+	}
+
+	// Single batch invalidation operation
+	b.cacheManager.BatchInvalidateSessionBeliefContexts(tenantID, invalidationTargets)
+
+	// Now handle the SSE broadcasting
+	for _, targetSessionID := range allSessionIDs {
 		for affectedStoryfragmentID, affectedPanes := range affectedStoryfragments {
 			var scrollTarget *string
 
@@ -142,8 +156,8 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 					scrollTarget = &gotoPaneID
 				}
 			}
-			// Invalidate belief context
-			b.cacheManager.InvalidateSessionBeliefContext(tenantID, targetSessionID, affectedStoryfragmentID)
+
+			// Send SSE broadcast (cache already invalidated above)
 			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
 		}
 	}
