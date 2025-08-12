@@ -15,6 +15,7 @@ type TenantUserStateCache struct {
 	StoryfragmentBeliefRegistries map[string]*StoryfragmentBeliefRegistry `json:"storyfragmentBeliefRegistries"`
 	SessionStates                 map[string]*SessionData                 // sessionId -> session data
 	SessionBeliefContexts         map[string]*SessionBeliefContext        // "sessionId:storyfragmentId" -> context
+	FingerprintToSessions         map[string][]string
 
 	// Cache metadata
 	LastLoaded time.Time

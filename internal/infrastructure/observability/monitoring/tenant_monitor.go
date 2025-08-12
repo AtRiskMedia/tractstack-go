@@ -142,15 +142,15 @@ type AlertCallback func(tenantID string, alert *TenantAlert)
 
 // TenantAlert represents a health alert for a tenant
 type TenantAlert struct {
-	ID           string                 `json:"id"`
-	TenantID     string                 `json:"tenantId"`
-	Timestamp    time.Time              `json:"timestamp"`
-	Severity     AlertSeverity          `json:"severity"`
-	Category     AlertCategory          `json:"category"`
-	Message      string                 `json:"message"`
-	CurrentValue interface{}            `json:"currentValue"`
-	Threshold    interface{}            `json:"threshold"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	ID           string         `json:"id"`
+	TenantID     string         `json:"tenantId"`
+	Timestamp    time.Time      `json:"timestamp"`
+	Severity     AlertSeverity  `json:"severity"`
+	Category     AlertCategory  `json:"category"`
+	Message      string         `json:"message"`
+	CurrentValue any            `json:"currentValue"`
+	Threshold    any            `json:"threshold"`
+	Metadata     map[string]any `json:"metadata"`
 }
 
 // AlertSeverity represents the severity of an alert
@@ -368,7 +368,7 @@ func (tm *TenantMonitor) updateHealthStatus(tenantID string) {
 				Timestamp: time.Now(),
 				Category:  AlertCategoryHealth,
 				Message:   fmt.Sprintf("Tenant health status changed from %s to %s", oldStatus, newStatus),
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"oldStatus": oldStatus,
 					"newStatus": newStatus,
 				},
@@ -496,7 +496,7 @@ func (tm *TenantMonitor) triggerAlert(alert *TenantAlert) {
 }
 
 // GetSystemStats returns overall system statistics
-func (tm *TenantMonitor) GetSystemStats() map[string]interface{} {
+func (tm *TenantMonitor) GetSystemStats() map[string]any {
 	tm.mu.RLock()
 	defer tm.mu.RUnlock()
 
@@ -522,7 +522,7 @@ func (tm *TenantMonitor) GetSystemStats() map[string]interface{} {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"monitorUptime":     time.Since(tm.started),
 		"totalTenants":      totalTenants,
 		"healthyTenants":    healthyTenants,

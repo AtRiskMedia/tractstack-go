@@ -276,16 +276,16 @@ type CacheAlertCallback func(alert *CacheAlert)
 
 // CacheAlert represents a cache performance alert
 type CacheAlert struct {
-	ID           string                 `json:"id"`
-	Timestamp    time.Time              `json:"timestamp"`
-	Severity     AlertSeverity          `json:"severity"`
-	Category     CacheAlertCategory     `json:"category"`
-	LayerName    string                 `json:"layerName"`
-	TenantID     string                 `json:"tenantId,omitempty"`
-	Message      string                 `json:"message"`
-	CurrentValue interface{}            `json:"currentValue"`
-	Threshold    interface{}            `json:"threshold"`
-	Metadata     map[string]interface{} `json:"metadata"`
+	ID           string             `json:"id"`
+	Timestamp    time.Time          `json:"timestamp"`
+	Severity     AlertSeverity      `json:"severity"`
+	Category     CacheAlertCategory `json:"category"`
+	LayerName    string             `json:"layerName"`
+	TenantID     string             `json:"tenantId,omitempty"`
+	Message      string             `json:"message"`
+	CurrentValue any                `json:"currentValue"`
+	Threshold    any                `json:"threshold"`
+	Metadata     map[string]any     `json:"metadata"`
 }
 
 // CacheAlertCategory represents the type of cache alert
@@ -374,7 +374,7 @@ func (cpm *CachePerformanceMonitor) RecordCacheOperation(
 	}
 
 	// Update tenant metrics
-	cpm.updateTenantMetrics(tenantID, layerName, hit, latency, itemSizeBytes)
+	cpm.updateTenantMetrics(tenantID, layerName, hit, latency)
 
 	// Update overall metrics
 	cpm.updateOverallMetrics()
@@ -449,7 +449,6 @@ func (cpm *CachePerformanceMonitor) updateTenantMetrics(
 	tenantID, layerName string,
 	hit bool,
 	latency time.Duration,
-	itemSizeBytes int64,
 ) {
 	if _, exists := cpm.tenantMetrics[tenantID]; !exists {
 		cpm.tenantMetrics[tenantID] = &TenantCacheMetrics{
@@ -908,11 +907,11 @@ func (cpm *CachePerformanceMonitor) GetWarmingStats() *WarmingStats {
 }
 
 // GetCacheHealth returns the overall health status of the cache system
-func (cpm *CachePerformanceMonitor) GetCacheHealth() map[string]interface{} {
+func (cpm *CachePerformanceMonitor) GetCacheHealth() map[string]any {
 	cpm.mu.RLock()
 	defer cpm.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"overallHealth":      cpm.overallMetrics.OverallHealth,
 		"overallHitRatio":    cpm.overallMetrics.OverallHitRatio,
 		"totalMemoryMB":      cpm.overallMetrics.TotalMemoryUsageMB,
@@ -928,12 +927,12 @@ func (cpm *CachePerformanceMonitor) GetCacheHealth() map[string]interface{} {
 }
 
 // GetDetailedHealthReport returns a comprehensive health report
-func (cpm *CachePerformanceMonitor) GetDetailedHealthReport() map[string]interface{} {
+func (cpm *CachePerformanceMonitor) GetDetailedHealthReport() map[string]any {
 	cpm.mu.RLock()
 	defer cpm.mu.RUnlock()
 
 	// Get layer-by-layer health
-	layerHealth := make(map[string]interface{})
+	layerHealth := make(map[string]any)
 
 	layers := map[string]*CacheLayerMetrics{
 		"content":    cpm.contentCacheMetrics,
@@ -969,7 +968,7 @@ func (cpm *CachePerformanceMonitor) GetDetailedHealthReport() map[string]interfa
 			issues = append(issues, fmt.Sprintf("Latency above optimal: %v", avgLatency))
 		}
 
-		layerHealth[name] = map[string]interface{}{
+		layerHealth[name] = map[string]any{
 			"health":     health,
 			"hitRatio":   metrics.HitRatio,
 			"avgLatency": avgLatency,
@@ -980,11 +979,11 @@ func (cpm *CachePerformanceMonitor) GetDetailedHealthReport() map[string]interfa
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"timestamp":     time.Now(),
 		"overallHealth": cpm.overallMetrics.OverallHealth,
 		"layerHealth":   layerHealth,
-		"summary": map[string]interface{}{
+		"summary": map[string]any{
 			"totalRequests":      cpm.overallMetrics.TotalRequests,
 			"overallHitRatio":    cpm.overallMetrics.OverallHitRatio,
 			"totalMemoryMB":      cpm.overallMetrics.TotalMemoryUsageMB,
@@ -992,11 +991,11 @@ func (cpm *CachePerformanceMonitor) GetDetailedHealthReport() map[string]interfa
 			"warmingOps":         cpm.warmingStats.TotalWarmingOperations,
 			"warmingSuccessRate": cpm.warmingStats.WarmingSuccessRate,
 		},
-		"alerts": map[string]interface{}{
+		"alerts": map[string]any{
 			"criticalLayers": cpm.overallMetrics.CriticalLayers,
 			"warningLayers":  cpm.overallMetrics.WarningLayers,
 		},
-		"performance": map[string]interface{}{
+		"performance": map[string]any{
 			"ranking":    cpm.overallMetrics.LayerPerformanceRanking,
 			"bestLayer":  cpm.overallMetrics.BestPerformingLayer,
 			"worstLayer": cpm.overallMetrics.WorstPerformingLayer,
@@ -1088,7 +1087,7 @@ func (cpm *CachePerformanceMonitor) performHealthCheck() {
 				Message:      fmt.Sprintf("Cache hit ratio critically low for layer %s", name),
 				CurrentValue: metrics.HitRatio,
 				Threshold:    cpm.config.MinDegradedHitRatio,
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"totalRequests": metrics.TotalRequests,
 					"cacheHits":     metrics.CacheHits,
 					"cacheMisses":   metrics.CacheMisses,
@@ -1113,7 +1112,7 @@ func (cpm *CachePerformanceMonitor) performHealthCheck() {
 				Message:      fmt.Sprintf("Cache latency critically high for layer %s", name),
 				CurrentValue: avgLatency,
 				Threshold:    cpm.config.MaxHealthyLatency,
-				Metadata: map[string]interface{}{
+				Metadata: map[string]any{
 					"avgHitLatency":  metrics.AvgHitLatency,
 					"avgMissLatency": metrics.AvgMissLatency,
 				},
