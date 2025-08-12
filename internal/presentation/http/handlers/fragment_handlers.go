@@ -61,6 +61,10 @@ func (h *FragmentHandlers) GetPaneFragment(c *gin.Context) {
 
 	h.logger.Content().Info("Get fragment request completed", "duration", time.Since(start))
 
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetPaneFragment request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))

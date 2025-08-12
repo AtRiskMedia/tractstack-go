@@ -466,12 +466,16 @@ func (ss *SessionsStore) InvalidateSessionBeliefContext(tenantID, sessionID, sto
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 
+	// 1. Create the correct key.
 	contextKey := sessionID + ":" + storyfragmentID
+
+	// 2. Delete from the correct map: SessionBeliefContexts.
 	delete(cache.SessionBeliefContexts, contextKey)
+
 	cache.LastLoaded = time.Now().UTC()
 
 	if ss.logger != nil {
-		ss.logger.Cache().Debug("Cache operation", "operation", "invalidate", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "duration", time.Since(start))
+		ss.logger.Cache().Warn("Cache operation", "operation", "invalidate", "type", "session_belief_context", "tenantId", tenantID, "sessionId", sessionID, "storyfragmentId", storyfragmentID, "duration", time.Since(start))
 	}
 }
 

@@ -432,11 +432,19 @@ func (r *SQLEventRepository) LoadFingerprintBeliefs(fingerprintID string) (map[s
 			// Remove the belief entirely
 			delete(beliefs, beliefSlug)
 		case "IDENTIFY_AS":
+			r.logger.Database().Debug("LoadFingerprintBeliefs IDENTIFY_AS",
+				"beliefSlug", beliefSlug,
+				"verb", verb,
+				"objectValid", object.Valid,
+				"objectString", object.String)
 			// For IDENTIFY_AS, replace with the object value
 			if object.Valid && object.String != "" {
 				beliefs[beliefSlug] = []string{object.String}
 			}
 		default:
+			r.logger.Database().Debug("LoadFingerprintBeliefs DEFAULT",
+				"beliefSlug", beliefSlug,
+				"verb", verb)
 			// For other verbs, add the verb to the belief array
 			currentValues := beliefs[beliefSlug]
 			if !slices.Contains(currentValues, verb) {

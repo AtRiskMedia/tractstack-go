@@ -104,6 +104,26 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 	// Find ALL storyfragments affected by these belief changes
 	affectedStoryfragments := b.FindAffectedStoryfragments(tenantID, changedBeliefs)
 
+	// Include the current pane that contains the widget
+	if currentPaneID != "" && storyfragmentID != "" {
+		if panes, exists := affectedStoryfragments[storyfragmentID]; exists {
+			// Check if currentPaneID is already in the list
+			found := false
+			for _, paneID := range panes {
+				if paneID == currentPaneID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				affectedStoryfragments[storyfragmentID] = append(panes, currentPaneID)
+			}
+		} else {
+			// Create new entry for this storyfragment
+			affectedStoryfragments[storyfragmentID] = []string{currentPaneID}
+		}
+	}
+
 	if len(affectedStoryfragments) == 0 || len(allSessionIDs) == 0 {
 		return
 	}
@@ -122,11 +142,9 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 					scrollTarget = &gotoPaneID
 				}
 			}
-
-			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
-
-			// Invalidate belief context AFTER broadcasting (so computeScrollTarget can use it)
+			// Invalidate belief context
 			b.cacheManager.InvalidateSessionBeliefContext(tenantID, targetSessionID, affectedStoryfragmentID)
+			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
 		}
 	}
 }

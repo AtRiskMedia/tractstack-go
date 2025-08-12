@@ -65,6 +65,7 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(tenantCtx *tenant
 		// Task 2: Scan the pane's node structure for interactive belief widgets.
 		// This is the critical logic that was previously missing.
 		widgetBeliefs := brs.extractBeliefWidgetsFromPane(paneNode)
+
 		if len(widgetBeliefs) > 0 {
 			registry.PaneWidgetBeliefs[paneID] = widgetBeliefs
 			for _, beliefSlug := range widgetBeliefs {
@@ -116,8 +117,6 @@ func (brs *BeliefRegistryService) extractPaneBeliefData(paneNode *content.PaneNo
 
 // extractBeliefWidgetsFromPane is the core of the fix. It scans the `nodes` array within a pane's
 // OptionsPayload to find all belief-related widgets and the belief slugs they control.
-// LOGIC SOURCE: This combines the node parsing from `html/node_parser.go` with the widget identification
-// logic from the legacy `services/belief_registry.go`.
 func (brs *BeliefRegistryService) extractBeliefWidgetsFromPane(paneNode *content.PaneNode) []string {
 	var widgetBeliefs []string
 
