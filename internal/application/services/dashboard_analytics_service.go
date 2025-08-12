@@ -121,23 +121,55 @@ func (s *DashboardAnalyticsService) computeAllEvents(tenantCtx *tenant.Context, 
 }
 
 func (s *DashboardAnalyticsService) computeLineData(tenantCtx *tenant.Context, epinets []EpinetConfig, hourKeys []string) []LineDataSeries {
-	eventsByHour := make(map[string]int)
+	// Track events by verb type and hour
+	eventsByVerbAndHour := make(map[string]map[string]int)
+
 	for _, epinet := range epinets {
 		for _, hourKey := range hourKeys {
 			if bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey); exists {
-				for _, stepData := range bin.Data.Steps {
-					eventsByHour[hourKey] += len(stepData.Visitors)
+				for nodeID, stepData := range bin.Data.Steps {
+					// Parse nodeID to extract verb
+					// Format: "commitmentAction_StoryFragment_VERB_contentID"
+					parts := strings.Split(nodeID, "_")
+					if len(parts) >= 3 {
+						verb := parts[len(parts)-2]
+
+						// Initialize maps if needed
+						if eventsByVerbAndHour[verb] == nil {
+							eventsByVerbAndHour[verb] = make(map[string]int)
+						}
+
+						// Add visitor count to this verb for this hour
+						eventsByVerbAndHour[verb][hourKey] += len(stepData.Visitors)
+					}
 				}
 			}
 		}
 	}
 
-	var lineData []LineDataPoint
-	for _, hourKey := range hourKeys {
-		lineData = append(lineData, LineDataPoint{X: hourKey, Y: eventsByHour[hourKey]})
+	// Convert to LineDataSeries format
+	var lineSeriesList []LineDataSeries
+	for verb, hourData := range eventsByVerbAndHour {
+		var lineData []LineDataPoint
+		for _, hourKey := range hourKeys {
+			count := hourData[hourKey] // Will be 0 if key doesn't exist
+			lineData = append(lineData, LineDataPoint{X: hourKey, Y: count})
+		}
+
+		if len(lineData) > 0 {
+			lineSeriesList = append(lineSeriesList, LineDataSeries{
+				ID:   verb,
+				Data: lineData,
+			})
+		}
 	}
 
-	return []LineDataSeries{{ID: "events", Data: lineData}}
+	// If no verb-specific data found, return empty instead of single "events" series
+	if len(lineSeriesList) == 0 {
+		return []LineDataSeries{}
+	}
+
+	return lineSeriesList
 }
 
 func (s *DashboardAnalyticsService) computeHotContent(tenantCtx *tenant.Context, epinets []EpinetConfig, hourKeys []string) []HotItem {

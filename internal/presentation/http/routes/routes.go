@@ -127,6 +127,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		}
 		{
 			analytics.GET("/dashboard", analyticsHandlers.HandleDashboardAnalytics)
+			analytics.GET("/content-summary", analyticsHandlers.HandleContentSummary)
 			analytics.GET("/epinet/:id", analyticsHandlers.HandleEpinetSankey)
 			analytics.GET("/storyfragments", analyticsHandlers.HandleStoryfragmentAnalytics)
 			analytics.GET("/leads", analyticsHandlers.HandleLeadMetrics)
