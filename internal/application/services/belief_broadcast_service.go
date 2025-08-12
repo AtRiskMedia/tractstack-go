@@ -140,9 +140,6 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 		}
 	}
 
-	// Single batch invalidation operation
-	b.cacheManager.BatchInvalidateSessionBeliefContexts(tenantID, invalidationTargets)
-
 	// Now handle the SSE broadcasting
 	for _, targetSessionID := range allSessionIDs {
 		for affectedStoryfragmentID, affectedPanes := range affectedStoryfragments {
@@ -161,6 +158,8 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
 		}
 	}
+	// Single batch invalidation operation
+	b.cacheManager.BatchInvalidateSessionBeliefContexts(tenantID, invalidationTargets)
 }
 
 func (b *BeliefBroadcastService) FindAffectedStoryfragments(tenantID string, changedBeliefs []string) map[string][]string {
