@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+type SessionBeliefTarget struct {
+	SessionID       string
+	StoryfragmentID string
+}
+
 // TenantUserStateCache holds user state data for a single tenant
 type TenantUserStateCache struct {
 	// Persistent user state by fingerprint

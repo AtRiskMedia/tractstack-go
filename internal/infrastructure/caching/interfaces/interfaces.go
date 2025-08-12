@@ -95,6 +95,7 @@ type UserStateCache interface {
 	GetSessionBeliefContext(tenantID, sessionID, storyfragmentID string) (*types.SessionBeliefContext, bool)
 	SetSessionBeliefContext(tenantID string, context *types.SessionBeliefContext)
 	InvalidateSessionBeliefContext(tenantID, sessionID, storyfragmentID string)
+	BatchInvalidateSessionBeliefContexts(tenantID string, targets []types.SessionBeliefTarget)
 	InvalidateUserStateCache(tenantID string)
 	GetAllSessionIDs(tenantID string) []string
 	GetAllFingerprintIDs(tenantID string) []string
