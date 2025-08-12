@@ -948,3 +948,8 @@ func (m *Manager) GetSessionsByFingerprint(tenantID, fingerprintID string) []str
 	}
 	return m.sessionsStore.GetSessionsByFingerprint(tenantID, fingerprintID)
 }
+
+func (m *Manager) RemoveSession(tenantID, sessionID string) {
+	m.sessionsStore.RemoveSession(tenantID, sessionID)
+	m.updateTenantAccessTime(tenantID)
+}

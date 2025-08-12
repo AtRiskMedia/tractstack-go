@@ -152,16 +152,31 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 		contentCache.Mu.Unlock()
 	}
 
-	// 2. User State Cache Cleanup (2 hour TTL)
+	// 2. User State Cache Cleanup (2 hour TTL) - FIXED FOR INVERTED INDEX
 	userCache, err := manager.GetTenantUserStateCache(tenantID)
 	if err == nil && userCache != nil {
 		userCache.Mu.Lock()
 
-		// Clean expired sessions
+		// Clean expired sessions - PROPERLY maintaining inverted index
+		var expiredSessionIDs []string
 		for sessionID, session := range userCache.SessionStates {
 			if time.Since(session.LastActivity) > w.config.SessionCacheTTL {
+				expiredSessionIDs = append(expiredSessionIDs, sessionID)
+			}
+		}
+
+		// Remove expired sessions properly (maintaining index consistency)
+		for _, sessionID := range expiredSessionIDs {
+			if sessionData, exists := userCache.SessionStates[sessionID]; exists {
+				// Remove from inverted index FIRST
+				w.removeSessionFromFingerprintIndex(userCache, sessionData.FingerprintID, sessionID)
+				// Then remove from session states
 				delete(userCache.SessionStates, sessionID)
 				totalCleaned++
+
+				if w.logger != nil {
+					w.logger.Cache().Debug("Cleanup removed expired session", "tenantId", tenantID, "sessionId", sessionID, "fingerprintId", sessionData.FingerprintID)
+				}
 			}
 		}
 
@@ -196,8 +211,14 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 			userCache.KnownFingerprints = make(map[string]bool)
 			userCache.SessionStates = make(map[string]*types.SessionData)
 			userCache.SessionBeliefContexts = make(map[string]*types.SessionBeliefContext)
+			userCache.StoryfragmentBeliefRegistries = make(map[string]*types.StoryfragmentBeliefRegistry)
+			userCache.FingerprintToSessions = make(map[string][]string) // FIXED: Clear inverted index too
 			userCache.LastLoaded = now
-			totalCleaned += 5 // Count as 5 cleared maps
+			totalCleaned += 6 // Updated count to include FingerprintToSessions
+
+			if w.logger != nil {
+				w.logger.Cache().Info("Cleanup cleared entire user cache", "tenantId", tenantID, "reason", "expired_lastLoaded")
+			}
 		}
 
 		userCache.Mu.Unlock()
@@ -279,6 +300,31 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 	}
 
 	return totalCleaned
+}
+
+// removeSessionFromFingerprintIndex removes a session from the fingerprint's session list
+// MUST be called with userCache.Mu.Lock() held
+func (w *Worker) removeSessionFromFingerprintIndex(cache *types.TenantUserStateCache, fingerprintID, sessionID string) {
+	sessions := cache.FingerprintToSessions[fingerprintID]
+
+	// Find and remove the session
+	for i, existingSessionID := range sessions {
+		if existingSessionID == sessionID {
+			// Remove by swapping with last element and truncating
+			sessions[i] = sessions[len(sessions)-1]
+			cache.FingerprintToSessions[fingerprintID] = sessions[:len(sessions)-1]
+
+			// If no sessions left for this fingerprint, remove the key
+			if len(cache.FingerprintToSessions[fingerprintID]) == 0 {
+				delete(cache.FingerprintToSessions, fingerprintID)
+			}
+
+			if w.logger != nil {
+				w.logger.Cache().Debug("Cleanup removed session from fingerprint index", "fingerprintId", fingerprintID, "sessionId", sessionID, "remainingSessions", len(cache.FingerprintToSessions[fingerprintID]))
+			}
+			break
+		}
+	}
 }
 
 // getActiveTenants loads the tenant registry and returns active tenant IDs
