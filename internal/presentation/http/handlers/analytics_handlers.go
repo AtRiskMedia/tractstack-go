@@ -414,3 +414,50 @@ func (h *AnalyticsHandlers) triggerBackgroundWarming(tenantCtx *tenant.Context, 
 		log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
 	}
 }
+
+// HandleContentSummary handles GET /api/v1/analytics/content-summary
+func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("content_summary_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Analytics().Debug("Received content summary request", "method", c.Request.Method, "path", c.Request.URL.Path)
+
+	// Parse time range same as HandleAllAnalytics
+	startHour, endHour := h.parseTimeRange(c)
+
+	// Get epinet IDs same as HandleAllAnalytics
+	epinetIDs, err := h.getEpinetIDs(tenantCtx)
+	if err != nil || len(epinetIDs) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
+		return
+	}
+	epinetID := epinetIDs[0]
+
+	// Check cache status same as HandleAllAnalytics
+	cacheStatus := tenantCtx.CacheManager.GetRangeCacheStatus(tenantCtx.TenantID, epinetID, startHour, endHour)
+
+	if cacheStatus.Action != "proceed" {
+		h.triggerBackgroundWarming(tenantCtx, startHour, cacheStatus)
+		c.JSON(http.StatusOK, gin.H{"hotContent": nil})
+		return
+	}
+
+	// Compute dashboard same as HandleAllAnalytics
+	dashboard, err := h.dashboardAnalyticsService.ComputeDashboard(tenantCtx, startHour, endHour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Analytics().Info("Content summary request completed", "hotContentCount", len(dashboard.HotContent), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for HandleContentSummary", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
+	c.JSON(http.StatusOK, gin.H{"hotContent": dashboard.HotContent})
+}
