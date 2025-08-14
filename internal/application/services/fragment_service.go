@@ -492,7 +492,6 @@ func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string
 // GenerateHTMLFromPayload generates HTML directly from OptionsPayload without database persistence
 // This bypasses all belief-based visibility and personalization for preview purposes
 func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, paneID string, optionsPayload map[string]any) (string, error) {
-	// Extract pane-level fields from optionsPayload
 	var bgColour *string
 	var isDecorative bool
 
@@ -504,18 +503,42 @@ func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, pan
 		isDecorative = deco
 	}
 
-	// Create temporary pane node from payload using the CORRECT pane ID
 	tempPane := &content.PaneNode{
-		ID:              paneID, // <-- Use the actual pane ID from the request!
-		Title:           "Preview Pane",
-		Slug:            "preview-temp",
-		BgColour:        bgColour,
-		IsDecorative:    isDecorative,
-		HeldBeliefs:     make(map[string][]string), // Empty - no belief filtering
-		WithheldBeliefs: make(map[string][]string), // Empty - no belief filtering
-		OptionsPayload:  optionsPayload,
+		ID:             paneID,
+		Title:          "Preview Pane",
+		Slug:           "preview",
+		IsDecorative:   isDecorative,
+		BgColour:       bgColour,
+		OptionsPayload: optionsPayload,
 	}
 
-	// Generate HTML directly without personalization or caching
-	return s.generateBaseHTML(tenantCtx, tempPane)
+	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(tempPane)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract nodes from payload: %w", err)
+	}
+
+	paneNodeData := &rendering.NodeRenderData{
+		ID:       paneID,
+		NodeType: "Pane",
+		PaneData: &rendering.PaneRenderData{
+			Title:        tempPane.Title,
+			Slug:         tempPane.Slug,
+			IsDecorative: tempPane.IsDecorative,
+			BgColour:     tempPane.BgColour,
+		},
+	}
+	nodesData[paneID] = paneNodeData
+
+	renderCtx := &rendering.RenderContext{
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         tenantCtx.TenantID,
+		SessionID:        "preview-session",
+		StoryfragmentID:  "preview-fragment",
+		ContainingPaneID: paneID,
+		WidgetContext:    nil,
+	}
+
+	generator := templates.NewGenerator(renderCtx)
+	return generator.RenderPaneFragment(paneID), nil
 }
