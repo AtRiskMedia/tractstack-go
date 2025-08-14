@@ -465,8 +465,6 @@ func (s *FragmentService) buildDomainRegistry(typesRegistry *types.Storyfragment
 	return registry
 }
 
-// Helper conversion methods
-
 // convertStringMapToInterface converts map[string][]string to map[string]any
 func (s *FragmentService) convertStringMapToInterface(input map[string][]string) map[string]any {
 	if input == nil {
@@ -489,4 +487,35 @@ func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string
 		result[k] = v
 	}
 	return result
+}
+
+// GenerateHTMLFromPayload generates HTML directly from OptionsPayload without database persistence
+// This bypasses all belief-based visibility and personalization for preview purposes
+func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, paneID string, optionsPayload map[string]any) (string, error) {
+	// Extract pane-level fields from optionsPayload
+	var bgColour *string
+	var isDecorative bool
+
+	if bg, ok := optionsPayload["bgColour"].(string); ok {
+		bgColour = &bg
+	}
+
+	if deco, ok := optionsPayload["isDecorative"].(bool); ok {
+		isDecorative = deco
+	}
+
+	// Create temporary pane node from payload using the CORRECT pane ID
+	tempPane := &content.PaneNode{
+		ID:              paneID, // <-- Use the actual pane ID from the request!
+		Title:           "Preview Pane",
+		Slug:            "preview-temp",
+		BgColour:        bgColour,
+		IsDecorative:    isDecorative,
+		HeldBeliefs:     make(map[string][]string), // Empty - no belief filtering
+		WithheldBeliefs: make(map[string][]string), // Empty - no belief filtering
+		OptionsPayload:  optionsPayload,
+	}
+
+	// Generate HTML directly without personalization or caching
+	return s.generateBaseHTML(tenantCtx, tempPane)
 }

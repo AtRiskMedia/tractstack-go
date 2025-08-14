@@ -149,6 +149,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		{
 			fragments.GET("/panes/:id", fragmentHandlers.GetPaneFragment)
 			fragments.POST("/panes", fragmentHandlers.GetPaneFragmentBatch)
+			fragments.POST("/preview", fragmentHandlers.GeneratePreviewFromPayload)
 		}
 
 		// Content nodes - ALL PUBLIC for API access
