@@ -1,4 +1,3 @@
-// Package templates provides BgPaneWrapper.astro rendering functionality
 package templates
 
 import (
@@ -10,19 +9,17 @@ import (
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/shapes"
 )
 
-// BgPaneWrapperRenderer handles BgPaneWrapper.astro rendering logic
 type BgPaneWrapperRenderer struct {
 	ctx *rendering.RenderContext
 }
 
-// NewBgPaneWrapperRenderer creates a new background pane wrapper renderer
 func NewBgPaneWrapperRenderer(ctx *rendering.RenderContext) *BgPaneWrapperRenderer {
 	return &BgPaneWrapperRenderer{ctx: ctx}
 }
 
-// Template data structures for safe HTML rendering
 type bgImageTemplateData struct {
 	Src             string
 	SrcSet          string
@@ -33,32 +30,48 @@ type bgImageTemplateData struct {
 
 type bgDivTemplateData struct {
 	ResponsiveClass string
-	BackgroundURL   template.CSS // Safe CSS for background-image
+	BackgroundURL   template.CSS
 	ObjectFit       string
 	AltText         string
 }
 
 type visualBreakTemplateData struct {
-	ElementCSS string
+	HasShape        bool
+	ShapeName       string
+	ViewportKey     string
+	ID              string
+	SvgFill         string
+	ResponsiveClass string
+	ViewBoxWidth    int
+	ViewBoxHeight   int
+	Path            template.HTML
 }
 
-// Compiled templates for different rendering modes
 var (
 	bgImageTemplate = template.Must(template.New("bgImage").Parse(`<img src="{{.Src}}"{{if .SrcSet}} srcset="{{.SrcSet}}"{{end}} class="w-full h-full object-{{.ObjectFit}} {{.ResponsiveClass}}" alt="{{.AltText}}" />`))
 
 	bgDivTemplate = template.Must(template.New("bgDiv").Parse(`<div class="w-full h-full absolute top-0 left-0 {{.ResponsiveClass}}" style="{{.BackgroundURL}}background-size:{{.ObjectFit}};background-repeat:no-repeat;background-position:center;z-index:0" role="img" aria-label="{{.AltText}}"></div>`))
 
-	visualBreakTemplate = template.Must(template.New("visualBreak").Parse(`<div class="visual-break"{{if .ElementCSS}} class="{{.ElementCSS}}"{{end}}><div class="visual-break-content"></div></div>`))
+	visualBreakTemplate = template.Must(template.New("visualBreak").Parse(`{{if .HasShape}}<div class="grid {{.ResponsiveClass}}" style="fill: {{.SvgFill}};">
+  <svg id="svg__{{.ID}}" 
+       data-name="svg__{{.ShapeName}}--{{.ViewportKey}}" 
+       xmlns="http://www.w3.org/2000/svg" 
+       viewBox="0 0 {{.ViewBoxWidth}} {{.ViewBoxHeight}}" 
+       class="svg svg__{{.ShapeName}} svg__{{.ShapeName}}--{{.ViewportKey}}">
+    <desc>decorative background</desc>
+    <g>
+      <path d="{{.Path}}" />
+    </g>
+  </svg>
+</div>{{else}}<div class="visual-break-placeholder">Shape not found: {{.ShapeName}}</div>{{end}}`))
 )
 
-// Render implements the BgPaneWrapper.astro rendering logic exactly
 func (bpwr *BgPaneWrapperRenderer) Render(nodeID string) string {
 	nodeData := bpwr.getNodeData(nodeID)
 	if nodeData == nil {
 		return `<div class="bg-error">Missing background node</div>`
 	}
 
-	// Check if this is a background image node or visual break
 	if bpwr.isBgImageNode(nodeData) || bpwr.isArtpackImageNode(nodeData) {
 		return bpwr.renderBgImage(nodeData)
 	} else {
@@ -66,17 +79,14 @@ func (bpwr *BgPaneWrapperRenderer) Render(nodeID string) string {
 	}
 }
 
-// isBgImageNode checks if node is a background image node
 func (bpwr *BgPaneWrapperRenderer) isBgImageNode(nodeData *rendering.NodeRenderData) bool {
 	return nodeData.BgImageData != nil && nodeData.BgImageData.Type == "background-image"
 }
 
-// isArtpackImageNode checks if node is an artpack image node
 func (bpwr *BgPaneWrapperRenderer) isArtpackImageNode(nodeData *rendering.NodeRenderData) bool {
 	return nodeData.BgImageData != nil && nodeData.BgImageData.Type == "artpack-image"
 }
 
-// renderBgImage renders background image with secure URL handling
 func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderData) string {
 	if nodeData.BgImageData == nil {
 		return `<div class="bg-error">Missing image data</div>`
@@ -86,7 +96,6 @@ func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderD
 	isFlexImage := bgData.Position == "left" || bgData.Position == "right"
 	responsiveClass := bpwr.buildResponsiveClass(nodeData)
 
-	// Get safe values with defaults
 	src := ""
 	if nodeData.ImageURL != nil {
 		src = *nodeData.ImageURL
@@ -102,10 +111,9 @@ func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderD
 		altText = *nodeData.AltText
 	}
 
-	objectFit := "cover" // Default
+	objectFit := "cover"
 
 	if isFlexImage {
-		// Render as <img> for flex positioned images
 		templateData := bgImageTemplateData{
 			Src:             src,
 			SrcSet:          srcSet,
@@ -121,10 +129,8 @@ func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderD
 		}
 		return buf.String()
 	} else {
-		// Render as background div with secure CSS URL handling
 		backgroundCSS := ""
 		if src != "" {
-			// Validate and sanitize URL for CSS background-image
 			if sanitizedURL := bpwr.sanitizeBackgroundURL(src); sanitizedURL != "" {
 				backgroundCSS = fmt.Sprintf("background-image:url(%s);", sanitizedURL)
 			}
@@ -132,7 +138,7 @@ func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderD
 
 		templateData := bgDivTemplateData{
 			ResponsiveClass: responsiveClass,
-			BackgroundURL:   template.CSS(backgroundCSS), // Safe CSS type
+			BackgroundURL:   template.CSS(backgroundCSS),
 			ObjectFit:       objectFit,
 			AltText:         altText,
 		}
@@ -146,27 +152,22 @@ func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderD
 	}
 }
 
-// sanitizeBackgroundURL validates and sanitizes URLs for CSS background-image usage
 func (bpwr *BgPaneWrapperRenderer) sanitizeBackgroundURL(rawURL string) string {
-	// Parse and validate the URL
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
 		log.Printf("Invalid background URL: %s, error: %v", rawURL, err)
 		return ""
 	}
 
-	// Only allow http, https, and relative URLs
 	scheme := strings.ToLower(parsedURL.Scheme)
 	if scheme != "" && scheme != "http" && scheme != "https" {
 		log.Printf("Blocked unsafe URL scheme: %s", scheme)
 		return ""
 	}
 
-	// Return the original URL if valid (template.CSS will handle escaping)
 	return rawURL
 }
 
-// buildResponsiveClass implements responsive visibility classes
 func (bpwr *BgPaneWrapperRenderer) buildResponsiveClass(nodeData *rendering.NodeRenderData) string {
 	isHiddenOnViewport := func(viewport string) bool {
 		if nodeData.CustomData == nil {
@@ -208,30 +209,69 @@ func (bpwr *BgPaneWrapperRenderer) buildResponsiveClass(nodeData *rendering.Node
 	return strings.Join(classes, " ")
 }
 
-// renderBgVisualBreak renders visual break elements
 func (bpwr *BgPaneWrapperRenderer) renderBgVisualBreak(nodeData *rendering.NodeRenderData) string {
-	elementCSS := ""
-	if nodeData.ElementCSS != nil {
-		elementCSS = *nodeData.ElementCSS
+	if nodeData.VisualBreakData == nil {
+		return `<div class="bg-error">Missing visual break data</div>`
 	}
 
-	templateData := visualBreakTemplateData{
-		ElementCSS: elementCSS,
+	var html strings.Builder
+	viewports := []string{"mobile", "tablet", "desktop"}
+
+	for _, viewport := range viewports {
+		vbData := nodeData.VisualBreakData.GetViewportData(viewport)
+		if vbData == nil {
+			continue
+		}
+
+		shapeName := vbData.Collection + vbData.Image
+		shape, exists := shapes.GetShape(shapeName)
+		if !exists {
+			continue
+		}
+
+		templateData := visualBreakTemplateData{
+			HasShape:        true,
+			ShapeName:       shapeName,
+			ViewportKey:     viewport,
+			ID:              fmt.Sprintf("%s-%s", viewport, shapeName),
+			SvgFill:         vbData.SvgFill,
+			ResponsiveClass: bpwr.getViewportClass(viewport),
+			ViewBoxWidth:    shape.ViewBox[0],
+			ViewBoxHeight:   shape.ViewBox[1],
+			Path:            template.HTML(shape.Path),
+		}
+
+		var buf bytes.Buffer
+		if err := visualBreakTemplate.Execute(&buf, templateData); err != nil {
+			log.Printf("Error executing visual break template: %v", err)
+			continue
+		}
+		html.WriteString(buf.String())
 	}
 
-	var buf bytes.Buffer
-	if err := visualBreakTemplate.Execute(&buf, templateData); err != nil {
-		log.Printf("Error executing visual break template: %v", err)
-		return `<div class="bg-error">Template error</div>`
+	if html.Len() == 0 {
+		return `<div class="visual-break-placeholder">No valid visual break shapes found</div>`
 	}
-	return buf.String()
+
+	return html.String()
 }
 
-// getNodeData retrieves node data from real context
+func (bpwr *BgPaneWrapperRenderer) getViewportClass(viewport string) string {
+	switch viewport {
+	case "mobile":
+		return "md:hidden"
+	case "tablet":
+		return "hidden md:block xl:hidden"
+	case "desktop":
+		return "hidden xl:block"
+	default:
+		return ""
+	}
+}
+
 func (bpwr *BgPaneWrapperRenderer) getNodeData(nodeID string) *rendering.NodeRenderData {
 	if bpwr.ctx.AllNodes == nil {
 		return nil
 	}
-
 	return bpwr.ctx.AllNodes[nodeID]
 }
