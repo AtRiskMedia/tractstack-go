@@ -21,16 +21,17 @@ type BackgroundImageData struct {
 
 // NodeRenderData represents the complete data needed to render a node
 type NodeRenderData struct {
-	ID          string               `json:"id"`
-	NodeType    string               `json:"nodeType"`
-	TagName     *string              `json:"tagName,omitempty"`
-	Copy        *string              `json:"copy,omitempty"`
-	ElementCSS  *string              `json:"elementCss,omitempty"`
-	ParentCSS   []string             `json:"parentCss,omitempty"`
-	ParentID    string               `json:"parentId,omitempty"`
-	Children    []string             `json:"children,omitempty"`
-	PaneData    *PaneRenderData      `json:"paneData,omitempty"`
-	BgImageData *BackgroundImageData `json:"bgImageData,omitempty"`
+	ID              string               `json:"id"`
+	NodeType        string               `json:"nodeType"`
+	TagName         *string              `json:"tagName,omitempty"`
+	Copy            *string              `json:"copy,omitempty"`
+	ElementCSS      *string              `json:"elementCss,omitempty"`
+	ParentCSS       []string             `json:"parentCss,omitempty"`
+	ParentID        string               `json:"parentId,omitempty"`
+	Children        []string             `json:"children,omitempty"`
+	PaneData        *PaneRenderData      `json:"paneData,omitempty"`
+	BgImageData     *BackgroundImageData `json:"bgImageData,omitempty"`
+	VisualBreakData *VisualBreakNode     `json:"visualBreakData,omitempty"`
 
 	// Fields for NodeImg template
 	ImageURL *string `json:"imageUrl,omitempty"`

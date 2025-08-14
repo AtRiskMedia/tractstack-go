@@ -141,22 +141,71 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 
 	// Handle BgPane specific fields
 	if nodeData.NodeType == "BgPane" {
-		bgImageData := &rendering.BackgroundImageData{}
+		if nodeType, ok := nodeMap["type"].(string); ok && nodeType == "visual-break" {
+			// Handle visual break data
+			visualBreakNode := &rendering.VisualBreakNode{}
 
-		if nodeType, ok := nodeMap["type"].(string); ok {
-			bgImageData.Type = nodeType
+			if breakDesktop, ok := nodeMap["breakDesktop"].(map[string]any); ok {
+				visualBreakNode.BreakDesktop = &rendering.VisualBreakData{
+					Collection: getStringValue(breakDesktop, "collection"),
+					Image:      getStringValue(breakDesktop, "image"),
+					SvgFill:    getStringValue(breakDesktop, "svgFill"),
+				}
+			}
+
+			if breakTablet, ok := nodeMap["breakTablet"].(map[string]any); ok {
+				visualBreakNode.BreakTablet = &rendering.VisualBreakData{
+					Collection: getStringValue(breakTablet, "collection"),
+					Image:      getStringValue(breakTablet, "image"),
+					SvgFill:    getStringValue(breakTablet, "svgFill"),
+				}
+			}
+
+			if breakMobile, ok := nodeMap["breakMobile"].(map[string]any); ok {
+				visualBreakNode.BreakMobile = &rendering.VisualBreakData{
+					Collection: getStringValue(breakMobile, "collection"),
+					Image:      getStringValue(breakMobile, "image"),
+					SvgFill:    getStringValue(breakMobile, "svgFill"),
+				}
+			}
+
+			if hidden, ok := nodeMap["hiddenViewportMobile"].(bool); ok {
+				visualBreakNode.HiddenViewportMobile = hidden
+			}
+			if hidden, ok := nodeMap["hiddenViewportTablet"].(bool); ok {
+				visualBreakNode.HiddenViewportTablet = hidden
+			}
+			if hidden, ok := nodeMap["hiddenViewportDesktop"].(bool); ok {
+				visualBreakNode.HiddenViewportDesktop = hidden
+			}
+
+			nodeData.VisualBreakData = visualBreakNode
+		} else {
+			// Handle background image data
+			bgImageData := &rendering.BackgroundImageData{}
+
+			if nodeType, ok := nodeMap["type"].(string); ok {
+				bgImageData.Type = nodeType
+			}
+
+			if position, ok := nodeMap["position"].(string); ok {
+				bgImageData.Position = position
+			}
+
+			if size, ok := nodeMap["size"].(string); ok {
+				bgImageData.Size = size
+			}
+
+			nodeData.BgImageData = bgImageData
 		}
-
-		if position, ok := nodeMap["position"].(string); ok {
-			bgImageData.Position = position
-		}
-
-		if size, ok := nodeMap["size"].(string); ok {
-			bgImageData.Size = size
-		}
-
-		nodeData.BgImageData = bgImageData
 	}
 
 	return nodeData, nil
+}
+
+func getStringValue(m map[string]any, key string) string {
+	if val, ok := m[key].(string); ok {
+		return val
+	}
+	return ""
 }
