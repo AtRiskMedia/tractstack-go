@@ -28,6 +28,17 @@ func NewFragmentHandlers(fragmentService *services.FragmentService, logger *logg
 	}
 }
 
+// PreviewFromPayloadRequest represents the request body for preview generation
+type PreviewFromPayloadRequest struct {
+	Panes []PreviewPaneData `json:"panes"`
+}
+
+type PreviewPaneData struct {
+	ID             string         `json:"id"`
+	Title          string         `json:"title"`
+	OptionsPayload map[string]any `json:"optionsPayload"`
+}
+
 // GetPaneFragment handles GET /api/v1/fragments/panes/:id
 func (h *FragmentHandlers) GetPaneFragment(c *gin.Context) {
 	start := time.Now()
@@ -125,5 +136,53 @@ func (h *FragmentHandlers) GetPaneFragmentBatch(c *gin.Context) {
 
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetPaneFragmentBatch request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.PaneIDs))
+	c.JSON(http.StatusOK, response)
+}
+
+// GeneratePreviewFromPayload handles POST /api/v1/fragments/preview
+func (h *FragmentHandlers) GeneratePreviewFromPayload(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("generate_preview_from_payload_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	var req PreviewFromPayloadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if len(req.Panes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one pane is required"})
+		return
+	}
+
+	// Generate HTML from payloads without database persistence
+	results := make(map[string]string)
+	errors := make(map[string]string)
+
+	for _, paneData := range req.Panes {
+		// Pass the pane ID from the request to maintain parent-child relationships
+		html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, paneData.ID, paneData.OptionsPayload)
+		if err != nil {
+			errors[paneData.ID] = err.Error()
+			continue
+		}
+		results[paneData.ID] = html
+	}
+
+	response := gin.H{"fragments": results}
+	if len(errors) > 0 {
+		response["errors"] = errors
+	}
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GeneratePreviewFromPayload request",
+		"duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.Panes))
+
 	c.JSON(http.StatusOK, response)
 }
