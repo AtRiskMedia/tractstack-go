@@ -102,7 +102,7 @@ func (r *ImageFileRepository) Store(tenantID string, imageFile *content.ImageFil
 	r.logger.Database().Debug("Executing file insert", "id", imageFile.ID)
 
 	_, err := r.db.Exec(query, imageFile.ID, imageFile.Filename,
-		imageFile.AltDescription, imageFile.URL, imageFile.SrcSet)
+		imageFile.AltDescription, imageFile.Src, imageFile.SrcSet)
 	if err != nil {
 		r.logger.Database().Error("File insert failed", "error", err.Error(), "id", imageFile.ID)
 		return fmt.Errorf("failed to insert file: %w", err)
@@ -124,7 +124,7 @@ func (r *ImageFileRepository) Update(tenantID string, imageFile *content.ImageFi
 	r.logger.Database().Debug("Executing file update", "id", imageFile.ID)
 
 	_, err := r.db.Exec(query, imageFile.Filename, imageFile.AltDescription,
-		imageFile.URL, imageFile.SrcSet, imageFile.ID)
+		imageFile.Src, imageFile.SrcSet, imageFile.ID)
 	if err != nil {
 		r.logger.Database().Error("File update failed", "error", err.Error(), "id", imageFile.ID)
 		return fmt.Errorf("failed to update file: %w", err)
@@ -201,7 +201,7 @@ func (r *ImageFileRepository) loadFromDB(id string) (*content.ImageFileNode, err
 	var srcSet sql.NullString
 
 	err := row.Scan(&imageFile.ID, &imageFile.Filename, &imageFile.AltDescription,
-		&imageFile.URL, &srcSet)
+		&imageFile.Src, &srcSet)
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -256,7 +256,7 @@ func (r *ImageFileRepository) loadMultipleFromDB(ids []string) ([]*content.Image
 		var srcSet sql.NullString
 
 		err := rows.Scan(&imageFile.ID, &imageFile.Filename, &imageFile.AltDescription,
-			&imageFile.URL, &srcSet)
+			&imageFile.Src, &srcSet)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan file: %w", err)
 		}

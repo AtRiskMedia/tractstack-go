@@ -103,6 +103,6 @@ type ImageFileNode struct {
 	Filename       string  `json:"filename"`
 	NodeType       string  `json:"nodeType"`
 	AltDescription string  `json:"altDescription"`
-	URL            string  `json:"url"`
+	Src            string  `json:"src"`
 	SrcSet         *string `json:"srcSet,omitempty"`
 }
