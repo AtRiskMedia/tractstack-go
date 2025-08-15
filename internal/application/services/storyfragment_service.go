@@ -152,7 +152,7 @@ func (s *StoryFragmentService) GetFullPayloadBySlug(tenantCtx *tenant.Context, s
 		return nil, fmt.Errorf("failed to get storyfragment by slug %s: %w", slug, err)
 	}
 	if storyFragment == nil {
-		return nil, fmt.Errorf("storyfragment not found with slug %s", slug)
+		return nil, nil
 	}
 
 	payload := &StoryFragmentFullPayload{
