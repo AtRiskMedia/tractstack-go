@@ -113,8 +113,8 @@ func (s *ImageFileService) Create(tenantCtx *tenant.Context, imageFile *content.
 	if imageFile.Filename == "" {
 		return fmt.Errorf("imagefile filename cannot be empty")
 	}
-	if imageFile.URL == "" {
-		return fmt.Errorf("imagefile URL cannot be empty")
+	if imageFile.Src == "" {
+		return fmt.Errorf("imagefile Src cannot be empty")
 	}
 
 	imageFileRepo := tenantCtx.ImageFileRepo()
@@ -152,8 +152,8 @@ func (s *ImageFileService) Update(tenantCtx *tenant.Context, imageFile *content.
 	if imageFile.Filename == "" {
 		return fmt.Errorf("imagefile filename cannot be empty")
 	}
-	if imageFile.URL == "" {
-		return fmt.Errorf("imagefile URL cannot be empty")
+	if imageFile.Src == "" {
+		return fmt.Errorf("imagefile Src cannot be empty")
 	}
 
 	imageFileRepo := tenantCtx.ImageFileRepo()
