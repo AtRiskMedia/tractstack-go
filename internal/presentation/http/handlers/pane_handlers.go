@@ -305,3 +305,41 @@ func (h *PaneHandlers) DeletePane(c *gin.Context) {
 		"paneId":  paneID,
 	})
 }
+
+// GetPaneTemplate returns a pane template in the same format as full-payload
+func (h *PaneHandlers) GetPaneTemplate(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_pane_template_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get pane template request", "method", c.Request.Method, "path", c.Request.URL.Path, "paneId", c.Param("id"))
+
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	paneID := c.Param("id")
+	if paneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pane ID is required"})
+		return
+	}
+
+	// Delegate to service layer for business logic
+	templatePayload, err := h.paneService.GetPaneTemplate(tenantCtx, paneID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if templatePayload == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "pane not found"})
+		return
+	}
+
+	h.logger.Content().Info("Get pane template request completed", "paneId", paneID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPaneTemplate request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
+
+	c.JSON(http.StatusOK, templatePayload)
+}
