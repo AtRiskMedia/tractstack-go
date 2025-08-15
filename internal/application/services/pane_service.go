@@ -20,6 +20,12 @@ type PaneService struct {
 	contentMapService *ContentMapService
 }
 
+// PaneTemplatePayload represents the template format for a pane
+type PaneTemplatePayload struct {
+	PaneNode   *content.PaneNode `json:"paneNode"`
+	ChildNodes []any             `json:"childNodes"`
+}
+
 // NewPaneService creates a new pane service singleton
 func NewPaneService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *PaneService {
 	return &PaneService{
@@ -263,4 +269,60 @@ func (s *PaneService) Delete(tenantCtx *tenant.Context, id string) error {
 	s.logger.Perf().Info("Performance for DeletePane", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", id)
 
 	return nil
+}
+
+// GetPaneTemplate returns a pane template in the same format as full-payload
+// This method contains the extraction logic, keeping the handler clean
+func (s *PaneService) GetPaneTemplate(tenantCtx *tenant.Context, paneID string) (*PaneTemplatePayload, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_pane_template", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if paneID == "" {
+		return nil, fmt.Errorf("pane ID cannot be empty")
+	}
+
+	// Get the pane using existing service method
+	pane, err := s.GetByID(tenantCtx, paneID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pane %s: %w", paneID, err)
+	}
+
+	if pane == nil {
+		return nil, fmt.Errorf("pane not found with ID %s", paneID)
+	}
+
+	// Extract child nodes from OptionsPayload (SAME logic as full-payload)
+	var childNodes []any
+	if pane.OptionsPayload != nil {
+		if nodes, exists := pane.OptionsPayload["nodes"]; exists {
+			if nodesArray, ok := nodes.([]any); ok {
+				childNodes = nodesArray
+			}
+		}
+	}
+
+	// Create cleaned pane (SAME logic as full-payload)
+	cleanedPane := *pane
+	cleanedPane.OptionsPayload = make(map[string]any)
+
+	// Copy all fields except "nodes"
+	if pane.OptionsPayload != nil {
+		for k, v := range pane.OptionsPayload {
+			if k != "nodes" {
+				cleanedPane.OptionsPayload[k] = v
+			}
+		}
+	}
+
+	payload := &PaneTemplatePayload{
+		PaneNode:   &cleanedPane,
+		ChildNodes: childNodes,
+	}
+
+	s.logger.Content().Info("Successfully generated pane template", "tenantId", tenantCtx.TenantID, "paneId", paneID, "childNodeCount", len(childNodes), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for GetPaneTemplate", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
+
+	return payload, nil
 }
