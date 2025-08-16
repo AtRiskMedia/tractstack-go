@@ -106,3 +106,14 @@ type ImageFileNode struct {
 	Src            string  `json:"src"`
 	SrcSet         *string `json:"srcSet,omitempty"`
 }
+
+type ImpressionNode struct {
+	ID          string `json:"id"`
+	NodeType    string `json:"nodeType"`
+	TagName     string `json:"tagName"`
+	ParentID    string `json:"parentId"`
+	Title       string `json:"title"`
+	Body        string `json:"body"`
+	ButtonText  string `json:"buttonText"`
+	ActionsLisp string `json:"actionsLisp"`
+}

@@ -444,6 +444,8 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		return
 	}
 
+	h.logger.Content().Warn("=== HANDLER IMPRESSIONS DEBUG ===", "storyfragmentID", storyFragment.ID, "paneIDsCount", len(storyFragment.PaneIDs))
+
 	var fragmentsData map[string]string
 	if len(storyFragment.PaneIDs) > 0 {
 		results, errors, err := h.fragmentService.GenerateFragmentBatch(
@@ -465,6 +467,25 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		fragmentsData = make(map[string]string)
 	}
 
+	// Get impressions for this storyfragment
+	h.logger.Content().Warn("About to call GetImpressionsByPaneIDs", "paneIDsCount", len(storyFragment.PaneIDs))
+
+	var impressions []map[string]any
+	if len(storyFragment.PaneIDs) > 0 {
+		impressions, err = h.storyFragmentService.GetImpressionsByPaneIDs(tenantCtx, storyFragment.PaneIDs)
+		if err != nil {
+			h.logger.Content().Warn("Failed to fetch impressions", "error", err.Error())
+			impressions = []map[string]any{}
+		} else {
+			h.logger.Content().Warn("Successfully fetched impressions", "count", len(impressions))
+		}
+	} else {
+		h.logger.Content().Warn("No pane IDs to fetch impressions for")
+		impressions = []map[string]any{}
+	}
+
+	h.logger.Content().Warn("Final impressions before response", "count", len(impressions), "impressions", impressions)
+
 	response := gin.H{
 		"id":              storyFragment.ID,
 		"title":           storyFragment.Title,
@@ -475,9 +496,10 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		"isHome":          storyFragment.IsHome,
 		"created":         storyFragment.Created,
 		"fragments":       fragmentsData,
+		"impressions":     impressions,
 	}
 
-	h.logger.Content().Info("Get story fragment personalized payload request completed", "slug", slug, "sessionId", sessionID, "paneCount", len(storyFragment.PaneIDs), "duration", time.Since(start))
+	h.logger.Content().Info("Get story fragment personalized payload request completed", "slug", slug, "sessionId", sessionID, "paneCount", len(storyFragment.PaneIDs), "impressionCount", len(impressions), "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetStoryFragmentPersonalizedPayloadBySlug request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
