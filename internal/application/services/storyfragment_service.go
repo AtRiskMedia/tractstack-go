@@ -216,7 +216,7 @@ func (s *StoryFragmentService) GetHome(tenantCtx *tenant.Context, sessionID stri
 	// Enrich with metadata (menu, isHome flag, etc.)
 	err = s.EnrichWithMetadata(tenantCtx, storyFragment, sessionID)
 	if err != nil {
-		s.logger.Content().Warn("Failed to enrich home storyfragment metadata", "error", err)
+		s.logger.Content().Debug("Failed to enrich home storyfragment metadata", "error", err)
 	}
 
 	s.logger.Content().Info("Successfully retrieved home storyfragment", "tenantId", tenantCtx.TenantID, "homeSlug", homeSlug, "found", storyFragment != nil, "duration", time.Since(start))
@@ -374,7 +374,7 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 		menuRepo := tenantCtx.MenuRepo()
 		menu, err := menuRepo.FindByID(tenantCtx.TenantID, *storyFragment.MenuID)
 		if err != nil {
-			s.logger.Content().Warn("Failed to load menu for storyfragment", "menuId", *storyFragment.MenuID, "error", err)
+			s.logger.Content().Debug("Failed to load menu for storyfragment", "menuId", *storyFragment.MenuID, "error", err)
 		} else {
 			storyFragment.Menu = menu
 		}
@@ -385,7 +385,7 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 		paneRepo := tenantCtx.PaneRepo()
 		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
 		if err != nil {
-			s.logger.Content().Warn("Failed to load panes for codeHook extraction", "error", err)
+			s.logger.Content().Debug("Failed to load panes for codeHook extraction", "error", err)
 		} else {
 			codeHookTargets := make(map[string]string)
 			for _, pane := range panes {
@@ -401,7 +401,7 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 	if sessionID != "" {
 		_, err := s.sessionBeliefService.CreateSessionBeliefContext(tenantCtx, sessionID, storyFragment.ID)
 		if err != nil {
-			s.logger.Content().Warn("Failed to create session belief context", "error", err)
+			s.logger.Content().Debug("Failed to create session belief context", "error", err)
 		}
 	}
 
@@ -413,10 +413,10 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 	marker := s.perfTracker.StartOperation("get_impressions_by_pane_ids", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	s.logger.Content().Warn("=== IMPRESSIONS DEBUG START ===", "paneIDsCount", len(paneIDs), "paneIDs", paneIDs)
+	s.logger.Content().Debug("=== IMPRESSIONS DEBUG START ===", "paneIDsCount", len(paneIDs), "paneIDs", paneIDs)
 
 	if len(paneIDs) == 0 {
-		s.logger.Content().Warn("No pane IDs provided for impressions")
+		s.logger.Content().Debug("No pane IDs provided for impressions")
 		return []map[string]any{}, nil
 	}
 
@@ -426,29 +426,29 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 	// Use the existing bulk pane retrieval method
 	panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, paneIDs)
 	if err != nil {
-		s.logger.Content().Warn("Failed to get panes for impressions", "error", err.Error())
+		s.logger.Content().Debug("Failed to get panes for impressions", "error", err.Error())
 		return nil, fmt.Errorf("failed to get panes for impressions: %w", err)
 	}
 
-	s.logger.Content().Warn("Retrieved panes for impressions", "panesCount", len(panes))
+	s.logger.Content().Debug("Retrieved panes for impressions", "panesCount", len(panes))
 
 	var impressions []map[string]any
 
 	// Extract impressions from each pane's OptionsPayload.nodes
 	for i, pane := range panes {
-		s.logger.Content().Warn("Processing pane", "index", i, "paneID", pane.ID, "hasOptionsPayload", pane.OptionsPayload != nil)
+		s.logger.Content().Debug("Processing pane", "index", i, "paneID", pane.ID, "hasOptionsPayload", pane.OptionsPayload != nil)
 
 		if pane == nil || pane.OptionsPayload == nil {
-			s.logger.Content().Warn("Skipping pane - nil or no options payload", "paneID", pane.ID)
+			s.logger.Content().Debug("Skipping pane - nil or no options payload", "paneID", pane.ID)
 			continue
 		}
 
 		// Check if pane has nodes in its OptionsPayload
 		if nodes, exists := pane.OptionsPayload["nodes"]; exists {
-			s.logger.Content().Warn("Found nodes in pane options payload", "paneID", pane.ID, "nodesType", fmt.Sprintf("%T", nodes))
+			s.logger.Content().Debug("Found nodes in pane options payload", "paneID", pane.ID, "nodesType", fmt.Sprintf("%T", nodes))
 
 			if nodesArray, ok := nodes.([]any); ok {
-				s.logger.Content().Warn("Nodes is array", "paneID", pane.ID, "nodeCount", len(nodesArray))
+				s.logger.Content().Debug("Nodes is array", "paneID", pane.ID, "nodeCount", len(nodesArray))
 
 				// Iterate through nodes looking for impressions
 				for j, nodeInterface := range nodesArray {
@@ -456,7 +456,7 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 						nodeType, hasNodeType := nodeMap["nodeType"]
 						tagName, hasTagName := nodeMap["tagName"]
 
-						s.logger.Content().Warn("Processing node",
+						s.logger.Content().Debug("Processing node",
 							"paneID", pane.ID,
 							"nodeIndex", j,
 							"hasNodeType", hasNodeType,
@@ -470,7 +470,7 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 								if tagName, exists := nodeMap["tagName"]; exists {
 									if tagNameStr, ok := tagName.(string); ok && tagNameStr == "impression" {
 
-										s.logger.Content().Warn("FOUND IMPRESSION NODE!",
+										s.logger.Content().Debug("FOUND IMPRESSION NODE!",
 											"paneID", pane.ID,
 											"nodeID", nodeMap["id"],
 											"title", nodeMap["title"],
@@ -494,10 +494,10 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 										if impression["id"] != "" && impression["title"] != "" &&
 											impression["body"] != "" && impression["buttonText"] != "" &&
 											impression["actionsLisp"] != "" {
-											s.logger.Content().Warn("Adding impression to results", "impressionID", impression["id"])
+											s.logger.Content().Debug("Adding impression to results", "impressionID", impression["id"])
 											impressions = append(impressions, impression)
 										} else {
-											s.logger.Content().Warn("Skipping incomplete impression",
+											s.logger.Content().Debug("Skipping incomplete impression",
 												"impressionID", impression["id"],
 												"hasTitle", impression["title"] != "",
 												"hasBody", impression["body"] != "",
@@ -505,26 +505,26 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 												"hasActionsLisp", impression["actionsLisp"] != "")
 										}
 									} else {
-										s.logger.Content().Warn("Node has Impression type but wrong tagName", "paneID", pane.ID, "tagName", tagName)
+										s.logger.Content().Debug("Node has Impression type but wrong tagName", "paneID", pane.ID, "tagName", tagName)
 									}
 								} else {
-									s.logger.Content().Warn("Node has Impression type but no tagName", "paneID", pane.ID)
+									s.logger.Content().Debug("Node has Impression type but no tagName", "paneID", pane.ID)
 								}
 							} else {
-								s.logger.Content().Warn("Node type not Impression", "paneID", pane.ID, "nodeType", nodeType)
+								s.logger.Content().Debug("Node type not Impression", "paneID", pane.ID, "nodeType", nodeType)
 							}
 						} else {
-							s.logger.Content().Warn("Node has no nodeType field", "paneID", pane.ID)
+							s.logger.Content().Debug("Node has no nodeType field", "paneID", pane.ID)
 						}
 					} else {
-						s.logger.Content().Warn("Node is not a map", "paneID", pane.ID, "nodeIndex", j, "nodeType", fmt.Sprintf("%T", nodeInterface))
+						s.logger.Content().Debug("Node is not a map", "paneID", pane.ID, "nodeIndex", j, "nodeType", fmt.Sprintf("%T", nodeInterface))
 					}
 				}
 			} else {
-				s.logger.Content().Warn("Nodes is not an array", "paneID", pane.ID, "nodesType", fmt.Sprintf("%T", nodes))
+				s.logger.Content().Debug("Nodes is not an array", "paneID", pane.ID, "nodesType", fmt.Sprintf("%T", nodes))
 			}
 		} else {
-			s.logger.Content().Warn("No nodes field in pane options payload", "paneID", pane.ID, "optionsKeys", func() []string {
+			s.logger.Content().Debug("No nodes field in pane options payload", "paneID", pane.ID, "optionsKeys", func() []string {
 				keys := make([]string, 0, len(pane.OptionsPayload))
 				for k := range pane.OptionsPayload {
 					keys = append(keys, k)
@@ -534,7 +534,7 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 		}
 	}
 
-	s.logger.Content().Warn("=== IMPRESSIONS DEBUG END ===",
+	s.logger.Content().Debug("=== IMPRESSIONS DEBUG END ===",
 		"finalImpressionCount", len(impressions),
 		"duration", time.Since(start))
 

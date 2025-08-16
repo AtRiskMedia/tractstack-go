@@ -444,7 +444,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		return
 	}
 
-	h.logger.Content().Warn("=== HANDLER IMPRESSIONS DEBUG ===", "storyfragmentID", storyFragment.ID, "paneIDsCount", len(storyFragment.PaneIDs))
+	h.logger.Content().Debug("=== HANDLER IMPRESSIONS DEBUG ===", "storyfragmentID", storyFragment.ID, "paneIDsCount", len(storyFragment.PaneIDs))
 
 	var fragmentsData map[string]string
 	if len(storyFragment.PaneIDs) > 0 {
@@ -468,23 +468,23 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 	}
 
 	// Get impressions for this storyfragment
-	h.logger.Content().Warn("About to call GetImpressionsByPaneIDs", "paneIDsCount", len(storyFragment.PaneIDs))
+	h.logger.Content().Debug("About to call GetImpressionsByPaneIDs", "paneIDsCount", len(storyFragment.PaneIDs))
 
 	var impressions []map[string]any
 	if len(storyFragment.PaneIDs) > 0 {
 		impressions, err = h.storyFragmentService.GetImpressionsByPaneIDs(tenantCtx, storyFragment.PaneIDs)
 		if err != nil {
-			h.logger.Content().Warn("Failed to fetch impressions", "error", err.Error())
+			h.logger.Content().Debug("Failed to fetch impressions", "error", err.Error())
 			impressions = []map[string]any{}
 		} else {
-			h.logger.Content().Warn("Successfully fetched impressions", "count", len(impressions))
+			h.logger.Content().Debug("Successfully fetched impressions", "count", len(impressions))
 		}
 	} else {
-		h.logger.Content().Warn("No pane IDs to fetch impressions for")
+		h.logger.Content().Debug("No pane IDs to fetch impressions for")
 		impressions = []map[string]any{}
 	}
 
-	h.logger.Content().Warn("Final impressions before response", "count", len(impressions), "impressions", impressions)
+	h.logger.Content().Debug("Final impressions before response", "count", len(impressions), "impressions", impressions)
 
 	response := gin.H{
 		"id":              storyFragment.ID,

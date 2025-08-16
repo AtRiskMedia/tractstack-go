@@ -39,7 +39,7 @@ func NewEventProcessingService(
 func (s *EventProcessingService) ProcessEventsWithSSE(
 	tenantCtx *tenant.Context,
 	sessionID string,
-	storyfragmentID string, // ADDED: storyfragmentID parameter to match handler call
+	storyfragmentID string,
 	events []domainEvents.Event,
 	currentPaneID string,
 	gotoPaneID string,
@@ -96,6 +96,36 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 			if err := eventRepo.StoreActionEvent(actionEvent); err != nil {
 				s.logger.Database().Error("Failed to store Pane action event",
 					"error", err.Error(), "tenantId", tenantCtx.TenantID, "paneId", event.ID)
+			}
+
+		case "Impression":
+			s.logger.Analytics().Debug("✅ Impression Event Received",
+				"impressionId", event.ID,
+				"verb", event.Verb,
+				"sessionId", sessionID,
+				"tenantId", tenantCtx.TenantID,
+			)
+
+			sessionData, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
+			if !exists {
+				s.logger.Analytics().Warn("Could not find session to process Impression event", "sessionId", sessionID)
+				continue
+			}
+
+			actionEvent := &analytics.ActionEvent{
+				ObjectID:      event.ID,
+				ObjectType:    event.Type,
+				Verb:          event.Verb,
+				FingerprintID: sessionData.FingerprintID,
+				VisitID:       sessionData.VisitID,
+				Duration:      0, // Impressions don't have duration
+				CreatedAt:     time.Now().UTC(),
+			}
+
+			eventRepo := tenantCtx.EventRepo()
+			if err := eventRepo.StoreActionEvent(actionEvent); err != nil {
+				s.logger.Database().Error("Failed to store Impression action event",
+					"error", err.Error(), "tenantId", tenantCtx.TenantID, "impressionId", event.ID)
 			}
 
 		case "StoryFragment":
