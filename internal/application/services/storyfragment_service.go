@@ -407,3 +407,137 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 
 	return nil
 }
+
+func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context, paneIDs []string) ([]map[string]any, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_impressions_by_pane_ids", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	s.logger.Content().Warn("=== IMPRESSIONS DEBUG START ===", "paneIDsCount", len(paneIDs), "paneIDs", paneIDs)
+
+	if len(paneIDs) == 0 {
+		s.logger.Content().Warn("No pane IDs provided for impressions")
+		return []map[string]any{}, nil
+	}
+
+	// Get the pane repository from tenant context
+	paneRepo := tenantCtx.PaneRepo()
+
+	// Use the existing bulk pane retrieval method
+	panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, paneIDs)
+	if err != nil {
+		s.logger.Content().Warn("Failed to get panes for impressions", "error", err.Error())
+		return nil, fmt.Errorf("failed to get panes for impressions: %w", err)
+	}
+
+	s.logger.Content().Warn("Retrieved panes for impressions", "panesCount", len(panes))
+
+	var impressions []map[string]any
+
+	// Extract impressions from each pane's OptionsPayload.nodes
+	for i, pane := range panes {
+		s.logger.Content().Warn("Processing pane", "index", i, "paneID", pane.ID, "hasOptionsPayload", pane.OptionsPayload != nil)
+
+		if pane == nil || pane.OptionsPayload == nil {
+			s.logger.Content().Warn("Skipping pane - nil or no options payload", "paneID", pane.ID)
+			continue
+		}
+
+		// Check if pane has nodes in its OptionsPayload
+		if nodes, exists := pane.OptionsPayload["nodes"]; exists {
+			s.logger.Content().Warn("Found nodes in pane options payload", "paneID", pane.ID, "nodesType", fmt.Sprintf("%T", nodes))
+
+			if nodesArray, ok := nodes.([]any); ok {
+				s.logger.Content().Warn("Nodes is array", "paneID", pane.ID, "nodeCount", len(nodesArray))
+
+				// Iterate through nodes looking for impressions
+				for j, nodeInterface := range nodesArray {
+					if nodeMap, ok := nodeInterface.(map[string]any); ok {
+						nodeType, hasNodeType := nodeMap["nodeType"]
+						tagName, hasTagName := nodeMap["tagName"]
+
+						s.logger.Content().Warn("Processing node",
+							"paneID", pane.ID,
+							"nodeIndex", j,
+							"hasNodeType", hasNodeType,
+							"nodeType", nodeType,
+							"hasTagName", hasTagName,
+							"tagName", tagName)
+
+						// Check if this node is an impression
+						if nodeType, exists := nodeMap["nodeType"]; exists {
+							if nodeTypeStr, ok := nodeType.(string); ok && nodeTypeStr == "Impression" {
+								if tagName, exists := nodeMap["tagName"]; exists {
+									if tagNameStr, ok := tagName.(string); ok && tagNameStr == "impression" {
+
+										s.logger.Content().Warn("FOUND IMPRESSION NODE!",
+											"paneID", pane.ID,
+											"nodeID", nodeMap["id"],
+											"title", nodeMap["title"],
+											"body", nodeMap["body"],
+											"buttonText", nodeMap["buttonText"],
+											"actionsLisp", nodeMap["actionsLisp"])
+
+										// Create impression object with all required fields
+										impression := map[string]any{
+											"id":          nodeMap["id"],
+											"nodeType":    "Impression",
+											"tagName":     "impression",
+											"parentId":    pane.ID,
+											"title":       nodeMap["title"],
+											"body":        nodeMap["body"],
+											"buttonText":  nodeMap["buttonText"],
+											"actionsLisp": nodeMap["actionsLisp"],
+										}
+
+										// Only add if required fields are present
+										if impression["id"] != "" && impression["title"] != "" &&
+											impression["body"] != "" && impression["buttonText"] != "" &&
+											impression["actionsLisp"] != "" {
+											s.logger.Content().Warn("Adding impression to results", "impressionID", impression["id"])
+											impressions = append(impressions, impression)
+										} else {
+											s.logger.Content().Warn("Skipping incomplete impression",
+												"impressionID", impression["id"],
+												"hasTitle", impression["title"] != "",
+												"hasBody", impression["body"] != "",
+												"hasButtonText", impression["buttonText"] != "",
+												"hasActionsLisp", impression["actionsLisp"] != "")
+										}
+									} else {
+										s.logger.Content().Warn("Node has Impression type but wrong tagName", "paneID", pane.ID, "tagName", tagName)
+									}
+								} else {
+									s.logger.Content().Warn("Node has Impression type but no tagName", "paneID", pane.ID)
+								}
+							} else {
+								s.logger.Content().Warn("Node type not Impression", "paneID", pane.ID, "nodeType", nodeType)
+							}
+						} else {
+							s.logger.Content().Warn("Node has no nodeType field", "paneID", pane.ID)
+						}
+					} else {
+						s.logger.Content().Warn("Node is not a map", "paneID", pane.ID, "nodeIndex", j, "nodeType", fmt.Sprintf("%T", nodeInterface))
+					}
+				}
+			} else {
+				s.logger.Content().Warn("Nodes is not an array", "paneID", pane.ID, "nodesType", fmt.Sprintf("%T", nodes))
+			}
+		} else {
+			s.logger.Content().Warn("No nodes field in pane options payload", "paneID", pane.ID, "optionsKeys", func() []string {
+				keys := make([]string, 0, len(pane.OptionsPayload))
+				for k := range pane.OptionsPayload {
+					keys = append(keys, k)
+				}
+				return keys
+			}())
+		}
+	}
+
+	s.logger.Content().Warn("=== IMPRESSIONS DEBUG END ===",
+		"finalImpressionCount", len(impressions),
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return impressions, nil
+}
