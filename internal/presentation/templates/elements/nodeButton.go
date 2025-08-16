@@ -9,9 +9,16 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 )
 
-// nodeButtonTmpl is a pre-parsed template for rendering the button's opening tag.
-// Using html/template automatically escapes the class attribute, preventing HTML injection.
-var nodeButtonTmpl = template.Must(template.New("nodeButton").Parse(`<button class="{{.}}" onclick="return false;">`))
+// nodeButtonTmpl is a pre-parsed template for rendering the button's opening tag with HTMX attributes.
+// Follows the exact pattern from unset-button.go and belief widgets
+var nodeButtonTmpl = template.Must(template.New("nodeButton").Parse(`<button class="{{.Class}}"{{if .CallbackPayload}} hx-post="/api/v1/state" hx-trigger="click" hx-swap="none" hx-vals='{"beliefId":"{{.PaneID}}","beliefType":"Pane","beliefValue":"CLICKED","beliefObject":"{{.CallbackPayload}}"}'{{end}}>`))
+
+// nodeButtonData holds the data for the nodeButton template
+type nodeButtonData struct {
+	Class           string
+	CallbackPayload string
+	PaneID          string
+}
 
 // NodeButtonRenderer handles NodeButton.astro rendering logic
 type NodeButtonRenderer struct {
@@ -27,14 +34,17 @@ func NewNodeButtonRenderer(ctx *rendering.RenderContext, nodeRenderer NodeRender
 	}
 }
 
-// Render implements the EXACT NodeButton.astro rendering logic
+// Render implements the EXACT NodeButton.astro rendering logic with HTMX CLICKED event support
 func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	nodeData := nbr.getNodeData(nodeID)
 	if nodeData == nil {
 		return `<button>missing button</button>`
 	}
 
-	var html strings.Builder
+	var htmlBuilder strings.Builder
+
+	// Prepare template data
+	data := nodeButtonData{}
 
 	// Prepare CSS classes string
 	// EXACT match: className={`${node.elementCss || ""} whitespace-nowrap`}
@@ -43,11 +53,24 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 		cssClasses.WriteString(*nodeData.ElementCSS)
 	}
 	cssClasses.WriteString(" whitespace-nowrap")
-	finalClasses := strings.TrimSpace(cssClasses.String())
+	data.Class = strings.TrimSpace(cssClasses.String())
 
-	// Use the pre-parsed template to safely render the opening <button> tag.
-	// This replaces the insecure fmt.Sprintf() call.
-	err := nodeButtonTmpl.Execute(&html, finalClasses)
+	// Extract callback payload from CustomData
+	if nodeData.CustomData != nil {
+		if callbackPayload, exists := nodeData.CustomData["callbackPayload"]; exists {
+			if payloadStr, ok := callbackPayload.(string); ok && payloadStr != "" {
+				data.CallbackPayload = payloadStr
+			}
+		}
+	}
+
+	// Get pane ID from context
+	if nbr.ctx.ContainingPaneID != "" {
+		data.PaneID = nbr.ctx.ContainingPaneID
+	}
+
+	// Use the pre-parsed template to safely render the opening <button> tag
+	err := nodeButtonTmpl.Execute(&htmlBuilder, data)
 	if err != nil {
 		log.Printf("ERROR: Failed to execute nodeButton template for nodeID %s: %v", nodeID, err)
 		return `<!-- error rendering button -->`
@@ -57,23 +80,23 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	// This matches the expected output: <span class="whitespace-nowrap">Talk to me!​​ </span>
 	childNodeIDs := nbr.nodeRenderer.GetChildNodeIDs(nodeID)
 	if len(childNodeIDs) > 0 {
-		html.WriteString(`<span class="whitespace-nowrap">`)
+		htmlBuilder.WriteString(`<span class="whitespace-nowrap">`)
 		for _, childID := range childNodeIDs {
-			html.WriteString(nbr.nodeRenderer.RenderNode(childID))
+			htmlBuilder.WriteString(nbr.nodeRenderer.RenderNode(childID))
 		}
-		html.WriteString(`</span>`)
+		htmlBuilder.WriteString(`</span>`)
 	}
 
 	// Closing </button> tag
-	html.WriteString(`</button>`)
+	htmlBuilder.WriteString(`</button>`)
 
 	// Add trailing space logic - EXACT match: {needsTrailingSpace && " "}
 	needsTrailingSpace := nbr.checkNeedsTrailingSpace(nodeID)
 	if needsTrailingSpace {
-		html.WriteString(" ")
+		htmlBuilder.WriteString(" ")
 	}
 
-	return html.String()
+	return htmlBuilder.String()
 }
 
 // checkNeedsTrailingSpace implements the EXACT NodeButton.astro trailing space logic
@@ -112,10 +135,10 @@ func (nbr *NodeButtonRenderer) checkNeedsTrailingSpace(nodeID string) bool {
 	if nextNodeData.TagName != nil && *nextNodeData.TagName == "text" {
 		if nextNodeData.Copy != nil {
 			text := *nextNodeData.Copy
-			return !(strings.HasPrefix(text, ".") ||
-				strings.HasPrefix(text, ",") ||
-				strings.HasPrefix(text, ";") ||
-				strings.HasPrefix(text, ":"))
+			return !strings.HasPrefix(text, ".") &&
+				!strings.HasPrefix(text, ",") &&
+				!strings.HasPrefix(text, ";") &&
+				!strings.HasPrefix(text, ":")
 		}
 	}
 

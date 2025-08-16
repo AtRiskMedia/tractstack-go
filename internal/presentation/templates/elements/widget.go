@@ -49,11 +49,11 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 	// Dispatch to specific widget renderers exactly like Widget.astro switch pattern
 	switch hook.Hook {
 	case "youtube":
-		return wr.renderYouTube(nodeID, classNames, hook)
+		return wr.renderYouTube(classNames, hook)
 	case "bunny":
-		return wr.renderBunny(nodeID, classNames, hook)
+		return wr.renderBunny(classNames, hook)
 	case "signup":
-		return wr.renderSignUp(nodeID, classNames, hook)
+		return wr.renderSignUp(classNames, hook)
 	case "belief":
 		// Fixed: Use pre-resolved widget context instead of direct cache calls
 		return templates.RenderBelief(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
@@ -64,7 +64,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 		// Fixed: Use pre-resolved widget context instead of direct cache calls
 		return templates.RenderToggle(wr.ctx, classNames, *hook.Value1, *hook.Value2)
 	case "resource":
-		return wr.renderResource(nodeID, classNames, hook)
+		return wr.renderResource(classNames, hook)
 	default:
 		data := widgetData{ClassNames: classNames, Hook: hook.Hook}
 		var buf bytes.Buffer
@@ -78,7 +78,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 }
 
 // renderYouTube matches Widget.astro youtube condition exactly
-func (wr *WidgetRenderer) renderYouTube(nodeID, classNames string, hook *rendering.CodeHook) string {
+func (wr *WidgetRenderer) renderYouTube(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
 		data := widgetData{ClassNames: classNames, Value1: *hook.Value1, Value2: *hook.Value2}
 		var buf bytes.Buffer
@@ -93,7 +93,7 @@ func (wr *WidgetRenderer) renderYouTube(nodeID, classNames string, hook *renderi
 }
 
 // renderBunny matches Widget.astro bunny condition exactly
-func (wr *WidgetRenderer) renderBunny(nodeID, classNames string, hook *rendering.CodeHook) string {
+func (wr *WidgetRenderer) renderBunny(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
 		data := widgetData{ClassNames: classNames, Value1: *hook.Value1, Value2: *hook.Value2}
 		var buf bytes.Buffer
@@ -108,7 +108,7 @@ func (wr *WidgetRenderer) renderBunny(nodeID, classNames string, hook *rendering
 }
 
 // renderSignUp matches Widget.astro signup condition exactly
-func (wr *WidgetRenderer) renderSignUp(nodeID, classNames string, hook *rendering.CodeHook) string {
+func (wr *WidgetRenderer) renderSignUp(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && *hook.Value1 != "" {
 		persona := *hook.Value1
 		prompt := "Keep in touch!"
@@ -135,7 +135,7 @@ func (wr *WidgetRenderer) renderSignUp(nodeID, classNames string, hook *renderin
 }
 
 // renderResource matches Widget.astro resource condition exactly
-func (wr *WidgetRenderer) renderResource(nodeID, classNames string, hook *rendering.CodeHook) string {
+func (wr *WidgetRenderer) renderResource(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && *hook.Value1 != "" {
 		value2 := ""
 		if hook.Value2 != nil {

@@ -103,6 +103,16 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.ParentCSS = cssStrings
 	}
 
+	// Handle buttonPayload for action buttons
+	if buttonPayload, ok := nodeMap["buttonPayload"].(map[string]any); ok {
+		if callbackPayload, ok := buttonPayload["callbackPayload"].(string); ok && callbackPayload != "" {
+			if nodeData.CustomData == nil {
+				nodeData.CustomData = make(map[string]any)
+			}
+			nodeData.CustomData["callbackPayload"] = callbackPayload
+		}
+	}
+
 	// Handle image-related fields
 	if src, ok := nodeMap["src"].(string); ok {
 		nodeData.ImageURL = &src

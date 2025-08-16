@@ -66,38 +66,36 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 			}
 
 		case "Pane":
-			if event.Verb == "READ" || event.Verb == "GLOSSED" || event.Verb == "CLICKED" {
-				s.logger.Analytics().Debug("✅ Pane Event Received",
-					"paneId", event.ID,
-					"verb", event.Verb,
-					"durationMs", event.Object,
-					"sessionId", sessionID,
-					"tenantId", tenantCtx.TenantID,
-				)
+			s.logger.Analytics().Debug("✅ Pane Event Received",
+				"paneId", event.ID,
+				"verb", event.Verb,
+				"durationMs", event.Object,
+				"sessionId", sessionID,
+				"tenantId", tenantCtx.TenantID,
+			)
 
-				sessionData, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
-				if !exists {
-					s.logger.Analytics().Warn("Could not find session to process Pane event", "sessionId", sessionID)
-					continue
-				}
+			sessionData, exists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
+			if !exists {
+				s.logger.Analytics().Warn("Could not find session to process Pane event", "sessionId", sessionID)
+				continue
+			}
 
-				durationMs, _ := strconv.Atoi(event.Object)
+			durationMs, _ := strconv.Atoi(event.Object)
 
-				actionEvent := &analytics.ActionEvent{
-					ObjectID:      event.ID,
-					ObjectType:    event.Type,
-					Verb:          event.Verb,
-					FingerprintID: sessionData.FingerprintID,
-					VisitID:       sessionData.VisitID,
-					Duration:      durationMs,
-					CreatedAt:     time.Now().UTC(),
-				}
+			actionEvent := &analytics.ActionEvent{
+				ObjectID:      event.ID,
+				ObjectType:    event.Type,
+				Verb:          event.Verb,
+				FingerprintID: sessionData.FingerprintID,
+				VisitID:       sessionData.VisitID,
+				Duration:      durationMs,
+				CreatedAt:     time.Now().UTC(),
+			}
 
-				eventRepo := tenantCtx.EventRepo()
-				if err := eventRepo.StoreActionEvent(actionEvent); err != nil {
-					s.logger.Database().Error("Failed to store Pane action event",
-						"error", err.Error(), "tenantId", tenantCtx.TenantID, "paneId", event.ID)
-				}
+			eventRepo := tenantCtx.EventRepo()
+			if err := eventRepo.StoreActionEvent(actionEvent); err != nil {
+				s.logger.Database().Error("Failed to store Pane action event",
+					"error", err.Error(), "tenantId", tenantCtx.TenantID, "paneId", event.ID)
 			}
 
 		case "StoryFragment":
