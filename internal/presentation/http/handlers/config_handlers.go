@@ -62,7 +62,9 @@ func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetBrandConfig request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 	h.logger.System().Info("Get brand config request completed", "duration", time.Since(start))
 
-	c.JSON(http.StatusOK, tenantCtx.Config.BrandConfig)
+	brandConfig := *tenantCtx.Config.BrandConfig
+	brandConfig.HasAAI = tenantCtx.Config.AAIAPIKey != ""
+	c.JSON(http.StatusOK, brandConfig)
 }
 
 // UpdateBrandConfig handles PUT /api/v1/config/brand
