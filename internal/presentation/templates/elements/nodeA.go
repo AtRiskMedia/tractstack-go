@@ -9,18 +9,19 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 )
 
-// nodeATmpl is a pre-parsed and secure template for the opening <a> tag.
-// It uses Go's html/template to prevent XSS by automatically escaping the
-// href, target, and class attributes.
+// nodeATmpl is a pre-parsed and secure template for the opening <a> tag with HTMX attributes.
+// Follows the exact pattern from unset-button.go and belief widgets
 var nodeATmpl = template.Must(template.New("nodeA").Parse(
-	`<a href="{{.Href}}"{{if .Target}} target="{{.Target}}"{{end}}{{if .Class}} class="{{.Class}}"{{end}}>`,
+	`<a href="{{.Href}}"{{if .Target}} target="{{.Target}}"{{end}}{{if .Class}} class="{{.Class}}"{{end}}{{if .CallbackPayload}} hx-post="/api/v1/state" hx-trigger="mousedown" hx-swap="none" hx-vals='{"beliefId":"{{.PaneID}}","beliefType":"Pane","beliefValue":"CLICKED","beliefObject":"{{.CallbackPayload}}"}'{{end}}>`,
 ))
 
 // nodeAData holds the data for the nodeA template.
 type nodeAData struct {
-	Href   string
-	Target string
-	Class  string
+	Href            string
+	Target          string
+	Class           string
+	CallbackPayload string
+	PaneID          string
 }
 
 // NodeARenderer handles NodeA.astro rendering logic
@@ -37,7 +38,7 @@ func NewNodeARenderer(ctx *rendering.RenderContext, nodeRenderer NodeRenderer) *
 	}
 }
 
-// Render implements the EXACT NodeA.astro rendering logic with whitespace-nowrap wrapping
+// Render implements the EXACT NodeA.astro rendering logic with HTMX CLICKED event support
 func (nar *NodeARenderer) Render(nodeID string) string {
 	nodeData := nar.getNodeData(nodeID)
 	if nodeData == nil {
@@ -60,8 +61,21 @@ func (nar *NodeARenderer) Render(nodeID string) string {
 		data.Class = *nodeData.ElementCSS
 	}
 
+	// Extract callback payload from CustomData for action links
+	if nodeData.CustomData != nil {
+		if callbackPayload, exists := nodeData.CustomData["callbackPayload"]; exists {
+			if payloadStr, ok := callbackPayload.(string); ok && payloadStr != "" {
+				data.CallbackPayload = payloadStr
+			}
+		}
+	}
+
+	// Get pane ID from context for action links
+	if nar.ctx.ContainingPaneID != "" {
+		data.PaneID = nar.ctx.ContainingPaneID
+	}
+
 	// Use the pre-parsed template to safely render the opening <a> tag.
-	// This replaces the three insecure fmt.Sprintf() calls.
 	err := nodeATmpl.Execute(&html, data)
 	if err != nil {
 		log.Printf("ERROR: Failed to execute nodeA template for nodeID %s: %v", nodeID, err)
