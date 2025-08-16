@@ -63,6 +63,7 @@ type BrandConfig struct {
 	OGLogoBase64       string                `json:"OGLOGO_BASE64,omitempty"`
 	FaviconBase64      string                `json:"FAVICON_BASE64,omitempty"`
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
+	HasAAI             bool                  `json:"HAS_AAI"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go

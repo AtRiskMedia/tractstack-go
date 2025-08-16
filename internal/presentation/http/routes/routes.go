@@ -49,6 +49,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
+	aaiHandlers := handlers.NewAAIHandlers(container.Logger, container.PerfTracker)
 
 	sysopAPI := r.Group("/api/sysop")
 	{
@@ -142,6 +143,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		admin.Use(authHandlers.AuthMiddleware())
 		{
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
+			api.POST("/aai/askLemur", authHandlers.AuthMiddleware(), aaiHandlers.PostAskLemur)
 		}
 
 		// Fragment rendering endpoints
