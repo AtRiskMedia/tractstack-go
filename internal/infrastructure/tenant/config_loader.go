@@ -65,6 +65,20 @@ func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config
 	}
 	tenantConfig.BrandConfig = brandConfig
 
+	// Ensure tailwindWhitelist.json exists
+	whitelistPath := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "tailwindWhitelist.json")
+	if _, err := os.Stat(whitelistPath); os.IsNotExist(err) {
+		emptyWhitelist := map[string][]string{"safelist": {}}
+		whitelistData, err := json.MarshalIndent(emptyWhitelist, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal empty tailwind whitelist: %w", err)
+		}
+
+		if err := os.WriteFile(whitelistPath, whitelistData, 0644); err != nil {
+			return nil, fmt.Errorf("failed to create tailwind whitelist file: %w", err)
+		}
+	}
+
 	return &tenantConfig, nil
 }
 
