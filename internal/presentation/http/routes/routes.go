@@ -50,6 +50,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	sysopHandlers := handlers.NewSysOpHandlers(container)
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
 	aaiHandlers := handlers.NewAAIHandlers(container.Logger, container.PerfTracker)
+	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 
 	sysopAPI := r.Group("/api/sysop")
 	{
@@ -97,6 +98,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			configGroup.PUT("/brand", configHandlers.UpdateBrandConfig)
 			configGroup.GET("/advanced", configHandlers.GetAdvancedConfig)
 			configGroup.PUT("/advanced", authHandlers.AdminOnlyMiddleware(), configHandlers.UpdateAdvancedConfig)
+		}
+
+		// Tailwind
+		tailwindGroup := api.Group("/tailwind")
+		tailwindGroup.Use(authHandlers.AuthMiddleware())
+		{
+			tailwindGroup.POST("/classes", tailwindHandlers.GetTailwindClasses)
+			tailwindGroup.POST("/update", tailwindHandlers.UpdateTailwindCSS)
 		}
 
 		// Authentication and system routes
