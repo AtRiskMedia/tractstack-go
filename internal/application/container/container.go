@@ -55,6 +55,7 @@ type Container struct {
 	EventProcessingService *services.EventProcessingService
 	DBService              *services.DBService
 	ConfigService          *services.ConfigService
+	TailwindService        *services.TailwindService
 	MultiTenantService     *services.MultiTenantService
 	LogBroadcaster         *logging.LogBroadcaster
 	Broadcaster            messaging.Broadcaster
@@ -125,6 +126,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
+
+	// Create content services that TailwindService will depend on
+	paneService := services.NewPaneService(logger, perfTracker, contentMapService)
+
+	// Create TailwindService after its dependencies
+	tailwindService := services.NewTailwindService(paneService, configService, logger, perfTracker)
+
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
 	logBroadcaster := logging.GetBroadcaster()
 	broadcaster := messaging.NewSSEBroadcaster(logger)
@@ -143,7 +151,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	return &Container{
 		// Content Services
 		MenuService:           services.NewMenuService(logger, perfTracker, contentMapService),
-		PaneService:           services.NewPaneService(logger, perfTracker, contentMapService),
+		PaneService:           paneService, // Use the variable created above
 		ResourceService:       services.NewResourceService(logger, perfTracker, contentMapService),
 		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService),
 		TractStackService:     services.NewTractStackService(logger, perfTracker, contentMapService),
@@ -175,6 +183,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		EventProcessingService: eventProcessingService,
 		DBService:              dbService,
 		ConfigService:          configService,
+		TailwindService:        tailwindService,
 		MultiTenantService:     multiTenantService,
 		LogBroadcaster:         logBroadcaster,
 		Broadcaster:            broadcaster,
