@@ -159,6 +159,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		fragments := api.Group("/fragments")
 		{
 			fragments.GET("/panes/:id", fragmentHandlers.GetPaneFragment)
+			fragments.GET("/panes/:id/static", fragmentHandlers.GetPaneFragmentStatic)
 			fragments.POST("/panes", fragmentHandlers.GetPaneFragmentBatch)
 			fragments.POST("/preview", fragmentHandlers.GeneratePreviewFromPayload)
 		}
@@ -185,6 +186,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
 			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)
 			nodes.POST("/panes/files/bulk", paneHandlers.BulkUpdateFilePaneRelationships)
+			nodes.GET("/panes/slug/:slug/full-payload", paneHandlers.GetContextPaneFullPayload)
 
 			// Resource endpoints
 			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)

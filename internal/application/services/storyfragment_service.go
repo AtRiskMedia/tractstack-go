@@ -253,6 +253,11 @@ func (s *StoryFragmentService) Create(tenantCtx *tenant.Context, sf *content.Sto
 		return fmt.Errorf("failed to create storyfragment %s: %w", sf.ID, err)
 	}
 
+	// Update pane relationships
+	if err := storyFragmentRepo.UpdatePaneRelationships(tenantCtx.TenantID, sf.ID, sf.PaneIDs); err != nil {
+		return fmt.Errorf("failed to update pane relationships for storyfragment %s: %w", sf.ID, err)
+	}
+
 	// Surgically add the new item to the item cache and the master ID list
 	tenantCtx.CacheManager.SetStoryFragment(tenantCtx.TenantID, sf)
 	tenantCtx.CacheManager.AddStoryFragmentID(tenantCtx.TenantID, sf.ID)
