@@ -234,6 +234,10 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.PUT("/files/:id", imageFileHandlers.UpdateFile)
 			nodes.DELETE("/files/:id", imageFileHandlers.DeleteFile)
 
+			// og images
+			nodes.POST("/images/og", authHandlers.AuthMiddleware(), imageFileHandlers.UploadOGImage)
+			nodes.DELETE("/images/og", authHandlers.AuthMiddleware(), imageFileHandlers.DeleteOGImage)
+
 			// Epinet endpoints
 			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
 			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)

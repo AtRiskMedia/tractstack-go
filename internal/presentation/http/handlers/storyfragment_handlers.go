@@ -4,10 +4,12 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/media"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -506,13 +508,14 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 	c.JSON(http.StatusOK, response)
 }
 
-// UpdateStoryFragmentComplete updates a storyfragment with complete payload including topics and description
+// UpdateStoryFragmentComplete updates a storyfragment with full payload
 func (h *StoryFragmentHandlers) UpdateStoryFragmentComplete(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	start := time.Now()
 	marker := h.perfTracker.StartOperation("update_storyfragment_complete_request", tenantCtx.TenantID)
 	defer marker.Complete()
-	h.logger.Content().Debug("Received update story fragment complete request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
+	h.logger.Content().Debug("Received update storyfragment complete request", "method", c.Request.Method, "path", c.Request.URL.Path)
+
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
@@ -524,25 +527,83 @@ func (h *StoryFragmentHandlers) UpdateStoryFragmentComplete(c *gin.Context) {
 		return
 	}
 
-	var payload content.StoryFragmentCompletePayload
-	if err := c.ShouldBindJSON(&payload); err != nil {
+	var storyFragment content.StoryFragmentNode
+	if err := c.ShouldBindJSON(&storyFragment); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
+	storyFragment.ID = storyFragmentID
 
-	payload.ID = storyFragmentID
+	// Get existing StoryFragment to compare socialImagePath for cleanup
+	existingFragment, err := h.storyFragmentService.GetByID(tenantCtx, storyFragmentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get existing storyfragment", "details": err.Error()})
+		return
+	}
 
-	if err := h.storyFragmentService.UpdateComplete(tenantCtx, &payload); err != nil {
+	// Auto-cleanup old OG image if socialImagePath changed
+	fmt.Printf("[DEBUG] Checking for OG image cleanup:\n")
+	fmt.Printf("[DEBUG] existingFragment != nil: %t\n", existingFragment != nil)
+	if existingFragment != nil {
+		fmt.Printf("[DEBUG] existingFragment.SocialImagePath != nil: %t\n", existingFragment.SocialImagePath != nil)
+		if existingFragment.SocialImagePath != nil {
+			fmt.Printf("[DEBUG] existingFragment.SocialImagePath: %s\n", *existingFragment.SocialImagePath)
+		}
+	}
+	fmt.Printf("[DEBUG] storyFragment.SocialImagePath != nil: %t\n", storyFragment.SocialImagePath != nil)
+	if storyFragment.SocialImagePath != nil {
+		fmt.Printf("[DEBUG] storyFragment.SocialImagePath: %s\n", *storyFragment.SocialImagePath)
+	}
+
+	shouldCleanup := false
+	if existingFragment != nil &&
+		existingFragment.SocialImagePath != nil &&
+		storyFragment.SocialImagePath != nil &&
+		*existingFragment.SocialImagePath != "" {
+
+		oldPath := *existingFragment.SocialImagePath
+		newPath := *storyFragment.SocialImagePath
+
+		// Normalize paths for comparison - extract just the filename part
+		oldFilename := filepath.Base(oldPath)
+		newFilename := filepath.Base(newPath)
+
+		fmt.Printf("[DEBUG] Path comparison: oldFilename='%s' vs newFilename='%s'\n", oldFilename, newFilename)
+
+		// Only cleanup if the actual filenames are different
+		shouldCleanup = oldFilename != newFilename
+
+		fmt.Printf("[DEBUG] Should cleanup: %t\n", shouldCleanup)
+	}
+
+	if shouldCleanup {
+		fmt.Printf("[DEBUG] CLEANUP TRIGGERED! oldPath: %s, newPath: %s\n", *existingFragment.SocialImagePath, *storyFragment.SocialImagePath)
+		h.logger.Content().Info("Cleaning up old OG image", "storyFragmentId", storyFragmentID, "oldPath", *existingFragment.SocialImagePath, "newPath", *storyFragment.SocialImagePath)
+
+		// Get tenant's media path and create ImageProcessor
+		mediaPath := filepath.Join("config", tenantCtx.TenantID, "media")
+		processor := media.NewImageProcessor(mediaPath)
+
+		// Delete old image and thumbnails (don't fail save if cleanup fails)
+		if err := processor.DeleteOGImageAndThumbnails(*existingFragment.SocialImagePath); err != nil {
+			h.logger.Content().Warn("Failed to cleanup old OG image", "error", err, "path", *existingFragment.SocialImagePath)
+		}
+	} else {
+		fmt.Printf("[DEBUG] No cleanup needed\n")
+	}
+
+	// Update the storyfragment
+	if err := h.storyFragmentService.Update(tenantCtx, &storyFragment); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.logger.Content().Info("Update story fragment complete request completed", "storyFragmentId", storyFragmentID, "title", payload.Title, "duration", time.Since(start))
+	h.logger.Content().Info("Update storyfragment complete request completed", "storyFragmentId", storyFragment.ID, "title", storyFragment.Title, "slug", storyFragment.Slug, "duration", time.Since(start))
 	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for UpdateStoryFragmentComplete request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", storyFragmentID)
+	h.logger.Perf().Info("Performance for UpdateStoryFragmentComplete request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", storyFragment.ID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "storyfragment updated successfully",
-		"storyFragmentId": storyFragmentID,
+		"storyFragmentId": storyFragment.ID,
 	})
 }
