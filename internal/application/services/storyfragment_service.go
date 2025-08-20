@@ -541,3 +541,78 @@ func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context
 	marker.SetSuccess(true)
 	return impressions, nil
 }
+
+// UpdateComplete updates a storyfragment with complete payload including topics and description
+func (s *StoryFragmentService) UpdateComplete(tenantCtx *tenant.Context, payload *content.StoryFragmentCompletePayload) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("update_storyfragment_complete", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if payload == nil {
+		return fmt.Errorf("payload cannot be nil")
+	}
+	if payload.ID == "" {
+		return fmt.Errorf("storyfragment ID cannot be empty")
+	}
+	if payload.Title == "" {
+		return fmt.Errorf("storyfragment title cannot be empty")
+	}
+	if payload.Slug == "" {
+		return fmt.Errorf("storyfragment slug cannot be empty")
+	}
+	if payload.TractStackID == "" {
+		return fmt.Errorf("tractstack ID cannot be empty")
+	}
+
+	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
+
+	// Verify storyfragment exists
+	existing, err := storyFragmentRepo.FindByID(tenantCtx.TenantID, payload.ID)
+	if err != nil {
+		return fmt.Errorf("failed to verify storyfragment %s exists: %w", payload.ID, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("storyfragment %s not found", payload.ID)
+	}
+
+	// Update base storyfragment first
+	err = storyFragmentRepo.Update(tenantCtx.TenantID, &payload.StoryFragmentNode)
+	if err != nil {
+		return fmt.Errorf("failed to update base storyfragment %s: %w", payload.ID, err)
+	}
+
+	// Update pane relationships
+	err = storyFragmentRepo.UpdatePaneRelationships(tenantCtx.TenantID, payload.ID, payload.PaneIDs)
+	if err != nil {
+		return fmt.Errorf("failed to update pane relationships for storyfragment %s: %w", payload.ID, err)
+	}
+
+	// Update topics if provided
+	if payload.Topics != nil {
+		err = storyFragmentRepo.UpdateTopics(tenantCtx.TenantID, payload.ID, payload.Topics)
+		if err != nil {
+			return fmt.Errorf("failed to update topics for storyfragment %s: %w", payload.ID, err)
+		}
+	}
+
+	// Update description if provided
+	if payload.Description != nil {
+		err = storyFragmentRepo.UpdateDescription(tenantCtx.TenantID, payload.ID, payload.Description)
+		if err != nil {
+			return fmt.Errorf("failed to update description for storyfragment %s: %w", payload.ID, err)
+		}
+	}
+
+	// Update cache and refresh content map
+	tenantCtx.CacheManager.SetStoryFragment(tenantCtx.TenantID, &payload.StoryFragmentNode)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after storyfragment complete update",
+			"error", err, "storyFragmentId", payload.ID, "tenantId", tenantCtx.TenantID)
+	}
+
+	s.logger.Content().Info("Successfully updated storyfragment complete", "tenantId", tenantCtx.TenantID, "storyfragmentId", payload.ID, "title", payload.Title, "slug", payload.Slug, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for UpdateStoryFragmentComplete", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", payload.ID)
+
+	return nil
+}

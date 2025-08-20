@@ -10,6 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
@@ -243,8 +244,12 @@ func (r *StoryFragmentRepository) loadFromDB(id string) (*content.StoryFragmentN
 		return nil, fmt.Errorf("failed to scan storyfragment: %w", err)
 	}
 
-	if created, err := time.Parse("2006-01-02 15:04:05", createdStr); err == nil {
-		sf.Created = created
+	sf.Created, err = time.Parse(time.RFC3339, createdStr)
+	if err != nil {
+		sf.Created, err = time.Parse("2006-01-02 15:04:05", createdStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created timestamp: %w", err)
+		}
 	}
 	if changed.Valid {
 		if changedTime, err := time.Parse("2006-01-02 15:04:05", changed.String); err == nil {
@@ -318,8 +323,12 @@ func (r *StoryFragmentRepository) loadMultipleFromDB(ids []string) ([]*content.S
 			return nil, fmt.Errorf("failed to scan storyfragment: %w", err)
 		}
 
-		if created, err := time.Parse("2006-01-02 15:04:05", createdStr); err == nil {
-			sf.Created = created
+		sf.Created, err = time.Parse(time.RFC3339, createdStr)
+		if err != nil {
+			sf.Created, err = time.Parse("2006-01-02 15:04:05", createdStr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse created timestamp: %w", err)
+			}
 		}
 		if changed.Valid {
 			if changedTime, err := time.Parse("2006-01-02 15:04:05", changed.String); err == nil {
@@ -488,4 +497,87 @@ func (r *StoryFragmentRepository) getAllPaneRelationships(storyFragmentIDs []str
 		r.logger.LogSlowQuery(query, duration, "system")
 	}
 	return relationships, rows.Err()
+}
+
+// UpdatePaneRelationships updates the storyfragment_panes relationships
+func (r *StoryFragmentRepository) UpdatePaneRelationships(tenantID, storyFragmentID string, paneIDs []string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete existing relationships
+	_, err = tx.Exec("DELETE FROM storyfragment_panes WHERE storyfragment_id = ?", storyFragmentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing pane relationships: %w", err)
+	}
+
+	// Insert new relationships with weight
+	for i, paneID := range paneIDs {
+		_, err = tx.Exec("INSERT INTO storyfragment_panes (id, storyfragment_id, pane_id, weight) VALUES (?, ?, ?, ?)",
+			security.GenerateULID(), storyFragmentID, paneID, i)
+		if err != nil {
+			return fmt.Errorf("failed to insert pane relationship: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// UpdateTopics updates the topics for a storyfragment
+func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string, topics []string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete existing topic relationships
+	_, err = tx.Exec("DELETE FROM storyfragment_has_topic WHERE storyfragment_id = ?", storyFragmentID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing topic relationships: %w", err)
+	}
+
+	// Process each topic
+	for _, topicTitle := range topics {
+		// Insert topic if it doesn't exist
+		_, err = tx.Exec("INSERT OR IGNORE INTO storyfragment_topics (title) VALUES (?)", topicTitle)
+		if err != nil {
+			return fmt.Errorf("failed to insert topic: %w", err)
+		}
+
+		// Get topic ID
+		var topicID int64
+		err = tx.QueryRow("SELECT id FROM storyfragment_topics WHERE title = ?", topicTitle).Scan(&topicID)
+		if err != nil {
+			return fmt.Errorf("failed to get topic ID: %w", err)
+		}
+
+		// Create relationship
+		_, err = tx.Exec("INSERT INTO storyfragment_has_topic (storyfragment_id, topic_id) VALUES (?, ?)",
+			storyFragmentID, topicID)
+		if err != nil {
+			return fmt.Errorf("failed to create topic relationship: %w", err)
+		}
+	}
+
+	return tx.Commit()
+}
+
+// UpdateDescription updates the description for a storyfragment
+func (r *StoryFragmentRepository) UpdateDescription(tenantID, storyFragmentID string, description *string) error {
+	if description == nil {
+		// Delete existing description
+		_, err := r.db.Exec("DELETE FROM storyfragment_details WHERE storyfragment_id = ?", storyFragmentID)
+		return err
+	}
+
+	// Upsert description
+	_, err := r.db.Exec(`INSERT INTO storyfragment_details (storyfragment_id, description) 
+		VALUES (?, ?) 
+		ON CONFLICT(storyfragment_id) DO UPDATE SET description = excluded.description`,
+		storyFragmentID, *description)
+
+	return err
 }

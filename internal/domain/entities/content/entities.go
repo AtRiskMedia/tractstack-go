@@ -28,6 +28,12 @@ type StoryFragmentNode struct {
 	Changed          *time.Time        `json:"changed,omitempty"`
 }
 
+type StoryFragmentCompletePayload struct {
+	StoryFragmentNode
+	Topics      []string `json:"topics,omitempty"`
+	Description *string  `json:"description,omitempty"`
+}
+
 type PaneNode struct {
 	ID              string              `json:"id"`
 	Title           string              `json:"title"`

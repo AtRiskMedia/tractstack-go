@@ -505,3 +505,44 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 
 	c.JSON(http.StatusOK, response)
 }
+
+// UpdateStoryFragmentComplete updates a storyfragment with complete payload including topics and description
+func (h *StoryFragmentHandlers) UpdateStoryFragmentComplete(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("update_storyfragment_complete_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received update story fragment complete request", "method", c.Request.Method, "path", c.Request.URL.Path, "storyFragmentId", c.Param("id"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	storyFragmentID := c.Param("id")
+	if storyFragmentID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "storyfragment ID is required"})
+		return
+	}
+
+	var payload content.StoryFragmentCompletePayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	payload.ID = storyFragmentID
+
+	if err := h.storyFragmentService.UpdateComplete(tenantCtx, &payload); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Update story fragment complete request completed", "storyFragmentId", storyFragmentID, "title", payload.Title, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateStoryFragmentComplete request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", storyFragmentID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":         "storyfragment updated successfully",
+		"storyFragmentId": storyFragmentID,
+	})
+}
