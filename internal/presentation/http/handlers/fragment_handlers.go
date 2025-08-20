@@ -186,3 +186,43 @@ func (h *FragmentHandlers) GeneratePreviewFromPayload(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+// GetPaneFragmentStatic handles GET /api/v1/fragments/panes/:id/static
+// Cache-first, non-personalized fragment generation for context panes
+func (h *FragmentHandlers) GetPaneFragmentStatic(c *gin.Context) {
+	start := time.Now()
+	h.logger.Content().Debug("Received get static pane fragment request", "method", c.Request.Method, "path", c.Request.URL.Path)
+
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("get_pane_fragment_static_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	// Extract path parameter
+	paneID := c.Param("id")
+	if paneID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Pane ID is required"})
+		return
+	}
+
+	// Force static generation - no session/storyfragment context
+	html, err := h.fragmentService.GenerateFragment(tenantCtx, paneID, "", "")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Get static fragment request completed", "duration", time.Since(start))
+
+	c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetPaneFragmentStatic request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}

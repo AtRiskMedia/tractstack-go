@@ -52,13 +52,33 @@ func (s *FragmentService) GenerateFragment(
 	tenantCtx *tenant.Context,
 	paneID, sessionID, storyfragmentID string,
 ) (string, error) {
-	s.logger.Content().Debug("🔍 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID)
+	s.logger.Content().Debug("🎯 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
 
 	// Step 1: Load the essential static data for the pane.
 	paneRepo := tenantCtx.PaneRepo()
 	pane, err := paneRepo.FindByID(tenantCtx.TenantID, paneID)
 	if err != nil || pane == nil {
 		return "", fmt.Errorf("pane %s not found or failed to load: %w", paneID, err)
+	}
+
+	// Early exit for context panes - they never need belief/personalization logic
+	if pane.IsContextPane {
+		s.logger.Content().Debug("Context pane detected, using static generation", "paneId", paneID)
+		htmlContent, err := s.getCachedOrGenerateHTML(tenantCtx, pane)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate context pane HTML: %w", err)
+		}
+		return htmlContent, nil
+	}
+
+	// For non-context panes, only proceed with belief logic if we have a valid storyfragmentID
+	if storyfragmentID == "" {
+		s.logger.Content().Debug("No storyfragmentID provided, using static generation", "paneId", paneID)
+		htmlContent, err := s.getCachedOrGenerateHTML(tenantCtx, pane)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate static pane HTML: %w", err)
+		}
+		return htmlContent, nil
 	}
 
 	cacheManager := tenantCtx.CacheManager
@@ -69,7 +89,10 @@ func (s *FragmentService) GenerateFragment(
 	hasBeliefs := len(userBeliefs) > 0
 
 	// Step 3: Determine if this specific pane has ANY belief-related logic.
-	_, hasPaneBeliefs := beliefRegistry.PaneBeliefPayloads[paneID]
+	var hasPaneBeliefs bool
+	if hasRegistry && beliefRegistry != nil {
+		_, hasPaneBeliefs = beliefRegistry.PaneBeliefPayloads[paneID]
+	}
 
 	var htmlContent string
 
@@ -91,7 +114,7 @@ func (s *FragmentService) GenerateFragment(
 	}
 
 	// Finally, apply the visibility wrapper (using the already-corrected logic).
-	if hasRegistry {
+	if hasRegistry && beliefRegistry != nil {
 		htmlContent = s.applyBeliefVisibility(tenantCtx, htmlContent, paneID, sessionID, storyfragmentID, beliefRegistry)
 	}
 

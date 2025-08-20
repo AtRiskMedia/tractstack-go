@@ -395,3 +395,80 @@ func (h *PaneHandlers) BulkUpdateFilePaneRelationships(c *gin.Context) {
 		"paneCount": len(req.Relationships),
 	})
 }
+
+// GetContextPaneFullPayload returns a context pane with full editorial payload
+func (h *PaneHandlers) GetContextPaneFullPayload(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("get_context_pane_full_payload_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received get context pane full payload request", "method", c.Request.Method, "path", c.Request.URL.Path, "slug", c.Param("slug"))
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	slug := c.Param("slug")
+	if slug == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "context pane slug is required"})
+		return
+	}
+
+	// Get the context pane by slug
+	paneRepo := tenantCtx.PaneRepo()
+	contextPane, err := paneRepo.FindBySlug(tenantCtx.TenantID, slug)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if contextPane == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "context pane not found"})
+		return
+	}
+
+	// Verify this is actually a context pane
+	if !contextPane.IsContextPane {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "pane is not a context pane"})
+		return
+	}
+
+	// === EXTRACT CHILD NODES (same logic as storyfragment full-payload) ===
+	var allChildNodes []any
+
+	// Extract child nodes from the context pane's OptionsPayload
+	if contextPane.OptionsPayload != nil {
+		if nodes, exists := contextPane.OptionsPayload["nodes"]; exists {
+			if nodesArray, ok := nodes.([]any); ok {
+				allChildNodes = append(allChildNodes, nodesArray...)
+			}
+		}
+	}
+
+	// Create cleaned pane (without embedded nodes)
+	cleanedPane := *contextPane
+	cleanedPane.OptionsPayload = make(map[string]any)
+
+	// Copy all fields except "nodes"
+	if contextPane.OptionsPayload != nil {
+		for k, v := range contextPane.OptionsPayload {
+			if k != "nodes" {
+				cleanedPane.OptionsPayload[k] = v
+			}
+		}
+	}
+
+	// === BUILD RESPONSE (same structure as storyfragment full-payload) ===
+	response := gin.H{
+		"storyfragmentNodes": []*content.StoryFragmentNode{}, // empty for context panes
+		"paneNodes":          []*content.PaneNode{&cleanedPane},
+		"childNodes":         allChildNodes,
+		"tractstackNodes":    []*content.TractStackNode{}, // empty for context panes
+	}
+
+	h.logger.Content().Info("Get context pane full payload request completed", "slug", slug, "found", contextPane != nil, "childNodeCount", len(allChildNodes), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GetContextPaneFullPayload request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
+
+	c.JSON(http.StatusOK, response)
+}
