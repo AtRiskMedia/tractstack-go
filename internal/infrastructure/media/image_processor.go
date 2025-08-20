@@ -379,3 +379,160 @@ func processBinaryImage(data, filename, targetDir string) (string, error) {
 
 	return fullPath, nil
 }
+
+// ProcessContentImageWithSizes handles content image processing with responsive sizes
+// Creates responsive WebP versions for raster images or saves SVG as-is
+// Returns main src path and srcSet string (srcSet is nil for SVGs)
+func (p *ImageProcessor) ProcessContentImageWithSizes(data, fileID string) (string, *string, error) {
+	fmt.Printf("[DEBUG] ProcessContentImageWithSizes: fileID=%s, basePath=%s\n", fileID, p.basePath)
+
+	if data == "" {
+		return "", nil, fmt.Errorf("empty base64 data")
+	}
+
+	// Extract file extension from MIME type
+	ext := extractExtension(data)
+	if ext == "" {
+		return "", nil, fmt.Errorf("unsupported image format")
+	}
+	fmt.Printf("[DEBUG] Detected extension: %s\n", ext)
+
+	// Get current month path for organization
+	monthPath := getMonthPath()
+
+	// Create month-based directory
+	monthDir := filepath.Join(p.basePath, "images", monthPath)
+	if err := os.MkdirAll(monthDir, 0755); err != nil {
+		fmt.Printf("[ERROR] Failed to create month directory %s: %v\n", monthDir, err)
+		return "", nil, fmt.Errorf("failed to create month directory: %w", err)
+	}
+	fmt.Printf("[DEBUG] Month directory created: %s\n", monthDir)
+
+	// Handle SVG files (no resizing needed)
+	if ext == "svg" {
+		filename := fmt.Sprintf("%s.%s", fileID, ext)
+		_, err := processSVG(data, filename, monthDir)
+		if err != nil {
+			fmt.Printf("[ERROR] Failed to save SVG: %v\n", err)
+			return "", nil, fmt.Errorf("failed to save SVG: %w", err)
+		}
+
+		relativePath := fmt.Sprintf("/media/images/%s/%s", monthPath, filename)
+		fmt.Printf("[DEBUG] SVG saved successfully: %s\n", relativePath)
+		return relativePath, nil, nil
+	}
+
+	// Handle raster images (PNG, JPG, WebP) - create responsive versions
+	filename := fmt.Sprintf("%s.%s", fileID, ext)
+	originalPath, err := processBinaryImage(data, filename, monthDir)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to save original image: %v\n", err)
+		return "", nil, fmt.Errorf("failed to save original image: %w", err)
+	}
+	fmt.Printf("[DEBUG] Original image saved to: %s\n", originalPath)
+
+	// Generate responsive WebP versions
+	responsivePaths, err := p.generateContentImageSizes(originalPath, fileID, monthDir)
+	if err != nil {
+		// If responsive generation fails, clean up original and return error
+		fmt.Printf("[ERROR] Responsive image generation failed, cleaning up original: %s\n", originalPath)
+		os.Remove(originalPath)
+		return "", nil, fmt.Errorf("failed to generate responsive images: %w", err)
+	}
+
+	// Build srcSet string and determine main src
+	srcSet := p.buildContentImageSrcSet(responsivePaths, monthPath)
+	mainSrc := fmt.Sprintf("/media/images/%s/%s_1920px.webp", monthPath, fileID)
+
+	fmt.Printf("[DEBUG] Success! Main src: %s, SrcSet: %s\n", mainSrc, srcSet)
+	return mainSrc, &srcSet, nil
+}
+
+// generateContentImageSizes creates 1920px, 1080px, and 600px WebP versions
+func (p *ImageProcessor) generateContentImageSizes(originalPath, fileID, monthDir string) ([]string, error) {
+	fmt.Printf("[DEBUG] generateContentImageSizes: originalPath=%s, fileID=%s, monthDir=%s\n",
+		originalPath, fileID, monthDir)
+
+	// Open and decode the original image
+	originalFile, err := os.Open(originalPath)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to open original file: %v\n", err)
+		return nil, fmt.Errorf("failed to open original file: %w", err)
+	}
+	defer originalFile.Close()
+
+	// Decode the image
+	img, err := imaging.Decode(originalFile)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to decode image: %v\n", err)
+		return nil, fmt.Errorf("failed to decode image: %w", err)
+	}
+
+	fmt.Printf("[DEBUG] Original image decoded successfully, bounds: %v\n", img.Bounds())
+
+	// Content image responsive sizes (different from OG thumbnail sizes)
+	sizes := []int{1920, 1080, 600}
+	responsivePaths := make([]string, len(sizes))
+
+	fmt.Printf("[DEBUG] Creating responsive images with fileID: %s\n", fileID)
+
+	for i, width := range sizes {
+		fmt.Printf("[DEBUG] Processing responsive image %d/%d: %dpx width\n", i+1, len(sizes), width)
+
+		// Resize image maintaining aspect ratio
+		resized := imaging.Resize(img, width, 0, imaging.Lanczos)
+		fmt.Printf("[DEBUG] Resized image bounds: %v\n", resized.Bounds())
+
+		// Create WebP filename with content image naming pattern
+		webpFilename := fmt.Sprintf("%s_%dpx.webp", fileID, width)
+		webpPath := filepath.Join(monthDir, webpFilename)
+		fmt.Printf("[DEBUG] Saving responsive image to: %s\n", webpPath)
+
+		// Save as WebP using webp library
+		err := webp.Save(webpPath, resized, &webp.Options{Quality: 85})
+		if err != nil {
+			fmt.Printf("[ERROR] Failed to save WebP responsive image %s: %v\n", webpFilename, err)
+			// Clean up any previously created responsive images
+			for j := range i {
+				fmt.Printf("[DEBUG] Cleaning up responsive image: %s\n", responsivePaths[j])
+				os.Remove(responsivePaths[j])
+			}
+			return nil, fmt.Errorf("failed to save WebP responsive image %s: %w", webpFilename, err)
+		}
+
+		responsivePaths[i] = webpPath
+		fmt.Printf("[DEBUG] Successfully saved responsive image: %s\n", webpPath)
+	}
+
+	// Remove original image after successful WebP generation
+	if err := os.Remove(originalPath); err != nil {
+		fmt.Printf("[WARN] Failed to remove original image: %v\n", err)
+		// Don't fail the entire operation for cleanup issues
+	} else {
+		fmt.Printf("[DEBUG] Original image removed: %s\n", originalPath)
+	}
+
+	fmt.Printf("[DEBUG] All responsive images created successfully: %v\n", responsivePaths)
+	return responsivePaths, nil
+}
+
+// buildContentImageSrcSet generates the srcSet string for responsive images
+func (p *ImageProcessor) buildContentImageSrcSet(responsivePaths []string, monthPath string) string {
+	sizes := []int{1920, 1080, 600}
+	srcSetParts := make([]string, len(sizes))
+
+	for i, width := range sizes {
+		// Extract filename from full path
+		filename := filepath.Base(responsivePaths[i])
+		relativePath := fmt.Sprintf("/media/images/%s/%s", monthPath, filename)
+		srcSetParts[i] = fmt.Sprintf("%s %dw", relativePath, width)
+	}
+
+	return strings.Join(srcSetParts, ", ")
+}
+
+// getMonthPath returns current month in YYYY-MM format for directory organization
+func getMonthPath() string {
+	now := time.Now()
+	return now.Format("2006-01")
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/oklog/ulid/v2"
 )
 
 // OGImageUploadRequest represents the request body for OG image uploads
@@ -152,7 +153,7 @@ func (h *ImageFileHandlers) GetFileByID(c *gin.Context) {
 	c.JSON(http.StatusOK, fileNode)
 }
 
-// CreateFile creates a new imagefile
+// CreateFile creates a new imagefile with image processing
 func (h *ImageFileHandlers) CreateFile(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	start := time.Now()
@@ -164,25 +165,77 @@ func (h *ImageFileHandlers) CreateFile(c *gin.Context) {
 		return
 	}
 
-	var imageFile content.ImageFileNode
-	if err := c.ShouldBindJSON(&imageFile); err != nil {
+	// Parse request to extract base64Data
+	var requestData struct {
+		Base64Data string `json:"base64Data" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&requestData); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
 	}
 
+	// Validate base64 data format
+	if !strings.Contains(requestData.Base64Data, "data:image/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid base64 image data"})
+		return
+	}
+
+	// Generate ULID for fileId
+	fileID := ulid.Make().String()
+
+	// Get tenant's media path and create ImageProcessor
+	mediaPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.TenantID, "media")
+	processor := media.NewImageProcessor(mediaPath)
+
+	// Process the image and generate responsive versions
+	src, srcSet, err := processor.ProcessContentImageWithSizes(requestData.Base64Data, fileID)
+	if err != nil {
+		h.logger.Content().Error("Failed to process content image", "error", err, "fileID", fileID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process image", "details": err.Error()})
+		return
+	}
+
+	// Extract filename from src path for database record
+	filename := filepath.Base(src)
+
+	// Create ImageFileNode with processed data
+	imageFile := content.ImageFileNode{
+		ID:             fileID,
+		NodeType:       "File",
+		Filename:       filename,
+		AltDescription: "Image requiring description", // Default alt text
+		Src:            src,
+		SrcSet:         srcSet,
+	}
+
+	// Save to database
 	if err := h.imageFileService.Create(tenantCtx, &imageFile); err != nil {
+		// If database save fails, attempt to clean up created files
+		h.logger.Content().Warn("Database save failed, attempting file cleanup", "fileID", fileID, "error", err)
+		// Note: Could add cleanup logic here if needed
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	h.logger.Content().Info("Create imagefile request completed", "fileId", imageFile.ID, "filename", imageFile.Filename, "duration", time.Since(start))
+	// Invalidate relevant caches
+	tenantCtx.CacheManager.InvalidateFullContentMap(tenantCtx.TenantID)
+
+	h.logger.Content().Info("Create imagefile request completed", "fileId", imageFile.ID, "filename", imageFile.Filename, "src", src, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for CreateFile request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "fileId", imageFile.ID)
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "imagefile created successfully",
-		"fileId":  imageFile.ID,
-	})
+	// Return complete file data for frontend
+	response := gin.H{
+		"fileId": imageFile.ID,
+		"src":    imageFile.Src,
+	}
+
+	// Only include srcSet if it was generated (not for SVGs)
+	if imageFile.SrcSet != nil {
+		response["srcSet"] = *imageFile.SrcSet
+	}
+
+	c.JSON(http.StatusCreated, response)
 }
 
 // UpdateFile updates an existing imagefile

@@ -111,6 +111,7 @@ type ImageFileNode struct {
 	AltDescription string  `json:"altDescription"`
 	Src            string  `json:"src"`
 	SrcSet         *string `json:"srcSet,omitempty"`
+	Base64Data     *string `json:"base64Data,omitempty"`
 }
 
 type ImpressionNode struct {
