@@ -326,3 +326,47 @@ func (s *PaneService) GetPaneTemplate(tenantCtx *tenant.Context, paneID string) 
 
 	return payload, nil
 }
+
+// BulkUpdateFilePaneRelationships updates file-pane relationships for multiple panes
+func (s *PaneService) BulkUpdateFilePaneRelationships(tenantCtx *tenant.Context, relationships map[string][]string) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("bulk_update_file_pane_relationships", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if len(relationships) == 0 {
+		return fmt.Errorf("relationships map cannot be empty")
+	}
+
+	// Validate all pane IDs exist
+	paneRepo := tenantCtx.PaneRepo()
+	for paneID := range relationships {
+		if paneID == "" {
+			return fmt.Errorf("pane ID cannot be empty")
+		}
+
+		// Verify pane exists
+		existing, err := paneRepo.FindByID(tenantCtx.TenantID, paneID)
+		if err != nil {
+			return fmt.Errorf("failed to verify pane %s exists: %w", paneID, err)
+		}
+		if existing == nil {
+			return fmt.Errorf("pane %s not found", paneID)
+		}
+	}
+
+	// Update relationships
+	if err := paneRepo.UpdateFilePaneRelationships(tenantCtx.TenantID, relationships); err != nil {
+		return fmt.Errorf("failed to bulk update file-pane relationships: %w", err)
+	}
+
+	// Invalidate relevant caches
+	for paneID := range relationships {
+		tenantCtx.CacheManager.InvalidatePane(tenantCtx.TenantID, paneID)
+	}
+
+	s.logger.Content().Info("Successfully bulk updated file-pane relationships", "tenantId", tenantCtx.TenantID, "paneCount", len(relationships), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for BulkUpdateFilePaneRelationships", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(relationships))
+
+	return nil
+}
