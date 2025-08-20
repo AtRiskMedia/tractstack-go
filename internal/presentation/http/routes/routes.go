@@ -206,6 +206,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
 			nodes.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
 			nodes.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
+			nodes.PUT("/storyfragments/:id/complete", storyFragmentHandlers.UpdateStoryFragmentComplete)
 
 			// TractStack endpoints
 			nodes.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)

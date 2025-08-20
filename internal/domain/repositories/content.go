@@ -26,6 +26,9 @@ type StoryFragmentRepository interface {
 	Store(tenantID string, storyFragment *content.StoryFragmentNode) error
 	Update(tenantID string, storyFragment *content.StoryFragmentNode) error
 	Delete(tenantID, id string) error
+	UpdatePaneRelationships(tenantID, storyFragmentID string, paneIDs []string) error
+	UpdateTopics(tenantID, storyFragmentID string, topics []string) error
+	UpdateDescription(tenantID, storyFragmentID string, description *string) error
 }
 
 type PaneRepository interface {

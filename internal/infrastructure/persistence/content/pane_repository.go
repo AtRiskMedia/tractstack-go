@@ -240,8 +240,12 @@ func (r *PaneRepository) loadFromDB(id string) (*content.PaneNode, error) {
 		return nil, fmt.Errorf("failed to scan pane: %w", err)
 	}
 
-	if created, err := time.Parse("2006-01-02 15:04:05", createdStr); err == nil {
-		pane.Created = created
+	pane.Created, err = time.Parse(time.RFC3339, createdStr)
+	if err != nil {
+		pane.Created, err = time.Parse("2006-01-02 15:04:05", createdStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse created timestamp: %w", err)
+		}
 	}
 	if changed.Valid {
 		if changedTime, err := time.Parse("2006-01-02 15:04:05", changed.String); err == nil {
@@ -322,8 +326,12 @@ func (r *PaneRepository) loadMultipleFromDB(ids []string) ([]*content.PaneNode, 
 			return nil, fmt.Errorf("failed to scan pane: %w", err)
 		}
 
-		if created, err := time.Parse("2006-01-02 15:04:05", createdStr); err == nil {
-			pane.Created = created
+		pane.Created, err = time.Parse(time.RFC3339, createdStr)
+		if err != nil {
+			pane.Created, err = time.Parse("2006-01-02 15:04:05", createdStr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse created timestamp: %w", err)
+			}
 		}
 		if changed.Valid {
 			if changedTime, err := time.Parse("2006-01-02 15:04:05", changed.String); err == nil {
