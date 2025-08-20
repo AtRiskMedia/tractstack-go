@@ -3,6 +3,9 @@ module github.com/AtRiskMedia/tractstack-go
 go 1.22.0
 
 require (
+	github.com/AssemblyAI/assemblyai-go-sdk v1.10.0
+	github.com/chai2010/webp v1.4.0
+	github.com/disintegration/imaging v1.6.2
 	github.com/gin-contrib/cors v1.4.0
 	github.com/gin-gonic/gin v1.9.1
 	github.com/golang-jwt/jwt/v4 v4.5.0
@@ -15,7 +18,6 @@ require (
 )
 
 require (
-	github.com/AssemblyAI/assemblyai-go-sdk v1.10.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
@@ -39,6 +41,7 @@ require (
 	github.com/ugorji/go/codec v1.2.11 // indirect
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
+	golang.org/x/image v0.0.0-20211028202545-6944b10bf410 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
