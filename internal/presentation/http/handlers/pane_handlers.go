@@ -13,6 +13,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// BulkFilePaneRequest represents the request body for bulk file-pane relationship updates
+type BulkFilePaneRequest struct {
+	Relationships []struct {
+		PaneID  string   `json:"paneId" binding:"required"`
+		FileIDs []string `json:"fileIds"`
+	} `json:"relationships" binding:"required"`
+}
+
 // PaneIDsRequest represents the request body for bulk pane loading
 type PaneIDsRequest struct {
 	PaneIDs []string `json:"paneIds" binding:"required"`
@@ -342,4 +350,48 @@ func (h *PaneHandlers) GetPaneTemplate(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetPaneTemplate request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
 
 	c.JSON(http.StatusOK, templatePayload)
+}
+
+// BulkUpdateFilePaneRelationships handles bulk updates of file-pane relationships
+func (h *PaneHandlers) BulkUpdateFilePaneRelationships(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("bulk_update_file_pane_relationships_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received bulk update file-pane relationships request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var req BulkFilePaneRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if len(req.Relationships) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "relationships array cannot be empty"})
+		return
+	}
+
+	// Convert request format to service format (map[paneID][]fileIDs)
+	relationships := make(map[string][]string)
+	for _, rel := range req.Relationships {
+		relationships[rel.PaneID] = rel.FileIDs
+	}
+
+	if err := h.paneService.BulkUpdateFilePaneRelationships(tenantCtx, relationships); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Bulk update file-pane relationships completed", "paneCount", len(req.Relationships), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for BulkUpdateFilePaneRelationships request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.Relationships))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "file-pane relationships updated successfully",
+		"paneCount": len(req.Relationships),
+	})
 }

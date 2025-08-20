@@ -40,6 +40,7 @@ type PaneRepository interface {
 	Store(tenantID string, pane *content.PaneNode) error
 	Update(tenantID string, pane *content.PaneNode) error
 	Delete(tenantID, id string) error
+	UpdateFilePaneRelationships(tenantID string, relationships map[string][]string) error
 }
 
 type MenuRepository interface {

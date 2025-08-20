@@ -184,6 +184,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.POST("/panes/create", paneHandlers.CreatePane)
 			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
 			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)
+			nodes.POST("/panes/files/bulk", paneHandlers.BulkUpdateFilePaneRelationships)
 
 			// Resource endpoints
 			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)

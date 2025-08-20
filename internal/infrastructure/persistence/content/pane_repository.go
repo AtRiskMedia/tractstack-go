@@ -11,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
@@ -546,4 +547,67 @@ func (r *PaneRepository) FindContext(tenantID string) ([]*content.PaneNode, erro
 	}
 
 	return contextPanes, nil
+}
+
+// File: internal/infrastructure/persistence/content/pane_repository.go
+// Add this method at the end of the PaneRepository methods:
+
+// UpdateFilePaneRelationships updates file-pane relationships for multiple panes
+func (r *PaneRepository) UpdateFilePaneRelationships(tenantID string, relationships map[string][]string) error {
+	start := time.Now()
+	r.logger.Database().Debug("Starting bulk update of file-pane relationships", "tenantId", tenantID, "paneCount", len(relationships))
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		r.logger.Database().Warn("Failed to begin transaction for bulk file-pane update", "error", err.Error(), "tenantId", tenantID)
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	totalRelationships := 0
+
+	for paneID, fileIDs := range relationships {
+		r.logger.Database().Debug("Processing pane relationships", "paneId", paneID, "fileCount", len(fileIDs))
+
+		// Delete existing relationships for this pane
+		deleteResult, err := tx.Exec("DELETE FROM file_panes WHERE pane_id = ?", paneID)
+		if err != nil {
+			r.logger.Database().Warn("Failed to delete existing file-pane relationships", "error", err.Error(), "paneId", paneID, "tenantId", tenantID)
+			return fmt.Errorf("failed to delete existing file-pane relationships for pane %s: %w", paneID, err)
+		}
+
+		deletedRows, _ := deleteResult.RowsAffected()
+		r.logger.Database().Debug("Deleted existing relationships", "paneId", paneID, "deletedRows", deletedRows)
+
+		// Insert new relationships for this pane
+		for _, fileID := range fileIDs {
+			relationshipID := security.GenerateULID()
+			r.logger.Database().Debug("Inserting file-pane relationship", "relationshipId", relationshipID, "fileId", fileID, "paneId", paneID)
+
+			insertResult, err := tx.Exec("INSERT INTO file_panes (id, file_id, pane_id) VALUES (?, ?, ?)",
+				relationshipID, fileID, paneID)
+			if err != nil {
+				r.logger.Database().Warn("Failed to insert file-pane relationship", "error", err.Error(), "paneId", paneID, "fileId", fileID, "relationshipId", relationshipID)
+				return fmt.Errorf("failed to insert file-pane relationship for pane %s, file %s: %w", paneID, fileID, err)
+			}
+
+			insertedRows, _ := insertResult.RowsAffected()
+			r.logger.Database().Debug("Inserted relationship", "relationshipId", relationshipID, "insertedRows", insertedRows)
+			totalRelationships++
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		r.logger.Database().Warn("Failed to commit bulk file-pane update transaction", "error", err.Error(), "tenantId", tenantID)
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	r.logger.Database().Info("Bulk file-pane relationships update completed", "tenantId", tenantID, "paneCount", len(relationships), "totalRelationships", totalRelationships, "duration", time.Since(start))
+
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery("BULK UPDATE file_panes", duration, tenantID)
+	}
+
+	return nil
 }
