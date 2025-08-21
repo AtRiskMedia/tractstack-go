@@ -336,9 +336,9 @@ func (cmb *ContentMapBuilder) addThumbnailPaths(item *content.ContentMapItem, so
 
 	cacheBuster := time.Now().Unix()
 
-	thumbSrc := fmt.Sprintf("/images/thumbs/%s_1200px.webp?v=%d", basename, cacheBuster)
+	thumbSrc := fmt.Sprintf("/media/images/thumbs/%s_1200px.webp?v=%d", basename, cacheBuster)
 	thumbSrcSet := fmt.Sprintf(
-		"/images/thumbs/%s_1200px.webp?v=%d 1200w, /images/thumbs/%s_600px.webp?v=%d 600w, /images/thumbs/%s_300px.webp?v=%d 300w",
+		"/media/images/thumbs/%s_1200px.webp?v=%d 1200w, /media/images/thumbs/%s_600px.webp?v=%d 600w, /media/images/thumbs/%s_300px.webp?v=%d 300w",
 		basename, cacheBuster, basename, cacheBuster, basename, cacheBuster,
 	)
 
