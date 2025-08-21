@@ -22,9 +22,11 @@ type HourlyEpinetData struct {
 
 // HourlyEpinetStepData contains visitor data for a specific epinet step
 type HourlyEpinetStepData struct {
-	Visitors  map[string]bool `json:"visitors"` // Set of visitor IDs
-	Name      string          `json:"name"`
-	StepIndex int             `json:"stepIndex"`
+	Visitors          map[string]bool `json:"visitors"`          // Set of visitor IDs
+	KnownVisitors     map[string]bool `json:"knownVisitors"`     // Set of known visitor IDs
+	AnonymousVisitors map[string]bool `json:"anonymousVisitors"` // Set of anonymous visitor IDs
+	Name              string          `json:"name"`
+	StepIndex         int             `json:"stepIndex"`
 }
 
 // HourlyEpinetTransitionData contains visitor transition data between steps

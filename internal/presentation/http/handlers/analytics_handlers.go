@@ -461,3 +461,29 @@ func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"hotContent": dashboard.HotContent})
 }
+
+// HandleLeadsDownload handles GET /api/v1/admin/leads/download
+func (h *AnalyticsHandlers) HandleLeadsDownload(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("leads_download_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	csvData, err := h.leadAnalyticsService.GenerateLeadsCSV(tenantCtx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", "attachment; filename=leads.csv")
+	c.Data(http.StatusOK, "text/csv", csvData)
+
+	h.logger.Analytics().Info("Leads download completed", "tenantId", tenantCtx.TenantID, "duration", time.Since(start))
+	marker.SetSuccess(true)
+}

@@ -216,6 +216,13 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 		batchStartTime := now.Add(-time.Duration(endHourOffset) * time.Hour)
 		batchEndTime := now.Add(-time.Duration(startHourOffset) * time.Hour)
 
+		// Get known fingerprints once per batch
+		knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
+		if err != nil {
+			ws.logger.Cache().Error("Analytics warming batch failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
+			return fmt.Errorf("batch failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
+		}
+
 		analysis := ws.analyzeEpinet(epinets[0])
 		allActionEvents, err := ws.getActionEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
 		if err != nil {
@@ -239,7 +246,7 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 				var transitions map[string]map[string]*types.HourlyEpinetTransitionData
 
 				if hasEvents {
-					steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems)
+					steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems, knownFingerprints)
 					transitions = ws.buildTransitionsFromSteps(steps)
 				} else {
 					steps = make(map[string]*types.HourlyEpinetStepData)
@@ -305,6 +312,13 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 
 	eventsByHour := ws.groupEventsByHour(allActionEvents, allBeliefEvents)
 
+	// Get known fingerprints once for recent hours warming
+	knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
+	if err != nil {
+		ws.logger.Cache().Error("Recent hours warming failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("recent hours warming failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
+	}
+
 	for _, hourKey := range missingHourKeys {
 		for _, epinet := range epinets {
 			events, hasEvents := eventsByHour[hourKey]
@@ -313,7 +327,7 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 			var transitions map[string]map[string]*types.HourlyEpinetTransitionData
 
 			if hasEvents {
-				steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems)
+				steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems, knownFingerprints)
 				transitions = ws.buildTransitionsFromSteps(steps)
 			} else {
 				steps = make(map[string]*types.HourlyEpinetStepData)
@@ -597,7 +611,7 @@ func (ws *WarmingService) analyzeEpinet(epinet types.EpinetConfig) *EpinetAnalys
 	return analysis
 }
 
-func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, actionEvents []analytics.ActionEvent, beliefEvents []analytics.BeliefEvent, contentItems map[string]types.ContentItem) map[string]*types.HourlyEpinetStepData {
+func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, actionEvents []analytics.ActionEvent, beliefEvents []analytics.BeliefEvent, contentItems map[string]types.ContentItem, knownFingerprints map[string]bool) map[string]*types.HourlyEpinetStepData {
 	steps := make(map[string]*types.HourlyEpinetStepData)
 	for _, event := range actionEvents {
 		for stepIndex, step := range epinet.Steps {
@@ -605,12 +619,19 @@ func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, action
 				nodeID := ws.getStepNodeID(step, event.ObjectID, event.Verb)
 				if steps[nodeID] == nil {
 					steps[nodeID] = &types.HourlyEpinetStepData{
-						Visitors:  make(map[string]bool),
-						Name:      ws.getNodeName(step, event.ObjectID, contentItems, event.Verb),
-						StepIndex: stepIndex + 1,
+						Visitors:          make(map[string]bool),
+						KnownVisitors:     make(map[string]bool),
+						AnonymousVisitors: make(map[string]bool),
+						Name:              ws.getNodeName(step, event.ObjectID, contentItems, event.Verb),
+						StepIndex:         stepIndex + 1,
 					}
 				}
 				steps[nodeID].Visitors[event.FingerprintID] = true
+				if knownFingerprints[event.FingerprintID] {
+					steps[nodeID].KnownVisitors[event.FingerprintID] = true
+				} else {
+					steps[nodeID].AnonymousVisitors[event.FingerprintID] = true
+				}
 			}
 		}
 	}
@@ -620,12 +641,19 @@ func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, action
 				nodeID := ws.getStepNodeID(step, "", *event.Object)
 				if steps[nodeID] == nil {
 					steps[nodeID] = &types.HourlyEpinetStepData{
-						Visitors:  make(map[string]bool),
-						Name:      ws.getNodeName(step, "", contentItems, *event.Object),
-						StepIndex: stepIndex + 1,
+						Visitors:          make(map[string]bool),
+						KnownVisitors:     make(map[string]bool),
+						AnonymousVisitors: make(map[string]bool),
+						Name:              ws.getNodeName(step, "", contentItems, *event.Object),
+						StepIndex:         stepIndex + 1,
 					}
 				}
 				steps[nodeID].Visitors[event.FingerprintID] = true
+				if knownFingerprints[event.FingerprintID] {
+					steps[nodeID].KnownVisitors[event.FingerprintID] = true
+				} else {
+					steps[nodeID].AnonymousVisitors[event.FingerprintID] = true
+				}
 			}
 		}
 	}
@@ -842,4 +870,24 @@ func (ws *WarmingService) applyVisibilityWrapper(htmlContent, visibility string)
 	default:
 		return htmlContent
 	}
+}
+
+func (ws *WarmingService) getKnownFingerprints(tenantCtx *tenant.Context) (map[string]bool, error) {
+	query := `SELECT id, CASE WHEN lead_id IS NOT NULL THEN 1 ELSE 0 END as is_known FROM fingerprints`
+	rows, err := tenantCtx.Database.Conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	knownFingerprints := make(map[string]bool)
+	for rows.Next() {
+		var fingerprintID string
+		var isKnown bool
+		if err := rows.Scan(&fingerprintID, &isKnown); err != nil {
+			return nil, err
+		}
+		knownFingerprints[fingerprintID] = isKnown
+	}
+	return knownFingerprints, nil
 }
