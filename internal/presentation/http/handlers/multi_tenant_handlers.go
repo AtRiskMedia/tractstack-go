@@ -44,7 +44,8 @@ func (h *MultiTenantHandlers) HandleProvisionTenant(c *gin.Context) {
 	}
 	marker.TenantID = req.TenantID
 
-	if err := h.service.ProvisionTenant(req); err != nil {
+	activationToken, err := h.service.ProvisionTenant(req)
+	if err != nil {
 		marker.SetError(err)
 		h.logger.System().Error("Tenant provisioning failed", "error", err, "tenantId", req.TenantID)
 		// Use HTTP 409 Conflict for business logic failures like "tenant already exists".
@@ -53,7 +54,11 @@ func (h *MultiTenantHandlers) HandleProvisionTenant(c *gin.Context) {
 	}
 
 	marker.SetSuccess(true)
-	c.JSON(http.StatusCreated, gin.H{"status": "ok", "message": "Tenant provisioned successfully. Activation email sent."})
+	c.JSON(http.StatusCreated, gin.H{
+		"status":  "ok",
+		"message": "Tenant provisioned successfully. Activation email sent.",
+		"token":   activationToken,
+	})
 }
 
 // HandleActivateTenant handles POST /api/v1/tenant/activation
