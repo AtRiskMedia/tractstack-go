@@ -65,14 +65,19 @@ type CapacityResult struct {
 }
 
 // ProvisionTenant handles the creation of a new, reserved tenant.
-func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
+func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, error) {
 	marker := s.perfTracker.StartOperation("service_provision_tenant", req.TenantID)
 	defer marker.Complete()
+
+	// Auto-populate domains for sandbox if not provided
+	if len(req.Domains) == 0 {
+		req.Domains = []string{"*"}
+	}
 
 	// 1. Input Validation
 	if err := s.validateProvisionRequest(req); err != nil {
 		marker.SetError(err)
-		return err
+		return "", err
 	}
 
 	// 2. Generate Secrets
@@ -83,7 +88,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 	if err != nil {
 		marker.SetError(err)
 		s.logger.System().Error("Failed to hash admin password during provisioning", "error", err, "tenantId", req.TenantID)
-		return fmt.Errorf("password hashing failed")
+		return "", fmt.Errorf("password hashing failed")
 	}
 
 	// 3. Create Tenant Configuration
@@ -102,12 +107,12 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 	// 4. Persist Configuration
 	if err := s.saveTenantConfig(newConfig); err != nil {
 		marker.SetError(err)
-		return err
+		return "", err
 	}
 
 	if err := s.updateTenantRegistry(req.TenantID, "reserved", req.Domains); err != nil {
 		marker.SetError(err)
-		return err
+		return "", err
 	}
 
 	// 5. Send Activation Email
@@ -120,7 +125,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 
 	marker.SetSuccess(true)
 	s.logger.Tenant().Info("Tenant successfully provisioned", "tenantId", req.TenantID)
-	return nil
+	return activationToken, nil
 }
 
 // ActivateTenant finalizes tenant setup by creating the database schema.

@@ -61,38 +61,11 @@ func Initialize() error {
 
 	log.Printf("Found %d tenants in registry", len(registry.Tenants))
 
-	// Step 3: Pre-activate inactive tenants only
-	log.Println("Starting tenant pre-activation...")
-	if err := tenantManager.PreActivateAllTenants(); err != nil {
-		return fmt.Errorf("tenant pre-activation failed: %w", err)
-	}
-
-	// Step 4: Validate tenant activation
-	log.Println("Validating tenant activation...")
-	if err := tenantManager.ValidatePreActivation(); err != nil {
-		return fmt.Errorf("tenant validation failed: %w", err)
-	}
-
-	// Step 5: Verify active tenant connections
-	log.Println("Verifying active tenant database connections...")
-	activeCount, err := tenantManager.GetActiveTenantCount()
-	if err != nil {
-		return fmt.Errorf("failed to get active tenant count: %w", err)
-	}
-	log.Printf("✓ %d active tenant connections verified", activeCount)
-
-	// Step 6: Initialize cache system
+	// Step 3: Initialize cache system
 	log.Println("Initializing cache system...")
 	cacheManager := tenantManager.GetCacheManager()
 
-	for tenantID, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status == "active" {
-			log.Printf("✓ Initializing cache for tenant: %s", tenantID)
-			cacheManager.InitializeTenant(tenantID)
-		}
-	}
-
-	// Step 7: Create dependency injection container (THIS IS WHERE LOGGER IS CREATED!)
+	// Step 4: Create dependency injection container (MOVED HERE - BEFORE PRE-ACTIVATION!)
 	log.Println("Initializing dependency injection container...")
 	appContainer := container.NewContainer(tenantManager, cacheManager)
 	log.Println("✓ Dependency injection container created with singleton services.")
@@ -101,10 +74,39 @@ func Initialize() error {
 	tenantManager.SetLogger(logger)
 	logger.Tenant().Info("Tenant manager logger initialized", "hasDetector", true, "hasCache", true)
 
-	// Step 8: Initialize application services (handled by container)
+	// Step 5: Pre-activate inactive tenants (NOW HAS LOGGER!)
+	logger.Startup().Info("Starting tenant pre-activation...")
+	if err := tenantManager.PreActivateAllTenants(); err != nil {
+		return fmt.Errorf("tenant pre-activation failed: %w", err)
+	}
+
+	// Step 6: Validate tenant activation
+	logger.Startup().Info("Validating tenant activation...")
+	if err := tenantManager.ValidatePreActivation(); err != nil {
+		return fmt.Errorf("tenant validation failed: %w", err)
+	}
+
+	// Step 7: Verify active tenant connections
+	logger.Startup().Info("Verifying active tenant database connections...")
+	activeCount, err := tenantManager.GetActiveTenantCount()
+	if err != nil {
+		return fmt.Errorf("failed to get active tenant count: %w", err)
+	}
+	logger.Startup().Info("Active tenant connections verified", "count", activeCount)
+
+	// Step 8: Initialize tenant cache
+	logger.Startup().Info("Initializing tenant cache...")
+	for tenantID, tenantInfo := range registry.Tenants {
+		if tenantInfo.Status == "active" {
+			logger.Tenant().Info("Initializing cache for tenant", "tenantId", tenantID)
+			cacheManager.InitializeTenant(tenantID)
+		}
+	}
+
+	// Step 9: Initialize application services (handled by container)
 	logger.Startup().Info("Singleton application services initialized via container")
 
-	// Step 9: Initialize cache warming
+	// Step 10: Initialize cache warming
 	logger.Startup().Info("Initializing cache warming...")
 	startWarmTime := time.Now()
 
@@ -119,7 +121,7 @@ func Initialize() error {
 		logger.Startup().Info("Cache warming completed successfully", "duration", time.Since(startWarmTime))
 	}
 
-	// Step 10: Start background cleanup worker
+	// Step 11: Start background cleanup worker
 	logger.Startup().Info("Starting background cleanup worker...")
 	startWorkerTime := time.Now()
 
@@ -129,7 +131,7 @@ func Initialize() error {
 
 	logger.Startup().Info("Background cleanup worker started", "duration", time.Since(startWorkerTime))
 
-	// Step 11: Start HTTP server
+	// Step 12: Start HTTP server
 	logger.Startup().Info("Starting HTTP server...")
 	startServerTime := time.Now()
 
@@ -141,7 +143,7 @@ func Initialize() error {
 
 	logger.Startup().Info("HTTP server initialized", "port", port, "duration", time.Since(startServerTime))
 
-	// Step 12: Setup graceful shutdown
+	// Step 13: Setup graceful shutdown
 	gracefulShutdown := make(chan os.Signal, 1)
 	signal.Notify(gracefulShutdown, syscall.SIGINT, syscall.SIGTERM)
 
