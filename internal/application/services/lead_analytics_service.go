@@ -1,6 +1,8 @@
 package services
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
@@ -92,7 +94,7 @@ func (s *LeadAnalyticsService) getTotalVisitors(tenantCtx *tenant.Context, hourK
 }
 
 func (s *LeadAnalyticsService) getTotalLeads(tenantCtx *tenant.Context) int {
-	query := `SELECT COUNT(DISTINCT fingerprint_id) FROM fingerprints WHERE lead_id IS NOT NULL`
+	query := `SELECT COUNT(*) FROM leads`
 
 	var count int
 	err := tenantCtx.Database.Conn.QueryRow(query).Scan(&count)
@@ -273,4 +275,34 @@ func (s *LeadAnalyticsService) getHourKeysForCustomRange(startHour, endHour int)
 	}
 
 	return hourKeys
+}
+
+func (s *LeadAnalyticsService) GenerateLeadsCSV(tenantCtx *tenant.Context) ([]byte, error) {
+	query := `
+		SELECT l.id, l.first_name, l.email, l.created_at,
+		       COALESCE(v.campaign_id, 'direct') as source
+		FROM leads l
+		LEFT JOIN fingerprints f ON l.id = f.lead_id
+		LEFT JOIN visits v ON f.id = v.fingerprint_id
+		ORDER BY l.created_at DESC
+	`
+
+	rows, err := tenantCtx.Database.Conn.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var csvContent strings.Builder
+	csvContent.WriteString("ID,First Name,Email,Created At,Source\n")
+
+	for rows.Next() {
+		var id, firstName, email, createdAt, source string
+		if err := rows.Scan(&id, &firstName, &email, &createdAt, &source); err != nil {
+			continue
+		}
+		csvContent.WriteString(fmt.Sprintf("%s,%s,%s,%s,%s\n", id, firstName, email, createdAt, source))
+	}
+
+	return []byte(csvContent.String()), nil
 }

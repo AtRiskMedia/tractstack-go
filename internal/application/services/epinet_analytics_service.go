@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
@@ -61,10 +62,6 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		hourKeys = s.getHourKeysForTimeRange(168)
 	}
 
-	knownFingerprints, err := s.getKnownFingerprints(tenantCtx)
-	if err != nil {
-		return nil, err
-	}
 	contentItems, err := s.getContentItems(tenantCtx)
 	if err != nil {
 		return nil, err
@@ -89,7 +86,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 			}
 
 			for visitorID := range stepData.Visitors {
-				if !s.shouldIncludeVisitor(visitorID, filters, knownFingerprints) {
+				if !s.shouldIncludeVisitor(visitorID, filters, stepData) {
 					continue
 				}
 				stepUserSets[stepIndex][originalNodeID][visitorID] = true
@@ -175,7 +172,7 @@ func (s *EpinetAnalyticsService) intersectVisitors(set1, set2 map[string]bool) m
 	return intersection
 }
 
-func (s *EpinetAnalyticsService) shouldIncludeVisitor(visitorID string, filters *SankeyFilters, knownFingerprints map[string]bool) bool {
+func (s *EpinetAnalyticsService) shouldIncludeVisitor(visitorID string, filters *SankeyFilters, stepData *types.HourlyEpinetStepData) bool {
 	if filters == nil {
 		return true
 	}
@@ -184,7 +181,7 @@ func (s *EpinetAnalyticsService) shouldIncludeVisitor(visitorID string, filters 
 		return false
 	}
 
-	isKnown := knownFingerprints[visitorID]
+	isKnown := stepData.KnownVisitors[visitorID]
 	switch filters.VisitorType {
 	case "known":
 		return isKnown
@@ -193,26 +190,6 @@ func (s *EpinetAnalyticsService) shouldIncludeVisitor(visitorID string, filters 
 	default:
 		return true
 	}
-}
-
-func (s *EpinetAnalyticsService) getKnownFingerprints(tenantCtx *tenant.Context) (map[string]bool, error) {
-	query := `SELECT id, CASE WHEN lead_id IS NOT NULL THEN 1 ELSE 0 END as is_known FROM fingerprints`
-	rows, err := tenantCtx.Database.Conn.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	knownFingerprints := make(map[string]bool)
-	for rows.Next() {
-		var fingerprintID string
-		var isKnown bool
-		if err := rows.Scan(&fingerprintID, &isKnown); err != nil {
-			return nil, err
-		}
-		knownFingerprints[fingerprintID] = isKnown
-	}
-	return knownFingerprints, nil
 }
 
 func (s *EpinetAnalyticsService) getContentItems(tenantCtx *tenant.Context) (map[string]ContentItem, error) {

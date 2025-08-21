@@ -31,9 +31,15 @@ type HotItem struct {
 }
 
 type DashboardAnalytics struct {
-	Stats      TimeRangeStats   `json:"stats"`
-	Line       []LineDataSeries `json:"line"`
-	HotContent []HotItem        `json:"hotContent"`
+	Stats            TimeRangeStats   `json:"stats"`
+	Line             []LineDataSeries `json:"line"`
+	HotContent       []HotItem        `json:"hotContent"`
+	DailyKnown       int              `json:"dailyKnown"`
+	DailyAnonymous   int              `json:"dailyAnonymous"`
+	WeeklyKnown      int              `json:"weeklyKnown"`
+	WeeklyAnonymous  int              `json:"weeklyAnonymous"`
+	MonthlyKnown     int              `json:"monthlyKnown"`
+	MonthlyAnonymous int              `json:"monthlyAnonymous"`
 }
 
 type EpinetConfig struct {
@@ -70,10 +76,14 @@ func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, 
 	weeklyHourKeys := s.getHourKeysForCustomRange(168, 0)
 	monthlyHourKeys := s.getHourKeysForCustomRange(672, 0)
 
+	dailyTotal, dailyKnown, dailyAnonymous := s.computeVisitorBreakdowns(tenantCtx, epinets, dailyHourKeys)
+	weeklyTotal, weeklyKnown, weeklyAnonymous := s.computeVisitorBreakdowns(tenantCtx, epinets, weeklyHourKeys)
+	monthlyTotal, monthlyKnown, monthlyAnonymous := s.computeVisitorBreakdowns(tenantCtx, epinets, monthlyHourKeys)
+
 	stats := TimeRangeStats{
-		Daily:   s.computeAllEvents(tenantCtx, epinets, dailyHourKeys),
-		Weekly:  s.computeAllEvents(tenantCtx, epinets, weeklyHourKeys),
-		Monthly: s.computeAllEvents(tenantCtx, epinets, monthlyHourKeys),
+		Daily:   dailyTotal,
+		Weekly:  weeklyTotal,
+		Monthly: monthlyTotal,
 	}
 
 	s.logger.Analytics().Info("Successfully computed dashboard analytics", "tenantId", tenantCtx.TenantID, "startHour", startHour, "endHour", endHour, "epinetCount", len(epinets), "duration", time.Since(start))
@@ -81,9 +91,15 @@ func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, 
 	s.logger.Perf().Info("Performance for ComputeDashboard", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return &DashboardAnalytics{
-		Stats:      stats,
-		Line:       s.computeLineData(tenantCtx, epinets, hourKeys),
-		HotContent: s.computeHotContent(tenantCtx, epinets, hourKeys),
+		Stats:            stats,
+		Line:             s.computeLineData(tenantCtx, epinets, hourKeys),
+		HotContent:       s.computeHotContent(tenantCtx, epinets, hourKeys),
+		DailyKnown:       dailyKnown,
+		DailyAnonymous:   dailyAnonymous,
+		WeeklyKnown:      weeklyKnown,
+		WeeklyAnonymous:  weeklyAnonymous,
+		MonthlyKnown:     monthlyKnown,
+		MonthlyAnonymous: monthlyAnonymous,
 	}, nil
 }
 
@@ -106,18 +122,30 @@ func (s *DashboardAnalyticsService) getEpinets(tenantCtx *tenant.Context) ([]Epi
 	return configs, nil
 }
 
-func (s *DashboardAnalyticsService) computeAllEvents(tenantCtx *tenant.Context, epinets []EpinetConfig, hourKeys []string) int {
-	total := 0
+func (s *DashboardAnalyticsService) computeVisitorBreakdowns(tenantCtx *tenant.Context, epinets []EpinetConfig, hourKeys []string) (int, int, int) {
+	allVisitors := make(map[string]bool)
+	knownVisitors := make(map[string]bool)
+	anonymousVisitors := make(map[string]bool)
+
 	for _, epinet := range epinets {
 		for _, hourKey := range hourKeys {
 			if bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey); exists {
 				for _, stepData := range bin.Data.Steps {
-					total += len(stepData.Visitors)
+					for visitorID := range stepData.Visitors {
+						allVisitors[visitorID] = true
+					}
+					for visitorID := range stepData.KnownVisitors {
+						knownVisitors[visitorID] = true
+					}
+					for visitorID := range stepData.AnonymousVisitors {
+						anonymousVisitors[visitorID] = true
+					}
 				}
 			}
 		}
 	}
-	return total
+
+	return len(allVisitors), len(knownVisitors), len(anonymousVisitors)
 }
 
 func (s *DashboardAnalyticsService) computeLineData(tenantCtx *tenant.Context, epinets []EpinetConfig, hourKeys []string) []LineDataSeries {

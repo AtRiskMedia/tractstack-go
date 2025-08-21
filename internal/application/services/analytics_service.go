@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
@@ -47,11 +48,6 @@ func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, e
 		hourKeys = s.getHourKeysForTimeRange(168)
 	}
 
-	knownFingerprints, err := s.getKnownFingerprints(tenantCtx)
-	if err != nil {
-		return nil, err
-	}
-
 	visitorEventCount := make(map[string]int)
 	for _, hourKey := range hourKeys {
 		bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinetID, hourKey)
@@ -60,7 +56,7 @@ func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, e
 		}
 		for _, stepData := range bin.Data.Steps {
 			for visitorID := range stepData.Visitors {
-				if s.shouldIncludeVisitor(visitorID, &SankeyFilters{VisitorType: visitorType}, knownFingerprints) {
+				if s.shouldIncludeVisitor(visitorID, &SankeyFilters{VisitorType: visitorType}, stepData) {
 					visitorEventCount[visitorID]++
 				}
 			}
@@ -69,10 +65,26 @@ func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, e
 
 	var userCounts []UserCount
 	for id, count := range visitorEventCount {
+		// Check if visitor is known by looking in any step data that contains this visitor
+		isKnown := false
+		for _, hourKey := range hourKeys {
+			if bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinetID, hourKey); exists {
+				for _, stepData := range bin.Data.Steps {
+					if stepData.KnownVisitors[id] {
+						isKnown = true
+						break
+					}
+				}
+				if isKnown {
+					break
+				}
+			}
+		}
+
 		userCounts = append(userCounts, UserCount{
 			ID:      id,
 			Count:   count,
-			IsKnown: knownFingerprints[id],
+			IsKnown: isKnown,
 		})
 	}
 
@@ -90,7 +102,7 @@ func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, e
 	return userCounts, nil
 }
 
-func (s *AnalyticsService) shouldIncludeVisitor(visitorID string, filters *SankeyFilters, knownFingerprints map[string]bool) bool {
+func (s *AnalyticsService) shouldIncludeVisitor(visitorID string, filters *SankeyFilters, stepData *types.HourlyEpinetStepData) bool {
 	if filters == nil {
 		return true
 	}
@@ -99,7 +111,7 @@ func (s *AnalyticsService) shouldIncludeVisitor(visitorID string, filters *Sanke
 		return false
 	}
 
-	isKnown := knownFingerprints[visitorID]
+	isKnown := stepData.KnownVisitors[visitorID]
 	switch filters.VisitorType {
 	case "known":
 		return isKnown
@@ -108,26 +120,6 @@ func (s *AnalyticsService) shouldIncludeVisitor(visitorID string, filters *Sanke
 	default:
 		return true
 	}
-}
-
-func (s *AnalyticsService) getKnownFingerprints(tenantCtx *tenant.Context) (map[string]bool, error) {
-	query := `SELECT id, CASE WHEN lead_id IS NOT NULL THEN 1 ELSE 0 END as is_known FROM fingerprints`
-	rows, err := tenantCtx.Database.Conn.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	knownFingerprints := make(map[string]bool)
-	for rows.Next() {
-		var fingerprintID string
-		var isKnown bool
-		if err := rows.Scan(&fingerprintID, &isKnown); err != nil {
-			return nil, err
-		}
-		knownFingerprints[fingerprintID] = isKnown
-	}
-	return knownFingerprints, nil
 }
 
 func (s *AnalyticsService) getHourKeysForTimeRange(hoursBack int) []string {

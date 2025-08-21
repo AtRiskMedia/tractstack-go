@@ -152,6 +152,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		admin.Use(authHandlers.AuthMiddleware())
 		{
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
+			admin.GET("/leads/download", analyticsHandlers.HandleLeadsDownload)
 			api.POST("/aai/askLemur", authHandlers.AuthMiddleware(), aaiHandlers.PostAskLemur)
 		}
 
