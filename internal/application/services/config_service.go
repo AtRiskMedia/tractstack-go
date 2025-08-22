@@ -319,13 +319,20 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		return nil, fmt.Errorf("failed to create media directory: %w", err)
 	}
 
-	if request.LogoBase64 == "" {
+	// Logo processing
+	if request.LogoBase64 == "" && request.Logo == "" {
+		// Remove file
 		if config.Logo != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Logo, "/media/"))
 			os.Remove(oldPath)
 		}
 		config.Logo = ""
-	} else {
+	} else if request.LogoBase64 != "" {
+		// Add file (remove old if exists)
+		if config.Logo != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Logo, "/media/"))
+			os.Remove(oldPath)
+		}
 		filename := "logo" + c.getExtensionFromBase64(request.LogoBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
 
@@ -344,13 +351,20 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		}
 	}
 
-	if request.WordmarkBase64 == "" {
+	// Wordmark processing
+	if request.WordmarkBase64 == "" && request.Wordmark == "" {
+		// Remove file
 		if config.Wordmark != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Wordmark, "/media/"))
 			os.Remove(oldPath)
 		}
 		config.Wordmark = ""
-	} else {
+	} else if request.WordmarkBase64 != "" {
+		// Add file (remove old if exists)
+		if config.Wordmark != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Wordmark, "/media/"))
+			os.Remove(oldPath)
+		}
 		filename := "wordmark" + c.getExtensionFromBase64(request.WordmarkBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
 
@@ -369,13 +383,20 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		}
 	}
 
-	if request.FaviconBase64 == "" {
+	// Favicon processing
+	if request.FaviconBase64 == "" && request.Favicon == "" {
+		// Remove file
 		if config.Favicon != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Favicon, "/media/"))
 			os.Remove(oldPath)
 		}
 		config.Favicon = ""
-	} else {
+	} else if request.FaviconBase64 != "" {
+		// Add file (remove old if exists)
+		if config.Favicon != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Favicon, "/media/"))
+			os.Remove(oldPath)
+		}
 		filename := "favicon" + c.getExtensionFromBase64(request.FaviconBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
 
@@ -386,13 +407,20 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		config.Favicon = relativePath
 	}
 
-	if request.OGBase64 == "" {
+	// OG Image processing
+	if request.OGBase64 == "" && request.OG == "" {
+		// Remove file
 		if config.OG != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OG, "/media/"))
 			os.Remove(oldPath)
 		}
 		config.OG = ""
-	} else {
+	} else if request.OGBase64 != "" {
+		// Add file (remove old if exists)
+		if config.OG != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OG, "/media/"))
+			os.Remove(oldPath)
+		}
 		newVersion := time.Now().Unix()
 		filename := fmt.Sprintf("og-v%d%s", newVersion, c.getExtensionFromBase64(request.OGBase64))
 		targetDir := filepath.Join(mediaPath, "images/brand")
@@ -405,13 +433,20 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		config.StylesVer = newVersion
 	}
 
-	if request.OGLogoBase64 == "" {
+	// OG Logo processing
+	if request.OGLogoBase64 == "" && request.OGLogo == "" {
+		// Remove file
 		if config.OGLogo != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OGLogo, "/media/"))
 			os.Remove(oldPath)
 		}
 		config.OGLogo = ""
-	} else {
+	} else if request.OGLogoBase64 != "" {
+		// Add file (remove old if exists)
+		if config.OGLogo != "" {
+			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OGLogo, "/media/"))
+			os.Remove(oldPath)
+		}
 		newVersion := time.Now().Unix()
 		filename := fmt.Sprintf("oglogo-v%d%s", newVersion, c.getExtensionFromBase64(request.OGLogoBase64))
 		targetDir := filepath.Join(mediaPath, "images/brand")
