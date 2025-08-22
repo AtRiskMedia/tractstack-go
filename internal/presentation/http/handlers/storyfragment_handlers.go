@@ -213,8 +213,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 		return
 	}
 
-	// === V1 COMPATIBILITY PROCESSING ===
-	var allChildNodes []any
+	allChildNodes := make([]any, 0)
 	cleanedPanes := make([]*content.PaneNode, len(fullPayload.Panes))
 
 	for i, pane := range fullPayload.Panes {

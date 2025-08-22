@@ -361,7 +361,11 @@ func (r *StoryFragmentRepository) loadMultipleFromDB(ids []string) ([]*content.S
 	}
 
 	for _, sf := range storyFragments {
-		sf.PaneIDs = allPaneRelationships[sf.ID]
+		if paneIDs, exists := allPaneRelationships[sf.ID]; exists {
+			sf.PaneIDs = paneIDs
+		} else {
+			sf.PaneIDs = make([]string, 0)
+		}
 	}
 
 	r.logger.Database().Info("Multiple storyfragments loaded from database", "requested", len(ids), "loaded", len(storyFragments), "duration", time.Since(start))
@@ -440,7 +444,7 @@ func (r *StoryFragmentRepository) getPaneIDsForStoryFragment(storyFragmentID str
 	}
 	defer rows.Close()
 
-	var paneIDs []string
+	paneIDs := make([]string, 0)
 	for rows.Next() {
 		var paneID string
 		if err := rows.Scan(&paneID); err != nil {
