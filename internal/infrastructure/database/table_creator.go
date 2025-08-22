@@ -141,7 +141,7 @@ var indexes = []string{
 	`CREATE INDEX IF NOT EXISTS idx_storyfragment_has_topic_storyfragment_id ON storyfragment_has_topic(storyfragment_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_storyfragment_has_topic_topic_id ON storyfragment_has_topic(topic_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_storyfragment_has_topic_unique ON storyfragment_has_topic(storyfragment_id, topic_id)`,
-	`CREATE INDEX IF NOT EXISTS idx_storyfragment_details_storyfragment_id ON storyfragment_details(storyfragment_id)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_storyfragment_details_storyfragment_id ON storyfragment_details(storyfragment_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_files_resource_resource_id ON files_resource(resource_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_files_resource_file_id ON files_resource(file_id)`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_files_resource_unique ON files_resource(resource_id, file_id)`,
