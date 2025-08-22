@@ -364,6 +364,10 @@ func (s *StoryFragmentService) Delete(tenantCtx *tenant.Context, id string) erro
 }
 
 func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, storyFragment *content.StoryFragmentNode, sessionID string) error {
+	if storyFragment == nil {
+		return fmt.Errorf("storyFragment cannot be nil")
+	}
+
 	// 1. Set IsHome flag
 	homeSlug := ""
 	if tenantCtx.Config != nil && tenantCtx.Config.BrandConfig != nil {
