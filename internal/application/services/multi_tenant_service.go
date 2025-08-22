@@ -15,7 +15,6 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // MultiTenantService orchestrates tenant lifecycle operations.
@@ -84,12 +83,6 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 	jwtSecret, _ := security.GenerateSecureKey(64)
 	aesKey, _ := security.GenerateSecureKey(64)
 	activationToken, _ := security.GenerateSecureToken(32)
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), bcrypt.DefaultCost)
-	if err != nil {
-		marker.SetError(err)
-		s.logger.System().Error("Failed to hash admin password during provisioning", "error", err, "tenantId", req.TenantID)
-		return "", fmt.Errorf("password hashing failed")
-	}
 
 	// 3. Create Tenant Configuration
 	newConfig := &tenant.Config{
@@ -99,7 +92,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 		JWTSecret:       jwtSecret,
 		AESKey:          aesKey,
 		TursoEnabled:    req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
-		AdminPassword:   string(hashedPassword),
+		AdminPassword:   req.AdminPassword,
 		HomeSlug:        "hello",
 		ActivationToken: activationToken,
 	}
