@@ -264,3 +264,18 @@ func (m *Manager) SetLogger(logger *logging.ChanneledLogger) {
 func (m *Manager) GetLogger() *logging.ChanneledLogger {
 	return m.logger
 }
+
+// InvalidateTenantContext removes a tenant context from cache to force recreation
+func (m *Manager) InvalidateTenantContext(tenantID string) {
+	m.globalMutex.Lock()
+	defer m.globalMutex.Unlock()
+
+	if ctx, exists := m.contexts[tenantID]; exists {
+		if err := ctx.Close(); err != nil {
+			m.logger.Tenant().Warn("Error closing tenant context during invalidation",
+				"error", err, "tenantId", tenantID)
+		}
+		delete(m.contexts, tenantID)
+		m.logger.Tenant().Debug("Tenant context invalidated", "tenantId", tenantID)
+	}
+}

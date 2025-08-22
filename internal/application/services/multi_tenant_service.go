@@ -166,6 +166,15 @@ func (s *MultiTenantService) ActivateTenant(token string) error {
 		return err
 	}
 
+	// Refresh detector registry to sync with updated file
+	detector := s.tenantManager.GetDetector()
+	if err := detector.RefreshRegistry(); err != nil {
+		marker.SetError(err)
+		return fmt.Errorf("failed to refresh tenant registry: %w", err)
+	}
+	// Invalidate cached tenant context to force recreation with new status
+	s.tenantManager.InvalidateTenantContext(tenantID)
+
 	// 5. Clear Activation Token
 	ctx.Config.ActivationToken = ""
 	if err := s.saveTenantConfig(ctx.Config); err != nil {
@@ -187,9 +196,7 @@ func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
 	currentTenants := len(registry.Tenants)
 	maxTenants := config.MaxTenants
 	availableSlots := maxTenants - currentTenants
-	if availableSlots < 0 {
-		availableSlots = 0
-	}
+	availableSlots = max(0, availableSlots)
 
 	return &CapacityResult{
 		Available:      availableSlots > 0,
