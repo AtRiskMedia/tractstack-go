@@ -253,6 +253,11 @@ func (s *StoryFragmentService) Create(tenantCtx *tenant.Context, sf *content.Sto
 		return fmt.Errorf("failed to create storyfragment %s: %w", sf.ID, err)
 	}
 
+	s.logger.Content().Debug("About to call UpdatePaneRelationships",
+		"storyFragmentId", sf.ID,
+		"paneIDsCount", len(sf.PaneIDs),
+		"paneIDs", sf.PaneIDs)
+
 	// Update pane relationships
 	if err := storyFragmentRepo.UpdatePaneRelationships(tenantCtx.TenantID, sf.ID, sf.PaneIDs); err != nil {
 		return fmt.Errorf("failed to update pane relationships for storyfragment %s: %w", sf.ID, err)
@@ -319,6 +324,11 @@ func (s *StoryFragmentService) Update(tenantCtx *tenant.Context, sf *content.Sto
 	s.logger.Content().Info("Successfully updated storyfragment", "tenantId", tenantCtx.TenantID, "storyfragmentId", sf.ID, "title", sf.Title, "slug", sf.Slug, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for UpdateStoryFragment", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", sf.ID)
+
+	s.logger.Content().Debug("Update service called",
+		"storyFragmentId", sf.ID,
+		"paneIDsCount", len(sf.PaneIDs),
+		"paneIDs", sf.PaneIDs)
 
 	return nil
 }
