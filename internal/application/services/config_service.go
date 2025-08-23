@@ -500,7 +500,7 @@ func (c *ConfigService) processSVG(data, filename, targetDir string) (string, er
 }
 
 func (c *ConfigService) processBinaryImage(data, filename, targetDir string) (string, error) {
-	binaryPattern := regexp.MustCompile(`^data:image/\w+;base64,`)
+	binaryPattern := regexp.MustCompile(`^data:image/[^;]+;base64,`)
 	if !binaryPattern.MatchString(data) {
 		return "", fmt.Errorf("invalid binary image base64 format")
 	}

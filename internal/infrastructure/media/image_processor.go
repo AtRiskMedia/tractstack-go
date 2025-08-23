@@ -293,7 +293,7 @@ func (p *ImageProcessor) ProcessOGImageWithThumbnails(data, nodeID string) (stri
 // processBinaryImage handles binary image processing (PNG, JPG, ICO, WebP)
 func processBinaryImage(data, filename, targetDir string) (string, error) {
 	// Binary image regex pattern
-	binaryPattern := regexp.MustCompile(`^data:image/\w+;base64,`)
+	binaryPattern := regexp.MustCompile(`^data:image/[^;]+;base64,`)
 	if !binaryPattern.MatchString(data) {
 		return "", fmt.Errorf("invalid binary image base64 format")
 	}
