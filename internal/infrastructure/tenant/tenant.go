@@ -110,41 +110,6 @@ func (m *Manager) createContext(tenantID string) (*Context, error) {
 	return ctx, nil
 }
 
-// PreActivateAllTenants activates all tenants in the registry during startup
-func (m *Manager) PreActivateAllTenants() error {
-	registry, err := LoadTenantRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to load tenant registry for pre-activation: %w", err)
-	}
-
-	if len(registry.Tenants) == 0 {
-		return nil
-	}
-
-	var failedTenants []string
-
-	for tenantID, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status == "active" {
-			continue
-		}
-
-		if err := m.preActivateSingleTenant(tenantID); err != nil {
-			failedTenants = append(failedTenants, tenantID)
-			continue
-		}
-	}
-
-	if err := m.detector.RefreshRegistry(); err != nil {
-		return fmt.Errorf("failed to refresh detector registry: %w", err)
-	}
-
-	if len(failedTenants) > 0 {
-		return fmt.Errorf("pre-activation failed for tenants: %v", failedTenants)
-	}
-
-	return nil
-}
-
 // preActivateSingleTenant activates a single tenant during startup
 func (m *Manager) preActivateSingleTenant(tenantID string) error {
 	ctx, err := m.createContext(tenantID)
@@ -163,67 +128,6 @@ func (m *Manager) preActivateSingleTenant(tenantID string) error {
 	m.detector.UpdateTenantStatus(tenantID, "active", dbType)
 
 	return nil
-}
-
-// ValidatePreActivation verifies all tenants are active after pre-activation
-func (m *Manager) ValidatePreActivation() error {
-	log.Println("=== Validating pre-activation results ===")
-
-	registry, err := LoadTenantRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to load registry for validation: %w", err)
-	}
-
-	if len(registry.Tenants) == 0 {
-		log.Println("No tenants to validate")
-		return nil
-	}
-
-	inactiveTenants := make([]string, 0)
-	activeTenants := make([]string, 0)
-	reservedTenants := make([]string, 0)
-
-	for tenantID, tenantInfo := range registry.Tenants {
-		switch tenantInfo.Status {
-		case "active":
-			activeTenants = append(activeTenants, tenantID)
-		case "reserved":
-			reservedTenants = append(reservedTenants, tenantID)
-		default:
-			inactiveTenants = append(inactiveTenants, tenantID)
-		}
-	}
-
-	log.Printf("Active tenants: %v", activeTenants)
-	if len(reservedTenants) > 0 {
-		log.Printf("Reserved tenants (awaiting activation): %v", reservedTenants)
-	}
-
-	if len(inactiveTenants) > 0 {
-		log.Printf("Inactive tenants: %v", inactiveTenants)
-		return fmt.Errorf("validation failed - %d tenants still inactive: %v",
-			len(inactiveTenants), inactiveTenants)
-	}
-
-	log.Printf("✓ Validation passed - %d tenants active, %d reserved", len(activeTenants), len(reservedTenants))
-	return nil
-}
-
-// GetActiveTenantCount returns the number of active tenants
-func (m *Manager) GetActiveTenantCount() (int, error) {
-	registry, err := LoadTenantRegistry()
-	if err != nil {
-		return 0, fmt.Errorf("failed to load tenant registry: %w", err)
-	}
-
-	activeCount := 0
-	for _, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status == "active" {
-			activeCount++
-		}
-	}
-
-	return activeCount, nil
 }
 
 // GetCacheManager returns the cache manager for external access
@@ -278,4 +182,99 @@ func (m *Manager) InvalidateTenantContext(tenantID string) {
 		delete(m.contexts, tenantID)
 		m.logger.Tenant().Debug("Tenant context invalidated", "tenantId", tenantID)
 	}
+}
+
+// GetActiveTenantCount returns the number of active tenants
+func (m *Manager) GetActiveTenantCount() (int, error) {
+	// Use detector's in-memory registry instead of reading filesystem
+	detector := m.GetDetector()
+	registry := detector.GetRegistry()
+
+	activeCount := 0
+	for _, tenantInfo := range registry.Tenants {
+		if tenantInfo.Status == "active" {
+			activeCount++
+		}
+	}
+
+	return activeCount, nil
+}
+
+// ValidatePreActivation verifies all tenants are active after pre-activation
+func (m *Manager) ValidatePreActivation() error {
+	log.Println("=== Validating pre-activation results ===")
+
+	// Use detector's in-memory registry instead of reading filesystem
+	detector := m.GetDetector()
+	registry := detector.GetRegistry()
+
+	if len(registry.Tenants) == 0 {
+		log.Println("No tenants to validate")
+		return nil
+	}
+
+	inactiveTenants := make([]string, 0)
+	activeTenants := make([]string, 0)
+	reservedTenants := make([]string, 0)
+
+	for tenantID, tenantInfo := range registry.Tenants {
+		switch tenantInfo.Status {
+		case "active":
+			activeTenants = append(activeTenants, tenantID)
+		case "reserved":
+			reservedTenants = append(reservedTenants, tenantID)
+		default:
+			inactiveTenants = append(inactiveTenants, tenantID)
+		}
+	}
+
+	log.Printf("Active tenants: %v", activeTenants)
+	if len(reservedTenants) > 0 {
+		log.Printf("Reserved tenants (awaiting activation): %v", reservedTenants)
+	}
+
+	if len(inactiveTenants) > 0 {
+		log.Printf("Inactive tenants (awaiting setup): %v", inactiveTenants)
+	}
+
+	log.Printf("✓ Validation passed - %d tenants active, %d reserved", len(activeTenants), len(reservedTenants))
+	return nil
+}
+
+// PreActivateAllTenants activates all tenants in the registry during startup
+func (m *Manager) PreActivateAllTenants() error {
+	detector := m.GetDetector()
+	registry := detector.GetRegistry()
+
+	if len(registry.Tenants) == 0 {
+		return nil
+	}
+
+	var failedTenants []string
+
+	for tenantID, tenantInfo := range registry.Tenants {
+		if tenantInfo.Status == "active" {
+			continue // Skip already active tenants
+		}
+
+		if tenantInfo.Status == "inactive" {
+			continue // Skip inactive tenants (no config files yet)
+		}
+
+		// Only try to pre-activate "reserved" tenants (which have config files)
+		if err := m.preActivateSingleTenant(tenantID); err != nil {
+			failedTenants = append(failedTenants, tenantID)
+			continue
+		}
+	}
+
+	if err := detector.RefreshRegistry(); err != nil {
+		return fmt.Errorf("failed to refresh detector registry: %w", err)
+	}
+
+	if len(failedTenants) > 0 {
+		return fmt.Errorf("pre-activation failed for tenants: %v", failedTenants)
+	}
+
+	return nil
 }

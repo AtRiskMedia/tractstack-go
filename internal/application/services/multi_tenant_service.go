@@ -181,10 +181,9 @@ func (s *MultiTenantService) ActivateTenant(token string) error {
 
 // GetCapacity checks the system's capacity for new tenants.
 func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
-	registry, err := tenant.LoadTenantRegistry()
-	if err != nil {
-		return nil, fmt.Errorf("could not load tenant registry: %w", err)
-	}
+	// Use detector's in-memory registry instead of reading filesystem
+	detector := s.tenantManager.GetDetector()
+	registry := detector.GetRegistry()
 
 	currentTenants := len(registry.Tenants)
 	maxTenants := config.MaxTenants
@@ -212,10 +211,11 @@ func (s *MultiTenantService) validateProvisionRequest(req ProvisionRequest) erro
 	if len(req.Domains) == 0 || req.Domains[0] == "" {
 		return fmt.Errorf("at least one domain is required")
 	}
-	registry, err := tenant.LoadTenantRegistry()
-	if err != nil {
-		return fmt.Errorf("could not load tenant registry for validation")
-	}
+
+	// Use detector's in-memory registry instead of reading filesystem
+	detector := s.tenantManager.GetDetector()
+	registry := detector.GetRegistry()
+
 	if _, exists := registry.Tenants[req.TenantID]; exists {
 		return fmt.Errorf("tenant ID '%s' already exists", req.TenantID)
 	}
@@ -239,12 +239,20 @@ func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
 
 func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domains []string) error {
 	registryPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", "t8k", "tenants.json")
-	registry, err := tenant.LoadTenantRegistry()
-	if err != nil {
-		return fmt.Errorf("failed to load registry to update: %w", err)
+
+	// Use detector's in-memory registry as base instead of reading filesystem
+	detector := s.tenantManager.GetDetector()
+	registry := detector.GetRegistry()
+
+	// Make a copy to avoid modifying the detector's registry directly
+	registryCopy := &tenant.TenantRegistry{
+		Tenants: make(map[string]tenant.TenantInfo),
+	}
+	for k, v := range registry.Tenants {
+		registryCopy.Tenants[k] = v
 	}
 
-	info, exists := registry.Tenants[tenantID]
+	info, exists := registryCopy.Tenants[tenantID]
 	if !exists {
 		info = tenant.TenantInfo{TenantID: tenantID}
 	}
@@ -252,20 +260,26 @@ func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domai
 	if domains != nil {
 		info.Domains = domains
 	}
-	registry.Tenants[tenantID] = info
+	registryCopy.Tenants[tenantID] = info
 
-	registryData, err := json.MarshalIndent(registry, "", "  ")
+	registryData, err := json.MarshalIndent(registryCopy, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal registry: %w", err)
 	}
-	return os.WriteFile(registryPath, registryData, 0644)
+
+	// Write to filesystem
+	if err := os.WriteFile(registryPath, registryData, 0644); err != nil {
+		return fmt.Errorf("failed to write registry: %w", err)
+	}
+
+	// Refresh detector's in-memory cache to sync with file
+	return detector.RefreshRegistry()
 }
 
 func (s *MultiTenantService) findTenantByActivationToken(token string) (string, error) {
-	registry, err := tenant.LoadTenantRegistry()
-	if err != nil {
-		return "", err
-	}
+	// Use detector's in-memory registry instead of reading filesystem
+	detector := s.tenantManager.GetDetector()
+	registry := detector.GetRegistry()
 
 	for tenantID, info := range registry.Tenants {
 		if info.Status == "reserved" {
@@ -281,4 +295,9 @@ func (s *MultiTenantService) findTenantByActivationToken(token string) (string, 
 	}
 
 	return "", fmt.Errorf("invalid or expired activation token")
+}
+
+// GetTenantManager returns the tenant manager instance
+func (s *MultiTenantService) GetTenantManager() *tenant.Manager {
+	return s.tenantManager
 }
