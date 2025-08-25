@@ -8,96 +8,27 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
 // DatabaseHandlers contains all database-related HTTP handlers
 type DatabaseHandlers struct {
-	dbService   *services.DBService
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
+	dbService     *services.DBService
+	logger        *logging.ChanneledLogger
+	perfTracker   *performance.Tracker
+	tenantManager *tenant.Manager
 }
 
 // NewDBHandlers creates database handlers with injected dependencies
-func NewDBHandlers(dbService *services.DBService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *DatabaseHandlers {
+func NewDBHandlers(dbService *services.DBService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker, tenantManager *tenant.Manager) *DatabaseHandlers {
 	return &DatabaseHandlers{
-		dbService:   dbService,
-		logger:      logger,
-		perfTracker: perfTracker,
+		dbService:     dbService,
+		logger:        logger,
+		perfTracker:   perfTracker,
+		tenantManager: tenantManager,
 	}
-}
-
-// GetDatabaseStatus handles GET /api/v1/db/status - checks tenant database status
-func (h *DatabaseHandlers) GetDatabaseStatus(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	start := time.Now()
-	marker := h.perfTracker.StartOperation("get_database_status_request", tenantCtx.TenantID)
-	defer marker.Complete()
-	h.logger.System().Debug("Received get database status request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
-
-	// Use database service to check status
-	status := h.dbService.CheckStatus(tenantCtx)
-
-	// Log the result
-	if status["error"] != nil && status["error"].(string) != "" {
-		h.logger.System().Error("Database status check failed", "tenantId", tenantCtx.TenantID, "error", status["error"], "duration", time.Since(start))
-		marker.SetSuccess(false)
-		h.logger.Perf().Info("Performance for GetDatabaseStatus request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", false)
-
-		// Return error status but still return 200 OK with error details
-		c.JSON(http.StatusOK, gin.H{
-			"tenantId":       status["tenantId"],
-			"status":         status["status"],
-			"allTablesExist": false,
-			"error":          status["error"],
-			"responseTime":   status["timestamp"],
-		})
-		return
-	}
-
-	h.logger.System().Info("Database status check completed", "tenantId", tenantCtx.TenantID, "status", status["status"], "allTablesExist", status["allTablesExist"], "duration", time.Since(start))
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for GetDatabaseStatus request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
-
-	// Return successful status
-	c.JSON(http.StatusOK, status)
-}
-
-// GetDatabaseHealth handles GET /api/v1/db/health - comprehensive health check
-func (h *DatabaseHandlers) GetDatabaseHealth(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	start := time.Now()
-	marker := h.perfTracker.StartOperation("get_database_health_request", tenantCtx.TenantID)
-	defer marker.Complete()
-	h.logger.System().Debug("Received get database health request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
-
-	// Perform comprehensive health check
-	healthResult := h.dbService.PerformHealthCheck(tenantCtx)
-
-	// Log the result
-	h.logger.System().Info("Database health check completed",
-		"tenantId", tenantCtx.TenantID,
-		"overallStatus", healthResult["status"],
-		"duration", time.Since(start))
-
-	// Set marker success based on overall status
-	success := healthResult["status"] == "healthy"
-	marker.SetSuccess(success)
-	h.logger.Perf().Info("Performance for GetDatabaseHealth request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", success)
-
-	// Return health check results
-	c.JSON(http.StatusOK, healthResult)
 }
 
 // GetConnectionStats handles GET /api/v1/db/stats - database connection statistics
@@ -270,34 +201,46 @@ type TestResponse struct {
 	CompletedAt   time.Time                 `json:"completedAt"`
 }
 
-// GetGeneralHealth handles GET /api/v1/health - matches legacy format exactly
 func (h *DatabaseHandlers) GetGeneralHealth(c *gin.Context) {
-	// Ensure tenant context exists before returning healthy status
+	// First, try to get tenant context using existing middleware pattern
 	tenantCtx, exists := middleware.GetTenantContext(c)
+
+	// If tenant context exists and tenant is active, return healthy status
+	if exists && tenantCtx.Status == "active" {
+		// Return healthy status in exact legacy format
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "ok",
+			"healthy":   true,
+			"timestamp": time.Now().UTC().Unix(),
+			"tenantId":  tenantCtx.TenantID,
+		})
+		return
+	}
+
+	// If tenant context failed, check if this is a setup detection scenario
 	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"healthy": false,
-			"error":   "tenant context unavailable",
-		})
-		return
+		// Determine which tenant was being requested
+		detector := h.tenantManager.GetDetector()
+		tenantID, err := detector.DetectTenant(c)
+
+		// CRITICAL: Only check for setup if the requested tenant is "default"
+		if err == nil && tenantID == "default" {
+			defaultTenantStatus := detector.GetTenantStatus("default")
+
+			// If default tenant exists in registry but is inactive, setup is needed
+			if defaultTenantStatus == "inactive" {
+				c.JSON(http.StatusOK, gin.H{
+					"needsSetup": true,
+				})
+				return
+			}
+		}
 	}
 
-	// Verify tenant is active
-	if tenantCtx.Status != "active" {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"status":  "error",
-			"healthy": false,
-			"error":   "tenant not active",
-		})
-		return
-	}
-
-	// Return healthy status in exact legacy format
-	c.JSON(http.StatusOK, gin.H{
-		"status":    "ok",
-		"healthy":   true,
-		"timestamp": time.Now().UTC().Unix(),
-		"tenantId":  tenantCtx.TenantID,
+	// Fallback for other error cases
+	c.JSON(http.StatusServiceUnavailable, gin.H{
+		"status":  "error",
+		"healthy": false,
+		"error":   "tenant not available",
 	})
 }

@@ -43,6 +43,19 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 
 		tenantCtx, err := tenantManager.GetContext(c)
 		if err != nil {
+			// Check if this is default tenant setup scenario
+			if tenantID == "default" {
+				detector := tenantManager.GetDetector()
+				if detector.GetTenantStatus("default") == "inactive" {
+					// Set flags for health handler and continue
+					c.Set("setupNeeded", true)
+					c.Set("tenantId", "default")
+					marker.SetSuccess(true)
+					c.Next()
+					return
+				}
+			}
+
 			errMsg := fmt.Sprintf("tenant '%s' not found or failed to initialize", tenantID)
 			logger.Tenant().Error(errMsg, "error", err, "tenantId", tenantID)
 			marker.SetSuccess(false)

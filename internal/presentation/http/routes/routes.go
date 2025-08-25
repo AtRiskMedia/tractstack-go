@@ -46,7 +46,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	authHandlers := handlers.NewAuthHandlers(container.AuthService, container.Logger, container.PerfTracker)
 	visitHandlers := handlers.NewVisitHandlers(container.SessionService, container.AuthService, container.Broadcaster, container.Logger, container.PerfTracker)
 	stateHandlers := handlers.NewStateHandlers(container.EventProcessingService, container.Broadcaster, container.Logger, container.PerfTracker)
-	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker)
+	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker, container.TenantManager)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
 	aaiHandlers := handlers.NewAAIHandlers(container.Logger, container.PerfTracker)
@@ -80,6 +80,11 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			tenantAPI.POST("/activation", multiTenantHandlers.HandleActivateTenant)
 			tenantAPI.GET("/capacity", multiTenantHandlers.HandleGetCapacity)
 		}
+	}
+
+	setupAPI := r.Group("/api/v1/setup")
+	{
+		setupAPI.POST("/initialize", multiTenantHandlers.HandleSetupInitialize)
 	}
 
 	// API routes with tenant middleware
@@ -123,9 +128,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 		// State management (separate from auth)
 		api.POST("/state", stateHandlers.PostState)
-
-		// Database status
-		api.GET("/db/status", dbHandlers.GetDatabaseStatus)
 
 		// General health endpoint
 		api.GET("/health", dbHandlers.GetGeneralHealth)

@@ -189,7 +189,7 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 	registryPath := filepath.Join(homeDir, "t8k-go-server", "config", "t8k", "tenants.json")
 
 	if _, err := os.Stat(registryPath); os.IsNotExist(err) {
-		// Create default registry if it doesn't exist
+		// Create default registry with inactive default tenant
 		defaultRegistry := &TenantRegistry{
 			Tenants: map[string]TenantInfo{
 				"default": {
@@ -200,6 +200,22 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 				},
 			},
 		}
+
+		// Save default registry to disk
+		registryDir := filepath.Dir(registryPath)
+		if err := os.MkdirAll(registryDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create registry directory: %w", err)
+		}
+
+		data, err := json.MarshalIndent(defaultRegistry, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal default registry: %w", err)
+		}
+
+		if err := os.WriteFile(registryPath, data, 0644); err != nil {
+			return nil, fmt.Errorf("failed to write default registry: %w", err)
+		}
+
 		return defaultRegistry, nil
 	}
 
