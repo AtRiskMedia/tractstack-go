@@ -59,7 +59,7 @@ func (tc *TableCreator) SeedInitialContent(db *sql.DB) error {
 		storyFragmentID := security.GenerateULID()
 		now := time.Now().UTC()
 		_, err = db.Exec(`INSERT INTO storyfragments (id, title, slug, tractstack_id, created, changed) VALUES (?, ?, ?, ?, ?, ?)`,
-			storyFragmentID, "Hello", "hello", tractStackID, now, now)
+			storyFragmentID, "Hello", "", tractStackID, now, now)
 		if err != nil {
 			return fmt.Errorf("failed to insert default storyfragment: %w", err)
 		}
