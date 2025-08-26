@@ -4,6 +4,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -103,6 +104,16 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 		return "", err
 	}
 
+	if err := s.copyDefaultStyles(req.TenantID); err != nil {
+		marker.SetError(err)
+		return "", err
+	}
+
+	if err := s.copyDefaultFonts(req.TenantID); err != nil {
+		marker.SetError(err)
+		return "", err
+	}
+
 	if err := s.updateTenantRegistry(req.TenantID, "reserved", req.Domains); err != nil {
 		marker.SetError(err)
 		return "", err
@@ -119,6 +130,36 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 	marker.SetSuccess(true)
 	s.logger.Tenant().Info("Tenant successfully provisioned", "tenantId", req.TenantID)
 	return activationToken, nil
+}
+
+func (s *MultiTenantService) validateProvisionRequest(req ProvisionRequest) error {
+	re := regexp.MustCompile(`^[a-z0-9-]{3,12}$`)
+	if !re.MatchString(req.TenantID) {
+		return fmt.Errorf("invalid tenant ID format: must be 3-12 lowercase alphanumeric characters or hyphens")
+	}
+	if len(req.AdminPassword) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	if len(req.Domains) == 0 || req.Domains[0] == "" {
+		return fmt.Errorf("at least one domain is required")
+	}
+
+	// Use detector's in-memory registry instead of reading filesystem
+	detector := s.tenantManager.GetDetector()
+	registry := detector.GetRegistry()
+
+	if _, exists := registry.Tenants[req.TenantID]; exists {
+		// Special case: allow provisioning default tenant if it's inactive (fresh install)
+		if req.TenantID == "default" {
+			tenantInfo := registry.Tenants[req.TenantID]
+			if tenantInfo.Status == "inactive" {
+				// Allow provisioning - this is fresh install setup
+				return nil
+			}
+		}
+		return fmt.Errorf("tenant ID '%s' already exists", req.TenantID)
+	}
+	return nil
 }
 
 // ActivateTenant finalizes tenant setup by creating the database schema.
@@ -196,30 +237,6 @@ func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
 		MaxTenants:     maxTenants,
 		AvailableSlots: availableSlots,
 	}, nil
-}
-
-// --- Private Helper Methods ---
-
-func (s *MultiTenantService) validateProvisionRequest(req ProvisionRequest) error {
-	re := regexp.MustCompile(`^[a-z0-9-]{3,12}$`)
-	if !re.MatchString(req.TenantID) {
-		return fmt.Errorf("invalid tenant ID format: must be 3-12 lowercase alphanumeric characters or hyphens")
-	}
-	if len(req.AdminPassword) < 8 {
-		return fmt.Errorf("password must be at least 8 characters")
-	}
-	if len(req.Domains) == 0 || req.Domains[0] == "" {
-		return fmt.Errorf("at least one domain is required")
-	}
-
-	// Use detector's in-memory registry instead of reading filesystem
-	detector := s.tenantManager.GetDetector()
-	registry := detector.GetRegistry()
-
-	if _, exists := registry.Tenants[req.TenantID]; exists {
-		return fmt.Errorf("tenant ID '%s' already exists", req.TenantID)
-	}
-	return nil
 }
 
 func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
@@ -300,4 +317,100 @@ func (s *MultiTenantService) findTenantByActivationToken(token string) (string, 
 // GetTenantManager returns the tenant manager instance
 func (s *MultiTenantService) GetTenantManager() *tenant.Manager {
 	return s.tenantManager
+}
+
+func copyFile(src, dst string) error {
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	destFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	if err != nil {
+		return err
+	}
+
+	// Sync to ensure the file is written to disk
+	return destFile.Sync()
+}
+
+func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
+	homeDir := os.Getenv("HOME")
+	sourceDir := filepath.Join("pkg", "styles")
+	targetDir := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "media", "css")
+
+	// Create target directory
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create CSS directory: %w", err)
+	}
+
+	// Copy frontend.css
+	if err := copyFile(
+		filepath.Join(sourceDir, "frontend.css"),
+		filepath.Join(targetDir, "frontend.css"),
+	); err != nil {
+		return fmt.Errorf("failed to copy frontend.css: %w", err)
+	}
+
+	// Copy custom.css
+	if err := copyFile(
+		filepath.Join(sourceDir, "custom.css"),
+		filepath.Join(targetDir, "custom.css"),
+	); err != nil {
+		return fmt.Errorf("failed to copy custom.css: %w", err)
+	}
+
+	// Copy storykeep.css
+	if err := copyFile(
+		filepath.Join(sourceDir, "storykeep.css"),
+		filepath.Join(targetDir, "storykeep.css"),
+	); err != nil {
+		return fmt.Errorf("failed to copy storykeep.css: %w", err)
+	}
+
+	return nil
+}
+
+func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
+	homeDir := os.Getenv("HOME")
+	sourceDir := filepath.Join("pkg", "fonts")
+	targetDir := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "media", "fonts")
+
+	// Create target directory
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("failed to create fonts directory: %w", err)
+	}
+
+	// Copy Inter-Regular.woff2
+	if err := copyFile(
+		filepath.Join(sourceDir, "Inter-Regular.woff2"),
+		filepath.Join(targetDir, "Inter-Regular.woff2"),
+	); err != nil {
+		return fmt.Errorf("failed to copy Inter-Regular.woff2: %w", err)
+	}
+
+	// Copy Inter-Bold.woff2
+	if err := copyFile(
+		filepath.Join(sourceDir, "Inter-Bold.woff2"),
+		filepath.Join(targetDir, "Inter-Bold.woff2"),
+	); err != nil {
+		return fmt.Errorf("failed to copy Inter-Bold.woff2: %w", err)
+	}
+
+	// Copy Inter-Black.woff2
+	if err := copyFile(
+		filepath.Join(sourceDir, "Inter-Black.woff2"),
+		filepath.Join(targetDir, "Inter-Black.woff2"),
+	); err != nil {
+		return fmt.Errorf("failed to copy Inter-Black.woff2: %w", err)
+	}
+
+	return nil
 }
