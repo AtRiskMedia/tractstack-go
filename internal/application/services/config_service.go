@@ -163,6 +163,13 @@ func (c *ConfigService) ProcessBrandConfigUpdate(
 		return nil, err
 	}
 
+	// Update custom CSS if brand colors changed
+	if request.BrandColours != "" && request.BrandColours != currentConfig.BrandColours {
+		if err := c.updateBrandColorsInCustomCSS(mediaPath, request.BrandColours); err != nil {
+			return nil, fmt.Errorf("failed to update brand colors in CSS: %w", err)
+		}
+	}
+
 	// Update configuration fields with proper protection
 	finalConfig := c.updateBrandConfigFields(processedConfig, request)
 
@@ -620,6 +627,74 @@ func (c *ConfigService) saveKnownResources(tenantID string, knownResources *type
 
 	if err := os.WriteFile(knownResourcesPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write known resources config: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ConfigService) updateBrandColorsInCustomCSS(mediaPath, brandColours string) error {
+	// Parse comma-separated colors
+	colors := strings.Split(brandColours, ",")
+	if len(colors) != 8 {
+		return fmt.Errorf("expected 8 brand colors, got %d", len(colors))
+	}
+
+	// Validate colors are valid hex
+	hexPattern := regexp.MustCompile("^[a-fA-F0-9]{6}$")
+	for i, color := range colors {
+		color = strings.TrimSpace(color)
+		if len(color) != 6 {
+			return fmt.Errorf("invalid hex color at position %d: %s", i+1, color)
+		}
+		// Validate hex characters
+		if !hexPattern.MatchString(color) {
+			return fmt.Errorf("invalid hex color at position %d: %s", i+1, color)
+		}
+		colors[i] = color
+	}
+
+	// CSS file paths
+	cssPath := filepath.Join(mediaPath, "css", "custom.css")
+	tmpPath := cssPath + ".tmp"
+	goodPath := cssPath + ".good"
+
+	// Read current CSS
+	content, err := os.ReadFile(cssPath)
+	if err != nil {
+		return fmt.Errorf("failed to read custom.css: %w", err)
+	}
+
+	// Replace brand color values
+	updatedContent := string(content)
+	for i, color := range colors {
+		pattern := fmt.Sprintf(`(--brand-%d:\s*)#[a-fA-F0-9]{6}(;)`, i+1)
+		replacement := fmt.Sprintf("${1}#%s${2}", color)
+		re := regexp.MustCompile(pattern)
+		updatedContent = re.ReplaceAllString(updatedContent, replacement)
+	}
+
+	// Write to temp file
+	if err := os.WriteFile(tmpPath, []byte(updatedContent), 0644); err != nil {
+		return fmt.Errorf("failed to write temp CSS: %w", err)
+	}
+
+	// Verify temp file can be read
+	if _, err := os.ReadFile(tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to verify temp CSS: %w", err)
+	}
+
+	// Atomic replacement: backup original, activate new
+	if err := os.Rename(cssPath, goodPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to backup CSS: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, cssPath); err != nil {
+		// Restore from backup on failure
+		os.Rename(goodPath, cssPath)
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to activate new CSS: %w", err)
 	}
 
 	return nil
