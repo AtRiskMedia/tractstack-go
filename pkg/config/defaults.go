@@ -160,7 +160,7 @@ func init() {
 	EnableMultiTenant = getEnvBool("ENABLE_MULTI_TENANT", false)
 
 	// Memory Management
-	MaxTenants = getEnvInt("MAX_TENANTS", 5)
+	MaxTenants = getEnvInt("MAX_TENANTS", 0)
 	MaxMemoryMB = getEnvInt("MAX_MEMORY_MB", 512)
 	MaxSessionsPerTenant = getEnvInt("MAX_SESSIONS_PER_TENANT", 5000)
 
