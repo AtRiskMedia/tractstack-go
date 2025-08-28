@@ -3,7 +3,6 @@ package container
 
 import (
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -81,7 +80,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	}
 
 	loggerConfig := logging.DefaultLoggerConfig()
-	loggerConfig.LogDirectory = filepath.Join(os.Getenv("HOME"), "t8k-go-server", "log")
+	loggerConfig.LogDirectory = filepath.Join(config.BackendPath, "log")
 
 	switch strings.ToUpper(config.LogVerbosity) {
 	case "TRACE":

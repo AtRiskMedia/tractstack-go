@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -92,6 +93,9 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 }
 
 var (
+	// Folder location
+	BackendPath string
+
 	// Server Configuration
 	Port               string
 	ServerReadTimeout  time.Duration
@@ -149,6 +153,10 @@ var (
 
 func init() {
 	loadEnvFile()
+
+	// Folder location
+	homeDir, _ := os.UserHomeDir()
+	BackendPath = getEnvString("GO_BACKEND_PATH", filepath.Join(homeDir, "t8k-go-server"))
 
 	// Server Configuration
 	Port = getEnvString("PORT", "8080")

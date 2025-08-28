@@ -12,6 +12,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // TailwindService handles tailwind CSS class extraction and updates
@@ -123,7 +124,7 @@ func (s *TailwindService) UpdateTailwindCSS(tenantCtx *tenant.Context, frontendC
 	defer marker.Complete()
 
 	// Get media path
-	mediaPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.TenantID, "media")
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
 	stylesDir := filepath.Join(mediaPath, "styles")
 
 	// Ensure styles directory exists
@@ -217,7 +218,7 @@ func (s *TailwindService) extractClassesFromOptionsPayload(optionsPayload map[st
 
 // loadStaticWhitelist loads the static whitelist from filesystem
 func (s *TailwindService) loadStaticWhitelist(tenantID string) ([]string, error) {
-	whitelistPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantID, "tailwindWhitelist.json")
+	whitelistPath := filepath.Join(config.BackendPath, "config", tenantID, "tailwindWhitelist.json")
 
 	data, err := os.ReadFile(whitelistPath)
 	if err != nil {

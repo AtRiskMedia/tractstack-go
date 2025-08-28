@@ -17,6 +17,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 )
 
@@ -252,7 +253,7 @@ func (c *ConfigService) TestTursoConnection(databaseURL, authToken string) error
 
 // SaveBrandConfig saves brand configuration to disk
 func (c *ConfigService) SaveBrandConfig(tenantID string, config *types.BrandConfig) error {
-	configPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantID)
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID)
 
 	// Ensure config directory exists
 	if err := os.MkdirAll(configPath, 0755); err != nil {
@@ -284,7 +285,7 @@ func (c *ConfigService) SaveBrandConfig(tenantID string, config *types.BrandConf
 
 // SaveAdvancedConfig saves advanced configuration to disk
 func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
-	configPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.Config.TenantID, "env.json")
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantCtx.Config.TenantID, "env.json")
 
 	// Ensure config directory exists
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -611,7 +612,7 @@ func (c *ConfigService) saveKnownResources(tenantID string, knownResources *type
 		return nil // Nothing to save
 	}
 
-	configPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantID)
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID)
 
 	// Ensure config directory exists
 	if err := os.MkdirAll(configPath, 0755); err != nil {

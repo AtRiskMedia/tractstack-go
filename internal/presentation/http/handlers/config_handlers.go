@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -94,7 +94,7 @@ func (h *ConfigHandlers) UpdateBrandConfig(c *gin.Context) {
 	}
 
 	// Get media path
-	mediaPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.Config.TenantID, "media")
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.Config.TenantID, "media")
 
 	// Process brand config update through service
 	updatedConfig, err := h.configService.ProcessBrandConfigUpdate(mediaPath, &request, currentConfig)

@@ -3,7 +3,6 @@ package handlers
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 	"github.com/oklog/ulid/v2"
 )
@@ -184,7 +184,7 @@ func (h *ImageFileHandlers) CreateFile(c *gin.Context) {
 	fileID := ulid.Make().String()
 
 	// Get tenant's media path and create ImageProcessor
-	mediaPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.TenantID, "media")
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
 	processor := media.NewImageProcessor(mediaPath)
 
 	// Process the image and generate responsive versions
@@ -349,7 +349,7 @@ func (h *ImageFileHandlers) UploadOGImage(c *gin.Context) {
 	}
 
 	// Get tenant's media path and create ImageProcessor
-	mediaPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.TenantID, "media")
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
 	processor := media.NewImageProcessor(mediaPath)
 
 	// Process the image and generate thumbnails
@@ -411,7 +411,7 @@ func (h *ImageFileHandlers) DeleteOGImage(c *gin.Context) {
 	}
 
 	// Get tenant's media path and create ImageProcessor
-	mediaPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", tenantCtx.TenantID, "media")
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
 	processor := media.NewImageProcessor(mediaPath)
 
 	// Delete the image and its thumbnails

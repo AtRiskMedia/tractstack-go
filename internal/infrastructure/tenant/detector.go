@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -80,12 +81,7 @@ func (d *Detector) DetectTenant(c *gin.Context) (string, error) {
 
 // hasConfigDirectory checks if a tenant has a config directory
 func (d *Detector) hasConfigDirectory(tenantID string) bool {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-
-	configDir := filepath.Join(homeDir, "t8k-go-server", "config", tenantID)
+	configDir := filepath.Join(config.BackendPath, "config", tenantID)
 	if _, err := os.Stat(configDir); err == nil {
 		return true
 	}

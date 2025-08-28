@@ -16,7 +16,7 @@ import (
 
 // ImageProcessor handles image processing operations for a specific tenant
 type ImageProcessor struct {
-	basePath string // Points to ~/t8k-go-server/config/{tenantId}/media
+	basePath string // Defaults to ~/t8k-go-server/config/{tenantId}/media
 }
 
 // NewImageProcessor creates a new ImageProcessor instance

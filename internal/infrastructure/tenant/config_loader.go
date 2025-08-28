@@ -9,6 +9,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // Config represents the structure of a single tenant's configuration
@@ -34,12 +35,7 @@ type Config struct {
 
 // LoadTenantConfig loads configuration for a specific tenant from its env.json file.
 func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("could not find user home directory: %w", err)
-	}
-
-	configPath := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "env.json")
+	configPath := filepath.Join(config.BackendPath, "config", tenantID, "env.json")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("tenant config file not found at %s", configPath)
 	}
@@ -56,7 +52,7 @@ func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config
 
 	// Set computed fields
 	tenantConfig.TenantID = tenantID
-	tenantConfig.SQLitePath = filepath.Join(homeDir, "t8k-go-server", "db", tenantID, "tractstack.db")
+	tenantConfig.SQLitePath = filepath.Join(config.BackendPath, "db", tenantID, "tractstack.db")
 
 	// Load brand configuration
 	brandConfig, err := LoadBrandConfig(tenantID)
@@ -66,7 +62,7 @@ func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config
 	tenantConfig.BrandConfig = brandConfig
 
 	// Ensure tailwindWhitelist.json exists
-	whitelistPath := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "tailwindWhitelist.json")
+	whitelistPath := filepath.Join(config.BackendPath, "config", tenantID, "tailwindWhitelist.json")
 	if _, err := os.Stat(whitelistPath); os.IsNotExist(err) {
 		emptyWhitelist := map[string][]string{"safelist": {}}
 		whitelistData, err := json.MarshalIndent(emptyWhitelist, "", "  ")
@@ -84,12 +80,7 @@ func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config
 
 // LoadBrandConfig loads brand configuration for a specific tenant
 func LoadBrandConfig(tenantID string) (*types.BrandConfig, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("could not find user home directory: %w", err)
-	}
-
-	brandPath := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "brand.json")
+	brandPath := filepath.Join(config.BackendPath, "config", tenantID, "brand.json")
 
 	// Return defaults if file doesn't exist
 	if _, err := os.Stat(brandPath); os.IsNotExist(err) {
@@ -141,12 +132,7 @@ func LoadBrandConfig(tenantID string) (*types.BrandConfig, error) {
 
 // LoadKnownResources loads known resources configuration for a specific tenant
 func LoadKnownResources(tenantID string) (*types.KnownResourcesConfig, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("could not find user home directory: %w", err)
-	}
-
-	knownResourcesPath := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "knownResources.json")
+	knownResourcesPath := filepath.Join(config.BackendPath, "config", tenantID, "knownResources.json")
 
 	// Return empty config if file doesn't exist
 	if _, err := os.Stat(knownResourcesPath); os.IsNotExist(err) {
@@ -181,12 +167,7 @@ type TenantInfo struct {
 
 // LoadTenantRegistry loads the global tenant registry
 func LoadTenantRegistry() (*TenantRegistry, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("could not find user home directory: %w", err)
-	}
-
-	registryPath := filepath.Join(homeDir, "t8k-go-server", "config", "t8k", "tenants.json")
+	registryPath := filepath.Join(config.BackendPath, "config", "t8k", "tenants.json")
 
 	if _, err := os.Stat(registryPath); os.IsNotExist(err) {
 		// Create default registry with inactive default tenant
@@ -234,12 +215,7 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 
 // RegisterTenant adds a new tenant to the registry
 func RegisterTenant(tenantID string) error {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("could not find user home directory: %w", err)
-	}
-
-	registryPath := filepath.Join(homeDir, "t8k-go-server", "config", "t8k", "tenants.json")
+	registryPath := filepath.Join(config.BackendPath, "config", "t8k", "tenants.json")
 
 	registry, err := LoadTenantRegistry()
 	if err != nil {

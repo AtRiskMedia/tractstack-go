@@ -15,7 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
-	"github.com/AtRiskMedia/tractstack-go/pkg/config"
+	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // MultiTenantService orchestrates tenant lifecycle operations.
@@ -227,7 +227,7 @@ func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
 	registry := detector.GetRegistry()
 
 	currentTenants := len(registry.Tenants)
-	maxTenants := config.MaxTenants
+	maxTenants := pkgconfig.MaxTenants
 	availableSlots := maxTenants - currentTenants
 	availableSlots = max(0, availableSlots)
 
@@ -240,7 +240,7 @@ func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
 }
 
 func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
-	configPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", config.TenantID, "env.json")
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", config.TenantID, "env.json")
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
@@ -255,7 +255,7 @@ func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
 }
 
 func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domains []string) error {
-	registryPath := filepath.Join(os.Getenv("HOME"), "t8k-go-server", "config", "t8k", "tenants.json")
+	registryPath := filepath.Join(pkgconfig.BackendPath, "config", "t8k", "tenants.json")
 
 	// Use detector's in-memory registry as base instead of reading filesystem
 	detector := s.tenantManager.GetDetector()
@@ -342,9 +342,8 @@ func copyFile(src, dst string) error {
 }
 
 func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
-	homeDir := os.Getenv("HOME")
 	sourceDir := filepath.Join("pkg", "styles")
-	targetDir := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "media", "css")
+	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "media", "css")
 
 	// Create target directory
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -379,9 +378,8 @@ func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
 }
 
 func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
-	homeDir := os.Getenv("HOME")
 	sourceDir := filepath.Join("pkg", "fonts")
-	targetDir := filepath.Join(homeDir, "t8k-go-server", "config", tenantID, "media", "fonts")
+	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "media", "fonts")
 
 	// Create target directory
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
