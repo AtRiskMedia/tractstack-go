@@ -37,7 +37,7 @@ func loadEnvFile() {
 			}
 
 			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
+			value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
 
 			if os.Getenv(key) == "" {
 				os.Setenv(key, value)
