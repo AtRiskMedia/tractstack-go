@@ -83,6 +83,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	}
 
 	setupAPI := r.Group("/api/v1/setup")
+	setupAPI.Use(middleware.CORSMiddleware())
 	{
 		setupAPI.POST("/initialize", multiTenantHandlers.HandleSetupInitialize)
 	}
