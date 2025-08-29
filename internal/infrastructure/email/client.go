@@ -25,7 +25,7 @@ type ResendClient struct {
 func NewService() (Service, error) {
 	apiKey := os.Getenv("RESEND_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("RESEND_API_KEY environment variable is required")
+		return nil, nil
 	}
 
 	fromEmail := os.Getenv("TENANT_EMAIL_FROM")

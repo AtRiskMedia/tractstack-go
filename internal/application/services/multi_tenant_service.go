@@ -119,12 +119,18 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 		return "", err
 	}
 
-	// 5. Send Activation Email
-	activationURL := fmt.Sprintf("https://%s/activate?token=%s", req.Domains[0], activationToken)
-	if err := s.emailService.SendTenantActivationEmail(req.AdminEmail, req.TenantID, activationURL); err != nil {
-		marker.SetError(err)
-		s.logger.System().Error("Failed to send activation email", "error", err, "tenantId", req.TenantID)
-		// Do not fail the entire operation, but log it as a critical issue.
+	// 5. Send Activation Email (if avail)
+	if s.emailService != nil {
+		activationURL := fmt.Sprintf("https://%s/activate?token=%s", req.Domains[0], activationToken)
+		if err := s.emailService.SendTenantActivationEmail(req.AdminEmail, req.TenantID, activationURL); err != nil {
+			marker.SetError(err)
+			s.logger.System().Error("Failed to send activation email", "error", err, "tenantId", req.TenantID)
+		} else {
+			s.logger.System().Info("Activation email sent successfully", "tenantId", req.TenantID, "adminEmail", req.AdminEmail)
+		}
+	} else {
+		s.logger.System().Warn("Activation email not sent - email service not configured",
+			"tenantId", req.TenantID, "adminEmail", req.AdminEmail)
 	}
 
 	marker.SetSuccess(true)
@@ -411,4 +417,9 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 	}
 
 	return nil
+}
+
+// HasEmailService returns whether email functionality is available
+func (s *MultiTenantService) HasEmailService() bool {
+	return s.emailService != nil
 }

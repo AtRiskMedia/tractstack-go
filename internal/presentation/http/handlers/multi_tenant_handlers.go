@@ -62,10 +62,17 @@ func (h *MultiTenantHandlers) HandleProvisionTenant(c *gin.Context) {
 		return
 	}
 
+	var message string
+	if h.service.HasEmailService() { // We'll need to add this method
+		message = "Tenant provisioned successfully. Activation email sent."
+	} else {
+		message = "Tenant provisioned successfully. Email service not available - use activation token."
+	}
+
 	marker.SetSuccess(true)
 	c.JSON(http.StatusCreated, gin.H{
 		"status":  "ok",
-		"message": "Tenant provisioned successfully. Activation email sent.",
+		"message": message,
 		"token":   activationToken,
 	})
 }

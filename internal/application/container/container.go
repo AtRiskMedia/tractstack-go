@@ -3,6 +3,7 @@ package container
 
 import (
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -74,10 +75,6 @@ type Container struct {
 func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) *Container {
 	// Initialize observability infrastructure
 	perfTracker := performance.NewTracker(performance.DefaultTrackerConfig())
-	emailService, err := email.NewService()
-	if err != nil {
-		panic("Failed to initialize email service: " + err.Error())
-	}
 
 	loggerConfig := logging.DefaultLoggerConfig()
 	loggerConfig.LogDirectory = filepath.Join(config.BackendPath, "log")
@@ -103,6 +100,19 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		panic("Failed to initialize logger: " + err.Error())
 	}
 	logger.Startup().Info("Channeled logger initialized successfully", "logDirectory", loggerConfig.LogDirectory)
+
+	var emailService email.Service
+	if apiKey := os.Getenv("RESEND_API_KEY"); apiKey != "" {
+		var err error
+		emailService, err = email.NewService()
+		if err != nil {
+			panic("Failed to initialize email service: " + err.Error())
+		}
+		logger.Startup().Info("Email service initialized successfully with Resend API")
+	} else {
+		emailService = nil
+		logger.Startup().Warn("Email service disabled - RESEND_API_KEY not configured")
+	}
 
 	beliefEvaluationService := services.NewBeliefEvaluationService()
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
