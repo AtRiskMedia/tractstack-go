@@ -1189,13 +1189,371 @@ EOF
 # Configure systemd services
 configure_systemd_services() {
   echo -e "${BLUE}Configuring systemd services...${RESET}"
-  echo "✅ systemd service configuration would run here"
+
+  # Determine service configuration based on installation type
+  local service_name
+  local service_file
+  local binary_path
+  local working_dir
+  local data_dir
+
+  case "${INSTALL_TYPE}" in
+  "prod" | "multi")
+    service_name="tractstack-go"
+    service_file="/etc/systemd/system/tractstack-go.service"
+    binary_path="/home/t8k/bin/tractstack-go"
+    working_dir="/home/t8k/src/tractstack-go"
+    data_dir="/home/t8k/t8k-go-server"
+    ;;
+  "dedicated")
+    service_name="tractstack-go@${SITE_ID}"
+    service_file="/etc/systemd/system/tractstack-go@.service"
+    binary_path="/home/t8k/sites/%i/bin/tractstack-go"
+    working_dir="/home/t8k/sites/%i/src/tractstack-go"
+    data_dir="/home/t8k/sites/%i/t8k-go-server"
+    ;;
+  *)
+    echo -e "${RED}⛌ Unknown install type: ${INSTALL_TYPE}${RESET}"
+    cleanup_lock
+    exit 1
+    ;;
+  esac
+
+  # Create systemd service file for TractStack Go backend
+  echo -e "${BLUE}Creating systemd service: ${service_name}${RESET}"
+
+  if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
+    # Create template service for dedicated installations
+    cat >"$service_file" <<EOF
+[Unit]
+Description=TractStack Go Backend (Site: %i)
+After=network-online.target nginx.service
+Wants=network-online.target
+Requires=nginx.service
+
+[Service]
+Type=simple
+User=t8k
+Group=t8k
+WorkingDirectory=${working_dir}
+Environment=GO_BACKEND_PATH=${data_dir}/
+Environment=PORT=${ALLOCATED_GO_PORT}
+Environment=GIN_MODE=release
+ExecStart=${binary_path}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tractstack-go-%i
+
+# Security settings (relaxed for compatibility)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/home/t8k
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  else
+    # Create regular service for main/multi installations
+    cat >"$service_file" <<EOF
+[Unit]
+Description=TractStack Go Backend
+After=network-online.target nginx.service
+Wants=network-online.target
+Requires=nginx.service
+
+[Service]
+Type=simple
+User=t8k
+Group=t8k
+WorkingDirectory=${working_dir}
+Environment=GO_BACKEND_PATH=${data_dir}/
+Environment=PORT=${ALLOCATED_GO_PORT}
+Environment=GIN_MODE=release$(if [[ "${INSTALL_TYPE}" == "multi" ]]; then echo -e "\nEnvironment=ENABLE_MULTI_TENANT=true"; fi)
+ExecStart=${binary_path}
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tractstack-go
+
+# Security settings (relaxed for compatibility)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ReadWritePaths=/home/t8k
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  fi
+
+  echo -e "${GREEN}✅ Created systemd service file: ${service_file}${RESET}"
+
+  # Setup build system (idempotent)
+  setup_build_watcher
+
+  # Reload systemd daemon
+  echo -e "${BLUE}Reloading systemd daemon...${RESET}"
+  systemctl daemon-reload
+
+  # Enable and start the TractStack Go service
+  echo -e "${BLUE}Enabling and starting ${service_name}...${RESET}"
+  systemctl enable "$service_name"
+  systemctl start "$service_name"
+
+  # Verify service status
+  if systemctl is-active --quiet "$service_name"; then
+    echo -e "${GREEN}✅ ${service_name} is running${RESET}"
+  else
+    echo -e "${RED}⛌ ${service_name} failed to start${RESET}"
+    echo "Service status:"
+    systemctl status "$service_name" --no-pager -l
+    cleanup_lock
+    exit 1
+  fi
+
+  echo -e "${GREEN}✅ systemd service configuration complete${RESET}"
+}
+
+# Setup build system file watcher
+setup_build_watcher() {
+  local path_unit="/etc/systemd/system/t8k-build-watcher.path"
+  local service_unit="/etc/systemd/system/t8k-build-watcher.service"
+
+  # Check if build watcher already exists (idempotent)
+  if systemctl list-unit-files | grep -q "t8k-build-watcher.path"; then
+    echo -e "${BLUE}Build system already configured, skipping...${RESET}"
+    return 0
+  fi
+
+  echo -e "${BLUE}Setting up build system file watcher...${RESET}"
+
+  # Create systemd path unit
+  cat >"$path_unit" <<EOF
+[Unit]
+Description=TractStack Build Watcher
+Documentation=https://tractstack.org/docs
+
+[Path]
+PathModified=/home/t8k/state
+Unit=t8k-build-watcher.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Create systemd service unit
+  cat >"$service_unit" <<EOF
+[Unit]
+Description=TractStack Build Concierge
+Documentation=https://tractstack.org/docs
+
+[Service]
+Type=oneshot
+User=t8k
+Group=t8k
+ExecStart=/home/t8k/scripts/t8k-concierge.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=t8k-concierge
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/home/t8k
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  echo -e "${GREEN}✅ Created build watcher systemd units${RESET}"
+
+  # Enable and start the build watcher
+  echo -e "${BLUE}Enabling build system file watcher...${RESET}"
+  systemctl enable t8k-build-watcher.path
+  systemctl start t8k-build-watcher.path
+
+  # Verify path watcher is active
+  if systemctl is-active --quiet t8k-build-watcher.path; then
+    echo -e "${GREEN}✅ Build system file watcher is active${RESET}"
+  else
+    echo -e "${YELLOW}⚠️  Build system file watcher failed to start${RESET}"
+    systemctl status t8k-build-watcher.path --no-pager -l
+  fi
+}
+
+# Setup build system file watcher (idempotent)
+setup_build_watcher() {
+  local path_unit="/etc/systemd/system/t8k-build-watcher.path"
+  local service_unit="/etc/systemd/system/t8k-build-watcher.service"
+
+  # Check if build watcher already exists (idempotent)
+  if systemctl list-unit-files | grep -q "t8k-build-watcher.path"; then
+    echo -e "${BLUE}Build system already configured, skipping...${RESET}"
+    return 0
+  fi
+
+  echo -e "${BLUE}Setting up build system file watcher...${RESET}"
+
+  # Create systemd path unit
+  cat >"$path_unit" <<EOF
+[Unit]
+Description=TractStack Build Watcher
+Documentation=https://tractstack.org/docs
+
+[Path]
+PathModified=/home/t8k/state
+Unit=t8k-build-watcher.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Create systemd service unit
+  cat >"$service_unit" <<EOF
+[Unit]
+Description=TractStack Build Concierge
+Documentation=https://tractstack.org/docs
+
+[Service]
+Type=oneshot
+User=t8k
+Group=t8k
+ExecStart=/home/t8k/scripts/t8k-concierge.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=t8k-concierge
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/home/t8k
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  echo -e "${GREEN}✅ Created build watcher systemd units${RESET}"
+
+  # Enable and start the build watcher
+  echo -e "${BLUE}Enabling build system file watcher...${RESET}"
+  systemctl enable t8k-build-watcher.path
+  systemctl start t8k-build-watcher.path
+
+  # Verify path watcher is active
+  if systemctl is-active --quiet t8k-build-watcher.path; then
+    echo -e "${GREEN}✅ Build system file watcher is active${RESET}"
+  else
+    echo -e "${YELLOW}⚠️  Build system file watcher failed to start${RESET}"
+    systemctl status t8k-build-watcher.path --no-pager -l
+  fi
 }
 
 # Setup PM2 ecosystem
 setup_pm2_ecosystem() {
   echo -e "${BLUE}Setting up PM2 ecosystem...${RESET}"
-  echo "✅ PM2 ecosystem setup would run here"
+
+  local ecosystem_file="/home/t8k/etc/pm2/ecosystem.config.js"
+  local pm2_home="/home/t8k/.pm2"
+
+  # Ensure the t8k user has a PM2 home directory
+  sudo -u t8k mkdir -p "$pm2_home"
+
+  # Only create ecosystem config if it doesn't exist
+  if [[ ! -f "$ecosystem_file" ]]; then
+    echo -e "${BLUE}Creating PM2 ecosystem configuration...${RESET}"
+    sudo -u t8k tee "$ecosystem_file" >/dev/null <<'EOF'
+const fs = require('fs');
+const path = require('path');
+
+// Read port allocations
+const portsFile = '/home/t8k/etc/t8k-ports.conf';
+const apps = [];
+
+if (fs.existsSync(portsFile)) {
+  const portsContent = fs.readFileSync(portsFile, 'utf8');
+  const lines = portsContent.trim().split('\n');
+
+  for (const line of lines) {
+    if (!line.includes('=')) continue;
+
+    const [siteId, ports] = line.split('=');
+    const [goPort, astroPort] = ports.split(',');
+
+    let appPath;
+    let appName;
+
+    if (siteId === 'main') {
+      appPath = '/home/t8k/src/my-tractstack';
+      appName = 'astro-main';
+    } else {
+      appPath = `/home/t8k/sites/${siteId}/src/my-tractstack`;
+      appName = `astro-${siteId}`;
+    }
+
+    // Check if the app directory exists
+    if (fs.existsSync(appPath) && fs.existsSync(path.join(appPath, 'dist/server/entry.mjs'))) {
+      apps.push({
+        name: appName,
+        script: 'dist/server/entry.mjs',
+        cwd: appPath,
+        instances: 1,
+        autorestart: true,
+        watch: false,
+        max_memory_restart: '512M',
+        env: {
+          NODE_ENV: 'production',
+          PORT: astroPort,
+          HOST: '0.0.0.0'
+        }
+      });
+    }
+  }
+}
+
+module.exports = {
+  apps: apps
+};
+EOF
+  else
+    echo -e "${BLUE}PM2 ecosystem configuration already exists, skipping creation${RESET}"
+  fi
+
+  # Create log directory
+  sudo -u t8k mkdir -p /home/t8k/log
+
+  # Use reload or start for the ecosystem file
+  # This ensures all apps defined in the ecosystem file are running as expected.
+  echo -e "${BLUE}Starting or reloading PM2 ecosystem...${RESET}"
+  sudo -u t8k --preserve-env=PATH PM2_HOME="$pm2_home" pm2 startOrReload "$ecosystem_file"
+
+  # Configure PM2 to start on boot
+  echo -e "${BLUE}Configuring PM2 startup service...${RESET}"
+
+  # Generate and execute the startup script non-interactively.
+  # This command creates and enables a systemd service for PM2.
+  local pm2_path
+  pm2_path=$(sudo -u t8k which pm2)
+  if [[ -z "$pm2_path" ]]; then
+    echo -e "${RED}❌ Could not find pm2 executable for user t8k${RESET}"
+    cleanup_lock
+    exit 1
+  fi
+
+  # The `pm2 startup` command generates a systemd service.
+  # Running this command as root sets up the service correctly.
+  env PATH=$PATH:/usr/bin:"$(dirname "$pm2_path")" "$pm2_path" startup systemd -u t8k --hp /home/t8k
+
+  # Save the current process list so PM2 will resurrect them on reboot.
+  echo -e "${BLUE}Saving process list for reboot...${RESET}"
+  sudo -u t8k PM2_HOME="$pm2_home" pm2 save
+
+  echo -e "${GREEN}✅ PM2 ecosystem configured and running${RESET}"
 }
 
 # Setup build system
