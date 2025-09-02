@@ -125,7 +125,7 @@ func (s *TailwindService) UpdateTailwindCSS(tenantCtx *tenant.Context, frontendC
 
 	// Get media path
 	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
-	stylesDir := filepath.Join(mediaPath, "styles")
+	stylesDir := filepath.Join(mediaPath, "css")
 
 	// Ensure styles directory exists
 	if err := os.MkdirAll(stylesDir, 0755); err != nil {

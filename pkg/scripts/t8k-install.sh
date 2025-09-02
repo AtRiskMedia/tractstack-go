@@ -1109,7 +1109,7 @@ server {
       proxy_set_header X-Forwarded-Proto \$scheme;
   }
   location /media/ {
-      alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/${SITE_ID}/media/;
+      alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/;
   }
 }
 EOF
