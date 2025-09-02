@@ -242,6 +242,25 @@ check_prerequisites() {
 
   echo -e "${GREEN}✅ Git found${RESET}"
 
+  # Check Python dependencies
+  echo -e "${BLUE}Installing Python dependencies...${RESET}"
+  case $PACKAGE_MANAGER in
+  pacman)
+    sudo pacman -S --noconfirm python-beautifulsoup4
+    ;;
+  apt)
+    sudo apt update && sudo apt install -y python3-bs4
+    ;;
+  dnf)
+    sudo dnf install -y python3-beautifulsoup4
+    ;;
+  *)
+    echo -e "${YELLOW}Warning: Unknown package manager, attempting pip install${RESET}"
+    pip3 install --break-system-packages beautifulsoup4
+    ;;
+  esac
+  echo -e "${GREEN}✅ Python dependencies installed${RESET}"
+
   # For interactive mode, check production capabilities now
   if [[ -z "${INSTALL_TYPE}" ]]; then
     echo
@@ -762,7 +781,7 @@ EOF
   if [[ -d "${src_dir}/tractstack-go/pkg/scripts" ]]; then
     echo -e "${BLUE}Deploying operational scripts...${RESET}"
     sudo -u t8k cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
-    sudo -u t8k chmod +x /home/t8k/scripts/*
+    sudo -u t8k chmod +x /home/t8k/scripts/*.sh
   fi
 
   echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"

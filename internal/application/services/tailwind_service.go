@@ -218,7 +218,7 @@ func (s *TailwindService) extractClassesFromOptionsPayload(optionsPayload map[st
 
 // loadStaticWhitelist loads the static whitelist from filesystem
 func (s *TailwindService) loadStaticWhitelist(tenantID string) ([]string, error) {
-	whitelistPath := filepath.Join(config.BackendPath, "config", tenantID, "tailwindWhitelist.json")
+	whitelistPath := filepath.Join(config.BackendPath, "config", "default", "tailwindWhitelist.json")
 
 	data, err := os.ReadFile(whitelistPath)
 	if err != nil {
