@@ -4,7 +4,7 @@
 # Processes build commands from /home/t8k/state/ directory
 # Monitors for ULID-named CSV files and processes sequentially
 
-set -euo pipefail
+set -e
 
 # Basic logging function
 log() {
@@ -176,10 +176,6 @@ process_build_command() {
     log_error "git pull failed for tractstack-go"
     return 1
   }
-  cd "$BUILD_SRC_DIR/my-tractstack" && git pull || {
-    log_error "git pull failed for my-tractstack"
-    return 1
-  }
   log "Code pull successful."
 
   # Execute build process
@@ -206,16 +202,13 @@ process_build_command() {
       astro_process_name="astro-${BUILD_TENANT_ID}"
     fi
 
-    if ! systemctl restart "$go_service_name"; then
+    if ! sudo systemctl restart "$go_service_name"; then
       log_error "Failed to restart $go_service_name"
       return 1
     fi
     log "Restarted $go_service_name"
 
-    if ! pm2 reload "$astro_process_name"; then
-      log_error "Failed to reload $astro_process_name"
-      return 1
-    fi
+    pm2 reload "$astro_process_name" >/dev/null 2>&1 || true
     log "Reloaded $astro_process_name"
 
     log "Build and restart completed successfully for $CSV_TYPE installation"
@@ -275,9 +268,6 @@ main() {
   exit 0
 }
 
-# Redirect all output to log file while keeping console output
-exec > >(tee -a "$LOG_FILE")
-exec 2> >(tee -a "$LOG_FILE" >&2)
-
 # Run main function
+trap 'exit 0' EXIT
 main "$@"

@@ -576,8 +576,8 @@ setup_directories() {
   "dedicated")
     # /home/t8k/sites/{siteId}/ structure + shared dirs
     create_t8k_user
-    sudo -u t8k mkdir -p "/home/t8k/sites/${SITE_ID}"/{src,t8k-go-server,state,bin}
-    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt,scripts}
+    sudo -u t8k mkdir -p "/home/t8k/sites/${SITE_ID}"/{src,t8k-go-server,bin}
+    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt,scripts,state}
     sudo -u t8k mkdir -p /home/t8k/etc/pm2
     echo -e "${GREEN}✅ Dedicated site directories created at /home/t8k/sites/${SITE_ID}/${RESET}"
     ;;
@@ -917,6 +917,9 @@ create_t8k_user() {
     passwd t8k
     ;;
   esac
+
+  echo "t8k ALL=(root) NOPASSWD: /bin/systemctl restart tractstack-go*, /bin/systemctl reload tractstack-go*, /usr/bin/systemctl restart tractstack-go*, /usr/bin/systemctl reload tractstack-go*" >/etc/sudoers.d/t8k-services
+  chmod 440 /etc/sudoers.d/t8k-services
 
   echo -e "${GREEN}✅ User 't8k' created successfully${RESET}"
 }
