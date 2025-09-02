@@ -1494,6 +1494,10 @@ production_install() {
 
   echo
   echo -e "${GREEN}🎉 TractStack production installation complete!${RESET}"
+  echo -e "${WHITE}Your site is available at:${RESET}"
+  echo -e "   ${BLUE}https://${DOMAIN}${RESET} (Production domain)"
+  echo -e "   ${BLUE}https://localhost:${ALLOCATED_ASTRO_PORT}${RESET} (Direct Astro access)"
+  echo -e "   ${BLUE}http://localhost:${ALLOCATED_GO_PORT}${RESET} (Go backend API)"
   echo
 }
 
