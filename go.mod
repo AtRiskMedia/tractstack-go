@@ -1,6 +1,6 @@
 module github.com/AtRiskMedia/tractstack-go
 
-go 1.22.0
+go 1.22
 
 require (
 	github.com/AssemblyAI/assemblyai-go-sdk v1.10.0
