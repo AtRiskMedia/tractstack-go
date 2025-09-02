@@ -120,6 +120,10 @@ build_astro_frontend() {
 
   # Build Astro project
   cd "$astro_src_dir"
+  if ! pnpm install; then
+    log_error "pnpm install failed"
+    return 1
+  fi
   if ! pnpm build; then
     log_error "Astro build failed"
     return 1
@@ -166,6 +170,18 @@ process_build_command() {
 
   log "Build paths - Source: $BUILD_SRC_DIR, Binary: $BUILD_BIN_DIR, Data: $BUILD_DATA_DIR"
 
+  # Pull latest code from Git repositories
+  log "Pulling latest code..."
+  cd "$BUILD_SRC_DIR/tractstack-go" && git pull || {
+    log_error "git pull failed for tractstack-go"
+    return 1
+  }
+  cd "$BUILD_SRC_DIR/my-tractstack" && git pull || {
+    log_error "git pull failed for my-tractstack"
+    return 1
+  }
+  log "Code pull successful."
+
   # Execute build process
   local build_success=true
 
@@ -180,7 +196,29 @@ process_build_command() {
   fi
 
   if [[ "$build_success" == true ]]; then
-    log "Build completed successfully for $CSV_TYPE installation"
+    # Restart services
+    log "Build successful. Restarting services..."
+    local go_service_name="tractstack-go"
+    local astro_process_name="astro-main"
+
+    if [[ "$CSV_TYPE" == "dedicated" ]]; then
+      go_service_name="tractstack-go@${BUILD_TENANT_ID}"
+      astro_process_name="astro-${BUILD_TENANT_ID}"
+    fi
+
+    if ! systemctl restart "$go_service_name"; then
+      log_error "Failed to restart $go_service_name"
+      return 1
+    fi
+    log "Restarted $go_service_name"
+
+    if ! pm2 reload "$astro_process_name"; then
+      log_error "Failed to reload $astro_process_name"
+      return 1
+    fi
+    log "Reloaded $astro_process_name"
+
+    log "Build and restart completed successfully for $CSV_TYPE installation"
     # Remove processed file
     rm -f "$csv_file"
     log "Removed processed file: $csv_file"
@@ -202,7 +240,7 @@ main() {
     exit 1
   fi
 
-  # Find all build-*.csv files and sort by ULID (chronological order)
+  # Find all build-*.csv files and sort by name (chronological order for ULIDs)
   local build_files=()
   while IFS= read -r -d '' file; do
     build_files+=("$file")

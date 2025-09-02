@@ -125,6 +125,16 @@ show_install_instructions() {
   pm2)
     echo -e "  ${BLUE}pm2${RESET}: npm install -g pm2"
     ;;
+  sqlite3)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sqlite3${RESET}: sudo apt update && sudo apt install sqlite3" ;;
+    dnf) echo -e "  ${BLUE}sqlite3${RESET}: sudo dnf install sqlite3" ;;
+    pacman) echo -e "  ${BLUE}sqlite3${RESET}: sudo pacman -S sqlite" ;;
+    zypper) echo -e "  ${BLUE}sqlite3${RESET}: sudo zypper install sqlite3" ;;
+    apk) echo -e "  ${BLUE}sqlite3${RESET}: sudo apk add sqlite" ;;
+    *) echo -e "  ${BLUE}sqlite3${RESET}: Install sqlite3 using your package manager" ;;
+    esac
+    ;;
   systemd)
     if [[ "$OS" == "macos" ]]; then
       echo -e "  ${BLUE}systemd${RESET}: Not available on macOS (production installs not supported)"
@@ -285,6 +295,15 @@ check_production_prerequisites() {
     exit 1
   fi
   echo -e "${GREEN}✅ systemd found${RESET}"
+
+  # Check sqlite3
+  if ! command -v sqlite3 &>/dev/null; then
+    echo -e "${RED}❌ sqlite3 is not installed.${RESET}"
+    show_install_instructions "sqlite3"
+    cleanup_lock
+    exit 1
+  fi
+  echo -e "${GREEN}✅ sqlite3 found${RESET}"
 
   # Check if t8k user exists
   if id "t8k" &>/dev/null; then
@@ -550,7 +569,7 @@ setup_directories() {
   "prod" | "multi")
     # /home/t8k/ structure
     create_t8k_user
-    sudo -u t8k mkdir -p /home/t8k/{src,t8k-go-server,etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state,bin}
+    sudo -u t8k mkdir -p /home/t8k/{src,t8k-go-server,etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state,bin,scripts}
     sudo -u t8k mkdir -p /home/t8k/etc/pm2
     echo -e "${GREEN}✅ Production directories created at /home/t8k/${RESET}"
     ;;
@@ -558,7 +577,7 @@ setup_directories() {
     # /home/t8k/sites/{siteId}/ structure + shared dirs
     create_t8k_user
     sudo -u t8k mkdir -p "/home/t8k/sites/${SITE_ID}"/{src,t8k-go-server,state,bin}
-    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt}
+    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt,scripts}
     sudo -u t8k mkdir -p /home/t8k/etc/pm2
     echo -e "${GREEN}✅ Dedicated site directories created at /home/t8k/sites/${SITE_ID}/${RESET}"
     ;;
@@ -586,10 +605,8 @@ allocate_ports() {
   fi
 
   # Read existing allocations from the file
-  # Note: IFS="=" read -r splits by the first '='
   if [[ -f "$PORTS_CONFIG_FILE" ]]; then
     while IFS="=" read -r site_id_entry port_pair; do
-      # Validate format: site_id=goPort,astroPort
       if [[ "$site_id_entry" =~ ^[a-zA-Z0-9_-]+$ ]] && [[ "$port_pair" =~ ^[0-9]+,[0-9]+$ ]]; then
         local go_port=$(echo "$port_pair" | cut -d',' -f1)
         local astro_port=$(echo "$port_pair" | cut -d',' -f2)
@@ -606,7 +623,6 @@ allocate_ports() {
   elif [[ "${INSTALL_TYPE}" == "prod" || "${INSTALL_TYPE}" == "multi" ]]; then
     current_site_id="main"
   else
-    # This scenario should ideally not be reached if the function is only called for production installs.
     echo -e "${RED}❌ Internal error: allocate_ports called for unsupported install type: ${INSTALL_TYPE}${RESET}"
     cleanup_lock
     exit 1
@@ -629,14 +645,12 @@ allocate_ports() {
     ALLOCATED_GO_PORT="$existing_go_port"
     ALLOCATED_ASTRO_PORT="$existing_astro_port"
     echo -e "${GREEN}✅ Re-using existing allocated ports for ${current_site_id}: Go Port ${ALLOCATED_GO_PORT}, Astro Port ${ALLOCATED_ASTRO_PORT}${RESET}"
-    return 0 # Exit early, no need to allocate new ports
+    return 0
   fi
 
   # Find the next available Go port
-  local go_port_start
-  if [[ "$current_site_id" == "main" ]]; then
-    go_port_start=10000
-  else # Dedicated instances
+  local go_port_start=10000
+  if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
     go_port_start=10001
   fi
 
@@ -656,10 +670,8 @@ allocate_ports() {
   done
 
   # Find the next available Astro port
-  local astro_port_start
-  if [[ "$current_site_id" == "main" ]]; then
-    astro_port_start=20000
-  else # Dedicated instances
+  local astro_port_start=20000
+  if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
     astro_port_start=20001
   fi
 
@@ -686,15 +698,11 @@ allocate_ports() {
 
   echo -e "${GREEN}✅ Allocated new ports for ${current_site_id}: Go Port ${ALLOCATED_GO_PORT}, Astro Port ${ALLOCATED_ASTRO_PORT}${RESET}"
 
-  # Add or update the port entry in the config file
   local new_entry="${current_site_id}=${ALLOCATED_GO_PORT},${ALLOCATED_ASTRO_PORT}"
-
-  # Use a temporary file for safe update
   local temp_ports_file="${PORTS_CONFIG_FILE}.tmp"
   local entry_found=false
 
-  # Read original file, write to temp, updating or adding the entry
-  >"$temp_ports_file" # Create/truncate temp file
+  >"$temp_ports_file"
   if [[ -f "$PORTS_CONFIG_FILE" ]]; then
     while IFS= read -r line; do
       if [[ "$line" == "${current_site_id}"=* ]]; then
@@ -710,15 +718,13 @@ allocate_ports() {
     echo "$new_entry" >>"$temp_ports_file"
   fi
 
-  # Replace the original file with the updated one and ensure correct permissions/ownership
   sudo mv "$temp_ports_file" "$PORTS_CONFIG_FILE"
-  sudo chown t8k:t8k "$PORTS_CONFIG_FILE" # Ensure t8k user owns the file
-  sudo chmod 644 "$PORTS_CONFIG_FILE"     # Standard read/write permissions for owner, read-only for others
-
+  sudo chown t8k:t8k "$PORTS_CONFIG_FILE"
+  sudo chmod 644 "$PORTS_CONFIG_FILE"
   echo -e "${GREEN}✅ Ports configuration updated in ${PORTS_CONFIG_FILE}${RESET}"
 }
 
-# Deploy Go backend - Updated
+# Deploy Go backend
 deploy_go_backend() {
   echo -e "${BLUE}Deploying Go backend...${RESET}"
 
@@ -738,7 +744,6 @@ deploy_go_backend() {
 
   echo -e "${BLUE}Creating Go backend configuration...${RESET}"
   local go_env_file="${src_dir}/tractstack-go/.env"
-
   sudo -u t8k tee "$go_env_file" >/dev/null <<EOF
 GO_BACKEND_PATH=${data_dir}/
 PORT=${ALLOCATED_GO_PORT}
@@ -753,18 +758,17 @@ EOF
   cd "${src_dir}/tractstack-go"
   sudo -u t8k go build -o "${bin_dir}/tractstack-go" ./cmd/tractstack-go
 
-  # Copy operational scripts to shared location
+  # Copy operational scripts from the repo to the central scripts directory
   if [[ -d "${src_dir}/tractstack-go/pkg/scripts" ]]; then
     echo -e "${BLUE}Deploying operational scripts...${RESET}"
-    sudo -u t8k mkdir -p /home/t8k/scripts
     sudo -u t8k cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
     sudo -u t8k chmod +x /home/t8k/scripts/*
   fi
 
-  echo -e "${GREEN}âœ… Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
+  echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
 }
 
-# Deploy Astro frontend - Updated
+# Deploy Astro frontend
 deploy_astro_frontend() {
   echo -e "${BLUE}Deploying Astro frontend...${RESET}"
 
@@ -791,7 +795,6 @@ deploy_astro_frontend() {
 
   echo -e "${BLUE}Creating Astro frontend configuration...${RESET}"
   local astro_env_file="${src_dir}/my-tractstack/.env"
-
   sudo -u t8k tee "$astro_env_file" >/dev/null <<EOF
 PRIVATE_GO_BACKEND_PATH=${data_dir}/
 PUBLIC_GO_BACKEND=http://localhost:${ALLOCATED_GO_PORT}
@@ -808,17 +811,16 @@ EOF
   echo -e "${BLUE}Building Astro frontend for production...${RESET}"
   sudo -u t8k pnpm build
 
-  # Verify build artifacts exist
   if [[ ! -d "${src_dir}/my-tractstack/dist" ]]; then
-    echo -e "${RED}âŒ Astro build failed - no dist directory found${RESET}"
+    echo -e "${RED}❌ Astro build failed - no dist directory found${RESET}"
     cleanup_lock
     exit 1
   fi
 
-  echo -e "${GREEN}âœ… Astro frontend deployed and built at ${src_dir}/my-tractstack${RESET}"
+  echo -e "${GREEN}✅ Astro frontend deployed and built at ${src_dir}/my-tractstack${RESET}"
 }
 
-# Prepare service artifacts - New function
+# Prepare service artifacts
 prepare_service_artifacts() {
   echo -e "${BLUE}Preparing service artifacts...${RESET}"
 
@@ -832,46 +834,31 @@ prepare_service_artifacts() {
   local src_dir="${base_dir}/src"
   local bin_dir="${base_dir}/bin"
 
-  # Validate Go binary exists and is executable
   local go_binary="${bin_dir}/tractstack-go"
   if [[ ! -f "$go_binary" ]]; then
-    echo -e "${RED}âŒ Go binary not found at ${go_binary}${RESET}"
+    echo -e "${RED}❌ Go binary not found at ${go_binary}${RESET}"
     cleanup_lock
     exit 1
   fi
-
   if [[ ! -x "$go_binary" ]]; then
     echo -e "${BLUE}Making Go binary executable...${RESET}"
     sudo -u t8k chmod +x "$go_binary"
   fi
 
-  # Validate Astro build artifacts exist
   local astro_dist="${src_dir}/my-tractstack/dist"
   if [[ ! -d "$astro_dist" ]]; then
-    echo -e "${RED}âŒ Astro build artifacts not found at ${astro_dist}${RESET}"
+    echo -e "${RED}❌ Astro build artifacts not found at ${astro_dist}${RESET}"
     cleanup_lock
     exit 1
   fi
 
-  # Validate package.json exists for PM2
   local package_json="${src_dir}/my-tractstack/package.json"
   if [[ ! -f "$package_json" ]]; then
-    echo -e "${RED}âŒ package.json not found at ${package_json}${RESET}"
+    echo -e "${RED}❌ package.json not found at ${package_json}${RESET}"
     cleanup_lock
     exit 1
   fi
 
-  # Validate operational scripts are deployed and executable
-  if [[ ! -d "/home/t8k/scripts" ]]; then
-    echo -e "${YELLOW}âš ï¸ Operational scripts directory not found - creating...${RESET}"
-    sudo -u t8k mkdir -p /home/t8k/scripts
-  fi
-
-  # Set proper permissions on service directories
-  sudo -u t8k chmod -R 755 "$bin_dir"
-  sudo -u t8k chmod -R 755 "${src_dir}/my-tractstack/dist"
-
-  # Create state directory if it doesn't exist
   local state_dir
   if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
     state_dir="${base_dir}/state"
@@ -882,26 +869,21 @@ prepare_service_artifacts() {
   sudo -u t8k mkdir -p "$state_dir"
   sudo -u t8k chmod 755 "$state_dir"
 
-  # Verify Go backend configuration
   local go_env_file="${src_dir}/tractstack-go/.env"
   if [[ ! -f "$go_env_file" ]]; then
-    echo -e "${RED}âŒ Go backend .env file not found${RESET}"
+    echo -e "${RED}❌ Go backend .env file not found${RESET}"
     cleanup_lock
     exit 1
   fi
 
-  # Verify Astro configuration
   local astro_env_file="${src_dir}/my-tractstack/.env"
   if [[ ! -f "$astro_env_file" ]]; then
-    echo -e "${RED}âŒ Astro .env file not found${RESET}"
+    echo -e "${RED}❌ Astro .env file not found${RESET}"
     cleanup_lock
     exit 1
   fi
 
-  echo -e "${GREEN}âœ… Service artifacts prepared and validated${RESET}"
-  echo -e "${BLUE}  Go binary: ${go_binary}${RESET}"
-  echo -e "${BLUE}  Astro dist: ${astro_dist}${RESET}"
-  echo -e "${BLUE}  State dir: ${state_dir}${RESET}"
+  echo -e "${GREEN}✅ Service artifacts prepared and validated${RESET}"
 }
 
 # Create t8k user if needed
@@ -923,17 +905,14 @@ create_t8k_user() {
 
   case $PACKAGE_MANAGER in
   apt)
-    # Debian/Ubuntu - adduser is interactive
     adduser t8k
     ;;
   dnf | pacman | zypper | apk)
-    # Other Linux - useradd then passwd
     useradd -m t8k
     echo "Please set password for user 't8k':"
     passwd t8k
     ;;
   *)
-    # Fallback
     useradd -m t8k
     echo "Please set password for user 't8k':"
     passwd t8k
@@ -953,7 +932,6 @@ setup_ssl_certificates() {
     dry_run_flag=""
   fi
 
-  # Install certbot as t8k user if not available
   if ! command -v certbot &>/dev/null; then
     echo -e "${BLUE}Installing certbot in t8k user venv...${RESET}"
     sudo -u t8k bash -c "
@@ -964,22 +942,15 @@ setup_ssl_certificates() {
     echo -e "${GREEN}✅ Certbot installed in /home/t8k/certbot_venv${RESET}"
   fi
 
-  # Create certbot directories
   sudo -u t8k mkdir -p /home/t8k/etc/letsencrypt /home/t8k/lib/letsencrypt /home/t8k/log/letsencrypt
 
-  # Primary domain certificates - comprehensive coverage
   local primary_cert_domains="-d ${DOMAIN} -d *.${DOMAIN}"
-
-  # Check if primary certificates already exist and are valid
   local primary_cert_path="/home/t8k/etc/letsencrypt/live/${DOMAIN}"
   local cert_file="${primary_cert_path}/fullchain.pem"
   local key_file="${primary_cert_path}/privkey.pem"
 
-  # Skip certificate request if valid certificates already exist
   if [[ -f "$cert_file" ]] && [[ -f "$key_file" ]]; then
     echo -e "${BLUE}Checking existing certificate validity...${RESET}"
-
-    # Check if certificate is still valid (not expiring within 30 days)
     if openssl x509 -in "$cert_file" -noout -checkend 2592000 >/dev/null 2>&1; then
       echo -e "${GREEN}✅ Valid SSL certificates already exist (not expiring within 30 days)${RESET}"
       return 0
@@ -993,42 +964,38 @@ setup_ssl_certificates() {
   echo -e "${BLUE}Requesting SSL certificates for: ${primary_cert_domains}${RESET}"
 
   if [[ -f "/home/t8k/.secrets/certbot/cloudflare.ini" ]]; then
-    # Automated Cloudflare DNS validation
     echo -e "${GREEN}Using Cloudflare DNS automation${RESET}"
     sudo -u t8k bash -c "
-   source /home/t8k/certbot_venv/bin/activate
-   certbot certonly --dns-cloudflare \
-     --dns-cloudflare-credentials /home/t8k/.secrets/certbot/cloudflare.ini \
-     --dns-cloudflare-propagation-seconds 15 \
-     --config-dir /home/t8k/etc/letsencrypt \
-     --work-dir /home/t8k/lib/letsencrypt \
-     --logs-dir /home/t8k/log/letsencrypt \
-     --non-interactive --agree-tos \
-     --email admin@${DOMAIN} \
-     $dry_run_flag \
-     ${primary_cert_domains}
- "
+      source /home/t8k/certbot_venv/bin/activate
+      certbot certonly --dns-cloudflare \
+        --dns-cloudflare-credentials /home/t8k/.secrets/certbot/cloudflare.ini \
+        --dns-cloudflare-propagation-seconds 15 \
+        --config-dir /home/t8k/etc/letsencrypt \
+        --work-dir /home/t8k/lib/letsencrypt \
+        --logs-dir /home/t8k/log/letsencrypt \
+        --non-interactive --agree-tos \
+        --email admin@${DOMAIN} \
+        $dry_run_flag \
+        ${primary_cert_domains}
+    "
   else
-    # Manual verification
     echo -e "${YELLOW}Using manual DNS verification${RESET}"
     echo -e "${BLUE}Certbot will show you TXT records to add to your DNS...${RESET}"
-
     if [[ "${NON_INTERACTIVE}" == true ]]; then
       echo -e "${RED}⛌ Manual verification required but running in non-interactive mode${RESET}"
       cleanup_lock
       exit 1
     fi
-
     sudo -u t8k bash -c "
-   source /home/t8k/certbot_venv/bin/activate
-   certbot certonly --manual --preferred-challenges dns \
-     --config-dir /home/t8k/etc/letsencrypt \
-     --work-dir /home/t8k/lib/letsencrypt \
-     --logs-dir /home/t8k/log/letsencrypt \
-     --agree-tos --email admin@${DOMAIN} \
-     $dry_run_flag \
-     ${primary_cert_domains}
- "
+      source /home/t8k/certbot_venv/bin/activate
+      certbot certonly --manual --preferred-challenges dns \
+        --config-dir /home/t8k/etc/letsencrypt \
+        --work-dir /home/t8k/lib/letsencrypt \
+        --logs-dir /home/t8k/log/letsencrypt \
+        --agree-tos --email admin@${DOMAIN} \
+        $dry_run_flag \
+        ${primary_cert_domains}
+    "
   fi
   echo -e "${GREEN}✅ SSL certificate request completed${RESET}"
 }
@@ -1050,7 +1017,6 @@ configure_nginx() {
   fi
 
   mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-
   local config_file="/etc/nginx/sites-available/${config_name}.conf"
 
   case "${INSTALL_TYPE}" in
@@ -1062,26 +1028,21 @@ server {
   server_name ${DOMAIN} www.${DOMAIN};
   return 301 https://\$server_name\$request_uri;
 }
-
 # HTTPS server
 server {
   listen 443 ssl http2;
   server_name ${DOMAIN} www.${DOMAIN};
-  
   ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
   ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-  
   access_log off;
   error_log /var/log/nginx/${config_name}-error.log warn;
-  
   location / {
-      proxy_pass http://localhost:${ALLOCATED_GO_PORT};
+      proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT};
       proxy_set_header Host \$host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto \$scheme;
   }
-  
   location /media/ {
       alias /home/t8k/t8k-go-server/config/default/media/;
   }
@@ -1096,26 +1057,21 @@ server {
   server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
   return 301 https://\$server_name\$request_uri;
 }
-
 # HTTPS server
 server {
   listen 443 ssl http2;
   server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
-  
   ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
   ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-  
   access_log off;
   error_log /var/log/nginx/${config_name}-error.log warn;
-  
   location / {
-      proxy_pass http://localhost:${ALLOCATED_GO_PORT};
+      proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT};
       proxy_set_header Host \$host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto \$scheme;
   }
-  
   location /media/ {
       set \$tenant_dir "default";
       if (\$host ~* ^([^.]+)\\.${DOMAIN//./\\.}\$) {
@@ -1134,26 +1090,21 @@ server {
   server_name ${DOMAIN} www.${DOMAIN};
   return 301 https://\$server_name\$request_uri;
 }
-
 # HTTPS server
 server {
   listen 443 ssl http2;
   server_name ${DOMAIN} www.${DOMAIN};
-  
   ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
   ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-  
   access_log off;
   error_log /var/log/nginx/${config_name}-error.log warn;
-  
   location / {
-      proxy_pass http://localhost:${ALLOCATED_GO_PORT};
+      proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT};
       proxy_set_header Host \$host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto \$scheme;
   }
-  
   location /media/ {
       alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/${SITE_ID}/media/;
   }
@@ -1168,21 +1119,14 @@ EOF
   esac
 
   echo -e "${BLUE}Creating nginx site configuration: ${config_name}.conf${RESET}"
-
-  # Enable site
   ln -sf "$config_file" "/etc/nginx/sites-enabled/${config_name}.conf"
-
-  # Test nginx configuration
   if ! nginx -t; then
     echo -e "${RED}⛌ nginx configuration test failed${RESET}"
     rm -f "/etc/nginx/sites-enabled/${config_name}.conf"
     cleanup_lock
     exit 1
   fi
-
-  # Reload nginx
   systemctl reload nginx
-
   echo -e "${GREEN}✅ nginx configuration complete${RESET}"
 }
 
@@ -1190,7 +1134,6 @@ EOF
 configure_systemd_services() {
   echo -e "${BLUE}Configuring systemd services...${RESET}"
 
-  # Determine service configuration based on installation type
   local service_name
   local service_file
   local binary_path
@@ -1219,18 +1162,15 @@ configure_systemd_services() {
     ;;
   esac
 
-  # Create systemd service file for TractStack Go backend
   echo -e "${BLUE}Creating systemd service: ${service_name}${RESET}"
 
   if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
-    # Create template service for dedicated installations
     cat >"$service_file" <<EOF
 [Unit]
 Description=TractStack Go Backend (Site: %i)
 After=network-online.target nginx.service
 Wants=network-online.target
 Requires=nginx.service
-
 [Service]
 Type=simple
 User=t8k
@@ -1245,24 +1185,19 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tractstack-go-%i
-
-# Security settings (relaxed for compatibility)
 NoNewPrivileges=yes
 PrivateTmp=yes
 ReadWritePaths=/home/t8k
-
 [Install]
 WantedBy=multi-user.target
 EOF
   else
-    # Create regular service for main/multi installations
     cat >"$service_file" <<EOF
 [Unit]
 Description=TractStack Go Backend
 After=network-online.target nginx.service
 Wants=network-online.target
 Requires=nginx.service
-
 [Service]
 Type=simple
 User=t8k
@@ -1277,32 +1212,24 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=tractstack-go
-
-# Security settings (relaxed for compatibility)
 NoNewPrivileges=yes
 PrivateTmp=yes
 ReadWritePaths=/home/t8k
-
 [Install]
 WantedBy=multi-user.target
 EOF
   fi
-
   echo -e "${GREEN}✅ Created systemd service file: ${service_file}${RESET}"
 
-  # Setup build system (idempotent)
   setup_build_watcher
 
-  # Reload systemd daemon
   echo -e "${BLUE}Reloading systemd daemon...${RESET}"
   systemctl daemon-reload
 
-  # Enable and start the TractStack Go service
   echo -e "${BLUE}Enabling and starting ${service_name}...${RESET}"
   systemctl enable "$service_name"
   systemctl start "$service_name"
 
-  # Verify service status
   if systemctl is-active --quiet "$service_name"; then
     echo -e "${GREEN}✅ ${service_name} is running${RESET}"
   else
@@ -1321,34 +1248,26 @@ setup_build_watcher() {
   local path_unit="/etc/systemd/system/t8k-build-watcher.path"
   local service_unit="/etc/systemd/system/t8k-build-watcher.service"
 
-  # Check if build watcher already exists (idempotent)
   if systemctl list-unit-files | grep -q "t8k-build-watcher.path"; then
-    echo -e "${BLUE}Build system already configured, skipping...${RESET}"
+    echo -e "${BLUE}Build system watcher already configured, skipping...${RESET}"
     return 0
   fi
 
   echo -e "${BLUE}Setting up build system file watcher...${RESET}"
 
-  # Create systemd path unit
   cat >"$path_unit" <<EOF
 [Unit]
 Description=TractStack Build Watcher
-Documentation=https://tractstack.org/docs
-
 [Path]
 PathModified=/home/t8k/state
 Unit=t8k-build-watcher.service
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
-  # Create systemd service unit
   cat >"$service_unit" <<EOF
 [Unit]
 Description=TractStack Build Concierge
-Documentation=https://tractstack.org/docs
-
 [Service]
 Type=oneshot
 User=t8k
@@ -1357,95 +1276,15 @@ ExecStart=/home/t8k/scripts/t8k-concierge.sh
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=t8k-concierge
-
-# Security settings
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/home/t8k
-
 [Install]
 WantedBy=multi-user.target
 EOF
-
   echo -e "${GREEN}✅ Created build watcher systemd units${RESET}"
 
-  # Enable and start the build watcher
   echo -e "${BLUE}Enabling build system file watcher...${RESET}"
   systemctl enable t8k-build-watcher.path
   systemctl start t8k-build-watcher.path
 
-  # Verify path watcher is active
-  if systemctl is-active --quiet t8k-build-watcher.path; then
-    echo -e "${GREEN}✅ Build system file watcher is active${RESET}"
-  else
-    echo -e "${YELLOW}⚠️  Build system file watcher failed to start${RESET}"
-    systemctl status t8k-build-watcher.path --no-pager -l
-  fi
-}
-
-# Setup build system file watcher (idempotent)
-setup_build_watcher() {
-  local path_unit="/etc/systemd/system/t8k-build-watcher.path"
-  local service_unit="/etc/systemd/system/t8k-build-watcher.service"
-
-  # Check if build watcher already exists (idempotent)
-  if systemctl list-unit-files | grep -q "t8k-build-watcher.path"; then
-    echo -e "${BLUE}Build system already configured, skipping...${RESET}"
-    return 0
-  fi
-
-  echo -e "${BLUE}Setting up build system file watcher...${RESET}"
-
-  # Create systemd path unit
-  cat >"$path_unit" <<EOF
-[Unit]
-Description=TractStack Build Watcher
-Documentation=https://tractstack.org/docs
-
-[Path]
-PathModified=/home/t8k/state
-Unit=t8k-build-watcher.service
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  # Create systemd service unit
-  cat >"$service_unit" <<EOF
-[Unit]
-Description=TractStack Build Concierge
-Documentation=https://tractstack.org/docs
-
-[Service]
-Type=oneshot
-User=t8k
-Group=t8k
-ExecStart=/home/t8k/scripts/t8k-concierge.sh
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=t8k-concierge
-
-# Security settings
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/home/t8k
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  echo -e "${GREEN}✅ Created build watcher systemd units${RESET}"
-
-  # Enable and start the build watcher
-  echo -e "${BLUE}Enabling build system file watcher...${RESET}"
-  systemctl enable t8k-build-watcher.path
-  systemctl start t8k-build-watcher.path
-
-  # Verify path watcher is active
   if systemctl is-active --quiet t8k-build-watcher.path; then
     echo -e "${GREEN}✅ Build system file watcher is active${RESET}"
   else
@@ -1461,17 +1300,14 @@ setup_pm2_ecosystem() {
   local ecosystem_file="/home/t8k/etc/pm2/ecosystem.config.js"
   local pm2_home="/home/t8k/.pm2"
 
-  # Ensure the t8k user has a PM2 home directory
   sudo -u t8k mkdir -p "$pm2_home"
 
-  # Only create ecosystem config if it doesn't exist
   if [[ ! -f "$ecosystem_file" ]]; then
     echo -e "${BLUE}Creating PM2 ecosystem configuration...${RESET}"
     sudo -u t8k tee "$ecosystem_file" >/dev/null <<'EOF'
 const fs = require('fs');
 const path = require('path');
 
-// Read port allocations
 const portsFile = '/home/t8k/etc/t8k-ports.conf';
 const apps = [];
 
@@ -1496,7 +1332,6 @@ if (fs.existsSync(portsFile)) {
       appName = `astro-${siteId}`;
     }
 
-    // Check if the app directory exists
     if (fs.existsSync(appPath) && fs.existsSync(path.join(appPath, 'dist/server/entry.mjs'))) {
       apps.push({
         name: appName,
@@ -1524,19 +1359,12 @@ EOF
     echo -e "${BLUE}PM2 ecosystem configuration already exists, skipping creation${RESET}"
   fi
 
-  # Create log directory
   sudo -u t8k mkdir -p /home/t8k/log
 
-  # Use reload or start for the ecosystem file
-  # This ensures all apps defined in the ecosystem file are running as expected.
   echo -e "${BLUE}Starting or reloading PM2 ecosystem...${RESET}"
   sudo -u t8k --preserve-env=PATH PM2_HOME="$pm2_home" pm2 startOrReload "$ecosystem_file"
 
-  # Configure PM2 to start on boot
   echo -e "${BLUE}Configuring PM2 startup service...${RESET}"
-
-  # Generate and execute the startup script non-interactively.
-  # This command creates and enables a systemd service for PM2.
   local pm2_path
   pm2_path=$(sudo -u t8k which pm2)
   if [[ -z "$pm2_path" ]]; then
@@ -1544,34 +1372,12 @@ EOF
     cleanup_lock
     exit 1
   fi
-
-  # The `pm2 startup` command generates a systemd service.
-  # Running this command as root sets up the service correctly.
   env PATH=$PATH:/usr/bin:"$(dirname "$pm2_path")" "$pm2_path" startup systemd -u t8k --hp /home/t8k
 
-  # Save the current process list so PM2 will resurrect them on reboot.
   echo -e "${BLUE}Saving process list for reboot...${RESET}"
   sudo -u t8k PM2_HOME="$pm2_home" pm2 save
 
   echo -e "${GREEN}✅ PM2 ecosystem configured and running${RESET}"
-}
-
-# Setup build system
-setup_build_system() {
-  echo -e "${BLUE}Setting up build system...${RESET}"
-  echo "✅ Build system setup would run here"
-}
-
-# Configure backup system
-configure_backup_system() {
-  echo -e "${BLUE}Configuring backup system...${RESET}"
-  echo "✅ Backup system configuration would run here"
-}
-
-# Verify installation
-verify_installation() {
-  echo -e "${BLUE}Verifying installation...${RESET}"
-  echo "✅ Installation verification would run here"
 }
 
 # Quick install implementation
@@ -1583,7 +1389,6 @@ quick_install() {
   echo -e "Install directory: ${WHITE}$INSTALL_DIR${RESET}"
   echo
 
-  # Check if install directory already exists
   if [[ -d "$INSTALL_DIR" ]]; then
     echo -e "${RED}❌ Directory $INSTALL_DIR already exists!${RESET}"
     echo "For a fresh installation you must remove this folder."
@@ -1664,9 +1469,6 @@ production_install() {
   configure_nginx
   configure_systemd_services
   setup_pm2_ecosystem
-  setup_build_system
-  configure_backup_system
-  verify_installation
 
   echo
   echo -e "${GREEN}🎉 TractStack production installation complete!${RESET}"
@@ -1678,7 +1480,6 @@ main() {
   show_header
 
   if is_interactive "$@"; then
-    # Interactive mode (no arguments)
     check_prerequisites
     choose_install_type
     if [[ "${INSTALL_TYPE}" == "quick" ]]; then
@@ -1687,7 +1488,6 @@ main() {
       production_install
     fi
   else
-    # CLI mode with arguments
     parse_cli_args "$@"
     check_prerequisites
     if [[ "${INSTALL_TYPE}" == "quick" ]]; then
