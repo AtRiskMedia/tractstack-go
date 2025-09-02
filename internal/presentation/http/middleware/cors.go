@@ -38,7 +38,8 @@ func CORSMiddleware() gin.HandlerFunc {
 
 			// Allow specific development ports and your range
 			// 4320-4399: Your custom site isolation testing range
-			return (portNum >= 4320 && portNum <= 4399)
+			// 20000-29999: Production ports
+			return (portNum >= 4320 && portNum <= 4399) || (portNum >= 20000 && portNum <= 29999)
 		},
 		AllowMethods: []string{
 			"GET", "POST", "PUT", "DELETE", "OPTIONS",

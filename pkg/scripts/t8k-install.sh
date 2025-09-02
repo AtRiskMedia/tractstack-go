@@ -16,7 +16,7 @@ WHITE='\033[97m'
 RESET='\033[0m'
 
 # Global variables
-DRY_RUN=true
+DRY_RUN=false
 INSTALL_TYPE=""
 DOMAIN=""
 NON_INTERACTIVE=false
@@ -774,12 +774,11 @@ deploy_astro_frontend() {
 
   local base_dir
   local tenant_id
+  tenant_id="default"
   if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
     base_dir="/home/t8k/sites/${SITE_ID}"
-    tenant_id="${SITE_ID}"
   else
     base_dir="/home/t8k"
-    tenant_id="default"
   fi
 
   local src_dir="${base_dir}/src"
@@ -998,6 +997,7 @@ setup_ssl_certificates() {
     "
   fi
   echo -e "${GREEN}✅ SSL certificate request completed${RESET}"
+  echo -e "${WHITE}SUCCESS! Visit ${BLUE}https://${DOMAIN}${RESET} or ${BLUE}https://localhost:${ALLOCATED_ASTRO_PORT}${RESET}"
 }
 
 # Configure nginx
