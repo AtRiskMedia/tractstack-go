@@ -30,20 +30,6 @@ ALLOCATED_GO_PORT=""
 ALLOCATED_ASTRO_PORT=""
 PORTS_CONFIG_FILE="/home/t8k/etc/t8k-ports.conf"
 
-# Show TractStack ASCII art
-show_header() {
-  echo -e "${GREEN}"
-  echo ' ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄'
-  echo '  ██  ██ ██ ▀▀ ██ ██ ▀▀ ██ ██ ▀▀ ██ ▀▀ ██ ██ ▀▀ ██ ██'
-  echo '  ██  ██▀█▄ ██▀██ ██ ▄▄ ██ ▀▀▀██ ██ ██▀██ ██ ▄▄ ██▀█▄'
-  echo '  ██  ██ ██ ██▄██ ██▄██ ██ ██▄██ ██ ██▄██ ██▄██ ██ ██'
-  echo '   ▀▀                   ▀▀       ▀▀             ▀▀ ▀▀▀'
-  echo -e "${WHITE}"
-  echo '  made by At Risk Media'
-  echo -e "${RESET}"
-  echo
-}
-
 cleanup_lock() {
   if [[ -n "${LOCK_FILE:-}" ]]; then
     rm -f "$LOCK_FILE"
@@ -192,214 +178,42 @@ check_production_availability() {
   fi
 }
 
-# Check prerequisites
-check_prerequisites() {
-  echo -e "${BLUE}Checking prerequisites...${RESET}"
-
-  # Detect OS and package manager first
-  detect_os_and_package_manager
-  echo -e "${BLUE}Detected OS: ${WHITE}${OS}${RESET}, Package Manager: ${WHITE}${PACKAGE_MANAGER}${RESET}"
-
-  # Set current user
-  CURRENT_USER=$(whoami)
-  echo -e "${BLUE}Running as user: ${WHITE}${CURRENT_USER}${RESET}"
-
-  # Core dependencies needed for all installs
-
-  # Check Go
-  if ! command -v go &>/dev/null; then
-    echo -e "${RED}❌ Go is not installed. Please install Go 1.22+ first.${RESET}"
-    cleanup_lock
-    exit 1
+# Check if user has sudo privileges without prompting for password
+has_sudo() {
+  # First check if already have active sudo session
+  if sudo -n true 2>/dev/null; then
+    return 0
   fi
 
-  GO_VERSION=$(go version | grep -o 'go[0-9]\+\.[0-9]\+' | sed 's/go//')
-  echo -e "${GREEN}✅ Go ${GO_VERSION} found${RESET}"
-
-  # Check Node.js/pnpm
-  if ! command -v node &>/dev/null; then
-    echo -e "${RED}❌ Node.js is not installed. Please install Node.js 18+ first.${RESET}"
-    cleanup_lock
-    exit 1
+  # Then check if user is in sudo groups
+  if groups | grep -qE '\b(sudo|wheel|admin)\b'; then
+    return 0
   fi
 
-  if ! command -v pnpm &>/dev/null; then
-    echo -e "${YELLOW}⚠️  pnpm not found, installing...${RESET}"
-    npm install -g pnpm
-  fi
-
-  NODE_VERSION=$(node --version)
-  PNPM_VERSION=$(pnpm --version)
-  echo -e "${GREEN}✅ Node.js ${NODE_VERSION} found${RESET}"
-  echo -e "${GREEN}✅ pnpm ${PNPM_VERSION} found${RESET}"
-
-  # Check Git
-  if ! command -v git &>/dev/null; then
-    echo -e "${RED}❌ Git is not installed. Please install Git first.${RESET}"
-    cleanup_lock
-    exit 1
-  fi
-
-  echo -e "${GREEN}✅ Git found${RESET}"
-
-  # Check Python dependencies
-  echo -e "${BLUE}Installing Python dependencies...${RESET}"
-  case $PACKAGE_MANAGER in
-  pacman)
-    sudo pacman -S --noconfirm python-beautifulsoup4
-    ;;
-  apt)
-    sudo apt update && sudo apt install -y python3-bs4
-    ;;
-  dnf)
-    sudo dnf install -y python3-beautifulsoup4
-    ;;
-  *)
-    echo -e "${YELLOW}Warning: Unknown package manager, attempting pip install${RESET}"
-    pip3 install --break-system-packages beautifulsoup4
-    ;;
-  esac
-  echo -e "${GREEN}✅ Python dependencies installed${RESET}"
-
-  # For interactive mode, check production capabilities now
-  if [[ -z "${INSTALL_TYPE}" ]]; then
-    echo
-    check_production_availability
-  fi
-
-  # For CLI mode with production install, validate now
-  if [[ "${INSTALL_TYPE}" != "quick" ]] && [[ -n "${INSTALL_TYPE}" ]]; then
-    check_production_prerequisites
-  fi
-
-  echo
+  return 1
 }
 
-# Check production-specific prerequisites (for CLI mode)
-check_production_prerequisites() {
-  echo -e "${BLUE}Checking production prerequisites...${RESET}"
-
-  if [[ "$CURRENT_USER" != "root" ]]; then
-    echo -e "${RED}❌ Production installations must be run as root${RESET}"
-    echo "Please run with: sudo $0 $*"
-    cleanup_lock
-    exit 1
-  fi
-
-  # Check nginx
-  if ! command -v nginx &>/dev/null; then
-    echo -e "${RED}❌ nginx is not installed.${RESET}"
-    show_install_instructions "nginx"
-    cleanup_lock
-    exit 1
-  fi
-  echo -e "${GREEN}✅ nginx found${RESET}"
-
-  # Check pm2
-  if ! command -v pm2 &>/dev/null; then
-    echo -e "${YELLOW}⚠️  pm2 not found, installing globally...${RESET}"
-    npm install -g pm2
-  fi
-  echo -e "${GREEN}✅ pm2 found${RESET}"
-
-  # Check systemctl
-  if [[ "$OS" == "macos" ]]; then
-    echo -e "${RED}❌ Production installations not supported on macOS${RESET}"
-    cleanup_lock
-    exit 1
-  elif ! command -v systemctl &>/dev/null; then
-    echo -e "${RED}❌ systemctl not found.${RESET}"
-    show_install_instructions "systemd"
-    cleanup_lock
-    exit 1
-  fi
-  echo -e "${GREEN}✅ systemd found${RESET}"
-
-  # Check sqlite3
-  if ! command -v sqlite3 &>/dev/null; then
-    echo -e "${RED}❌ sqlite3 is not installed.${RESET}"
-    show_install_instructions "sqlite3"
-    cleanup_lock
-    exit 1
-  fi
-  echo -e "${GREEN}✅ sqlite3 found${RESET}"
-
-  # Check if t8k user exists
-  if id "t8k" &>/dev/null; then
-    echo -e "${GREEN}✅ User 't8k' exists${RESET}"
-  else
-    echo -e "${YELLOW}⚠️  User 't8k' will be created during installation${RESET}"
-  fi
-}
-
-# Interactive install choice - uses pre-computed results
-choose_install_type() {
-  if [[ "$CURRENT_USER" == "root" ]]; then
-    echo -e "${YELLOW}Running as root - quick install disabled${RESET}"
+# Show header conditionally
+show_header() {
+  # Only show header for interactive runs without CLI args
+  if [[ $# -eq 0 ]] && [[ "${NON_INTERACTIVE}" != true ]]; then
+    echo -e "${GREEN}"
+    echo ' ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄'
+    echo '  ██  ██ ██ ▀▀ ██ ██ ▀▀ ██ ██ ▀▀ ██ ▀▀ ██ ██ ▀▀ ██ ██'
+    echo '  ██  ██▀█▄ ██▀██ ██ ▄▄ ██ ▀▀▀██ ██ ██▀██ ██ ▄▄ ██▀█▄'
+    echo '  ██  ██ ██ ██▄██ ██▄██ ██ ██▄██ ██ ██▄██ ██▄██ ██ ██'
+    echo '   ▀▀                   ▀▀       ▀▀             ▀▀ ▀▀▀'
+    echo -e "${WHITE}"
+    echo '  made by At Risk Media'
+    echo -e "${RESET}"
     echo
-
-    if [[ "$PRODUCTION_AVAILABLE" == true ]]; then
-      # Show production options only
-      echo -e "${BLUE}Choose installation type:${RESET}"
-      echo "1) Production single-tenant"
-      echo "2) Production multi-tenant"
-      echo "3) Dedicated tenant"
-      echo
-      read -p "Enter choice [1-3]: " choice
-
-      case $choice in
-      1)
-        INSTALL_TYPE="prod"
-        ask_domain
-        ;;
-      2)
-        INSTALL_TYPE="multi"
-        ask_domain
-        ;;
-      3)
-        INSTALL_TYPE="dedicated"
-        ask_dedicated_info
-        ;;
-      *)
-        echo -e "${RED}Invalid choice. Please enter 1-3.${RESET}"
-        choose_install_type
-        ;;
-      esac
-    else
-      # Missing production dependencies
-      echo -e "${RED}Production installations not available.${RESET}"
-      echo -e "Missing dependencies: ${RED}${MISSING_PRODUCTION_DEPS[*]}${RESET}"
-      echo
-      echo -e "To enable production installations, please install:"
-      for dep in "${MISSING_PRODUCTION_DEPS[@]}"; do
-        show_install_instructions "$dep"
-      done
-      echo
-      echo "Installation cannot proceed."
-      cleanup_lock
-      exit 1
-    fi
-  else
-    # Not running as root - only quick install
-    echo -e "${BLUE}Choose installation type:${RESET}"
-    echo "1) Quick install (development setup)"
-    echo
-    echo -e "${YELLOW}Production installations require root privileges.${RESET}"
-    echo -e "Run with ${BLUE}sudo $0${RESET} to access production options."
-    echo
-    read -p "Continue with quick install? [Y/n]: " continue_quick
-    if [[ "$continue_quick" =~ ^[Nn] ]]; then
-      echo "Installation cancelled."
-      exit 0
-    fi
-    INSTALL_TYPE="quick"
   fi
 }
 
 # Ask for domain in interactive mode
 ask_domain() {
   echo
-  read -p "Enter your domain (e.g., tractstack.com): " domain
+  read -p "Enter your domain (e.g., tractstack.com): " domain </dev/tty
   if [[ -z "$domain" ]]; then
     echo -e "${RED}Domain is required${RESET}"
     ask_domain
@@ -410,14 +224,14 @@ ask_domain() {
 # Ask for dedicated site info
 ask_dedicated_info() {
   echo
-  read -p "Enter site ID (3-12 lowercase chars): " site_id
+  read -p "Enter site ID (3-12 lowercase chars): " site_id </dev/tty
   if [[ -z "$site_id" ]] || [[ ! "$site_id" =~ ^[a-z0-9-]{3,12}$ ]]; then
     echo -e "${RED}Invalid site ID format${RESET}"
     ask_dedicated_info
   fi
   SITE_ID="$site_id"
 
-  read -p "Enter your domain (e.g., atriskmedia.com): " domain
+  read -p "Enter your domain (e.g., atriskmedia.com): " domain </dev/tty
   if [[ -z "$domain" ]]; then
     echo -e "${RED}Domain is required${RESET}"
     ask_dedicated_info
@@ -559,7 +373,7 @@ detect_cloudflare_secrets() {
 
     echo -e "${YELLOW}[SECURITY CONSIDERATION]${RESET}"
     echo "Cloudflare private secrets found in root account."
-    read -p "Share securely with t8k account? [y/N]: " share_secrets
+    read -p "Share securely with t8k account? [y/N]: " share_secrets </dev/tty
 
     if [[ "$share_secrets" =~ ^[Yy] ]]; then
       sudo -u t8k mkdir -p /home/t8k/.secrets/certbot
@@ -785,6 +599,28 @@ EOF
   fi
 
   echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
+}
+
+# Ensure beautiful soup 4
+ensure_bs4() {
+  # Check Python dependencies
+  echo -e "${BLUE}Installing Python dependencies...${RESET}"
+  case $PACKAGE_MANAGER in
+  pacman)
+    sudo pacman -S --noconfirm python-beautifulsoup4
+    ;;
+  apt)
+    sudo apt update && sudo apt install -y python3-bs4
+    ;;
+  dnf)
+    sudo dnf install -y python3-beautifulsoup4
+    ;;
+  *)
+    echo -e "${YELLOW}Warning: Unknown package manager, attempting pip install${RESET}"
+    pip3 install --break-system-packages beautifulsoup4
+    ;;
+  esac
+  echo -e "${GREEN}✅ Python dependencies installed${RESET}"
 }
 
 # Deploy Astro frontend
@@ -1485,6 +1321,7 @@ production_install() {
   detect_cloudflare_secrets
   setup_ssl_certificates
   allocate_ports
+  ensure_bs4
   deploy_go_backend
   deploy_astro_frontend
   prepare_service_artifacts
@@ -1501,27 +1338,206 @@ production_install() {
   echo
 }
 
-# Main execution
-main() {
-  show_header
+# Checks for essential developer dependencies (Go, Node, Git)
+# Exits if they are not found.
+check_essential_prerequisites() {
+  echo -e "${BLUE}Checking essential prerequisites...${RESET}"
+  local MISSING_DEPS=()
+  local FOUND_DEPS=()
 
-  if is_interactive "$@"; then
-    check_prerequisites
-    choose_install_type
-    if [[ "${INSTALL_TYPE}" == "quick" ]]; then
-      quick_install
+  if ! command -v go &>/dev/null; then MISSING_DEPS+=("Go"); else FOUND_DEPS+=("Go"); fi
+  if ! command -v node &>/dev/null; then MISSING_DEPS+=("Node.js"); else FOUND_DEPS+=("Node.js"); fi
+  if ! command -v git &>/dev/null; then MISSING_DEPS+=("Git"); else FOUND_DEPS+=("Git"); fi
+
+  if [[ ${#FOUND_DEPS[@]} -gt 0 ]]; then
+    for dep in "${FOUND_DEPS[@]}"; do echo -e "  ${GREEN}✅ ${dep} found${RESET}"; done
+  fi
+
+  if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    echo -e "${RED}Error: Missing essential dependencies:${RESET}"
+    for dep in "${MISSING_DEPS[@]}"; do echo -e "  ${RED}❌ ${dep}${RESET}"; done
+    echo -e "${YELLOW}Please install them and try again.${RESET}"
+    cleanup_lock
+    exit 1
+  fi
+
+  # Auto-install pnpm if needed
+  if ! command -v pnpm &>/dev/null; then
+    if command -v npm &>/dev/null; then
+      echo -e "${BLUE}Installing pnpm globally...${RESET}"
+      npm install -g pnpm
+      if ! command -v pnpm &>/dev/null; then
+        echo -e "${RED}Failed to auto-install pnpm. Please install it manually: npm install -g pnpm${RESET}"
+        cleanup_lock
+        exit 1
+      fi
+      echo -e "${GREEN}✅ pnpm installed successfully${RESET}"
     else
-      production_install
+      echo -e "${RED}Cannot install pnpm because Node.js/npm is missing.${RESET}"
+      cleanup_lock
+      exit 1
     fi
+  fi
+  echo
+}
+
+# Checks for production dependencies. This MUST be run as root.
+# Exits if they are not found.
+check_production_prerequisites() {
+  echo -e "${BLUE}Checking production prerequisites (as root)...${RESET}"
+  local MISSING_DEPS=()
+
+  if ! command -v nginx &>/dev/null; then MISSING_DEPS+=("nginx"); fi
+  if ! command -v pm2 &>/dev/null; then MISSING_DEPS+=("pm2"); fi
+  if ! command -v systemctl &>/dev/null; then MISSING_DEPS+=("systemd"); fi
+  if ! command -v sqlite3 &>/dev/null; then MISSING_DEPS+=("sqlite3"); fi
+
+  if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    echo -e "${RED}Error: Missing production dependencies:${RESET}"
+    for dep in "${MISSING_DEPS[@]}"; do
+      echo -e "  ${RED}❌ ${dep}${RESET}"
+      show_install_instructions "$dep"
+    done
+    echo -e "${YELLOW}Please install the required software and re-run the installer.${RESET}"
+    cleanup_lock
+    exit 1
+  fi
+  echo -e "${GREEN}✅ All production prerequisites found.${RESET}"
+  echo
+}
+
+# The new main interactive menu presented to a regular user.
+run_interactive_setup() {
+  echo -e "${BLUE}Choose your installation goal:${RESET}"
+  echo "1) Quick Install (for local development)"
+  echo "2) Production Install (to set up a live server)"
+  echo
+  read -p "Enter choice [1-2]: " choice </dev/tty
+
+  case $choice in
+  1)
+    echo
+    check_essential_prerequisites
+    quick_install
+    ;;
+  2)
+    echo
+    echo -e "${YELLOW}A production installation requires checking server software and running setup commands as root.${RESET}"
+    read -p "Proceed with elevation to sudo? [Y/n]: " sudo_confirm </dev/tty
+    if [[ "$sudo_confirm" =~ ^[Nn]$ ]]; then
+      cleanup_lock
+      exit 0
+    fi
+
+    echo -e "${BLUE}Elevating with sudo to continue production setup...${RESET}"
+    # Re-execute the script, passing a special flag to trigger the root-level interactive flow.
+    # This is the cleanest way to transition from a regular user to a root-driven process.
+    rm -f "$LOCK_FILE"
+    exec sudo "$0" --interactive-prod-flow
+    ;;
+  *)
+    echo -e "${RED}Invalid choice. Please try again.${RESET}"
+    run_interactive_setup
+    ;;
+  esac
+}
+
+# This function runs only AFTER the script has been re-executed with sudo.
+run_interactive_prod_flow_as_root() {
+  # First, check all prerequisites now that we are root.
+  check_essential_prerequisites
+  check_production_prerequisites
+
+  # Now, gather the required information
+  echo -e "${BLUE}Choose production installation type:${RESET}"
+  echo "1) Production single-tenant"
+  echo "2) Production multi-tenant"
+  echo "3) Dedicated tenant"
+  echo
+  read -p "Enter choice [1-3]: " choice </dev/tty
+
+  case $choice in
+  1)
+    INSTALL_TYPE="prod"
+    ask_domain
+    ;;
+  2)
+    INSTALL_TYPE="multi"
+    ask_domain
+    ;;
+  3)
+    INSTALL_TYPE="dedicated"
+    ask_dedicated_info
+    ;;
+  *)
+    echo -e "${RED}Invalid choice.${RESET}"
+    cleanup_lock
+    exit 1
+    ;;
+  esac
+
+  # Now we have all the info and can run the standard production install function.
+  production_install
+}
+
+# Main execution - rewritten for the new "flipped" logic.
+main() {
+  # Self-download logic for curl | bash execution
+  if [[ ! -t 0 ]] && [[ ! -f "$0" || "$0" == "bash" ]]; then
+    temp_script=$(mktemp)
+    curl -fsSL https://get.tractstack.com >"$temp_script"
+    chmod +x "$temp_script"
+    rm -f "$LOCK_FILE"
+    exec "$temp_script" "$@"
+  fi
+
+  # --- Handle special internal flags first ---
+  if [[ "${1:-}" == "--interactive-prod-flow" ]]; then
+    show_header
+    run_interactive_prod_flow_as_root
+    cleanup_lock
+    exit 0
+  fi
+
+  show_header "$@"
+
+  # --- Initial User Context Validation ---
+  if [[ "$(whoami)" == "t8k" ]]; then
+    echo -e "${RED}❌ This installer cannot be run as the 't8k' service user.${RESET}"
+    cleanup_lock
+    exit 1
+  fi
+
+  # --- Execution Mode: Interactive vs. Command-Line ---
+  if is_interactive "$@"; then
+    if [[ "$(whoami)" == "root" ]]; then
+      echo -e "${RED}❌ For safety, please run interactive installations as a regular user.${RESET}"
+      echo "The script will ask for your password to elevate with 'sudo' when needed."
+      cleanup_lock
+      exit 1
+    fi
+    run_interactive_setup
   else
+    # Non-Interactive / Command-Line Mode
     parse_cli_args "$@"
-    check_prerequisites
+
     if [[ "${INSTALL_TYPE}" == "quick" ]]; then
+      check_essential_prerequisites
       quick_install
     else
+      # For non-interactive production installs, we must already be root.
+      if [[ "$(whoami)" != "root" ]]; then
+        echo -e "${RED}❌ Production installs in non-interactive mode must be run with sudo.${RESET}"
+        echo "Example: sudo $0 --prod --domain=..."
+        cleanup_lock
+        exit 1
+      fi
+      check_essential_prerequisites
+      check_production_prerequisites
       production_install
     fi
   fi
+
   cleanup_lock
 }
 
