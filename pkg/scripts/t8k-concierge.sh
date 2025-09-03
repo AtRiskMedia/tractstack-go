@@ -118,6 +118,19 @@ build_astro_frontend() {
     return 1
   fi
 
+  # Check if git repo exists and handle accordingly
+  if [[ -d "$astro_src_dir/.git" ]]; then
+    cd "$astro_src_dir"
+    if [[ -z "$(git status --porcelain)" ]]; then
+      log "Git repo is clean, pulling latest changes..."
+      git pull || log_error "git pull failed for my-tractstack"
+    else
+      log "Git repo has unstaged changes, skipping pull"
+    fi
+  else
+    log "No git repository found, skipping pull"
+  fi
+
   # Build Astro project
   cd "$astro_src_dir"
   if ! pnpm install; then

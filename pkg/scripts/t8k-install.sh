@@ -468,7 +468,13 @@ GIN_MODE=release
 EOF
 
   if [[ "${INSTALL_TYPE}" == "multi" ]]; then
-    echo "ENABLE_MULTI_TENANT=true" | sudo -u t8k tee -a "${src_dir}/tractstack-go/.env" >/dev/null
+    cat <<EOF | sudo -u t8k tee -a "${src_dir}/tractstack-go/.env" >/dev/null
+ENABLE_MULTI_TENANT=true
+MAX_TENANTS=100
+MAX_MEMORY_MB=2048
+MAX_SESSIONS_PER_TENANT=1000
+SSE_HEARTBEAT_INTERVAL_SECONDS=60
+EOF
   fi
 
   echo -e "${BLUE}Building Go backend...${RESET}"
@@ -496,7 +502,11 @@ deploy_astro_frontend() {
   local data_dir="${base_dir}/t8k-go-server"
 
   echo -e "${BLUE}Creating Astro frontend project...${RESET}"
-  sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git" </dev/tty
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git --yes"
+  else
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git" </dev/tty
+  fi
 
   echo -e "${BLUE}Installing TractStack integration...${RESET}"
   sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && pnpm add astro-tractstack@latest"
@@ -509,7 +519,7 @@ PUBLIC_TENANTID=${tenant_id}
 EOF
 
   if [[ "${INSTALL_TYPE}" == "multi" ]]; then
-    echo "ENABLE_MULTI_TENANT=true" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
+    echo "PUBLIC_ENABLE_MULTI_TENANT=true" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
   fi
 
   echo -e "${BLUE}Running TractStack setup...${RESET}"
@@ -972,7 +982,11 @@ quick_install() {
 
   echo -e "${BLUE}Creating Astro frontend project...${RESET}"
   cd "$INSTALL_DIR/src"
-  pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git --yes"
+  else
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git" </dev/tty
+  fi
 
   echo -e "${BLUE}Installing and configuring TractStack integration...${RESET}"
   cd my-tractstack
@@ -982,8 +996,8 @@ quick_install() {
 
   echo -e "\n${GREEN}🎉 TractStack installation complete!${RESET}\n"
   echo -e "${WHITE}To start your TractStack site:${RESET}"
-  echo "1. Start Go backend:   ${BLUE}cd $INSTALL_DIR/src/tractstack-go && ./tractstack-go${RESET}"
-  echo "2. Start dev server:   ${BLUE}cd $INSTALL_DIR/src/my-tractstack && pnpm dev${RESET}"
+  echo -e "1. Start Go backend:   ${BLUE}cd $INSTALL_DIR/src/tractstack-go && ./tractstack-go${RESET}"
+  echo -e "2. Start dev server:   ${BLUE}cd $INSTALL_DIR/src/my-tractstack && pnpm dev${RESET}"
   echo -e "\nYour site will be at: ${BLUE}http://localhost:4321${RESET}\n"
 }
 
