@@ -982,11 +982,7 @@ quick_install() {
 
   echo -e "${BLUE}Creating Astro frontend project...${RESET}"
   cd "$INSTALL_DIR/src"
-  if [[ "${NON_INTERACTIVE}" == true ]]; then
-    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git --yes"
-  else
-    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git" </dev/tty
-  fi
+  pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
 
   echo -e "${BLUE}Installing and configuring TractStack integration...${RESET}"
   cd my-tractstack
