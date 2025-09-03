@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # TractStack v2 Installation Script
-# Corrected Architecture: Principle of Least Privilege & Fail-Fast Logic
+# Final Architecture: Configure t8k user environment, then use it via login shells.
 #
 # https://github.com/AtRiskMedia/tractstack-go
 
@@ -43,7 +43,7 @@ if [[ -f "$LOCK_FILE" ]]; then
   echo "Lock file: $LOCK_FILE"
   exit 1
 fi
-# The lock file is touched by the user, but will be removed with sudo in cleanup
+# The lock file is touched by the user
 touch "$LOCK_FILE"
 
 # Check if running interactively (no arguments)
@@ -443,11 +443,9 @@ allocate_ports() {
   echo -e "${GREEN}✅ Ports configuration updated in ${PORTS_CONFIG_FILE}${RESET}"
 }
 
-# Deploy Go backend (staging and moving)
+# Deploy Go backend
 deploy_go_backend() {
   echo -e "${BLUE}Deploying Go backend...${RESET}"
-  local STAGING_DIR
-  STAGING_DIR=$(mktemp -d)
 
   local base_dir
   if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
@@ -455,46 +453,37 @@ deploy_go_backend() {
   else
     base_dir="/home/t8k"
   fi
-  local target_src_dir="${base_dir}/src"
-  local target_bin_dir="${base_dir}/bin"
-  local target_data_dir="${base_dir}/t8k-go-server"
+  local src_dir="${base_dir}/src"
+  local bin_dir="${base_dir}/bin"
+  local data_dir="${base_dir}/t8k-go-server"
 
-  echo -e "${BLUE}Cloning and building Go backend in a temporary directory...${RESET}"
-  git clone https://github.com/AtRiskMedia/tractstack-go.git "${STAGING_DIR}/tractstack-go"
-  cd "${STAGING_DIR}/tractstack-go"
+  echo -e "${BLUE}Cloning TractStack Go backend...${RESET}"
+  sudo -i -u t8k git clone https://github.com/AtRiskMedia/tractstack-go.git "${src_dir}/tractstack-go"
 
-  tee ".env" >/dev/null <<EOF
-GO_BACKEND_PATH=${target_data_dir}/
+  echo -e "${BLUE}Creating Go backend configuration...${RESET}"
+  sudo -u t8k tee "${src_dir}/tractstack-go/.env" >/dev/null <<EOF
+GO_BACKEND_PATH=${data_dir}/
 PORT=${ALLOCATED_GO_PORT}
 GIN_MODE=release
 EOF
+
   if [[ "${INSTALL_TYPE}" == "multi" ]]; then
-    echo "ENABLE_MULTI_TENANT=true" >>".env"
+    echo "ENABLE_MULTI_TENANT=true" | sudo -u t8k tee -a "${src_dir}/tractstack-go/.env" >/dev/null
   fi
 
-  go build -o "${STAGING_DIR}/tractstack-go/tractstack-go" ./cmd/tractstack-go
+  echo -e "${BLUE}Building Go backend...${RESET}"
+  sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
 
-  echo -e "${BLUE}Moving built artifacts to production location...${RESET}"
-  sudo mv "${STAGING_DIR}/tractstack-go" "${target_src_dir}/"
-  sudo -u t8k mkdir -p "${target_bin_dir}"
-  sudo mv "${target_src_dir}/tractstack-go/tractstack-go" "${target_bin_dir}/"
+  echo -e "${BLUE}Deploying operational scripts...${RESET}"
+  sudo -i -u t8k bash -c "cp -r '${src_dir}/tractstack-go/pkg/scripts/'* /home/t8k/scripts/"
+  sudo -i -u t8k bash -c "chmod +x /home/t8k/scripts/*.sh"
 
-  if [[ -d "${target_src_dir}/tractstack-go/pkg/scripts" ]]; then
-    echo -e "${BLUE}Deploying operational scripts...${RESET}"
-    sudo cp -r "${target_src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
-    sudo chmod +x /home/t8k/scripts/*.sh
-  fi
-
-  sudo chown -R t8k:t8k "${target_src_dir}/tractstack-go" "${target_bin_dir}/tractstack-go"
-  rm -rf "$STAGING_DIR"
-  echo -e "${GREEN}✅ Go backend deployed to ${target_bin_dir}/tractstack-go${RESET}"
+  echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
 }
 
-# Deploy Astro frontend (staging and moving)
+# Deploy Astro frontend
 deploy_astro_frontend() {
   echo -e "${BLUE}Deploying Astro frontend...${RESET}"
-  local STAGING_DIR
-  STAGING_DIR=$(mktemp -d)
 
   local base_dir
   local tenant_id="default"
@@ -503,38 +492,39 @@ deploy_astro_frontend() {
   else
     base_dir="/home/t8k"
   fi
-  local target_src_dir="${base_dir}/src"
-  local target_data_dir="${base_dir}/t8k-go-server"
+  local src_dir="${base_dir}/src"
+  local data_dir="${base_dir}/t8k-go-server"
 
-  echo -e "${BLUE}Creating and building Astro project in a temporary directory...${RESET}"
-  cd "$STAGING_DIR"
-  pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
-  cd my-tractstack
-  pnpm add astro-tractstack@latest
+  echo -e "${BLUE}Creating Astro frontend project...${RESET}"
+  sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git" </dev/tty
 
-  tee ".env" >/dev/null <<EOF
-PRIVATE_GO_BACKEND_PATH=${target_data_dir}/
+  echo -e "${BLUE}Installing TractStack integration...${RESET}"
+  sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && pnpm add astro-tractstack@latest"
+
+  echo -e "${BLUE}Creating Astro frontend configuration...${RESET}"
+  sudo -u t8k tee "${src_dir}/my-tractstack/.env" >/dev/null <<EOF
+PRIVATE_GO_BACKEND_PATH=${data_dir}/
 PUBLIC_GO_BACKEND=http://localhost:${ALLOCATED_GO_PORT}
 PUBLIC_TENANTID=${tenant_id}
 EOF
+
   if [[ "${INSTALL_TYPE}" == "multi" ]]; then
-    echo "ENABLE_MULTI_TENANT=true" >>".env"
+    echo "ENABLE_MULTI_TENANT=true" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
   fi
 
-  npx create-tractstack </dev/tty
-  pnpm build
+  echo -e "${BLUE}Running TractStack setup...${RESET}"
+  sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && npx create-tractstack" </dev/tty
 
-  if [[ ! -d "dist" ]]; then
+  echo -e "${BLUE}Building Astro frontend for production...${RESET}"
+  sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && pnpm build"
+
+  if ! sudo test -d "${src_dir}/my-tractstack/dist"; then
     echo -e "${RED}❌ Astro build failed - no dist directory found${RESET}"
     cleanup_lock
     exit 1
   fi
 
-  echo -e "${BLUE}Moving built frontend to production location...${RESET}"
-  sudo mv "${STAGING_DIR}/my-tractstack" "${target_src_dir}/"
-  sudo chown -R t8k:t8k "${target_src_dir}/my-tractstack"
-  rm -rf "$STAGING_DIR"
-  echo -e "${GREEN}✅ Astro frontend deployed and built at ${target_src_dir}/my-tractstack${RESET}"
+  echo -e "${GREEN}✅ Astro frontend deployed and built at ${src_dir}/my-tractstack${RESET}"
 }
 
 # Create t8k user if needed
@@ -553,15 +543,48 @@ create_t8k_user() {
   fi
 
   echo -e "${BLUE}Creating system user 't8k'...${RESET}"
-  sudo adduser --system --group --shell /bin/bash --home /home/t8k t8k
+  case $PACKAGE_MANAGER in
+  apt)
+    # Use the more feature-rich adduser on Debian-based systems
+    sudo adduser --system --group --shell /bin/bash --home /home/t8k t8k
+    ;;
+  dnf | pacman | zypper | apk | *)
+    # Use the more standard useradd on other systems
+    sudo useradd --system --create-home --shell /bin/bash -m t8k
+    ;;
+  esac
 
-  echo -e "${YELLOW}You may be prompted to set a password for the 't8k' user for maintenance.${RESET}"
+  echo -e "${YELLOW}Please set a password for the 't8k' user for maintenance.${RESET}"
   sudo passwd t8k </dev/tty
 
   sudo bash -c 'echo "t8k ALL=(root) NOPASSWD: /bin/systemctl restart tractstack-go*, /bin/systemctl reload tractstack-go*, /usr/bin/systemctl restart tractstack-go*, /usr/bin/systemctl reload tractstack-go*" > /etc/sudoers.d/t8k-services'
   sudo chmod 440 /etc/sudoers.d/t8k-services
 
   echo -e "${GREEN}✅ User 't8k' created successfully${RESET}"
+}
+
+# Sets up the build environment for the t8k user by creating a .profile
+setup_t8k_environment() {
+  echo -e "${BLUE}Configuring build environment for t8k user...${RESET}"
+
+  local go_path node_path pnpm_path npm_path git_path augmented_path
+  go_path=$(dirname "$(command -v go)")
+  node_path=$(dirname "$(command -v node)")
+  pnpm_path=$(dirname "$(command -v pnpm)")
+  npm_path=$(dirname "$(command -v npm)")
+
+  # Deduplicate and form the augmented PATH.
+  augmented_path=$(echo "${go_path}:${node_path}:${pnpm_path}:${npm_path}:${PATH}" | awk -v RS=: '{ if (!seen[$0]++) { if (NR > 1) printf(":"); printf("%s", $0) } }')
+
+  # Create /home/t8k/.profile
+  sudo -u t8k tee /home/t8k/.profile >/dev/null <<EOF
+# This file is automatically generated by the TractStack installer.
+export PATH="${augmented_path}"
+export PM2_HOME="/home/t8k/.pm2"
+EOF
+
+  sudo chown t8k:t8k /home/t8k/.profile
+  echo -e "${GREEN}✅ t8k user environment configured.${RESET}"
 }
 
 # Setup SSL certificates
@@ -574,17 +597,42 @@ setup_ssl_certificates() {
     echo -e "${BLUE}Setting up SSL certificates...${RESET}"
   fi
 
-  if ! command -v certbot &>/dev/null; then
-    echo -e "${BLUE}Installing certbot...${RESET}"
-    # Install certbot system-wide
+  # Install python3-venv if needed, then create venv and install certbot
+  if ! sudo test -f /home/t8k/certbot_venv/bin/certbot; then
+    echo -e "${BLUE}Installing certbot in virtual environment...${RESET}"
+
+    # Install venv package based on OS
     case $PACKAGE_MANAGER in
-    apt) sudo apt-get update && sudo apt-get install -y certbot python3-certbot-dns-cloudflare ;;
-    dnf) sudo dnf install -y certbot python3-certbot-dns-cloudflare ;;
+    apt)
+      sudo apt update && sudo apt install -y python3-venv python3-pip
+      ;;
+    dnf)
+      sudo dnf install -y python3-venv python3-pip
+      ;;
+    pacman)
+      sudo pacman -S --noconfirm python python-pip
+      ;;
     *)
-      echo -e "${YELLOW}Could not auto-install certbot. Please install it manually.${RESET}"
+      echo -e "${YELLOW}Cannot auto-install python3-venv. Please install it manually.${RESET}"
       return 1
       ;;
     esac
+
+    # Create venv and install certbot
+    sudo -i -u t8k bash -c "
+     python3 -m venv /home/t8k/certbot_venv && \
+     source /home/t8k/certbot_venv/bin/activate && \
+     pip install certbot certbot-dns-cloudflare
+   "
+
+    # Verify installation worked
+    if ! sudo test -f /home/t8k/certbot_venv/bin/certbot; then
+      echo -e "${RED}❌ Certbot venv installation failed${RESET}"
+      cleanup_lock
+      exit 1
+    fi
+
+    echo -e "${GREEN}✅ Certbot installed in /home/t8k/certbot_venv${RESET}"
   fi
 
   sudo -u t8k mkdir -p /home/t8k/etc/letsencrypt /home/t8k/lib/letsencrypt /home/t8k/log/letsencrypt
@@ -601,16 +649,19 @@ setup_ssl_certificates() {
 
   if sudo test -f "/home/t8k/.secrets/certbot/cloudflare.ini"; then
     echo -e "${GREEN}Using Cloudflare DNS automation${RESET}"
-    sudo certbot certonly --dns-cloudflare \
-      --dns-cloudflare-credentials /home/t8k/.secrets/certbot/cloudflare.ini \
-      --dns-cloudflare-propagation-seconds 15 \
-      --config-dir /home/t8k/etc/letsencrypt \
-      --work-dir /home/t8k/lib/letsencrypt \
-      --logs-dir /home/t8k/log/letsencrypt \
-      --non-interactive --agree-tos \
-      --email "admin@${DOMAIN}" \
-      $dry_run_flag \
-      ${primary_cert_domains}
+    sudo -i -u t8k bash -c "
+     source /home/t8k/certbot_venv/bin/activate && \
+     certbot certonly --dns-cloudflare \
+       --dns-cloudflare-credentials /home/t8k/.secrets/certbot/cloudflare.ini \
+       --dns-cloudflare-propagation-seconds 15 \
+       --config-dir /home/t8k/etc/letsencrypt \
+       --work-dir /home/t8k/lib/letsencrypt \
+       --logs-dir /home/t8k/log/letsencrypt \
+       --non-interactive --agree-tos \
+       --email admin@${DOMAIN} \
+       $dry_run_flag \
+       ${primary_cert_domains}
+   "
   else
     echo -e "${YELLOW}Using manual DNS verification${RESET}"
     echo -e "${BLUE}Certbot will show you TXT records to add to your DNS...${RESET}"
@@ -619,13 +670,16 @@ setup_ssl_certificates() {
       cleanup_lock
       exit 1
     fi
-    sudo certbot certonly --manual --preferred-challenges dns \
-      --config-dir /home/t8k/etc/letsencrypt \
-      --work-dir /home/t8k/lib/letsencrypt \
-      --logs-dir /home/t8k/log/letsencrypt \
-      --agree-tos --email "admin@${DOMAIN}" \
-      $dry_run_flag \
-      ${primary_cert_domains} </dev/tty
+    sudo -i -u t8k bash -c "
+     source /home/t8k/certbot_venv/bin/activate && \
+     certbot certonly --manual --preferred-challenges dns \
+       --config-dir /home/t8k/etc/letsencrypt \
+       --work-dir /home/t8k/lib/letsencrypt \
+       --logs-dir /home/t8k/log/letsencrypt \
+       --agree-tos --email admin@${DOMAIN} \
+       $dry_run_flag \
+       ${primary_cert_domains}
+   " </dev/tty
   fi
   echo -e "${GREEN}✅ SSL certificate request completed${RESET}"
 }
@@ -882,14 +936,16 @@ module.exports = { apps };
 EOF
 
   echo -e "${BLUE}Starting or reloading PM2 ecosystem...${RESET}"
-  sudo -u t8k --preserve-env=PATH PM2_HOME=/home/t8k/.pm2 pm2 startOrReload "$ecosystem_file"
+  sudo -i -u t8k pm2 startOrReload "$ecosystem_file"
 
   echo -e "${BLUE}Configuring PM2 startup service...${RESET}"
-  # Run pm2 startup command with sudo to create the systemd service
-  sudo env PATH=$PATH:/usr/bin PM2_HOME=/home/t8k/.pm2 pm2 startup systemd -u t8k --hp /home/t8k
+  # This command must be run as root to create the systemd file, but we tell it to generate a service for user t8k
+  local pm2_path
+  pm2_path=$(command -v pm2)
+  sudo env PATH=$PATH:"$(dirname "$pm2_path")" "$pm2_path" startup systemd -u t8k --hp /home/t8k
 
   echo -e "${BLUE}Saving process list for reboot...${RESET}"
-  sudo -u t8k PM2_HOME=/home/t8k/.pm2 pm2 save
+  sudo -i -u t8k pm2 save
 
   echo -e "${GREEN}✅ PM2 ecosystem configured and running${RESET}"
 }
@@ -940,6 +996,7 @@ production_install() {
   check_existing_installation
 
   create_t8k_user
+  setup_t8k_environment # CRITICAL: Setup the user's environment before using it
   setup_directories
 
   detect_cloudflare_secrets
@@ -956,7 +1013,9 @@ production_install() {
 
   echo -e "\n${GREEN}🎉 TractStack production installation complete!${RESET}\n"
   echo -e "${WHITE}Your site is available at:${RESET}"
-  echo -e "   ${BLUE}https://${DOMAIN}${RESET}"
+  echo -e "   ${BLUE}https://${DOMAIN}${RESET} (Production domain)"
+  echo -e "   ${BLUE}https://localhost:${ALLOCATED_ASTRO_PORT}${RESET} (Direct Astro access)"
+  echo -e "   ${BLUE}http://localhost:${ALLOCATED_GO_PORT}${RESET} (Go backend API)"
 }
 
 # More robust go version check
@@ -987,6 +1046,7 @@ check_essential_prerequisites() {
   if ! command -v go &>/dev/null; then MISSING_DEPS+=("Go"); elif ! check_go_version; then MISSING_DEPS+=("Go 1.22+"); fi
   if ! command -v node &>/dev/null; then MISSING_DEPS+=("Node.js"); fi
   if ! command -v git &>/dev/null; then MISSING_DEPS+=("Git"); fi
+  if ! command -v npm &>/dev/null; then MISSING_DEPS+=("npm"); fi
 
   if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
     echo -e "${RED}Error: Missing essential developer dependencies:${RESET}"
