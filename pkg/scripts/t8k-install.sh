@@ -307,6 +307,12 @@ check_existing_installation() {
 detect_cloudflare_secrets() {
   echo -e "${BLUE}Detecting SSL configuration...${RESET}"
 
+  # Check if t8k already has secrets first
+  if sudo test -f "/home/t8k/.secrets/certbot/cloudflare.ini"; then
+    echo "✅ Cloudflare DNS secrets already configured for t8k user"
+    return 0
+  fi
+
   # This check requires sudo because it's looking in /root
   if sudo test -f "/root/.secrets/certbot/cloudflare.ini"; then
     echo -e "${YELLOW}⚠️ Cloudflare DNS secrets found in root account${RESET}"
