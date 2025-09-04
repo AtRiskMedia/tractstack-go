@@ -481,6 +481,8 @@ MAX_MEMORY_MB=2048
 MAX_SESSIONS_PER_TENANT=1000
 SSE_HEARTBEAT_INTERVAL_SECONDS=60
 EOF
+  else
+    echo "ENABLE_MULTI_TENANT=false" | sudo -u t8k tee -a "${src_dir}/tractstack-go/.env" >/dev/null
   fi
 
   echo -e "${BLUE}Building Go backend...${RESET}"
@@ -994,6 +996,9 @@ quick_install() {
   cd my-tractstack
   pnpm add astro-tractstack@latest
   echo "PRIVATE_GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/" >.env
+  echo "PUBLIC_GO_BACKEND=http://localhost:8080" >>.env
+  echo "PUBLIC_TENANTID=default" >>.env
+  echo "ENABLE_MULTI_TENANT=false" >>.env
   npx create-tractstack </dev/tty
 
   echo -e "${BLUE}Building Astro project for whitelist extraction...${RESET}"
