@@ -39,6 +39,7 @@ This automatically installs both the Go backend and creates a new Astro project 
 ## Manual Installation
 
 **Prerequisites:**
+
 - Node.js 20+
 - pnpm (recommended) or npm
 - Go 1.22+
@@ -74,7 +75,7 @@ npx create-tractstack
 cd ~/t8k/src/tractstack-go
 ./tractstack-go
 
-# Terminal 2: Astro frontend  
+# Terminal 2: Astro frontend
 cd ~/t8k/src/my-tractstack
 pnpm dev
 ```
@@ -84,12 +85,14 @@ Visit https://127.0.0.1:4321 to access your site and activate your Story Keep (C
 ## Installation Types
 
 ### Development (Quick Install)
+
 - Local setup in `~/t8k/`
 - No sudo required
 - Perfect for development and testing
 - SQLite database included
 
 ### Production Single-Tenant
+
 - System-wide installation at `/home/t8k/`
 - SSL certificates via Let's Encrypt
 - nginx reverse proxy
@@ -97,12 +100,14 @@ Visit https://127.0.0.1:4321 to access your site and activate your Story Keep (C
 - PM2 process management
 
 ### Production Multi-Tenant
+
 - Same as single-tenant plus:
 - Wildcard domain support (`*.yourdomain.com`)
 - Tenant management at `/sandbox/register`
 - Multiple isolated websites from one installation
 
 ### Dedicated Instance
+
 - Completely separate installation per site
 - Own source code, binaries, and data
 - Maximum isolation and customization
@@ -143,6 +148,7 @@ Visit https://127.0.0.1:4321 to access your site and activate your Story Keep (C
 ```
 
 ### Production Structure
+
 Production installations live at `/home/t8k/` with the same structure plus:
 
 ```
@@ -171,18 +177,23 @@ TractStack v2 includes powerful multi-tenant capabilities:
 ## SSL Certificate Management
 
 ### Cloudflare DNS (Automated)
+
 Create `/root/.secrets/certbot/cloudflare.ini`:
+
 ```ini
 dns_cloudflare_api_token = YOUR_API_TOKEN_HERE
 ```
+
 Certificates are obtained automatically during installation.
 
 ### Manual DNS Verification
+
 Without Cloudflare, the installer guides you through manual DNS TXT record verification.
 
 ## Service Management
 
 ### Main Installation
+
 ```bash
 # Status
 sudo systemctl status tractstack-go
@@ -198,6 +209,7 @@ sudo -u t8k pm2 logs astro-main
 ```
 
 ### Dedicated Instances
+
 ```bash
 # Replace SITE_ID with your site identifier
 sudo systemctl status tractstack-go@SITE_ID
@@ -214,8 +226,9 @@ type=dedicated,site=SITE_ID,command=build
 ```
 
 The system automatically:
+
 1. Pulls latest code from Git
-2. Builds Go backend and Astro frontend  
+2. Builds Go backend and Astro frontend
 3. Extracts Tailwind CSS optimizations
 4. Restarts services
 5. Cleans up processed files
@@ -223,12 +236,14 @@ The system automatically:
 ## Database Options
 
 ### SQLite (Default)
+
 - Zero configuration required
 - Perfect for most websites
 - Automatic backups and maintenance
 - Scales to hundreds of thousands of visitors
 
 ### Turso Cloud Database
+
 - Distributed SQLite with global replication
 - Configure during site initialization
 - Seamless scaling for high-traffic sites
@@ -245,8 +260,9 @@ The system automatically:
 ## API Integration
 
 TractStack provides RESTful APIs for:
+
 - Content management
-- User analytics  
+- User analytics
 - Belief tracking (visitor preferences)
 - Multi-tenant operations
 - Media handling
@@ -254,18 +270,20 @@ TractStack provides RESTful APIs for:
 ## Uninstalling
 
 **For Production installations**, the uninstall script is located at `/home/t8k/scripts/`:
+
 ```bash
 sudo /home/t8k/scripts/t8k-uninstall.sh
 ```
 
 **For Quick install (development)**, the script is in:
+
 ```bash
 sudo ~/t8k/src/tractstack-go/pkg/scripts/t8k-uninstall.sh
 ```
 
 ## Support & Documentation
 
-- **Documentation**: https://tractstack.org/docs
+- **Documentation**: https://tractstack.org
 - **GitHub Issues**: https://github.com/AtRiskMedia/tractstack-go/issues
 - **Email Support**: hello@tractstack.com
 - **Community**: Join discussions about adaptive web experiences
@@ -275,12 +293,13 @@ sudo ~/t8k/src/tractstack-go/pkg/scripts/t8k-uninstall.sh
 **Functional Source License (FSL)** - Commercial use encouraged!
 
 The only restriction is no re-selling TractStack as-a-service. Perfect for:
+
 - Agency client projects
-- Corporate websites  
+- Corporate websites
 - Personal projects
 - Open source contributions
 
 ---
 
-*TractStack v2 - Making the web adaptive, one site at a time*  
-*Made with ❤️ by [At Risk Media](https://atriskmedia.com)*
+_TractStack v2 - Making the web adaptive, one site at a time_  
+_Made with ❤️ by [At Risk Media](https://atriskmedia.com)_
