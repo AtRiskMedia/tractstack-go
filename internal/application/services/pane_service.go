@@ -223,6 +223,8 @@ func (s *PaneService) Update(tenantCtx *tenant.Context, pane *content.PaneNode) 
 		s.logger.Content().Error("Failed to refresh content map after pane update",
 			"error", err, "paneId", pane.ID, "tenantId", tenantCtx.TenantID)
 	}
+	// Invalidate its chunks
+	tenantCtx.CacheManager.InvalidateByDependency(tenantCtx.TenantID, pane.ID)
 
 	s.logger.Content().Info("Successfully updated pane", "tenantId", tenantCtx.TenantID, "paneId", pane.ID, "title", pane.Title, "slug", pane.Slug, "duration", time.Since(start))
 	marker.SetSuccess(true)
