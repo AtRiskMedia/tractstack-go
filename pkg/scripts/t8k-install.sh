@@ -996,6 +996,19 @@ quick_install() {
   echo "PRIVATE_GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/" >.env
   npx create-tractstack </dev/tty
 
+  echo -e "${BLUE}Building Astro project for whitelist extraction...${RESET}"
+  pnpm build
+
+  # Ensure config directory exists
+  mkdir -p "/home/$USER/t8k/t8k-go-server/config/default"
+  echo -e "${BLUE}Extracting Tailwind whitelist...${RESET}"
+  # Ensure config directory exists
+  mkdir -p "/home/$USER/t8k/t8k-go-server/config/default"
+  # Extract whitelist from built assets
+  python3 "$INSTALL_DIR/src/tractstack-go/pkg/scripts/extractTailwindWhitelist.py" \
+    "$INSTALL_DIR/src/my-tractstack/dist" \
+    "/home/$USER/t8k/t8k-go-server/config/default/tailwindWhitelist.json"
+
   echo -e "\n${GREEN}🎉 TractStack installation complete!${RESET}\n"
   echo -e "${WHITE}To start your TractStack site:${RESET}"
   echo -e "1. Start Go backend:   ${BLUE}cd $INSTALL_DIR/src/tractstack-go && ./tractstack-go${RESET}"
@@ -1012,7 +1025,7 @@ production_install() {
   check_existing_installation
 
   create_t8k_user
-  setup_t8k_environment # CRITICAL: Setup the user's environment before using it
+  setup_t8k_environment
   setup_directories
 
   detect_cloudflare_secrets
@@ -1026,6 +1039,7 @@ production_install() {
   configure_nginx
   configure_systemd_services
   setup_pm2_ecosystem
+  extract_initial_whitelist
 
   echo -e "\n${GREEN}🎉 TractStack production installation complete!${RESET}\n"
   echo -e "${WHITE}Your site is available at:${RESET}"
@@ -1102,6 +1116,40 @@ check_production_prerequisites() {
     exit 1
   fi
   echo -e "${GREEN}✅ All production prerequisites found.${RESET}"
+}
+
+# Function to extract initial tailwind whitelist
+extract_initial_whitelist() {
+  echo -e "${BLUE}Extracting Tailwind whitelist from built assets...${RESET}"
+
+  local base_dir
+  if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
+    base_dir="/home/t8k/sites/${SITE_ID}"
+  else
+    base_dir="/home/t8k"
+  fi
+
+  local astro_dist_dir="${base_dir}/src/my-tractstack/dist"
+  local whitelist_output="${base_dir}/t8k-go-server/config/default/tailwindWhitelist.json"
+
+  # Ensure config directory exists
+  sudo -u t8k mkdir -p "${base_dir}/t8k-go-server/config/default"
+
+  # Verify dist directory exists
+  if ! sudo test -d "$astro_dist_dir"; then
+    log_error "Astro dist directory not found: $astro_dist_dir"
+    return 1
+  fi
+
+  # Run extraction as t8k user
+  if sudo -u t8k python3 /home/t8k/scripts/extractTailwindWhitelist.py "$astro_dist_dir" "$whitelist_output"; then
+    echo -e "${GREEN}✅ Tailwind whitelist extracted successfully${RESET}"
+  else
+    log_error "Failed to extract Tailwind whitelist"
+    return 1
+  fi
+
+  return 0
 }
 
 # Main execution logic
