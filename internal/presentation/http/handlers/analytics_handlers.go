@@ -361,11 +361,21 @@ func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
 	})
 }
 
-// --- Helper Methods ---
-
 func (h *AnalyticsHandlers) parseTimeRange(c *gin.Context) (int, int) {
 	startHour, _ := strconv.Atoi(c.DefaultQuery("startHour", "168"))
 	endHour, _ := strconv.Atoi(c.DefaultQuery("endHour", "0"))
+	
+	// Validate and clamp parameters
+	if startHour < 0 {
+		startHour = 168 // Default to 1 week
+	}
+	if endHour < 0 {
+		endHour = 0 // Never allow negative end hours (future times)
+	}
+	if startHour <= endHour {
+		startHour = endHour + 1 // Ensure valid range
+	}
+	
 	return startHour, endHour
 }
 
