@@ -113,6 +113,9 @@ show_install_instructions() {
   pm2)
     echo -e "  ${BLUE}sudo npm install -g pm2${RESET}"
     ;;
+  pnpm)
+    echo -e "  ${BLUE}sudo npm install -g pnpm${RESET}"
+    ;;
   sqlite3)
     case $PACKAGE_MANAGER in
     apt) echo -e "  ${BLUE}sudo apt update && sudo apt install sqlite3${RESET}" ;;
@@ -129,6 +132,28 @@ show_install_instructions() {
     else
       echo -e "  ${YELLOW}systemd should be included with your Linux distribution.${RESET}"
     fi
+    ;;
+  python3)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install python3${RESET}" ;;
+    dnf) echo -e "  ${BLUE}sudo dnf install python3${RESET}" ;;
+    pacman) echo -e "  ${BLUE}sudo pacman -S python${RESET}" ;;
+    zypper) echo -e "  ${BLUE}sudo zypper install python3${RESET}" ;;
+    apk) echo -e "  ${BLUE}sudo apk add python3${RESET}" ;;
+    brew) echo -e "  ${BLUE}brew install python@3.12${RESET}" ;;
+    *) echo -e "  ${YELLOW}Please install python3 using your system's package manager.${RESET}" ;;
+    esac
+    ;;
+  python3-bs4)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install python3-bs4${RESET}" ;;
+    dnf) echo -e "  ${BLUE}sudo dnf install python3-beautifulsoup4${RESET}" ;;
+    pacman) echo -e "  ${BLUE}sudo pacman -S python-beautifulsoup4${RESET}" ;;
+    zypper) echo -e "  ${BLUE}sudo zypper install python3-beautifulsoup4${RESET}" ;;
+    apk) echo -e "  ${BLUE}sudo apk add py3-beautifulsoup4${RESET}" ;;
+    brew) echo -e "  ${BLUE}pip3 install beautifulsoup4${RESET}" ;;
+    *) echo -e "  ${YELLOW}Please install python3-beautifulsoup4 using your system's package manager.${RESET}" ;;
+    esac
     ;;
   esac
 }
@@ -1082,24 +1107,20 @@ check_essential_prerequisites() {
   if ! command -v node &>/dev/null; then MISSING_DEPS+=("Node.js"); fi
   if ! command -v git &>/dev/null; then MISSING_DEPS+=("Git"); fi
   if ! command -v npm &>/dev/null; then MISSING_DEPS+=("npm"); fi
+  if ! command -v pnpm &>/dev/null; then MISSING_DEPS+=("pnpm"); fi
+  if ! command -v python3 &>/dev/null; then MISSING_DEPS+=("python3"); fi
+  if ! python3 -c "import bs4" &>/dev/null 2>&1; then MISSING_DEPS+=("python3-bs4"); fi
 
   if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
     echo -e "${RED}Error: Missing essential developer dependencies:${RESET}"
-    for dep in "${MISSING_DEPS[@]}"; do echo -e "  ${RED}❌ ${dep}${RESET}"; done
+    for dep in "${MISSING_DEPS[@]}"; do
+      echo -e "  ${RED}⌘ ${dep}${RESET}"
+      show_install_instructions "$dep"
+    done
     cleanup_lock
     exit 1
   fi
 
-  if ! command -v pnpm &>/dev/null; then
-    if command -v npm &>/dev/null; then
-      echo -e "${BLUE}Installing pnpm globally via npm...${RESET}"
-      sudo npm install -g pnpm </dev/tty
-    else
-      echo -e "${RED}Cannot install pnpm because npm is missing.${RESET}"
-      cleanup_lock
-      exit 1
-    fi
-  fi
   echo -e "${GREEN}✅ All essential prerequisites found.${RESET}"
 }
 
@@ -1142,7 +1163,7 @@ extract_initial_whitelist() {
 
   # Verify dist directory exists
   if ! sudo test -d "$astro_dist_dir"; then
-    log_error "Astro dist directory not found: $astro_dist_dir"
+    echo -e "${RED}⌘ Astro dist directory not found: $astro_dist_dir${RESET}"
     return 1
   fi
 
@@ -1150,7 +1171,7 @@ extract_initial_whitelist() {
   if sudo -u t8k python3 /home/t8k/scripts/extractTailwindWhitelist.py "$astro_dist_dir" "$whitelist_output"; then
     echo -e "${GREEN}✅ Tailwind whitelist extracted successfully${RESET}"
   else
-    log_error "Failed to extract Tailwind whitelist"
+    echo -e "${RED}⌘ Failed to extract Tailwind whitelist${RESET}"
     return 1
   fi
 

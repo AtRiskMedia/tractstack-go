@@ -266,7 +266,7 @@ confirm_uninstall() {
   fi
 }
 
-# Stop and remove systemd services
+# Improved remove_systemd_services function with better error handling
 remove_systemd_services() {
   local target="$1"
   local site_id="${2:-}"
@@ -287,31 +287,50 @@ remove_systemd_services() {
   "site")
     log "Stopping and removing dedicated site systemd service: $site_id"
     local service_name="tractstack-go@${site_id}.service"
+
+    # Stop the service if running
     if systemctl is-active --quiet "$service_name" 2>/dev/null; then
+      log "Stopping service: $service_name"
       systemctl stop "$service_name"
     fi
+
+    # Disable the service (this removes the symlink)
     if systemctl is-enabled --quiet "$service_name" 2>/dev/null; then
+      log "Disabling service: $service_name"
       systemctl disable "$service_name"
     fi
+
+    # Additional safety check: manually remove symlink if it still exists
+    local symlink_path="/etc/systemd/system/multi-user.target.wants/${service_name}"
+    if [[ -L "$symlink_path" ]]; then
+      log "Manually removing leftover symlink: $symlink_path"
+      rm -f "$symlink_path"
+    fi
+
     # Note: Keep the template file /etc/systemd/system/tractstack-go@.service for other sites
     ;;
   "all")
     log "Stopping and removing all systemd services"
 
     # Stop all tractstack-go services
-    for service in $(systemctl list-units --type=service --state=active tractstack-go* --no-legend | awk '{print $1}'); do
+    for service in $(systemctl list-units --type=service --state=active "tractstack-go*" --no-legend | awk '{print $1}'); do
       log "Stopping service: $service"
-      systemctl stop "$service"
+      systemctl stop "$service" || true
     done
 
-    # Disable all tractstack-go services
-    for service in $(systemctl list-unit-files tractstack-go* --no-legend | awk '{print $1}'); do
-      log "Disabling service: $service"
-      systemctl disable "$service"
+    # Disable all tractstack-go services (including template instances)
+    for service in $(systemctl list-unit-files "tractstack-go*" --no-legend | awk '{print $1}'); do
+      if systemctl is-enabled --quiet "$service" 2>/dev/null; then
+        log "Disabling service: $service"
+        systemctl disable "$service" || true
+      fi
     done
 
     # Remove systemd service files
     rm -f /etc/systemd/system/tractstack-go*.service
+
+    # Additional cleanup: remove any leftover symlinks
+    find /etc/systemd/system -name "*tractstack-go*" -type l -delete 2>/dev/null || true
 
     # Remove build watcher
     if systemctl is-active --quiet t8k-build-watcher.path 2>/dev/null; then
