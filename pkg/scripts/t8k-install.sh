@@ -158,16 +158,14 @@ show_install_instructions() {
   esac
 }
 
-# Check if user has sudo privileges without prompting for password
+# Check if user has sudo privileges
 has_sudo() {
-  if ! sudo -n true 2>/dev/null; then
-    if groups | grep -qE '\b(sudo|wheel|admin)\b'; then
-      echo -e "${YELLOW}Sudo access is available, but you may be prompted for your password.${RESET}"
-      return 0
-    fi
+  if sudo -v 2>/dev/null; then
+    echo -e "${YELLOW}Sudo access has been confirmed.${RESET}"
+    return 0
+  else
     return 1
   fi
-  return 0
 }
 
 # Show header conditionally
@@ -553,6 +551,8 @@ EOF
 
   if [[ "${INSTALL_TYPE}" == "multi" ]]; then
     echo "PUBLIC_ENABLE_MULTI_TENANT=true" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
+  else
+    echo "PUBLIC_ENABLE_MULTI_TENANT=false" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
   fi
 
   echo -e "${BLUE}Running TractStack setup...${RESET}"
@@ -751,13 +751,29 @@ configure_nginx() {
   "prod")
     nginx_config=$(
       cat <<EOF
-server { listen 80; server_name ${DOMAIN} www.${DOMAIN}; return 301 https://\$host\$request_uri; }
 server {
-  listen 443 ssl http2; server_name ${DOMAIN} www.${DOMAIN};
-  ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-  ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-  location / { proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT}; proxy_set_header Host \$host; }
-  location /media/ { alias /home/t8k/t8k-go-server/config/default/media/; }
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN} www.${DOMAIN};
+    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    
+    location / {
+        proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    
+    location /media/ {
+        alias /home/t8k/t8k-go-server/config/default/media/;
+    }
 }
 EOF
     )
@@ -765,17 +781,33 @@ EOF
   "multi")
     nginx_config=$(
       cat <<EOF
-server { listen 80; server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN}; return 301 https://\$host\$request_uri; }
 server {
-  listen 443 ssl http2; server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
-  ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-  ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-  location / { proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT}; proxy_set_header Host \$host; }
-  location /media/ {
-      set \$tenant_dir "default";
-      if (\$host ~* ^([^.]+)\\.${DOMAIN//./\\.}\$) { set \$tenant_dir \$1; }
-      alias /home/t8k/t8k-go-server/config/\$tenant_dir/media/;
-  }
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
+    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    
+    location / {
+        proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    
+    location /media/ {
+        set \$tenant_dir "default";
+        if (\$host ~* ^([^.]+)\\.${DOMAIN//./\\.}\$) {
+            set \$tenant_dir \$1;
+        }
+        alias /home/t8k/t8k-go-server/config/\$tenant_dir/media/;
+    }
 }
 EOF
     )
@@ -783,13 +815,29 @@ EOF
   "dedicated")
     nginx_config=$(
       cat <<EOF
-server { listen 80; server_name ${DOMAIN} www.${DOMAIN}; return 301 https://\$host\$request_uri; }
 server {
-  listen 443 ssl http2; server_name ${DOMAIN} www.${DOMAIN};
-  ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-  ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-  location / { proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT}; proxy_set_header Host \$host; }
-  location /media/ { alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/; }
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ${DOMAIN} www.${DOMAIN};
+    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    
+    location / {
+        proxy_pass http://localhost:${ALLOCATED_ASTRO_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    
+    location /media/ {
+        alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/;
+    }
 }
 EOF
     )
@@ -1182,11 +1230,23 @@ extract_initial_whitelist() {
 main() {
   # Self-download logic for curl | bash execution
   if [[ ! -t 0 ]] && [[ ! -f "$0" || "$0" == "bash" ]]; then
-    temp_script=$(mktemp)
+    # Create user-specific temp directory
+    user_temp_dir="$HOME/.tmp"
+    mkdir -p "$user_temp_dir"
+
+    # Create temp script in user directory instead of /tmp
+    temp_script=$(mktemp "$user_temp_dir/t8k-install.XXXXXX")
+
     # Ensure lock is removed before exec
     rm -f "$LOCK_FILE"
+
+    # Download to user temp directory
     curl -fsSL https://get.tractstack.com >"$temp_script"
     chmod +x "$temp_script"
+
+    # Clean up temp file after exec (trap ensures cleanup even if script fails)
+    trap "rm -f '$temp_script'" EXIT
+
     exec "$temp_script" "$@"
   fi
 
