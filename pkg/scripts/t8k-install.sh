@@ -604,7 +604,10 @@ create_t8k_user() {
   echo -e "${YELLOW}Please set a password for the 't8k' user for maintenance.${RESET}"
   sudo passwd t8k </dev/tty
 
-  sudo bash -c 'echo "t8k ALL=(root) NOPASSWD: /bin/systemctl restart tractstack-go*, /bin/systemctl reload tractstack-go*, /usr/bin/systemctl restart tractstack-go*, /usr/bin/systemctl reload tractstack-go*" > /etc/sudoers.d/t8k-services'
+  systemctl_path=$(which systemctl)
+  sudo bash -c "cat > /etc/sudoers.d/t8k-services << EOF
+t8k ALL=(root) NOPASSWD: ${systemctl_path} restart tractstack-go*, ${systemctl_path} reload tractstack-go*, /bin/systemctl restart tractstack-go*, /bin/systemctl reload tractstack-go*, /usr/bin/systemctl restart tractstack-go*, /usr/bin/systemctl reload tractstack-go*
+EOF"
   sudo chmod 440 /etc/sudoers.d/t8k-services
 
   echo -e "${GREEN}✅ User 't8k' created successfully${RESET}"
