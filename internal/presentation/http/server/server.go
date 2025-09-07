@@ -22,8 +22,11 @@ type Server struct {
 func New(port string, container *container.Container) *Server {
 	router := routes.SetupRoutes(container)
 
+	// Determine server address based on configuration
+	addr := config.BindAddress + ":" + port
+
 	httpServer := &http.Server{
-		Addr:    ":" + port,
+		Addr:    addr,
 		Handler: router,
 		// ReadTimeout protects against slow clients on initial request.
 		ReadTimeout: config.ServerReadTimeout,
@@ -41,8 +44,16 @@ func New(port string, container *container.Container) *Server {
 func (s *Server) Start() error {
 	log.Printf("Starting HTTP server on %s", s.httpServer.Addr)
 
-	if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("failed to start HTTP server: %w", err)
+	if config.SSLEnabled && config.SSLCertPath != "" && config.SSLKeyPath != "" {
+		log.Printf("SSL enabled - using certificates: %s", config.SSLCertPath)
+		if err := s.httpServer.ListenAndServeTLS(config.SSLCertPath, config.SSLKeyPath); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("failed to start HTTPS server: %w", err)
+		}
+	} else {
+		log.Printf("Starting HTTP server (no SSL)")
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("failed to start HTTP server: %w", err)
+		}
 	}
 
 	return nil

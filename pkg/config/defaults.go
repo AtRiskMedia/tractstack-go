@@ -141,6 +141,12 @@ var (
 	RepositoryCleanupInterval time.Duration
 	RepositoryCleanupVerbose  bool
 
+	// SSL Configuration
+  SSLEnabled  bool
+  SSLCertPath string
+  SSLKeyPath  string
+  BindAddress string
+
 	// Logging Configuration
 	LogVerbosity string
 
@@ -202,6 +208,12 @@ func init() {
 	DBPoolCleanupInterval = time.Duration(getEnvInt("DB_POOL_CLEANUP_INTERVAL_MINUTES", 5)) * time.Minute
 	RepositoryCleanupInterval = time.Duration(getEnvInt("REPOSITORY_CLEANUP_INTERVAL", 30)) * time.Minute
 	RepositoryCleanupVerbose = getEnvString("REPOSITORY_CLEANUP_VERBOSE", "true") == "false"
+
+	// SSL Configuration
+  SSLEnabled = getEnvBool("SSL_ENABLED", false)
+  SSLCertPath = getEnvString("SSL_CERT_PATH", "")
+  SSLKeyPath = getEnvString("SSL_KEY_PATH", "")
+  BindAddress = getEnvString("BIND_ADDRESS", "127.0.0.1")
 
 	// Logging Configuration
 	LogVerbosity = getEnvString("LOG_VERBOSITY", "WARN")

@@ -494,6 +494,10 @@ deploy_go_backend() {
 GO_BACKEND_PATH=${data_dir}/
 PORT=${ALLOCATED_GO_PORT}
 GIN_MODE=release
+SSL_ENABLED=true
+SSL_CERT_PATH=/home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem
+SSL_KEY_PATH=/home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem
+BIND_ADDRESS=0.0.0.0
 EOF
 
   if [[ "${INSTALL_TYPE}" == "multi" ]]; then
@@ -775,21 +779,6 @@ server {
         alias /home/t8k/t8k-go-server/config/default/media/;
     }
 }
-
-server {
-    listen ${ALLOCATED_GO_PORT} ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
-    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    
-    location / {
-        proxy_pass http://localhost:${ALLOCATED_GO_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
 EOF
     )
     ;;
@@ -824,21 +813,6 @@ server {
         alias /home/t8k/t8k-go-server/config/\$tenant_dir/media/;
     }
 }
-
-server {
-    listen ${ALLOCATED_GO_PORT} ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
-    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    
-    location / {
-        proxy_pass http://localhost:${ALLOCATED_GO_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
 EOF
     )
     ;;
@@ -867,21 +841,6 @@ server {
     
     location /media/ {
         alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/;
-    }
-}
-
-server {
-    listen ${ALLOCATED_GO_PORT} ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
-    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    
-    location / {
-        proxy_pass http://localhost:${ALLOCATED_GO_PORT};
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
