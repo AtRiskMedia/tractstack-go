@@ -28,10 +28,6 @@ func New(port string, container *container.Container) *Server {
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: router,
-		// ReadTimeout protects against slow clients on initial request.
-		ReadTimeout: config.ServerReadTimeout,
-		// WriteTimeout is removed to allow long-lived streaming responses like SSE.
-		// IdleTimeout is also removed as it can prematurely close SSE connections.
 	}
 
 	return &Server{
