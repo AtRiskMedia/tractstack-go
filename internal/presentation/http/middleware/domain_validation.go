@@ -29,6 +29,20 @@ func DomainValidationMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
 			return
 		}
 
+		// Also check tenant registry domains directly (for setup mode)
+		tenantID := c.GetHeader("X-Tenant-ID")
+		if tenantID == "" {
+			tenantID = c.Query("tenantId")
+		}
+		if tenantID != "" {
+			detector := tenantManager.GetDetector()
+			hostDomain := strings.Split(host, ":")[0]
+			if detector.ValidateDomain(tenantID, hostDomain) {
+				c.Next()
+				return
+			}
+		}
+
 		// Get tenant context
 		tenantCtx, exists := GetTenantContext(c)
 		if !exists {
