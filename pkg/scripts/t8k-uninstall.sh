@@ -280,45 +280,35 @@ remove_systemd_services() {
     if systemctl is-enabled --quiet tractstack-go.service 2>/dev/null; then
       systemctl disable tractstack-go.service
     fi
-    if [[ -f "/etc/systemd/system/tractstack-go.service" ]]; then
-      rm -f /etc/systemd/system/tractstack-go.service
-    fi
+    rm -f /etc/systemd/system/tractstack-go.service
     ;;
   "site")
     log "Stopping and removing dedicated site systemd service: $site_id"
     local service_name="tractstack-go@${site_id}.service"
 
-    # Stop the service if running
     if systemctl is-active --quiet "$service_name" 2>/dev/null; then
       log "Stopping service: $service_name"
       systemctl stop "$service_name"
     fi
 
-    # Disable the service (this removes the symlink)
     if systemctl is-enabled --quiet "$service_name" 2>/dev/null; then
       log "Disabling service: $service_name"
       systemctl disable "$service_name"
     fi
 
-    # Additional safety check: manually remove symlink if it still exists
-    local symlink_path="/etc/systemd/system/multi-user.target.wants/${service_name}"
-    if [[ -L "$symlink_path" ]]; then
-      log "Manually removing leftover symlink: $symlink_path"
-      rm -f "$symlink_path"
+    if ! check_remaining_installations; then
+      log "No remaining installations, removing template service file"
+      rm -f /etc/systemd/system/tractstack-go@.service
     fi
-
-    # Note: Keep the template file /etc/systemd/system/tractstack-go@.service for other sites
     ;;
   "all")
     log "Stopping and removing all systemd services"
 
-    # Stop all tractstack-go services
     for service in $(systemctl list-units --type=service --state=active "tractstack-go*" --no-legend | awk '{print $1}'); do
       log "Stopping service: $service"
       systemctl stop "$service" || true
     done
 
-    # Disable all tractstack-go services (including template instances)
     for service in $(systemctl list-unit-files "tractstack-go*" --no-legend | awk '{print $1}'); do
       if systemctl is-enabled --quiet "$service" 2>/dev/null; then
         log "Disabling service: $service"
@@ -326,13 +316,9 @@ remove_systemd_services() {
       fi
     done
 
-    # Remove systemd service files
     rm -f /etc/systemd/system/tractstack-go*.service
-
-    # Additional cleanup: remove any leftover symlinks
     find /etc/systemd/system -name "*tractstack-go*" -type l -delete 2>/dev/null || true
 
-    # Remove build watcher
     if systemctl is-active --quiet t8k-build-watcher.path 2>/dev/null; then
       systemctl stop t8k-build-watcher.path
     fi
@@ -591,9 +577,9 @@ perform_uninstall() {
   "main")
     log "Starting main installation removal"
     remove_pm2_processes "main"
+    update_ports_config "main"
     remove_systemd_services "main"
     remove_nginx_config "main"
-    update_ports_config "main"
     remove_directories "main"
     remove_build_watcher_if_empty
     echo -e "${GREEN}Main installation removed successfully${RESET}"
@@ -601,9 +587,9 @@ perform_uninstall() {
   "site")
     log "Starting dedicated site removal: $SITE_ID"
     remove_pm2_processes "site" "$SITE_ID"
+    update_ports_config "site" "$SITE_ID"
     remove_systemd_services "site" "$SITE_ID"
     remove_nginx_config "site" "$SITE_ID"
-    update_ports_config "site" "$SITE_ID"
     remove_directories "site" "$SITE_ID"
     remove_build_watcher_if_empty
     echo -e "${GREEN}Site '$SITE_ID' removed successfully${RESET}"
@@ -611,9 +597,9 @@ perform_uninstall() {
   "all")
     log "Starting complete removal of all TractStack installations"
     remove_pm2_processes "all"
+    update_ports_config "all"
     remove_systemd_services "all"
     remove_nginx_config "all"
-    update_ports_config "all"
     remove_directories "all"
     remove_t8k_user
     echo -e "${GREEN}All TractStack installations removed successfully${RESET}"
