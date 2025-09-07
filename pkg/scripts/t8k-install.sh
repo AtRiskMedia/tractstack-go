@@ -992,7 +992,7 @@ Description=TractStack Build Concierge
 Type=oneshot
 User=t8k
 Group=t8k
-ExecStart=/home/t8k/scripts/t8k-concierge.sh
+ExecStart=/bin/bash -l /home/t8k/scripts/t8k-concierge.sh
 [Install]
 WantedBy=multi-user.target
 EOF
