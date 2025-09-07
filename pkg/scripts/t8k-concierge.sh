@@ -233,12 +233,15 @@ process_build_command() {
     fi
     log "Restarted $go_service_name"
 
-    pm2 reload "$astro_process_name" >/dev/null 2>&1 || true
-    log "Reloaded $astro_process_name"
+    if pm2 reload "$astro_process_name" >/dev/null 2>&1; then
+      log "Reloaded $astro_process_name"
+    else
+      log "PM2 reload warning for $astro_process_name"
+    fi
 
     log "Build and restart completed successfully for $CSV_TYPE installation"
     # Remove processed file
-    rm -f "$csv_file"
+    rm -f "$csv_file" || true
     log "Removed processed file: $csv_file"
   else
     log_error "Build failed for $CSV_TYPE installation"
@@ -277,9 +280,9 @@ main() {
 
   for build_file in "${build_files[@]}"; do
     if process_build_command "$build_file"; then
-      ((processed++))
+      processed=$((processed + 1))
     else
-      ((failed++))
+      failed=$((failed + 1))
       log_error "Failed to process: $build_file"
     fi
   done
@@ -287,12 +290,16 @@ main() {
   log "Build processing complete - Processed: $processed, Failed: $failed"
 
   if [[ $failed -gt 0 ]]; then
+    log_error "Some builds failed"
     exit 1
   fi
 
+  log "All builds completed successfully"
+  echo "About to exit with 0"
   exit 0
+
 }
 
 # Run main function
-trap 'exit 0' EXIT
 main "$@"
+echo "Script exit code: $?"

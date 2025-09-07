@@ -995,7 +995,8 @@ Description=TractStack Build Concierge
 Type=oneshot
 User=t8k
 Group=t8k
-ExecStart=/bin/bash -l /home/t8k/scripts/t8k-concierge.sh
+Environment=PATH=/usr/local/go/bin:/usr/bin:/usr/local/bin:/bin
+ExecStart=/home/t8k/scripts/t8k-concierge.sh
 [Install]
 WantedBy=multi-user.target
 EOF
