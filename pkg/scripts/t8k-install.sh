@@ -545,7 +545,7 @@ deploy_astro_frontend() {
   echo -e "${BLUE}Creating Astro frontend configuration...${RESET}"
   sudo -u t8k tee "${src_dir}/my-tractstack/.env" >/dev/null <<EOF
 PRIVATE_GO_BACKEND_PATH=${data_dir}/
-PUBLIC_GO_BACKEND=http://${DOMAIN}:${ALLOCATED_GO_PORT}
+PUBLIC_GO_BACKEND=https://${DOMAIN}:${ALLOCATED_GO_PORT}
 PUBLIC_TENANTID=${tenant_id}
 EOF
 
