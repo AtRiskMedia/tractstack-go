@@ -738,27 +738,51 @@ setup_ssl_certificates() {
 configure_nginx() {
   echo -e "${BLUE}Configuring nginx...${RESET}"
 
-  # Fix nginx permissions for media files
+  # Detect nginx user based on distro
+  local nginx_user
+  if grep -q "^user" /etc/nginx/nginx.conf 2>/dev/null; then
+    nginx_user=$(grep "^user" /etc/nginx/nginx.conf | awk '{print $2}' | sed 's/;//')
+  else
+    case $PACKAGE_MANAGER in
+    apt)
+      nginx_user="www-data"
+      ;;
+    dnf | zypper)
+      nginx_user="nginx"
+      ;;
+    pacman)
+      nginx_user="http"
+      ;;
+    apk)
+      nginx_user="nginx"
+      ;;
+    *)
+      nginx_user="nginx"
+      ;;
+    esac
+  fi
+
+  # Add nginx user to t8k group and set group permissions for media only
+  sudo usermod -a -G t8k "$nginx_user"
+
   case "${INSTALL_TYPE}" in
   "prod" | "multi")
-    sudo chmod 755 /home/t8k
-    sudo chmod 755 /home/t8k/t8k-go-server
-    sudo chmod 755 /home/t8k/t8k-go-server/config
-    sudo chmod 755 /home/t8k/t8k-go-server/config/default
-    sudo chmod 755 /home/t8k/t8k-go-server/config/default/media
-    sudo chmod -R 755 /home/t8k/t8k-go-server/config/default/media/
-    sudo chmod -R 644 /home/t8k/t8k-go-server/config/default/media/*/*
+    sudo chgrp -R t8k /home/t8k/t8k-go-server/config/default/media
+    sudo chmod -R g+r /home/t8k/t8k-go-server/config/default/media
+    sudo chmod g+x /home/t8k/t8k-go-server/config
+    sudo chmod g+x /home/t8k/t8k-go-server/config/default
+    sudo chmod g+x /home/t8k/t8k-go-server/config/default/media
+    sudo chmod g+x /home/t8k/t8k-go-server/config/default/media/css
+    sudo chmod g+x /home/t8k/t8k-go-server/config/default/media/fonts
     ;;
   "dedicated")
-    sudo chmod 755 /home/t8k
-    sudo chmod 755 /home/t8k/sites
-    sudo chmod 755 "/home/t8k/sites/${SITE_ID}"
-    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server"
-    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config"
-    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default"
-    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
-    sudo chmod -R 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/"
-    sudo chmod -R 644 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/"*
+    sudo chgrp -R t8k "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
+    sudo chmod -R g+r "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
+    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config"
+    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default"
+    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
+    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/css"
+    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/fonts"
     ;;
   esac
 
