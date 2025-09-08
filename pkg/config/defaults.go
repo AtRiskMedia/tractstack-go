@@ -142,10 +142,10 @@ var (
 	RepositoryCleanupVerbose  bool
 
 	// SSL Configuration
-  SSLEnabled  bool
-  SSLCertPath string
-  SSLKeyPath  string
-  BindAddress string
+	SSLEnabled  bool
+	SSLCertPath string
+	SSLKeyPath  string
+	BindAddress string
 
 	// Logging Configuration
 	LogVerbosity string
@@ -210,16 +210,16 @@ func init() {
 	RepositoryCleanupVerbose = getEnvString("REPOSITORY_CLEANUP_VERBOSE", "true") == "false"
 
 	// SSL Configuration
-  SSLEnabled = getEnvBool("SSL_ENABLED", false)
-  SSLCertPath = getEnvString("SSL_CERT_PATH", "")
-  SSLKeyPath = getEnvString("SSL_KEY_PATH", "")
-  BindAddress = getEnvString("BIND_ADDRESS", "127.0.0.1")
+	SSLEnabled = getEnvBool("SSL_ENABLED", false)
+	SSLCertPath = getEnvString("SSL_CERT_PATH", "")
+	SSLKeyPath = getEnvString("SSL_KEY_PATH", "")
+	BindAddress = getEnvString("BIND_ADDRESS", "127.0.0.1")
 
 	// Logging Configuration
 	LogVerbosity = getEnvString("LOG_VERBOSITY", "WARN")
 
 	// SysOp Configuration
-	SysopPassword = getEnvString("SYSOP_PASSWORD", "storykeep")
+	SysopPassword = getEnvString("SYSOP_PASSWORD", "")
 
 	// Analytics Configuration
 	ExposeAnalytics = getEnvBool("EXPOSE_ANALYTICS", false)
