@@ -63,7 +63,7 @@ func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
 		// Use tenant admin password as fallback
 		effectivePassword = fallbackPassword
 		passwordRequired = true
-		message = "Using tenant admin password for SysOp access. Set SYSOP_PASSWORD for dedicated SysOp authentication."
+		message = "Using tenant admin password for SysOp access. Set SYSOP_PASSWORD to restrict SysOp authentication."
 	} else {
 		// No authentication required
 		passwordRequired = false
