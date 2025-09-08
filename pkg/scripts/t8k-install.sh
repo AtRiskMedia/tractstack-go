@@ -617,7 +617,7 @@ EOF"
 setup_t8k_environment() {
   echo -e "${BLUE}Configuring build environment for t8k user...${RESET}"
 
-  local go_path node_path pnpm_path npm_path git_path augmented_path
+  local go_path node_path pnpm_path npm_path augmented_path
   go_path=$(dirname "$(command -v go)")
   node_path=$(dirname "$(command -v node)")
   pnpm_path=$(dirname "$(command -v pnpm)")
@@ -737,6 +737,30 @@ setup_ssl_certificates() {
 # Configure nginx
 configure_nginx() {
   echo -e "${BLUE}Configuring nginx...${RESET}"
+
+  # Fix nginx permissions for media files
+  case "${INSTALL_TYPE}" in
+  "prod" | "multi")
+    sudo chmod 755 /home/t8k
+    sudo chmod 755 /home/t8k/t8k-go-server
+    sudo chmod 755 /home/t8k/t8k-go-server/config
+    sudo chmod 755 /home/t8k/t8k-go-server/config/default
+    sudo chmod 755 /home/t8k/t8k-go-server/config/default/media
+    sudo chmod -R 755 /home/t8k/t8k-go-server/config/default/media/
+    sudo chmod -R 644 /home/t8k/t8k-go-server/config/default/media/*/*
+    ;;
+  "dedicated")
+    sudo chmod 755 /home/t8k
+    sudo chmod 755 /home/t8k/sites
+    sudo chmod 755 "/home/t8k/sites/${SITE_ID}"
+    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server"
+    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config"
+    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default"
+    sudo chmod 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
+    sudo chmod -R 755 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/"
+    sudo chmod -R 644 "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/"*
+    ;;
+  esac
 
   if ! systemctl is-active --quiet nginx &>/dev/null; then
     sudo systemctl start nginx

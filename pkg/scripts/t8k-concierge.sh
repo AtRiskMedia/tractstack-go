@@ -197,11 +197,24 @@ process_build_command() {
 
   # Pull latest code from Git repositories
   log "Pulling latest code..."
-  cd "$BUILD_SRC_DIR/tractstack-go" && git pull || {
+  cd "$BUILD_SRC_DIR/tractstack-go" || {
+    log_error "Failed to change directory to tractstack-go"
+    return 1
+  }
+  git pull || {
     log_error "git pull failed for tractstack-go"
     return 1
   }
-  log "Code pull successful."
+
+  # Update scripts after pulling
+  log "Updating scripts from tractstack-go..."
+  cp -r "$BUILD_SRC_DIR/tractstack-go/pkg/scripts/"* /home/t8k/scripts/ || {
+    log_error "Failed to update scripts from tractstack-go"
+    return 1
+  }
+  chmod +x /home/t8k/scripts/*.sh
+
+  log "Code pull and script update successful."
 
   # Execute build process
   local build_success=true
@@ -302,4 +315,3 @@ main() {
 
 # Run main function
 main "$@"
-echo "Script exit code: $?"
