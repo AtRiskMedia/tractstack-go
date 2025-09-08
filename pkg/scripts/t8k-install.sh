@@ -23,7 +23,6 @@ NON_INTERACTIVE=false
 SITE_ID=""
 OS=""
 PACKAGE_MANAGER=""
-CURRENT_USER=""
 ALLOCATED_GO_PORT=""
 ALLOCATED_ASTRO_PORT=""
 PORTS_CONFIG_FILE="/home/t8k/etc/t8k-ports.conf"
@@ -738,54 +737,6 @@ setup_ssl_certificates() {
 configure_nginx() {
   echo -e "${BLUE}Configuring nginx...${RESET}"
 
-  # Detect nginx user based on distro
-  local nginx_user
-  if grep -q "^user" /etc/nginx/nginx.conf 2>/dev/null; then
-    nginx_user=$(grep "^user" /etc/nginx/nginx.conf | awk '{print $2}' | sed 's/;//')
-  else
-    case $PACKAGE_MANAGER in
-    apt)
-      nginx_user="www-data"
-      ;;
-    dnf | zypper)
-      nginx_user="nginx"
-      ;;
-    pacman)
-      nginx_user="http"
-      ;;
-    apk)
-      nginx_user="nginx"
-      ;;
-    *)
-      nginx_user="nginx"
-      ;;
-    esac
-  fi
-
-  # Add nginx user to t8k group and set group permissions for media only
-  sudo usermod -a -G t8k "$nginx_user"
-
-  case "${INSTALL_TYPE}" in
-  "prod" | "multi")
-    sudo chgrp -R t8k /home/t8k/t8k-go-server/config/default/media
-    sudo chmod -R g+r /home/t8k/t8k-go-server/config/default/media
-    sudo chmod g+x /home/t8k/t8k-go-server/config
-    sudo chmod g+x /home/t8k/t8k-go-server/config/default
-    sudo chmod g+x /home/t8k/t8k-go-server/config/default/media
-    sudo chmod g+x /home/t8k/t8k-go-server/config/default/media/css
-    sudo chmod g+x /home/t8k/t8k-go-server/config/default/media/fonts
-    ;;
-  "dedicated")
-    sudo chgrp -R t8k "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
-    sudo chmod -R g+r "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
-    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config"
-    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default"
-    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media"
-    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/css"
-    sudo chmod g+x "/home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/fonts"
-    ;;
-  esac
-
   if ! systemctl is-active --quiet nginx &>/dev/null; then
     sudo systemctl start nginx
     sudo systemctl enable nginx
@@ -1311,6 +1262,7 @@ main() {
 
   if [[ "$(whoami)" == "t8k" ]]; then
     echo -e "${RED}❌ This installer cannot be run as the 't8k' service user.${RESET}"
+    cleanup_lock
     exit 1
   fi
 
@@ -1323,10 +1275,12 @@ main() {
     else
       if [[ "$(whoami)" == "root" ]]; then
         echo -e "${RED}❌ For safety, please run production installs as a regular user with sudo access, not as root.${RESET}"
+        cleanup_lock
         exit 1
       fi
       if ! has_sudo; then
         echo -e "${RED}❌ Sudo access is required for production installs.${RESET}"
+        cleanup_lock
         exit 1
       fi
       check_essential_prerequisites
@@ -1337,6 +1291,7 @@ main() {
   else
     if [[ "$(whoami)" == "root" ]]; then
       echo -e "${RED}❌ For safety, please run interactive installs as a regular user with sudo access, not as root.${RESET}"
+      cleanup_lock
       exit 1
     fi
 
@@ -1357,6 +1312,7 @@ main() {
       check_production_prerequisites
       if ! has_sudo; then
         echo -e "${RED}❌ Sudo access is required for production installs.${RESET}"
+        cleanup_lock
         exit 1
       fi
 
@@ -1381,6 +1337,7 @@ main() {
         ;;
       *)
         echo -e "${RED}Invalid choice.${RESET}"
+        cleanup_lock
         exit 1
         ;;
       esac
