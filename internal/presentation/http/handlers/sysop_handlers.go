@@ -7,6 +7,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -293,15 +294,6 @@ func (h *SysOpHandlers) SetLogLevel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "message": fmt.Sprintf("Log level for channel '%s' set to '%s'", req.Channel, req.Level)})
 }
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		return strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1")
-	},
-}
-
 // HandleSessionMapStream handles the WebSocket connection for the session map.
 func (h *SysOpHandlers) HandleSessionMapStream(c *gin.Context) {
 	tenantID := c.Query("tenant")
@@ -310,6 +302,32 @@ func (h *SysOpHandlers) HandleSessionMapStream(c *gin.Context) {
 		return
 	}
 
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+
+			// Allow localhost origins
+			if strings.HasPrefix(origin, "http://localhost") ||
+				strings.HasPrefix(origin, "http://127.0.0.1") ||
+				strings.HasPrefix(origin, "https://localhost") ||
+				strings.HasPrefix(origin, "https://127.0.0.1") {
+				return true
+			}
+
+			// For production origins, validate against tenant domains
+			if origin != "" {
+				if u, err := url.Parse(origin); err == nil {
+					hostname := u.Hostname()
+					detector := h.container.TenantManager.GetDetector()
+					return detector.ValidateDomain("default", hostname)
+				}
+			}
+
+			return false
+		},
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade to websocket: %v", err)

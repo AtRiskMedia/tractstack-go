@@ -13,7 +13,7 @@ import (
 func SetupRoutes(container *container.Container) *gin.Engine {
 	r := gin.Default()
 
-	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.CORSMiddleware(container.TenantManager))
 
 	// Serve static SysOp dashboard files from the /sysop URL.
 	r.Static("/sysop", "web/sysop")
@@ -83,7 +83,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	}
 
 	setupAPI := r.Group("/api/v1/setup")
-	setupAPI.Use(middleware.CORSMiddleware())
+	setupAPI.Use(middleware.CORSMiddleware(container.TenantManager))
 	{
 		setupAPI.POST("/initialize", multiTenantHandlers.HandleSetupInitialize)
 	}

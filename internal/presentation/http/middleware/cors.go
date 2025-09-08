@@ -2,14 +2,15 @@ package middleware
 
 import (
 	"net/url"
-	"strconv"
+	"strings"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 // CORSMiddleware provides enhanced CORS configuration with port range support
-func CORSMiddleware() gin.HandlerFunc {
+func CORSMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
 	config := cors.Config{
 		AllowOriginFunc: func(origin string) bool {
 			// Parse the origin URL
@@ -18,28 +19,31 @@ func CORSMiddleware() gin.HandlerFunc {
 				return false
 			}
 
-			// Check if it's a localhost variant
 			hostname := u.Hostname()
-			if hostname != "localhost" && hostname != "127.0.0.1" && hostname != "[::1]" {
-				return false
+
+			// Allow localhost and IPv6 development origins
+			if strings.HasPrefix(hostname, "localhost") ||
+				strings.HasPrefix(hostname, "127.0.0.1") ||
+				strings.HasPrefix(hostname, "[::1]") {
+				return true
 			}
 
-			// Extract port
-			port := u.Port()
-			if port == "" {
-				return false
+			// For production domains, validate against tenant registry
+			// Try default tenant first (most common case)
+			detector := tenantManager.GetDetector()
+			if detector.ValidateDomain("default", hostname) {
+				return true
 			}
 
-			// Parse port number
-			portNum, err := strconv.Atoi(port)
-			if err != nil {
-				return false
+			// If default fails, check all registered tenants
+			registry := detector.GetRegistry()
+			for tenantID := range registry.Tenants {
+				if detector.ValidateDomain(tenantID, hostname) {
+					return true
+				}
 			}
 
-			// Allow specific development ports and your range
-			// 4320-4399: Your custom site isolation testing range
-			// 20000-29999: Production ports
-			return (portNum >= 4320 && portNum <= 4399) || (portNum >= 20000 && portNum <= 29999)
+			return false
 		},
 		AllowMethods: []string{
 			"GET", "POST", "PUT", "DELETE", "OPTIONS",
