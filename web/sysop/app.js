@@ -710,7 +710,8 @@ document.addEventListener('alpine:init', () => {
         return;
       }
       this.sessionSocketStatus = 'CONNECTING';
-      const url = `ws://${window.location.host}/api/sysop/ws/session-map?tenant=${this.currentTenant}&token=${this.sysOpToken}`;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${protocol}//${window.location.host}/api/sysop/ws/session-map?tenant=${this.currentTenant}&token=${this.sysOpToken}`;
       this.sessionSocket = new WebSocket(url);
       this.sessionSocket.onopen = () => { this.sessionSocketStatus = 'ONLINE'; };
       this.sessionSocket.onclose = () => {
