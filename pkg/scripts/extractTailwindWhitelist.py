@@ -149,14 +149,6 @@ def main():
         json.dump(output_data, f, indent=2)
 
     print(f"Extracted {len(sorted_classes)} classes to {output_path}")
-    
-    # Debug output for verification
-    px_classes = [cls for cls in sorted_classes if cls.startswith('px-')]
-    print(f"Debug: Found {len(px_classes)} px- classes")
-    
-    target_classes = [cls for cls in sorted_classes if cls in ['max-w-72', 'md:max-w-72']]
-    if target_classes:
-        print(f"Debug: Found target classes: {target_classes}")
 
 if __name__ == '__main__':
     main()
