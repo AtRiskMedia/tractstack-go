@@ -7,6 +7,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
 type TimeRangeStats struct {
@@ -71,10 +72,10 @@ func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, 
 		return s.createEmptyDashboardAnalytics(), nil
 	}
 
-	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
-	dailyHourKeys := s.getHourKeysForCustomRange(24, 0)
-	weeklyHourKeys := s.getHourKeysForCustomRange(168, 0)
-	monthlyHourKeys := s.getHourKeysForCustomRange(672, 0)
+	hourKeys := utilities.GetHourKeysForCustomRange(startHour, endHour)
+	dailyHourKeys := utilities.GetHourKeysForCustomRange(24, 0)
+	weeklyHourKeys := utilities.GetHourKeysForCustomRange(168, 0)
+	monthlyHourKeys := utilities.GetHourKeysForCustomRange(672, 0)
 
 	dailyTotal, dailyKnown, dailyAnonymous := s.computeVisitorBreakdowns(tenantCtx, epinets, dailyHourKeys)
 	weeklyTotal, weeklyKnown, weeklyAnonymous := s.computeVisitorBreakdowns(tenantCtx, epinets, weeklyHourKeys)
@@ -310,20 +311,4 @@ func (s *DashboardAnalyticsService) createEmptyDashboardAnalytics() *DashboardAn
 		Line:       []LineDataSeries{},
 		HotContent: []HotItem{},
 	}
-}
-
-func (s *DashboardAnalyticsService) getHourKeysForCustomRange(startHour, endHour int) []string {
-	if startHour <= endHour {
-		return []string{}
-	}
-
-	hourKeys := make([]string, startHour-endHour)
-	now := time.Now().UTC()
-
-	for i := 0; i < startHour-endHour; i++ {
-		hourTime := now.Add(-time.Duration(endHour+i) * time.Hour)
-		hourKeys[i] = hourTime.Format("2006-01-02-15")
-	}
-
-	return hourKeys
 }

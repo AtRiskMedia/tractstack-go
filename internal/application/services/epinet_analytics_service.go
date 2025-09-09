@@ -8,6 +8,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
 type SankeyNode struct {
@@ -57,7 +58,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 	defer marker.Complete()
 	var hourKeys []string
 	if filters != nil && filters.StartHour != nil && filters.EndHour != nil {
-		hourKeys = s.getHourKeysForCustomRange(*filters.StartHour, *filters.EndHour)
+		hourKeys = utilities.GetHourKeysForCustomRange(*filters.StartHour, *filters.EndHour)
 	} else {
 		hourKeys = s.getHourKeysForTimeRange(168)
 	}
@@ -234,22 +235,6 @@ func (s *EpinetAnalyticsService) getHourKeysForTimeRange(hoursBack int) []string
 
 	for i := range hoursBack {
 		hourTime := now.Add(-time.Duration(i) * time.Hour)
-		hourKeys[i] = hourTime.Format("2006-01-02-15")
-	}
-
-	return hourKeys
-}
-
-func (s *EpinetAnalyticsService) getHourKeysForCustomRange(startHour, endHour int) []string {
-	if startHour <= endHour {
-		return []string{}
-	}
-
-	hourKeys := make([]string, startHour-endHour)
-	now := time.Now().UTC()
-
-	for i := 0; i < startHour-endHour; i++ {
-		hourTime := now.Add(-time.Duration(endHour+i) * time.Hour)
 		hourKeys[i] = hourTime.Format("2006-01-02-15")
 	}
 

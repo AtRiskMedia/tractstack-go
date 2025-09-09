@@ -8,6 +8,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
 type LeadMetrics struct {
@@ -35,7 +36,7 @@ func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, sta
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("compute_lead_metrics", tenantCtx.TenantID)
 	defer marker.Complete()
-	hourKeys := s.getHourKeysForCustomRange(startHour, endHour)
+	hourKeys := utilities.GetHourKeysForCustomRange(startHour, endHour)
 
 	totalVisitors := s.getTotalVisitors(tenantCtx, hourKeys)
 	totalLeads := s.getTotalLeads(tenantCtx)
@@ -142,7 +143,12 @@ func (s *LeadAnalyticsService) getLeadSources(tenantCtx *tenant.Context) map[str
 	if err != nil {
 		return leadSources
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log the error appropriately
+			s.logger.Database().Error("Failed to close rows", "error", err)
+		}
+	}()
 
 	for rows.Next() {
 		var source string
@@ -247,7 +253,12 @@ func (s *LeadAnalyticsService) getAttribution(tenantCtx *tenant.Context) map[str
 	if err != nil {
 		return attribution
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log the error appropriately
+			s.logger.Database().Error("Failed to close rows", "error", err)
+		}
+	}()
 
 	for rows.Next() {
 		var attributionType string
@@ -259,22 +270,6 @@ func (s *LeadAnalyticsService) getAttribution(tenantCtx *tenant.Context) map[str
 	}
 
 	return attribution
-}
-
-func (s *LeadAnalyticsService) getHourKeysForCustomRange(startHour, endHour int) []string {
-	if startHour <= endHour {
-		return []string{}
-	}
-
-	hourKeys := make([]string, startHour-endHour)
-	now := time.Now().UTC()
-
-	for i := 0; i < startHour-endHour; i++ {
-		hourTime := now.Add(-time.Duration(endHour+i) * time.Hour)
-		hourKeys[i] = hourTime.Format("2006-01-02-15")
-	}
-
-	return hourKeys
 }
 
 func (s *LeadAnalyticsService) GenerateLeadsCSV(tenantCtx *tenant.Context) ([]byte, error) {
@@ -291,7 +286,12 @@ func (s *LeadAnalyticsService) GenerateLeadsCSV(tenantCtx *tenant.Context) ([]by
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			// Log the error appropriately
+			s.logger.Database().Error("Failed to close rows", "error", err)
+		}
+	}()
 
 	var csvContent strings.Builder
 	csvContent.WriteString("ID,First Name,Email,Created At,Source\n")
