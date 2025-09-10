@@ -901,7 +901,6 @@ User=t8k
 Group=t8k
 WorkingDirectory=${working_dir}
 Environment=GO_BACKEND_PATH=${data_dir}/
-Environment=PORT=${ALLOCATED_GO_PORT}
 Environment=GIN_MODE=release
 ${env_multi}
 ExecStart=${binary_path}
@@ -929,7 +928,6 @@ User=t8k
 Group=t8k
 WorkingDirectory=${working_dir}
 Environment=GO_BACKEND_PATH=${data_dir}/
-Environment=PORT=${ALLOCATED_GO_PORT}
 Environment=GIN_MODE=release
 ExecStart=${binary_path}
 Restart=always
