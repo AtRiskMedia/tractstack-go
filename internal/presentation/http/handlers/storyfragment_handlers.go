@@ -2,9 +2,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -489,19 +491,63 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		impressions = []map[string]any{}
 	}
 
+	// Build resources payload from codeHook categories
+	resourcesPayload := make(map[string][]map[string]any)
+	if len(storyFragment.PaneIDs) > 0 {
+		paneRepo := tenantCtx.PaneRepo()
+		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
+		if err == nil {
+			allCategories := make([]string, 0)
+			for _, pane := range panes {
+				if pane != nil && pane.CodeHookPayload != nil {
+					if optionsStr, ok := pane.CodeHookPayload["options"]; ok {
+						var options map[string]any
+						if json.Unmarshal([]byte(optionsStr), &options) == nil {
+							if categoryStr, ok := options["category"].(string); ok {
+								categories := strings.Split(categoryStr, "|")
+								allCategories = append(allCategories, categories...)
+							}
+						}
+					}
+				}
+			}
+
+			if len(allCategories) > 0 {
+				resourceRepo := tenantCtx.ResourceRepo()
+				resources, err := resourceRepo.FindByFilters(tenantCtx.TenantID, []string{}, allCategories, []string{})
+				if err == nil {
+					for _, resource := range resources {
+						categoryKey := "default"
+						if resource.CategorySlug != nil {
+							categoryKey = *resource.CategorySlug
+						}
+						resourcesPayload[categoryKey] = append(resourcesPayload[categoryKey], map[string]any{
+							"id":             resource.ID,
+							"title":          resource.Title,
+							"slug":           resource.Slug,
+							"oneLiner":       resource.OneLiner,
+							"optionsPayload": resource.OptionsPayload,
+						})
+					}
+				}
+			}
+		}
+	}
+
 	h.logger.Content().Debug("Final impressions before response", "count", len(impressions), "impressions", impressions)
 
 	response := gin.H{
-		"id":              storyFragment.ID,
-		"title":           storyFragment.Title,
-		"slug":            storyFragment.Slug,
-		"paneIds":         storyFragment.PaneIDs,
-		"codeHookTargets": storyFragment.CodeHookTargets,
-		"menu":            storyFragment.Menu,
-		"isHome":          storyFragment.IsHome,
-		"created":         storyFragment.Created,
-		"fragments":       fragmentsData,
-		"impressions":     impressions,
+		"id":               storyFragment.ID,
+		"title":            storyFragment.Title,
+		"slug":             storyFragment.Slug,
+		"paneIds":          storyFragment.PaneIDs,
+		"codeHookTargets":  storyFragment.CodeHookTargets,
+		"resourcesPayload": resourcesPayload,
+		"menu":             storyFragment.Menu,
+		"isHome":           storyFragment.IsHome,
+		"created":          storyFragment.Created,
+		"fragments":        fragmentsData,
+		"impressions":      impressions,
 	}
 
 	h.logger.Content().Info("Get story fragment personalized payload request completed", "slug", slug, "sessionId", sessionID, "paneCount", len(storyFragment.PaneIDs), "impressionCount", len(impressions), "duration", time.Since(start))
