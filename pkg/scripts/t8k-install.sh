@@ -779,6 +779,8 @@ server {
     
     location /media/ {
         alias /home/t8k/t8k-go-server/config/default/media/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
     }
 }
 EOF
@@ -813,6 +815,8 @@ server {
             set \$tenant_dir \$1;
         }
         alias /home/t8k/t8k-go-server/config/\$tenant_dir/media/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
     }
 }
 EOF
@@ -843,6 +847,8 @@ server {
     
     location /media/ {
         alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/;
+        expires 30d;
+        add_header Cache-Control "public, immutable";
     }
 }
 EOF
