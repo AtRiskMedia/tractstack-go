@@ -399,7 +399,7 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 		}
 	}
 
-	// 3. Extract and attach CodeHookTargets
+	// 3. Extract and attach CodeHookTargets with options
 	if storyFragment.CodeHookTargets == nil && len(storyFragment.PaneIDs) > 0 {
 		paneRepo := tenantCtx.PaneRepo()
 		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
@@ -409,7 +409,16 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 			codeHookTargets := make(map[string]string)
 			for _, pane := range panes {
 				if pane != nil && pane.CodeHookTarget != nil && *pane.CodeHookTarget != "" {
+					// Map paneId to target
 					codeHookTargets[pane.ID] = *pane.CodeHookTarget
+
+					// Map paneId-target to options if available
+					if pane.CodeHookPayload != nil {
+						if optionsStr, ok := pane.CodeHookPayload["options"]; ok {
+							key := pane.ID + "-" + *pane.CodeHookTarget
+							codeHookTargets[key] = optionsStr
+						}
+					}
 				}
 			}
 			storyFragment.CodeHookTargets = codeHookTargets
