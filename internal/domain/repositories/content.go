@@ -29,6 +29,7 @@ type StoryFragmentRepository interface {
 	UpdatePaneRelationships(tenantID, storyFragmentID string, paneIDs []string) error
 	UpdateTopics(tenantID, storyFragmentID string, topics []string) error
 	UpdateDescription(tenantID, storyFragmentID string, description *string) error
+	FindIDsByPaneID(paneID string) ([]string, error) // This line is added
 }
 
 type PaneRepository interface {

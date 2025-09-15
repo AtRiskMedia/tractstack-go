@@ -509,7 +509,14 @@ func (r *StoryFragmentRepository) UpdatePaneRelationships(tenantID, storyFragmen
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	committed := false
+	defer func() {
+		if !committed {
+			if err := tx.Rollback(); err != nil {
+				r.logger.Database().Error("Failed to rollback transaction", "error", err)
+			}
+		}
+	}()
 
 	// Delete existing relationships
 	_, err = tx.Exec("DELETE FROM storyfragment_panes WHERE storyfragment_id = ?", storyFragmentID)
@@ -518,15 +525,31 @@ func (r *StoryFragmentRepository) UpdatePaneRelationships(tenantID, storyFragmen
 	}
 
 	// Insert new relationships with weight
-	for i, paneID := range paneIDs {
-		_, err = tx.Exec("INSERT INTO storyfragment_panes (id, storyfragment_id, pane_id, weight) VALUES (?, ?, ?, ?)",
-			security.GenerateULID(), storyFragmentID, paneID, i)
+	if len(paneIDs) > 0 {
+		stmt, err := tx.Prepare("INSERT INTO storyfragment_panes (id, storyfragment_id, pane_id, weight) VALUES (?, ?, ?, ?)")
 		if err != nil {
-			return fmt.Errorf("failed to insert pane relationship: %w", err)
+			return fmt.Errorf("failed to prepare insert statement for pane relationships: %w", err)
+		}
+		defer func() {
+			if err := stmt.Close(); err != nil {
+				r.logger.Database().Error("Failed to close statement for pane relationships", "error", err)
+			}
+		}()
+
+		for i, paneID := range paneIDs {
+			_, err = stmt.Exec(security.GenerateULID(), storyFragmentID, paneID, i)
+			if err != nil {
+				return fmt.Errorf("failed to insert pane relationship for pane %s: %w", paneID, err)
+			}
 		}
 	}
 
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for pane relationships: %w", err)
+	}
+
+	committed = true
+	return nil
 }
 
 // UpdateTopics updates the topics for a storyfragment
@@ -584,4 +607,39 @@ func (r *StoryFragmentRepository) UpdateDescription(tenantID, storyFragmentID st
 		storyFragmentID, *description)
 
 	return err
+}
+
+// FindIDsByPaneID retrieves all storyfragment IDs that contain a specific pane ID.
+func (r *StoryFragmentRepository) FindIDsByPaneID(paneID string) ([]string, error) {
+	query := `SELECT DISTINCT storyfragment_id FROM storyfragment_panes WHERE pane_id = ?`
+
+	start := time.Now()
+	r.logger.Database().Debug("Loading storyfragment IDs by pane ID from database", "paneId", paneID)
+
+	rows, err := r.db.Query(query, paneID)
+	if err != nil {
+		r.logger.Database().Error("Failed to query storyfragment IDs by pane ID", "error", err.Error(), "paneId", paneID)
+		return nil, fmt.Errorf("failed to query storyfragments by pane ID: %w", err)
+	}
+	defer rows.Close()
+
+	var storyFragmentIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan storyfragment ID: %w", err)
+		}
+		storyFragmentIDs = append(storyFragmentIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error while finding storyfragments by pane ID: %w", err)
+	}
+
+	r.logger.Database().Info("Loaded storyfragment IDs by pane ID", "paneId", paneID, "count", len(storyFragmentIDs), "duration", time.Since(start))
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
+	return storyFragmentIDs, nil
 }

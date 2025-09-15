@@ -1,7 +1,10 @@
+// in: internal/application/services/warming_service.go
+
 // Package services provides startup warming orchestration
 package services
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"slices"
@@ -40,14 +43,45 @@ type WarmingService struct {
 	perfTracker             *performance.Tracker
 	beliefEvaluationService *BeliefEvaluationService
 	sessionBeliefService    *SessionBeliefService
+
+	// Dependencies injected for proper DI pattern
+	tractStackService    *TractStackService
+	storyFragmentService *StoryFragmentService
+	paneService          *PaneService
+	menuService          *MenuService
+	resourceService      *ResourceService
+	beliefService        *BeliefService
+	epinetService        *EpinetService
+	imageFileService     *ImageFileService
 }
 
-func NewWarmingService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, beliefEvaluationService *BeliefEvaluationService, sessionBeliefService *SessionBeliefService) *WarmingService {
+func NewWarmingService(
+	logger *logging.ChanneledLogger,
+	perfTracker *performance.Tracker,
+	beliefEvaluationService *BeliefEvaluationService,
+	sessionBeliefService *SessionBeliefService,
+	tractStackService *TractStackService,
+	storyFragmentService *StoryFragmentService,
+	paneService *PaneService,
+	menuService *MenuService,
+	resourceService *ResourceService,
+	beliefService *BeliefService,
+	epinetService *EpinetService,
+	imageFileService *ImageFileService,
+) *WarmingService {
 	return &WarmingService{
 		logger:                  logger,
 		perfTracker:             perfTracker,
 		beliefEvaluationService: beliefEvaluationService,
 		sessionBeliefService:    sessionBeliefService,
+		tractStackService:       tractStackService,
+		storyFragmentService:    storyFragmentService,
+		paneService:             paneService,
+		menuService:             menuService,
+		resourceService:         resourceService,
+		beliefService:           beliefService,
+		epinetService:           epinetService,
+		imageFileService:        imageFileService,
 	}
 }
 
@@ -76,7 +110,9 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 		} else {
 			successCount++
 		}
-		tenantCtx.Close()
+		if closeErr := tenantCtx.Close(); closeErr != nil {
+			ws.logger.Cache().Error("Failed to close tenant context after warming", "error", closeErr, "tenantId", tenantID)
+		}
 	}
 
 	duration := time.Since(start)
@@ -104,36 +140,36 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	reporter.LogStepSuccess("Content Map warmed")
 	ws.logger.Cache().Debug("Content map warmed", "tenantId", tenantID)
 
-	// Bulk-load all content types into the cache.
-	if _, err := NewTractStackService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	// Bulk-load all content types into the cache using injected service singletons.
+	if _, err := ws.tractStackService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm TractStacks: %v", err)
 		ws.logger.Cache().Warn("Failed to warm TractStacks", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc, ws.sessionBeliefService).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.storyFragmentService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm StoryFragments: %v", err)
 		ws.logger.Cache().Warn("Failed to warm StoryFragments", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewPaneService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.paneService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Panes: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Panes", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewMenuService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.menuService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Menus: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Menus", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewResourceService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.resourceService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Resources: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Resources", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewBeliefService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.beliefService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Beliefs: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Beliefs", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewEpinetService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.epinetService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm Epinets: %v", err)
 		ws.logger.Cache().Warn("Failed to warm Epinets", "tenantId", tenantID, "error", err)
 	}
-	if _, err := NewImageFileService(ws.logger, ws.perfTracker, contentMapSvc).GetAllIDs(tenantCtx); err != nil {
+	if _, err := ws.imageFileService.GetAllIDs(tenantCtx); err != nil {
 		reporter.LogWarning("Failed to warm ImageFiles: %v", err)
 		ws.logger.Cache().Warn("Failed to warm ImageFiles", "tenantId", tenantID, "error", err)
 	}
@@ -141,20 +177,19 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	ws.logger.Cache().Debug("Content repositories warmed", "tenantId", tenantID)
 
 	// Build Belief Registries for all Storyfragments
-	storyFragmentIDs, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc, ws.sessionBeliefService).GetAllIDs(tenantCtx)
+	storyFragmentIDs, err := ws.storyFragmentService.GetAllIDs(tenantCtx)
 	if err != nil {
 		reporter.LogWarning("Could not retrieve StoryFragment IDs for belief registry warming: %v", err)
 		ws.logger.Cache().Warn("Could not retrieve StoryFragment IDs for belief registry warming", "tenantId", tenantID, "error", err)
 	} else {
-		paneService := NewPaneService(ws.logger, ws.perfTracker, contentMapSvc)
 		for _, sfID := range storyFragmentIDs {
-			sf, err := NewStoryFragmentService(ws.logger, ws.perfTracker, contentMapSvc, ws.sessionBeliefService).GetByID(tenantCtx, sfID)
+			sf, err := ws.storyFragmentService.GetByID(tenantCtx, sfID)
 			if err != nil || sf == nil {
 				continue
 			}
 			// Load only the panes required for this specific storyfragment.
 			if len(sf.PaneIDs) > 0 {
-				panes, err := paneService.GetByIDs(tenantCtx, sf.PaneIDs)
+				panes, err := ws.paneService.GetByIDs(tenantCtx, sf.PaneIDs)
 				if err != nil {
 					log.Printf("Warning: Failed to load panes for storyfragment %s during warming: %v", sfID, err)
 					ws.logger.Cache().Warn("Failed to load panes for storyfragment during warming", "tenantId", tenantID, "storyFragmentId", sfID, "error", err)
@@ -216,14 +251,13 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 		batchStartTime := now.Add(-time.Duration(endHourOffset) * time.Hour)
 		batchEndTime := now.Add(-time.Duration(startHourOffset) * time.Hour)
 
-		// Get known fingerprints once per batch
 		knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
 		if err != nil {
 			ws.logger.Cache().Error("Analytics warming batch failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
 			return fmt.Errorf("batch failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
 		}
 
-		analysis := ws.analyzeEpinet(epinets[0])
+		analysis := ws.analyzeEpinets(epinets)
 		allActionEvents, err := ws.getActionEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
 		if err != nil {
 			ws.logger.Cache().Error("Analytics warming batch failed: could not get action events", "tenantId", tenantCtx.TenantID, "error", err)
@@ -298,7 +332,7 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 		return fmt.Errorf("invalid hour key: %w", err)
 	}
 
-	analysis := ws.analyzeEpinet(epinets[0])
+	analysis := ws.analyzeEpinets(epinets)
 	allActionEvents, err := ws.getActionEventsForRange(tenantCtx, oldestHour, now, analysis)
 	if err != nil {
 		ws.logger.Cache().Error("Failed to get action events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
@@ -312,7 +346,6 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 
 	eventsByHour := ws.groupEventsByHour(allActionEvents, allBeliefEvents)
 
-	// Get known fingerprints once for recent hours warming
 	knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
 	if err != nil {
 		ws.logger.Cache().Error("Recent hours warming failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
@@ -447,7 +480,12 @@ func (ws *WarmingService) getActionEventsForRange(tenantCtx *tenant.Context, sta
 	if err != nil {
 		return nil, fmt.Errorf("failed to query action events: %w", err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			ws.logger.Cache().Error("Failed to close rows in getActionEventsForRange", "error", err)
+		}
+	}(rows)
 
 	for rows.Next() {
 		var event analytics.ActionEvent
@@ -502,7 +540,12 @@ func (ws *WarmingService) getBeliefEventsForRange(tenantCtx *tenant.Context, sta
 	if err != nil {
 		return nil, fmt.Errorf("failed to query belief events: %w", err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			ws.logger.Cache().Error("Failed to close rows in getBeliefEventsForRange", "error", err)
+		}
+	}(rows)
 
 	for rows.Next() {
 		var event analytics.BeliefEvent
@@ -578,7 +621,7 @@ func (ws *WarmingService) getContentItems(tenantCtx *tenant.Context) (map[string
 	return contentItems, nil
 }
 
-func (ws *WarmingService) analyzeEpinet(epinet types.EpinetConfig) *EpinetAnalysis {
+func (ws *WarmingService) analyzeEpinets(epinets []types.EpinetConfig) *EpinetAnalysis {
 	analysis := &EpinetAnalysis{
 		BeliefValues:     make(map[string]bool),
 		IdentifyAsValues: make(map[string]bool),
@@ -586,25 +629,27 @@ func (ws *WarmingService) analyzeEpinet(epinet types.EpinetConfig) *EpinetAnalys
 		ActionTypes:      make(map[string]bool),
 		ObjectIDs:        make(map[string]bool),
 	}
-	for _, step := range epinet.Steps {
-		switch step.GateType {
-		case "belief":
-			for _, val := range step.Values {
-				analysis.BeliefValues[val] = true
-			}
-		case "identifyAs":
-			for _, val := range step.Values {
-				analysis.IdentifyAsValues[val] = true
-			}
-		case "commitmentAction", "conversionAction":
-			for _, val := range step.Values {
-				analysis.ActionVerbs[val] = true
-			}
-			if step.ObjectType != "" {
-				analysis.ActionTypes[step.ObjectType] = true
-			}
-			for _, id := range step.ObjectIds {
-				analysis.ObjectIDs[id] = true
+	for _, epinet := range epinets {
+		for _, step := range epinet.Steps {
+			switch step.GateType {
+			case "belief":
+				for _, val := range step.Values {
+					analysis.BeliefValues[val] = true
+				}
+			case "identifyAs":
+				for _, val := range step.Values {
+					analysis.IdentifyAsValues[val] = true
+				}
+			case "commitmentAction", "conversionAction":
+				for _, val := range step.Values {
+					analysis.ActionVerbs[val] = true
+				}
+				if step.ObjectType != "" {
+					analysis.ActionTypes[step.ObjectType] = true
+				}
+				for _, id := range step.ObjectIds {
+					analysis.ObjectIDs[id] = true
+				}
 			}
 		}
 	}
@@ -878,7 +923,12 @@ func (ws *WarmingService) getKnownFingerprints(tenantCtx *tenant.Context) (map[s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			ws.logger.Cache().Error("Failed to close rows in getKnownFingerprints", "error", err)
+		}
+	}(rows)
 
 	knownFingerprints := make(map[string]bool)
 	for rows.Next() {

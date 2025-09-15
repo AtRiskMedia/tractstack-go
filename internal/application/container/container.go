@@ -22,18 +22,19 @@ import (
 // Container holds all singleton services and infrastructure dependencies
 type Container struct {
 	// Content Services
-	MenuService           *services.MenuService
-	PaneService           *services.PaneService
-	ResourceService       *services.ResourceService
-	StoryFragmentService  *services.StoryFragmentService
-	TractStackService     *services.TractStackService
-	BeliefService         *services.BeliefService
-	ImageFileService      *services.ImageFileService
-	EpinetService         *services.EpinetService
-	ContentMapService     *services.ContentMapService
-	OrphanAnalysisService *services.OrphanAnalysisService
-	BeliefRegistryService *services.BeliefRegistryService
-	WarmingService        *services.WarmingService
+	MenuService                 *services.MenuService
+	PaneService                 *services.PaneService
+	ResourceService             *services.ResourceService
+	StoryFragmentService        *services.StoryFragmentService
+	TractStackService           *services.TractStackService
+	BeliefService               *services.BeliefService
+	ImageFileService            *services.ImageFileService
+	EpinetService               *services.EpinetService
+	ContentMapService           *services.ContentMapService
+	OrphanAnalysisService       *services.OrphanAnalysisService
+	BeliefRegistryService       *services.BeliefRegistryService
+	WarmingService              *services.WarmingService
+	RegistryRebuildOrchestrator *services.RegistryRebuildOrchestrator
 
 	// Fragment Services
 	SessionBeliefService *services.SessionBeliefService
@@ -135,11 +136,51 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
+	beliefRegistryService := services.NewBeliefRegistryService(logger)
 
-	// Create content services that TailwindService will depend on
-	paneService := services.NewPaneService(logger, perfTracker, contentMapService)
+	// Create the orchestrator first, omitting the PaneService to break the dependency cycle.
+	registryRebuildOrchestrator := services.NewRegistryRebuildOrchestrator(
+		logger,
+		tenantManager,
+		beliefRegistryService,
+	)
 
-	// Create TailwindService after its dependencies
+	// Create PaneService, injecting the orchestrator.
+	paneService := services.NewPaneService(
+		logger,
+		perfTracker,
+		contentMapService,
+		registryRebuildOrchestrator,
+	)
+
+	// Now that PaneService is created, inject it back into the orchestrator.
+	registryRebuildOrchestrator.SetPaneService(paneService)
+
+	// Create the rest of the content services. Note that StoryFragmentService is back to its original constructor.
+	storyFragmentService := services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService)
+	tractStackService := services.NewTractStackService(logger, perfTracker, contentMapService)
+	menuService := services.NewMenuService(logger, perfTracker, contentMapService)
+	resourceService := services.NewResourceService(logger, perfTracker, contentMapService)
+	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
+	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
+	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)
+
+	// Create WarmingService, now injecting all its required content service dependencies.
+	warmingService := services.NewWarmingService(
+		logger,
+		perfTracker,
+		beliefEvaluationService,
+		sessionBeliefService,
+		tractStackService,
+		storyFragmentService,
+		paneService,
+		menuService,
+		resourceService,
+		beliefService,
+		epinetService,
+		imageFileService,
+	)
+
 	tailwindService := services.NewTailwindService(paneService, configService, logger, perfTracker)
 
 	multiTenantService := services.NewMultiTenantService(tenantManager, emailService, logger, perfTracker)
@@ -159,18 +200,19 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 	return &Container{
 		// Content Services
-		MenuService:           services.NewMenuService(logger, perfTracker, contentMapService),
-		PaneService:           paneService, // Use the variable created above
-		ResourceService:       services.NewResourceService(logger, perfTracker, contentMapService),
-		StoryFragmentService:  services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService),
-		TractStackService:     services.NewTractStackService(logger, perfTracker, contentMapService),
-		BeliefService:         services.NewBeliefService(logger, perfTracker, contentMapService),
-		ImageFileService:      services.NewImageFileService(logger, perfTracker, contentMapService),
-		EpinetService:         services.NewEpinetService(logger, perfTracker, contentMapService),
-		ContentMapService:     contentMapService,
-		OrphanAnalysisService: services.NewOrphanAnalysisService(logger),
-		BeliefRegistryService: services.NewBeliefRegistryService(logger),
-		WarmingService:        services.NewWarmingService(logger, perfTracker, beliefEvaluationService, sessionBeliefService),
+		MenuService:                 menuService,
+		PaneService:                 paneService,
+		ResourceService:             resourceService,
+		StoryFragmentService:        storyFragmentService,
+		TractStackService:           tractStackService,
+		BeliefService:               beliefService,
+		ImageFileService:            imageFileService,
+		EpinetService:               epinetService,
+		ContentMapService:           contentMapService,
+		OrphanAnalysisService:       services.NewOrphanAnalysisService(logger),
+		BeliefRegistryService:       beliefRegistryService,
+		WarmingService:              warmingService,
+		RegistryRebuildOrchestrator: registryRebuildOrchestrator,
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,

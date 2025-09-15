@@ -88,7 +88,7 @@ func (s *TailwindService) GetTailwindClasses(tenantCtx *tenant.Context, excludeP
 	}
 
 	// Load static whitelist from filesystem
-	staticClasses, err := s.loadStaticWhitelist(tenantCtx.TenantID)
+	staticClasses, err := s.loadStaticWhitelist()
 	if err != nil {
 		s.logger.System().Warn("Failed to load static whitelist", "error", err, "tenantId", tenantCtx.TenantID)
 		// Continue without static whitelist rather than fail
@@ -128,14 +128,14 @@ func (s *TailwindService) UpdateTailwindCSS(tenantCtx *tenant.Context, frontendC
 	stylesDir := filepath.Join(mediaPath, "css")
 
 	// Ensure styles directory exists
-	if err := os.MkdirAll(stylesDir, 0755); err != nil {
+	if err := os.MkdirAll(stylesDir, 0o755); err != nil {
 		return 0, fmt.Errorf("failed to create styles directory: %w", err)
 	}
 
 	// Write frontend CSS file
 	frontendPath := filepath.Join(stylesDir, "frontend.css")
 
-	if err := os.WriteFile(frontendPath, []byte(frontendCSS), 0644); err != nil {
+	if err := os.WriteFile(frontendPath, []byte(frontendCSS), 0o644); err != nil {
 		return 0, fmt.Errorf("failed to write frontend.css: %w", err)
 	}
 
@@ -217,7 +217,7 @@ func (s *TailwindService) extractClassesFromOptionsPayload(optionsPayload map[st
 }
 
 // loadStaticWhitelist loads the static whitelist from filesystem
-func (s *TailwindService) loadStaticWhitelist(tenantID string) ([]string, error) {
+func (s *TailwindService) loadStaticWhitelist() ([]string, error) {
 	whitelistPath := filepath.Join(config.BackendPath, "config", "default", "tailwindWhitelist.json")
 
 	data, err := os.ReadFile(whitelistPath)

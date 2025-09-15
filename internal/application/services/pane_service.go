@@ -15,9 +15,10 @@ import (
 
 // PaneService orchestrates pane operations with cache-first repository pattern
 type PaneService struct {
-	logger            *logging.ChanneledLogger
-	perfTracker       *performance.Tracker
-	contentMapService *ContentMapService
+	logger               *logging.ChanneledLogger
+	perfTracker          *performance.Tracker
+	contentMapService    *ContentMapService
+	registryOrchestrator *RegistryRebuildOrchestrator
 }
 
 // PaneTemplatePayload represents the template format for a pane
@@ -27,11 +28,17 @@ type PaneTemplatePayload struct {
 }
 
 // NewPaneService creates a new pane service singleton
-func NewPaneService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *PaneService {
+func NewPaneService(
+	logger *logging.ChanneledLogger,
+	perfTracker *performance.Tracker,
+	contentMapService *ContentMapService,
+	registryOrchestrator *RegistryRebuildOrchestrator,
+) *PaneService {
 	return &PaneService{
-		logger:            logger,
-		perfTracker:       perfTracker,
-		contentMapService: contentMapService,
+		logger:               logger,
+		perfTracker:          perfTracker,
+		contentMapService:    contentMapService,
+		registryOrchestrator: registryOrchestrator,
 	}
 }
 
@@ -226,6 +233,9 @@ func (s *PaneService) Update(tenantCtx *tenant.Context, pane *content.PaneNode) 
 	// Invalidate its chunks
 	tenantCtx.CacheManager.InvalidateByDependency(tenantCtx.TenantID, pane.ID)
 
+	// Trigger rebuild for all parent storyfragments.
+	s.triggerRebuildForPaneParents(tenantCtx, pane.ID)
+
 	s.logger.Content().Info("Successfully updated pane", "tenantId", tenantCtx.TenantID, "paneId", pane.ID, "title", pane.Title, "slug", pane.Slug, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	s.logger.Perf().Info("Performance for UpdatePane", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", pane.ID)
@@ -243,6 +253,9 @@ func (s *PaneService) Delete(tenantCtx *tenant.Context, id string) error {
 	}
 
 	paneRepo := tenantCtx.PaneRepo()
+
+	// Find parent storyfragments BEFORE deleting the pane and its relationships.
+	s.triggerRebuildForPaneParents(tenantCtx, id)
 
 	existing, err := paneRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
@@ -274,7 +287,6 @@ func (s *PaneService) Delete(tenantCtx *tenant.Context, id string) error {
 }
 
 // GetPaneTemplate returns a pane template in the same format as full-payload
-// This method contains the extraction logic, keeping the handler clean
 func (s *PaneService) GetPaneTemplate(tenantCtx *tenant.Context, paneID string) (*PaneTemplatePayload, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("get_pane_template", tenantCtx.TenantID)
@@ -284,17 +296,14 @@ func (s *PaneService) GetPaneTemplate(tenantCtx *tenant.Context, paneID string) 
 		return nil, fmt.Errorf("pane ID cannot be empty")
 	}
 
-	// Get the pane using existing service method
 	pane, err := s.GetByID(tenantCtx, paneID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pane %s: %w", paneID, err)
 	}
-
 	if pane == nil {
 		return nil, fmt.Errorf("pane not found with ID %s", paneID)
 	}
 
-	// Extract child nodes from OptionsPayload (SAME logic as full-payload)
 	var childNodes []any
 	if pane.OptionsPayload != nil {
 		if nodes, exists := pane.OptionsPayload["nodes"]; exists {
@@ -304,11 +313,8 @@ func (s *PaneService) GetPaneTemplate(tenantCtx *tenant.Context, paneID string) 
 		}
 	}
 
-	// Create cleaned pane (SAME logic as full-payload)
 	cleanedPane := *pane
 	cleanedPane.OptionsPayload = make(map[string]any)
-
-	// Copy all fields except "nodes"
 	if pane.OptionsPayload != nil {
 		for k, v := range pane.OptionsPayload {
 			if k != "nodes" {
@@ -339,14 +345,11 @@ func (s *PaneService) BulkUpdateFilePaneRelationships(tenantCtx *tenant.Context,
 		return fmt.Errorf("relationships map cannot be empty")
 	}
 
-	// Validate all pane IDs exist
 	paneRepo := tenantCtx.PaneRepo()
 	for paneID := range relationships {
 		if paneID == "" {
 			return fmt.Errorf("pane ID cannot be empty")
 		}
-
-		// Verify pane exists
 		existing, err := paneRepo.FindByID(tenantCtx.TenantID, paneID)
 		if err != nil {
 			return fmt.Errorf("failed to verify pane %s exists: %w", paneID, err)
@@ -356,12 +359,10 @@ func (s *PaneService) BulkUpdateFilePaneRelationships(tenantCtx *tenant.Context,
 		}
 	}
 
-	// Update relationships
 	if err := paneRepo.UpdateFilePaneRelationships(tenantCtx.TenantID, relationships); err != nil {
 		return fmt.Errorf("failed to bulk update file-pane relationships: %w", err)
 	}
 
-	// Invalidate relevant caches
 	for paneID := range relationships {
 		tenantCtx.CacheManager.InvalidatePane(tenantCtx.TenantID, paneID)
 	}
@@ -371,4 +372,21 @@ func (s *PaneService) BulkUpdateFilePaneRelationships(tenantCtx *tenant.Context,
 	s.logger.Perf().Info("Performance for BulkUpdateFilePaneRelationships", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(relationships))
 
 	return nil
+}
+
+// triggerRebuildForPaneParents finds all storyfragments containing a pane and enqueues them for a registry rebuild.
+func (s *PaneService) triggerRebuildForPaneParents(tenantCtx *tenant.Context, paneID string) {
+	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
+	parentSFIDs, err := storyFragmentRepo.FindIDsByPaneID(paneID)
+	if err != nil {
+		s.logger.Content().Error("Failed to find parent storyfragments for pane", "error", err, "paneId", paneID)
+		return
+	}
+
+	if len(parentSFIDs) > 0 {
+		s.logger.Cache().Info("Found parent storyfragments for pane update, enqueuing registry rebuilds", "paneId", paneID, "storyFragmentCount", len(parentSFIDs), "storyFragmentIds", parentSFIDs)
+		for _, sfID := range parentSFIDs {
+			s.registryOrchestrator.EnqueueRebuild(tenantCtx.TenantID, sfID)
+		}
+	}
 }
