@@ -80,7 +80,7 @@ func (s *OrphanAnalysisService) GetOrphanAnalysis(
 		}
 
 		// Stable ETag for loading
-		etag := s.generateETag(tenantCtx.TenantID + ":loading")
+		etag := s.generateETag(tenantCtx.TenantID)
 		return loadingPayload, etag, nil
 	}
 
@@ -115,7 +115,7 @@ func (s *OrphanAnalysisService) GetOrphanAnalysis(
 	}()
 
 	// Stable ETag for loading
-	etag := s.generateETag(tenantCtx.TenantID + ":loading")
+	etag := s.generateETag(tenantCtx.TenantID)
 	s.logger.Content().Debug(
 		"Orphan analysis request completed with loading status",
 		"tenantId", tenantCtx.TenantID,
