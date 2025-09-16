@@ -135,7 +135,7 @@ func renderIdentifyAsButton(beliefSlug, target, selectedTarget string, isOtherSe
 }
 
 // executeTemplate is a helper to render a named template and handle errors
-func executeTemplate(buf *bytes.Buffer, name string, data interface{}) {
+func executeTemplate(buf *bytes.Buffer, name string, data any) {
 	err := identifyAsTmpl.ExecuteTemplate(buf, name, data)
 	if err != nil {
 		buf.WriteString("<!-- template error -->")
@@ -155,29 +155,6 @@ func parseTargets(targetsString string) []string {
 		}
 	}
 	return targets
-}
-
-func getSelectedTarget(currentBelief *BeliefState) string {
-	if currentBelief == nil {
-		return ""
-	}
-	return currentBelief.Object
-}
-
-func isOtherTargetSelected(currentBelief *BeliefState, targets []string) bool {
-	if currentBelief == nil || currentBelief.Verb != "IDENTIFY_AS" {
-		return false
-	}
-	selectedTarget := currentBelief.Object
-	if selectedTarget == "" {
-		return false
-	}
-	for _, target := range targets {
-		if target == selectedTarget {
-			return false
-		}
-	}
-	return true
 }
 
 func getButtonTitle(target string, noprompt bool) string {

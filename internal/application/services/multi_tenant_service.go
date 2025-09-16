@@ -94,7 +94,6 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 		AESKey:          aesKey,
 		TursoEnabled:    req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
 		AdminPassword:   req.AdminPassword,
-		HomeSlug:        "hello",
 		ActivationToken: activationToken,
 	}
 
@@ -248,7 +247,7 @@ func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
 func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
 	configPath := filepath.Join(pkgconfig.BackendPath, "config", config.TenantID, "env.json")
 	configDir := filepath.Dir(configPath)
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -257,7 +256,7 @@ func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	return os.WriteFile(configPath, configData, 0600)
+	return os.WriteFile(configPath, configData, 0o600)
 }
 
 func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domains []string) error {
@@ -291,7 +290,7 @@ func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domai
 	}
 
 	// Write to filesystem
-	if err := os.WriteFile(registryPath, registryData, 0644); err != nil {
+	if err := os.WriteFile(registryPath, registryData, 0o644); err != nil {
 		return fmt.Errorf("failed to write registry: %w", err)
 	}
 
@@ -352,7 +351,7 @@ func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
 	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "media", "css")
 
 	// Create target directory
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create CSS directory: %w", err)
 	}
 
@@ -388,7 +387,7 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "media", "fonts")
 
 	// Create target directory
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create fonts directory: %w", err)
 	}
 

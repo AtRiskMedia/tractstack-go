@@ -47,6 +47,15 @@ func RenderBelief(ctx *rendering.RenderContext, classNames, slug, scale, extra s
 	placeholder := getPlaceholderText(scale)
 	actualOptions := filterPlaceholderOptions(getScaleOptions(scale))
 
+	log.Printf("===== WIDGET RENDER CYCLE FOR SLUG: [%s] =====", slug)
+	if ctx == nil {
+		log.Printf("FATAL RENDER ERROR: RenderContext (ctx) is nil!")
+	} else if ctx.WidgetContext == nil {
+		log.Printf("DIAGNOSTIC: ctx.WidgetContext is nil. This is expected on initial page load, but not on HTMX swaps.")
+	} else {
+		log.Printf("DIAGNOSTIC: ctx.WidgetContext is NOT nil. UserBeliefs CONTENT: %+v", ctx.WidgetContext.UserBeliefs)
+	}
+
 	selectedValue := ""
 	if currentBelief != nil {
 		for _, option := range actualOptions {

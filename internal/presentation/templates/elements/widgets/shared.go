@@ -2,8 +2,6 @@
 package templates
 
 import (
-	"encoding/json"
-
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 )
 
@@ -23,41 +21,30 @@ type ScaleOption struct {
 	Color string `json:"color"`
 }
 
-// Shared utility functions for all widgets
-
-// getUserBeliefs now uses pre-resolved widget context instead of direct cache calls
+// getUserBeliefs correctly retrieves the user's belief state map from the context.
 func getUserBeliefs(ctx *rendering.RenderContext) map[string][]string {
-	if ctx.WidgetContext == nil {
-		return nil
+	// Defensive check to prevent nil pointer panics during initial page loads.
+	if ctx == nil || ctx.WidgetContext == nil || ctx.WidgetContext.UserBeliefs == nil {
+		return make(map[string][]string) // Return an empty map, not nil
 	}
 
 	return ctx.WidgetContext.UserBeliefs
 }
 
+// getCurrentBeliefState finds the belief state for a given slug from the user's belief map.
 func getCurrentBeliefState(userBeliefs map[string][]string, beliefSlug string) *BeliefState {
 	if userBeliefs == nil {
 		return nil
 	}
 
-	beliefStrings, exists := userBeliefs[beliefSlug]
-	if !exists || len(beliefStrings) == 0 {
+	beliefValues, exists := userBeliefs[beliefSlug]
+	if !exists || len(beliefValues) == 0 {
 		return nil
 	}
 
-	rawValue := beliefStrings[0]
-
-	// Try to parse as JSON first (for legacy/structured beliefs)
-	var belief BeliefState
-	if err := json.Unmarshal([]byte(rawValue), &belief); err == nil {
-		return &belief
+	return &BeliefState{
+		ID:   beliefSlug,
+		Verb: beliefValues[0],
+		Slug: beliefSlug,
 	}
-
-	// If JSON parsing fails, treat as raw verb string
-	result := &BeliefState{
-		ID:     beliefSlug,
-		Verb:   rawValue,
-		Slug:   beliefSlug,
-		Object: "",
-	}
-	return result
 }

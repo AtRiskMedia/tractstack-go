@@ -14,23 +14,21 @@ import (
 
 // Config represents the structure of a single tenant's configuration
 type Config struct {
-	TenantID           string             `json:"tenantId"`
-	Domains            []string           `json:"domains"`
-	Status             string             `json:"status"`
-	DatabaseType       string             `json:"databaseType"`
-	TursoDatabase      string             `json:"TURSO_DATABASE_URL"`
-	TursoToken         string             `json:"TURSO_AUTH_TOKEN"`
-	AAIAPIKey          string             `json:"AAI_API_KEY"`
-	JWTSecret          string             `json:"JWT_SECRET"`
-	AESKey             string             `json:"AES_KEY"`
-	TursoEnabled       bool               `json:"TURSO_ENABLED"`
-	AdminPassword      string             `json:"ADMIN_PASSWORD,omitempty"`
-	EditorPassword     string             `json:"EDITOR_PASSWORD,omitempty"`
-	HomeSlug           string             `json:"HOME_SLUG,omitempty"`
-	TractStackHomeSlug string             `json:"TRACTSTACK_HOME_SLUG,omitempty"`
-	ActivationToken    string             `json:"ACTIVATION_TOKEN,omitempty"`
-	SQLitePath         string             `json:"-"`
-	BrandConfig        *types.BrandConfig `json:"-"`
+	TenantID        string             `json:"tenantId"`
+	Domains         []string           `json:"domains"`
+	Status          string             `json:"status"`
+	DatabaseType    string             `json:"databaseType"`
+	TursoDatabase   string             `json:"TURSO_DATABASE_URL"`
+	TursoToken      string             `json:"TURSO_AUTH_TOKEN"`
+	AAIAPIKey       string             `json:"AAI_API_KEY"`
+	JWTSecret       string             `json:"JWT_SECRET"`
+	AESKey          string             `json:"AES_KEY"`
+	TursoEnabled    bool               `json:"TURSO_ENABLED"`
+	AdminPassword   string             `json:"ADMIN_PASSWORD,omitempty"`
+	EditorPassword  string             `json:"EDITOR_PASSWORD,omitempty"`
+	ActivationToken string             `json:"ACTIVATION_TOKEN,omitempty"`
+	SQLitePath      string             `json:"-"`
+	BrandConfig     *types.BrandConfig `json:"-"`
 }
 
 // LoadTenantConfig loads configuration for a specific tenant from its env.json file.
@@ -70,7 +68,7 @@ func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config
 			return nil, fmt.Errorf("failed to marshal empty tailwind whitelist: %w", err)
 		}
 
-		if err := os.WriteFile(whitelistPath, whitelistData, 0644); err != nil {
+		if err := os.WriteFile(whitelistPath, whitelistData, 0o644); err != nil {
 			return nil, fmt.Errorf("failed to create tailwind whitelist file: %w", err)
 		}
 	}
@@ -184,7 +182,7 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 
 		// Save default registry to disk
 		registryDir := filepath.Dir(registryPath)
-		if err := os.MkdirAll(registryDir, 0755); err != nil {
+		if err := os.MkdirAll(registryDir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create registry directory: %w", err)
 		}
 
@@ -193,7 +191,7 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 			return nil, fmt.Errorf("failed to marshal default registry: %w", err)
 		}
 
-		if err := os.WriteFile(registryPath, data, 0644); err != nil {
+		if err := os.WriteFile(registryPath, data, 0o644); err != nil {
 			return nil, fmt.Errorf("failed to write default registry: %w", err)
 		}
 
@@ -233,7 +231,7 @@ func RegisterTenant(tenantID string) error {
 
 		// Ensure directory exists
 		registryDir := filepath.Dir(registryPath)
-		if err := os.MkdirAll(registryDir, 0755); err != nil {
+		if err := os.MkdirAll(registryDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create registry directory: %w", err)
 		}
 
@@ -243,7 +241,7 @@ func RegisterTenant(tenantID string) error {
 			return fmt.Errorf("failed to marshal registry: %w", err)
 		}
 
-		if err := os.WriteFile(registryPath, data, 0644); err != nil {
+		if err := os.WriteFile(registryPath, data, 0o644); err != nil {
 			return fmt.Errorf("failed to write registry: %w", err)
 		}
 	}

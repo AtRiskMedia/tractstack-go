@@ -61,45 +61,27 @@ func (s *FragmentService) GenerateFragment(
 		return "", fmt.Errorf("pane %s not found or failed to load: %w", paneID, err)
 	}
 
-	// Early exit for context panes - they never need belief/personalization logic
+	// Early exit for context panes - they never need belief/personalization logic.
 	if pane.IsContextPane {
 		s.logger.Content().Debug("Context pane detected, using static generation", "paneId", paneID)
-		htmlContent, err := s.getCachedOrGenerateHTML(tenantCtx, pane)
-		if err != nil {
-			return "", fmt.Errorf("failed to generate context pane HTML: %w", err)
-		}
-		return htmlContent, nil
+		return s.getCachedOrGenerateHTML(tenantCtx, pane)
 	}
 
-	// For non-context panes, only proceed with belief logic if we have a valid storyfragmentID
+	// For non-context panes, we need a storyfragmentID to check for widgets.
 	if storyfragmentID == "" {
 		s.logger.Content().Debug("No storyfragmentID provided, using static generation", "paneId", paneID)
-		htmlContent, err := s.getCachedOrGenerateHTML(tenantCtx, pane)
-		if err != nil {
-			return "", fmt.Errorf("failed to generate static pane HTML: %w", err)
-		}
-		return htmlContent, nil
+		return s.getCachedOrGenerateHTML(tenantCtx, pane)
 	}
 
+	// Get the belief registry to check for widgets.
 	cacheManager := tenantCtx.CacheManager
 	beliefRegistry, hasRegistry := cacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID)
 
-	// Step 2: Get the user's current beliefs. This is our personalization trigger.
-	userBeliefs, _ := s.sessionBeliefService.GetUserBeliefs(tenantCtx, sessionID)
-	hasBeliefs := len(userBeliefs) > 0
-
-	// Step 3: Determine if this specific pane has ANY belief-related logic.
-	var hasPaneBeliefs bool
-	if hasRegistry && beliefRegistry != nil {
-		_, hasPaneBeliefs = beliefRegistry.PaneBeliefPayloads[paneID]
-	}
-
 	var htmlContent string
 
-	// Step 4: The definitive decision.
-	// Regenerate HTML if the user has beliefs AND this pane uses beliefs in any way.
-	if hasBeliefs && hasPaneBeliefs {
-		s.logger.Content().Debug("Personalization required: User has beliefs and pane has belief logic. Generating fresh HTML.", "paneId", paneID)
+	// If the user has a session and the pane has widgets, we MUST generate a fresh copy.
+	if s.shouldBypassCacheForWidgets(paneID, sessionID, beliefRegistry) {
+		s.logger.Content().Debug("Personalization required: User has session and pane has widgets. Generating fresh HTML.", "paneId", paneID)
 		htmlContent, err = s.generateFreshHTML(tenantCtx, pane, sessionID, storyfragmentID, beliefRegistry)
 		if err != nil {
 			return "", fmt.Errorf("failed to generate fresh HTML for session: %w", err)
@@ -113,7 +95,7 @@ func (s *FragmentService) GenerateFragment(
 		}
 	}
 
-	// Finally, apply the visibility wrapper (using the already-corrected logic).
+	// Finally, apply the visibility wrapper.
 	if hasRegistry && beliefRegistry != nil {
 		htmlContent = s.applyBeliefVisibility(tenantCtx, htmlContent, paneID, sessionID, storyfragmentID, beliefRegistry)
 	}
@@ -190,14 +172,14 @@ func (s *FragmentService) generateSingleFragment(
 
 	var htmlContent string
 
-	// Check if we should use pre-resolved widget context
-	if widgetCtx != nil && s.shouldBypassCacheForWidgets(tenantCtx, paneID, sessionID, beliefRegistry) {
-		s.logger.Content().Debug("🔍 BATCH USING FRESH HTML", "paneId", paneID)
-		// Generate fresh HTML with widgets
+	// Check if we should bypass the cache for widget personalization
+	if s.shouldBypassCacheForWidgets(paneID, sessionID, beliefRegistry) {
+		s.logger.Content().Warn("🔍 BATCH USING FRESH HTML", "paneId", paneID)
+		// Generate fresh HTML with widgets, using the pre-resolved context
 		htmlContent = s.generateFreshHTMLWithWidgets(tenantCtx, pane, sessionID, storyfragmentID, widgetCtx)
 	} else {
-		s.logger.Content().Debug("🔍 BATCH USING CACHED HTML", "paneId", paneID)
-		// Use cached approach
+		s.logger.Content().Warn("🔍 BATCH USING CACHED HTML", "paneId", paneID)
+		// Use the fast, cached, non-personalized version
 		htmlContent, err = s.getCachedOrGenerateHTML(tenantCtx, pane)
 		if err != nil {
 			return "", fmt.Errorf("failed to get cached HTML: %w", err)
@@ -214,46 +196,29 @@ func (s *FragmentService) generateSingleFragment(
 
 // shouldBypassCacheForWidgets determines if cache should be bypassed for widget personalization
 func (s *FragmentService) shouldBypassCacheForWidgets(
-	tenantCtx *tenant.Context,
 	paneID, sessionID string,
 	beliefRegistry *types.StoryfragmentBeliefRegistry,
 ) bool {
-	s.logger.Content().Debug("🔍 CACHE BYPASS CHECK", "paneId", paneID, "sessionId", sessionID)
+	s.logger.Content().Warn("🔍 CACHE BYPASS CHECK", "paneId", paneID, "sessionId", sessionID)
 
-	if sessionID == "" || beliefRegistry == nil {
-		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no session or registry", "paneId", paneID)
+	if sessionID == "" {
+		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no session", "paneId", paneID)
 		return false
 	}
 
-	// Check if pane has widgets
-	widgetBeliefs, hasWidgets := beliefRegistry.PaneWidgetBeliefs[paneID]
-	if !hasWidgets || len(widgetBeliefs) == 0 {
-		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no widgets", "paneId", paneID)
+	if beliefRegistry == nil {
+		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no registry", "paneId", paneID)
 		return false
 	}
 
-	s.logger.Content().Debug("🔍 PANE HAS WIDGETS", "paneId", paneID, "widgetBeliefs", widgetBeliefs)
-
-	// Check if user has beliefs that intersect with widgets
-	if s.sessionBeliefService != nil {
-		userBeliefs, _ := s.sessionBeliefService.GetUserBeliefs(tenantCtx, sessionID)
-		s.logger.Content().Debug("🔍 USER BELIEFS FOR WIDGET CHECK",
-			"sessionId", sessionID,
-			"userBeliefsCount", len(userBeliefs),
-			"userBeliefs", userBeliefs)
-
-		if userBeliefs != nil {
-			for _, widgetBelief := range widgetBeliefs {
-				if _, hasUserBelief := userBeliefs[widgetBelief]; hasUserBelief {
-					s.logger.Content().Debug("🔍 CACHE BYPASS = TRUE", "reason", "user has widget belief", "belief", widgetBelief, "paneId", paneID)
-					return true
-				}
-			}
-		}
+	_, hasWidgets := beliefRegistry.PaneWidgetBeliefs[paneID]
+	if hasWidgets {
+		s.logger.Content().Warn("🔍 CACHE BYPASS = TRUE", "reason", "pane has widgets", "paneId", paneID)
+	} else {
+		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "pane has no widgets", "paneId", paneID)
 	}
 
-	s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no belief intersection", "paneId", paneID)
-	return false
+	return hasWidgets
 }
 
 // getCachedOrGenerateHTML handles cache-first HTML generation

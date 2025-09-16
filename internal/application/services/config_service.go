@@ -81,19 +81,17 @@ type BrandConfigUpdateRequest struct {
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
 type AdvancedConfigUpdateRequest struct {
-	TursoDatabaseURL   string `json:"turso_database_url,omitempty"`
-	TursoAuthToken     string `json:"turso_auth_token,omitempty"`
-	EmailHost          string `json:"email_host,omitempty"`
-	EmailPort          int    `json:"email_port,omitempty"`
-	EmailUser          string `json:"email_user,omitempty"`
-	EmailPass          string `json:"email_pass,omitempty"`
-	EmailFrom          string `json:"email_from,omitempty"`
-	AdminPassword      string `json:"admin_password,omitempty"`
-	EditorPassword     string `json:"editor_password,omitempty"`
-	AAIAPIKey          string `json:"aai_api_key,omitempty"`
-	TursoEnabled       *bool  `json:"turso_enabled,omitempty"`
-	HomeSlug           string `json:"home_slug,omitempty"`
-	TractStackHomeSlug string `json:"tractstack_home_slug,omitempty"`
+	TursoDatabaseURL string `json:"turso_database_url,omitempty"`
+	TursoAuthToken   string `json:"turso_auth_token,omitempty"`
+	EmailHost        string `json:"email_host,omitempty"`
+	EmailPort        int    `json:"email_port,omitempty"`
+	EmailUser        string `json:"email_user,omitempty"`
+	EmailPass        string `json:"email_pass,omitempty"`
+	EmailFrom        string `json:"email_from,omitempty"`
+	AdminPassword    string `json:"admin_password,omitempty"`
+	EditorPassword   string `json:"editor_password,omitempty"`
+	AAIAPIKey        string `json:"aai_api_key,omitempty"`
+	TursoEnabled     *bool  `json:"turso_enabled,omitempty"`
 }
 
 // ValidateAdminPermissions validates admin-only authentication
@@ -209,12 +207,6 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.AAIAPIKey != "" {
 		tenantCtx.Config.AAIAPIKey = request.AAIAPIKey
 	}
-	if request.HomeSlug != "" {
-		tenantCtx.Config.HomeSlug = request.HomeSlug
-	}
-	if request.TractStackHomeSlug != "" {
-		tenantCtx.Config.TractStackHomeSlug = request.TractStackHomeSlug
-	}
 	if request.TursoEnabled != nil {
 		tenantCtx.Config.TursoEnabled = *request.TursoEnabled
 	}
@@ -256,7 +248,7 @@ func (c *ConfigService) SaveBrandConfig(tenantID string, config *types.BrandConf
 	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID)
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(configPath, 0755); err != nil {
+	if err := os.MkdirAll(configPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -276,7 +268,7 @@ func (c *ConfigService) SaveBrandConfig(tenantID string, config *types.BrandConf
 		return fmt.Errorf("failed to marshal brand config: %w", err)
 	}
 
-	if err := os.WriteFile(brandPath, data, 0644); err != nil {
+	if err := os.WriteFile(brandPath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write brand config: %w", err)
 	}
 
@@ -288,22 +280,20 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantCtx.Config.TenantID, "env.json")
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	// This matches the legacy pattern and prevents accidental exposure of computed fields
 	configData := map[string]any{
-		"TURSO_DATABASE_URL":   tenantCtx.Config.TursoDatabase,
-		"TURSO_AUTH_TOKEN":     tenantCtx.Config.TursoToken,
-		"ADMIN_PASSWORD":       tenantCtx.Config.AdminPassword,
-		"EDITOR_PASSWORD":      tenantCtx.Config.EditorPassword,
-		"AAI_API_KEY":          tenantCtx.Config.AAIAPIKey,
-		"HOME_SLUG":            tenantCtx.Config.HomeSlug,
-		"TRACTSTACK_HOME_SLUG": tenantCtx.Config.TractStackHomeSlug,
-		"JWT_SECRET":           tenantCtx.Config.JWTSecret,
-		"AES_KEY":              tenantCtx.Config.AESKey,
-		"TURSO_ENABLED":        tenantCtx.Config.TursoEnabled,
+		"TURSO_DATABASE_URL": tenantCtx.Config.TursoDatabase,
+		"TURSO_AUTH_TOKEN":   tenantCtx.Config.TursoToken,
+		"ADMIN_PASSWORD":     tenantCtx.Config.AdminPassword,
+		"EDITOR_PASSWORD":    tenantCtx.Config.EditorPassword,
+		"AAI_API_KEY":        tenantCtx.Config.AAIAPIKey,
+		"JWT_SECRET":         tenantCtx.Config.JWTSecret,
+		"AES_KEY":            tenantCtx.Config.AESKey,
+		"TURSO_ENABLED":      tenantCtx.Config.TursoEnabled,
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")
@@ -311,7 +301,7 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(configPath, data, 0600); err != nil {
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -323,7 +313,7 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConfigUpdateRequest, currentConfig *types.BrandConfig) (*types.BrandConfig, error) {
 	config := *currentConfig
 
-	if err := os.MkdirAll(filepath.Join(mediaPath, "images/brand"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(mediaPath, "images/brand"), 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create media directory: %w", err)
 	}
 
@@ -500,7 +490,7 @@ func (c *ConfigService) processSVG(data, filename, targetDir string) (string, er
 
 	// Write as UTF-8 text
 	fullPath := filepath.Join(targetDir, filename)
-	if err := os.WriteFile(fullPath, decoded, 0644); err != nil {
+	if err := os.WriteFile(fullPath, decoded, 0o644); err != nil {
 		return "", fmt.Errorf("failed to write SVG file: %w", err)
 	}
 
@@ -522,7 +512,7 @@ func (c *ConfigService) processBinaryImage(data, filename, targetDir string) (st
 
 	// Write as binary
 	fullPath := filepath.Join(targetDir, filename)
-	if err := os.WriteFile(fullPath, decoded, 0644); err != nil {
+	if err := os.WriteFile(fullPath, decoded, 0o644); err != nil {
 		return "", fmt.Errorf("failed to write binary file: %w", err)
 	}
 
@@ -615,7 +605,7 @@ func (c *ConfigService) saveKnownResources(tenantID string, knownResources *type
 	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID)
 
 	// Ensure config directory exists
-	if err := os.MkdirAll(configPath, 0755); err != nil {
+	if err := os.MkdirAll(configPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -626,7 +616,7 @@ func (c *ConfigService) saveKnownResources(tenantID string, knownResources *type
 		return fmt.Errorf("failed to marshal known resources config: %w", err)
 	}
 
-	if err := os.WriteFile(knownResourcesPath, data, 0644); err != nil {
+	if err := os.WriteFile(knownResourcesPath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write known resources config: %w", err)
 	}
 
@@ -675,7 +665,7 @@ func (c *ConfigService) updateBrandColorsInCustomCSS(mediaPath, brandColours str
 	}
 
 	// Write to temp file
-	if err := os.WriteFile(tmpPath, []byte(updatedContent), 0644); err != nil {
+	if err := os.WriteFile(tmpPath, []byte(updatedContent), 0o644); err != nil {
 		return fmt.Errorf("failed to write temp CSS: %w", err)
 	}
 
