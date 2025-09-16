@@ -174,11 +174,11 @@ func (s *FragmentService) generateSingleFragment(
 
 	// Check if we should bypass the cache for widget personalization
 	if s.shouldBypassCacheForWidgets(paneID, sessionID, beliefRegistry) {
-		s.logger.Content().Warn("🔍 BATCH USING FRESH HTML", "paneId", paneID)
+		s.logger.Content().Debug("🔍 BATCH USING FRESH HTML", "paneId", paneID)
 		// Generate fresh HTML with widgets, using the pre-resolved context
 		htmlContent = s.generateFreshHTMLWithWidgets(tenantCtx, pane, sessionID, storyfragmentID, widgetCtx)
 	} else {
-		s.logger.Content().Warn("🔍 BATCH USING CACHED HTML", "paneId", paneID)
+		s.logger.Content().Debug("🔍 BATCH USING CACHED HTML", "paneId", paneID)
 		// Use the fast, cached, non-personalized version
 		htmlContent, err = s.getCachedOrGenerateHTML(tenantCtx, pane)
 		if err != nil {
@@ -199,23 +199,23 @@ func (s *FragmentService) shouldBypassCacheForWidgets(
 	paneID, sessionID string,
 	beliefRegistry *types.StoryfragmentBeliefRegistry,
 ) bool {
-	s.logger.Content().Warn("🔍 CACHE BYPASS CHECK", "paneId", paneID, "sessionId", sessionID)
+	s.logger.Content().Debug("🔍 CACHE BYPASS CHECK", "paneId", paneID, "sessionId", sessionID)
 
 	if sessionID == "" {
-		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no session", "paneId", paneID)
+		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no session", "paneId", paneID)
 		return false
 	}
 
 	if beliefRegistry == nil {
-		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "no registry", "paneId", paneID)
+		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "no registry", "paneId", paneID)
 		return false
 	}
 
 	_, hasWidgets := beliefRegistry.PaneWidgetBeliefs[paneID]
 	if hasWidgets {
-		s.logger.Content().Warn("🔍 CACHE BYPASS = TRUE", "reason", "pane has widgets", "paneId", paneID)
+		s.logger.Content().Debug("🔍 CACHE BYPASS = TRUE", "reason", "pane has widgets", "paneId", paneID)
 	} else {
-		s.logger.Content().Warn("🔍 CACHE BYPASS = FALSE", "reason", "pane has no widgets", "paneId", paneID)
+		s.logger.Content().Debug("🔍 CACHE BYPASS = FALSE", "reason", "pane has no widgets", "paneId", paneID)
 	}
 
 	return hasWidgets
