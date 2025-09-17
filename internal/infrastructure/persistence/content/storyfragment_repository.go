@@ -170,21 +170,58 @@ func (r *StoryFragmentRepository) Update(tenantID string, storyFragment *content
 }
 
 func (r *StoryFragmentRepository) Delete(tenantID, id string) error {
-	query := `DELETE FROM storyfragments WHERE id = ?`
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			if err := tx.Rollback(); err != nil {
+				r.logger.Database().Error("Failed to rollback transaction", "error", err)
+			}
+		}
+	}()
 
 	start := time.Now()
-	r.logger.Database().Debug("Executing storyfragment delete", "id", id)
+	r.logger.Database().Debug("Executing storyfragment delete with cleanup", "id", id)
 
-	_, err := r.db.Exec(query, id)
+	// Delete related data first (to handle foreign key constraints)
+
+	// 1. Delete pane relationships
+	_, err = tx.Exec("DELETE FROM storyfragment_panes WHERE storyfragment_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete pane relationships: %w", err)
+	}
+
+	// 2. Delete topic relationships
+	_, err = tx.Exec("DELETE FROM storyfragment_has_topic WHERE storyfragment_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete topic relationships: %w", err)
+	}
+
+	// 3. Delete description details
+	_, err = tx.Exec("DELETE FROM storyfragment_details WHERE storyfragment_id = ?", id)
+	if err != nil {
+		return fmt.Errorf("failed to delete description details: %w", err)
+	}
+
+	// 4. Finally delete the main storyfragment record
+	_, err = tx.Exec("DELETE FROM storyfragments WHERE id = ?", id)
 	if err != nil {
 		r.logger.Database().Error("Storyfragment delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete storyfragment: %w", err)
 	}
 
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit delete transaction: %w", err)
+	}
+	committed = true
+
 	r.logger.Database().Info("Storyfragment delete completed", "id", id, "duration", time.Since(start))
 	duration := time.Since(start)
 	if duration > config.SlowQueryThreshold {
-		r.logger.LogSlowQuery(query, duration, tenantID)
+		r.logger.LogSlowQuery("DELETE storyfragment with cleanup", duration, tenantID)
 	}
 	return nil
 }
@@ -558,7 +595,14 @@ func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string,
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	committed := false
+	defer func() {
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				r.logger.Database().Error("Failed to rollback transaction", "error", rollbackErr)
+			}
+		}
+	}()
 
 	// Delete existing topic relationships
 	_, err = tx.Exec("DELETE FROM storyfragment_has_topic WHERE storyfragment_id = ?", storyFragmentID)
@@ -568,17 +612,28 @@ func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string,
 
 	// Process each topic
 	for _, topicTitle := range topics {
-		// Insert topic if it doesn't exist
-		_, err = tx.Exec("INSERT OR IGNORE INTO storyfragment_topics (title) VALUES (?)", topicTitle)
-		if err != nil {
-			return fmt.Errorf("failed to insert topic: %w", err)
-		}
-
-		// Get topic ID
 		var topicID int64
+
+		// First try to get existing topic ID
 		err = tx.QueryRow("SELECT id FROM storyfragment_topics WHERE title = ?", topicTitle).Scan(&topicID)
 		if err != nil {
-			return fmt.Errorf("failed to get topic ID: %w", err)
+			if err == sql.ErrNoRows {
+				// Topic doesn't exist, create it with explicit numeric ID
+				var maxID int64
+				err = tx.QueryRow("SELECT COALESCE(MAX(id), 0) FROM storyfragment_topics").Scan(&maxID)
+				if err != nil {
+					return fmt.Errorf("failed to get max topic ID: %w", err)
+				}
+				topicID = maxID + 1
+
+				// Insert new topic with explicit ID
+				_, err = tx.Exec("INSERT INTO storyfragment_topics (id, title) VALUES (?, ?)", topicID, topicTitle)
+				if err != nil {
+					return fmt.Errorf("failed to insert new topic: %w", err)
+				}
+			} else {
+				return fmt.Errorf("failed to query existing topic: %w", err)
+			}
 		}
 
 		// Create relationship
@@ -589,7 +644,11 @@ func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string,
 		}
 	}
 
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 // UpdateDescription updates the description for a storyfragment
