@@ -266,7 +266,7 @@ func (w *Worker) cleanupTenant(tenantID string) int {
 				hourKey := binKey[lastColonIndex+1:]
 				currentHourKey := utilities.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 				if hourKey == currentHourKey {
-					ttl = 15 * time.Minute
+					ttl = w.config.CurrentHourTTL
 				} else {
 					ttl = w.config.AnalyticsCacheTTL
 				}

@@ -14,6 +14,7 @@ type Config struct {
 	SessionCacheTTL   time.Duration
 	AnalyticsCacheTTL time.Duration
 	FragmentCacheTTL  time.Duration
+	CurrentHourTTL    time.Duration
 }
 
 // NewConfig creates a new cleanup configuration by reading values
@@ -26,5 +27,6 @@ func NewConfig() *Config {
 		SessionCacheTTL:   config.UserStateTTL,
 		AnalyticsCacheTTL: config.AnalyticsBinTTL,
 		FragmentCacheTTL:  config.HTMLChunkTTL,
+		CurrentHourTTL:    config.CurrentHourTTL,
 	}
 }
