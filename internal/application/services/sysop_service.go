@@ -438,7 +438,7 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 	return activity, nil
 }
 
-// getContentMap retrieves titles and slugs for all content types from content map using correct cache access
+// getContentMap retrieves StoryFragment titles and slugs from content map using correct cache access
 func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title, Slug string }, error) {
 	contentMap := make(map[string]struct{ Title, Slug string })
 
@@ -455,11 +455,13 @@ func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title,
 		return contentMap, fmt.Errorf("failed to get content map: %w", err)
 	}
 
-	// Extract titles and slugs for all content types
+	// Extract StoryFragment titles and slugs
 	for _, item := range response.Data {
-		contentMap[item.ID] = struct{ Title, Slug string }{
-			Title: item.Title,
-			Slug:  item.Slug,
+		if item.Type == "StoryFragment" {
+			contentMap[item.ID] = struct{ Title, Slug string }{
+				Title: item.Title,
+				Slug:  item.Slug,
+			}
 		}
 	}
 
