@@ -220,7 +220,7 @@ func (s *SysOpService) GetActivityGraph(tenantID string) (*ActivityGraphResponse
 		}
 	}
 
-	// NEW: Process StoryFragment activity from hourly epinet bins
+	// Process StoryFragment activity from hourly epinet bins
 	storyFragmentActivity, err := s.extractStoryFragmentActivity(tenantID, oneHourAgo)
 	if err != nil {
 		s.logger.System().Warn("Failed to extract StoryFragment activity", "tenantId", tenantID, "error", err)
@@ -438,7 +438,7 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 	return activity, nil
 }
 
-// getContentMap retrieves StoryFragment titles and slugs from content map using correct cache access
+// getContentMap retrieves titles and slugs for all content types from content map using correct cache access
 func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title, Slug string }, error) {
 	contentMap := make(map[string]struct{ Title, Slug string })
 
@@ -455,13 +455,11 @@ func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title,
 		return contentMap, fmt.Errorf("failed to get content map: %w", err)
 	}
 
-	// Extract StoryFragment titles and slugs
+	// Extract titles and slugs for all content types
 	for _, item := range response.Data {
-		if item.Type == "StoryFragment" {
-			contentMap[item.ID] = struct{ Title, Slug string }{
-				Title: item.Title,
-				Slug:  item.Slug,
-			}
+		contentMap[item.ID] = struct{ Title, Slug string }{
+			Title: item.Title,
+			Slug:  item.Slug,
 		}
 	}
 
