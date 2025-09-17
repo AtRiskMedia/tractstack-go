@@ -365,7 +365,7 @@ func (s *SysOpService) extractStoryFragmentActivity(tenantID string, oneHourAgo 
 					"totalSteps", len(bin.Data.Steps))
 
 				for nodeID, stepData := range bin.Data.Steps {
-					if strings.Contains(nodeID, "StoryFragment") {
+					if !strings.Contains(nodeID, "StoryFragment") && !strings.Contains(nodeID, "Resource") {
 						s.logger.System().Debug("StoryFragment step found",
 							"nodeId", nodeID,
 							"visitorCount", len(stepData.Visitors))
@@ -457,7 +457,7 @@ func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title,
 
 	// Extract StoryFragment titles and slugs
 	for _, item := range response.Data {
-		if item.Type == "StoryFragment" {
+		if item.Type == "StoryFragment" || item.Type == "Resource" {
 			contentMap[item.ID] = struct{ Title, Slug string }{
 				Title: item.Title,
 				Slug:  item.Slug,
