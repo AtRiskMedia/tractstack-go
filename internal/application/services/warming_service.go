@@ -23,6 +23,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/templates"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 const (
@@ -788,7 +789,7 @@ func (ws *WarmingService) getTTLForHour(hourKey string) time.Duration {
 	now := time.Now().UTC()
 	currentHour := utilities.FormatHourKey(time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 0, 0, 0, time.UTC))
 	if hourKey == currentHour {
-		return 15 * time.Minute
+		return config.CurrentHourTTL
 	}
 	return 24 * time.Hour
 }
