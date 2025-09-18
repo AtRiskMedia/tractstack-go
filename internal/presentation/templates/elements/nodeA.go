@@ -54,9 +54,23 @@ func (nar *NodeARenderer) Render(nodeID string) string {
 	if nodeData.Href != nil && *nodeData.Href != "" {
 		data.Href = *nodeData.Href
 	}
+
+	isExternalURL := false
+	if nodeData.CustomData != nil {
+		if isExternal, exists := nodeData.CustomData["isExternalUrl"]; exists {
+			if isExternalBool, ok := isExternal.(bool); ok && isExternalBool {
+				isExternalURL = true
+			}
+		}
+	}
+
+	// Set target based on existing target or external URL detection
 	if nodeData.Target != nil && *nodeData.Target != "" {
 		data.Target = *nodeData.Target
+	} else if isExternalURL {
+		data.Target = "_blank"
 	}
+
 	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
 		data.Class = *nodeData.ElementCSS
 	}
@@ -90,6 +104,12 @@ func (nar *NodeARenderer) Render(nodeID string) string {
 		for _, childID := range childNodeIDs {
 			html.WriteString(nar.nodeRenderer.RenderNode(childID))
 		}
+
+		// Add external link icon for external URLs
+		if isExternalURL {
+			html.WriteString(`<span class="ml-1" aria-label="external link">↗</span>`)
+		}
+
 		html.WriteString(`</span>`)
 	}
 

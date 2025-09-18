@@ -111,6 +111,13 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 			}
 			nodeData.CustomData["callbackPayload"] = callbackPayload
 		}
+		// Extract isExternalUrl flag from buttonPayload
+		if isExternalURL, ok := buttonPayload["isExternalUrl"].(bool); ok && isExternalURL {
+			if nodeData.CustomData == nil {
+				nodeData.CustomData = make(map[string]any)
+			}
+			nodeData.CustomData["isExternalUrl"] = isExternalURL
+		}
 	}
 
 	// Handle image-related fields
