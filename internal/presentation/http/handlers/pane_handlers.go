@@ -26,6 +26,11 @@ type PaneIDsRequest struct {
 	PaneIDs []string `json:"paneIds" binding:"required"`
 }
 
+// BulkPaneRequest represents the request body for bulk pane processing
+type BulkPaneRequest struct {
+	Panes []map[string]interface{} `json:"panes" binding:"required"`
+}
+
 // PaneHandlers contains all pane-related HTTP handlers
 type PaneHandlers struct {
 	paneService *services.PaneService
@@ -40,6 +45,45 @@ func NewPaneHandlers(paneService *services.PaneService, logger *logging.Channele
 		logger:      logger,
 		perfTracker: perfTracker,
 	}
+}
+
+// BulkProcessPanes handles the creation and updating of multiple panes in a single request
+func (h *PaneHandlers) BulkProcessPanes(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("bulk_process_panes_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received bulk process panes request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var req BulkPaneRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if len(req.Panes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "panes array cannot be empty"})
+		return
+	}
+
+	processedIDs, err := h.paneService.BulkProcessPanes(tenantCtx, req.Panes, c.Request)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Bulk process panes request completed", "processedCount", len(processedIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for BulkProcessPanes request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.Panes))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "panes processed successfully",
+		"processedIds": processedIDs,
+	})
 }
 
 // GetAllPaneIDs returns all pane IDs using cache-first pattern

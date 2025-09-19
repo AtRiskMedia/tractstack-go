@@ -49,7 +49,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker, container.TenantManager)
 	sysopHandlers := handlers.NewSysOpHandlers(container)
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
-	aaiHandlers := handlers.NewAAIHandlers(container.Logger, container.PerfTracker)
+	aaiHandlers := handlers.NewAAIHandlers(container.AAIService, container.Logger, container.PerfTracker)
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 
 	sysopAPI := r.Group("/api/sysop")
@@ -182,6 +182,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			// Pane endpoints
 			nodes.GET("/panes", paneHandlers.GetAllPaneIDs)
 			nodes.POST("/panes", paneHandlers.GetPanesByIDs)
+			nodes.POST("/panes/bulk", paneHandlers.BulkProcessPanes)
 			nodes.GET("/panes/:id", paneHandlers.GetPaneByID)
 			nodes.GET("/panes/:id/template", paneHandlers.GetPaneTemplate)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)

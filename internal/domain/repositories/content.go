@@ -38,8 +38,8 @@ type PaneRepository interface {
 	FindByIDs(tenantID string, ids []string) ([]*content.PaneNode, error)
 	FindAll(tenantID string) ([]*content.PaneNode, error)
 	FindContext(tenantID string) ([]*content.PaneNode, error)
-	Store(tenantID string, pane *content.PaneNode) error
-	Update(tenantID string, pane *content.PaneNode) error
+	Store(tenantID string, pane *content.PaneNode, markdownBody string) error
+	Update(tenantID string, pane *content.PaneNode, markdownBody string) error
 	Delete(tenantID, id string) error
 	UpdateFilePaneRelationships(tenantID string, relationships map[string][]string) error
 }

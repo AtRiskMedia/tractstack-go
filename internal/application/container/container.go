@@ -58,6 +58,7 @@ type Container struct {
 	ConfigService          *services.ConfigService
 	TailwindService        *services.TailwindService
 	MultiTenantService     *services.MultiTenantService
+	AAIService             *services.AAIService
 	LogBroadcaster         *logging.LogBroadcaster
 	Broadcaster            messaging.Broadcaster
 	SysOpBroadcaster       *messaging.SysOpBroadcaster
@@ -115,6 +116,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		logger.Startup().Warn("Email service disabled - RESEND_API_KEY not configured")
 	}
 
+	aaiService := services.NewAAIService(logger, perfTracker)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
 	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
@@ -151,6 +153,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		perfTracker,
 		contentMapService,
 		registryRebuildOrchestrator,
+		aaiService,
 	)
 
 	// Now that PaneService is created, inject it back into the orchestrator.
@@ -236,6 +239,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ConfigService:          configService,
 		TailwindService:        tailwindService,
 		MultiTenantService:     multiTenantService,
+		AAIService:             aaiService,
 		LogBroadcaster:         logBroadcaster,
 		Broadcaster:            broadcaster,
 		SysOpService:           sysOpService,
