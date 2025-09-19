@@ -555,3 +555,68 @@ func (r *PaneRepository) UpdateFilePaneRelationships(tenantID string, relationsh
 
 	return nil
 }
+
+func (r *PaneRepository) SearchMarkdownContent(tenantID, searchTerm string) ([]string, error) {
+	query := `SELECT id FROM markdowns WHERE body LIKE ?`
+	start := time.Now()
+	rows, err := r.db.Query(query, "%"+searchTerm+"%")
+	if err != nil {
+		return nil, fmt.Errorf("failed to search markdown content: %w", err)
+	}
+	defer rows.Close()
+
+	var markdownIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan markdown ID: %w", err)
+		}
+		markdownIDs = append(markdownIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error during markdown search: %w", err)
+	}
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
+	return markdownIDs, nil
+}
+
+func (r *PaneRepository) FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs []string) ([]string, error) {
+	if len(markdownIDs) == 0 {
+		return []string{}, nil
+	}
+	placeholders := make([]string, len(markdownIDs))
+	args := make([]any, len(markdownIDs))
+	for i, id := range markdownIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := `SELECT id FROM panes WHERE markdown_id IN (` + strings.Join(placeholders, ",") + `)`
+	start := time.Now()
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pane IDs by markdown IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var paneIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan pane ID: %w", err)
+		}
+		paneIDs = append(paneIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error during pane ID lookup: %w", err)
+	}
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, tenantID)
+	}
+	return paneIDs, nil
+}

@@ -139,6 +139,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
 	beliefRegistryService := services.NewBeliefRegistryService(logger)
+	resourceService := services.NewResourceService(logger, perfTracker, contentMapService)
 
 	// Create the orchestrator first, omitting the PaneService to break the dependency cycle.
 	registryRebuildOrchestrator := services.NewRegistryRebuildOrchestrator(
@@ -147,23 +148,22 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		beliefRegistryService,
 	)
 
-	// Create PaneService, injecting the orchestrator.
+	// Create PaneService, injecting the orchestrator and other dependencies.
 	paneService := services.NewPaneService(
 		logger,
 		perfTracker,
 		contentMapService,
 		registryRebuildOrchestrator,
 		aaiService,
+		resourceService,
 	)
 
 	// Now that PaneService is created, inject it back into the orchestrator.
 	registryRebuildOrchestrator.SetPaneService(paneService)
 
-	// Create the rest of the content services. Note that StoryFragmentService is back to its original constructor.
 	storyFragmentService := services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService)
 	tractStackService := services.NewTractStackService(logger, perfTracker, contentMapService)
 	menuService := services.NewMenuService(logger, perfTracker, contentMapService)
-	resourceService := services.NewResourceService(logger, perfTracker, contentMapService)
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
 	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)

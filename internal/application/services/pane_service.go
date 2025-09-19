@@ -28,6 +28,7 @@ type PaneService struct {
 	registryOrchestrator *RegistryRebuildOrchestrator
 	markdownConverter    *markdown.Converter
 	aaiService           *AAIService
+	resourceService      *ResourceService
 }
 
 // PaneTemplatePayload represents the template format for a pane
@@ -44,7 +45,7 @@ type AITitleSlug struct {
 
 // paneNeedingAI is a helper struct to track panes that need AI processing.
 type paneNeedingAI struct {
-	payload  map[string]interface{}
+	payload  map[string]any
 	markdown string
 	index    int
 }
@@ -59,6 +60,7 @@ func NewPaneService(
 	contentMapService *ContentMapService,
 	registryOrchestrator *RegistryRebuildOrchestrator,
 	aaiService *AAIService,
+	resourceService *ResourceService,
 ) *PaneService {
 	return &PaneService{
 		logger:               logger,
@@ -67,6 +69,7 @@ func NewPaneService(
 		registryOrchestrator: registryOrchestrator,
 		markdownConverter:    markdown.NewConverter(),
 		aaiService:           aaiService,
+		resourceService:      resourceService,
 	}
 }
 
@@ -75,8 +78,8 @@ func StringToTimeHookFunc() mapstructure.DecodeHookFunc {
 	return func(
 		f reflect.Type,
 		t reflect.Type,
-		data interface{},
-	) (interface{}, error) {
+		data any,
+	) (any, error) {
 		if t != reflect.TypeOf(time.Time{}) {
 			return data, nil
 		}
@@ -116,7 +119,7 @@ func (s *PaneService) generateMarkdownFromNodes(paneID string, optionsPayload ma
 }
 
 // isSystemGenerated checks if a title and slug match the system-generated pattern.
-func isSystemGenerated(title, slug interface{}) bool {
+func isSystemGenerated(title, slug any) bool {
 	titleStr, titleOk := title.(string)
 	slugStr, slugOk := slug.(string)
 
@@ -138,7 +141,7 @@ func isSystemGenerated(title, slug interface{}) bool {
 }
 
 // convertPayloadToPaneNode safely converts a map to a PaneNode struct.
-func convertPayloadToPaneNode(payload map[string]interface{}) (*content.PaneNode, error) {
+func convertPayloadToPaneNode(payload map[string]any) (*content.PaneNode, error) {
 	var pane content.PaneNode
 	config := &mapstructure.DecoderConfig{
 		Result:           &pane,
@@ -179,7 +182,7 @@ func (s *PaneService) ensureUniqueSlug(tenantCtx *tenant.Context, desiredSlug st
 
 // BulkProcessPanes handles the efficient processing of multiple panes,
 // including batch AI title/slug generation for system-generated panes.
-func (s *PaneService) BulkProcessPanes(tenantCtx *tenant.Context, panePayloads []map[string]interface{}, originalReq *http.Request) ([]string, error) {
+func (s *PaneService) BulkProcessPanes(tenantCtx *tenant.Context, panePayloads []map[string]any, originalReq *http.Request) ([]string, error) {
 	start := time.Now()
 	var panesNeedingAI []paneNeedingAI
 
@@ -187,7 +190,7 @@ func (s *PaneService) BulkProcessPanes(tenantCtx *tenant.Context, panePayloads [
 		id, _ := payload["id"].(string)
 		title, _ := payload["title"].(string)
 		slug, _ := payload["slug"].(string)
-		optionsPayload, _ := payload["optionsPayload"].(map[string]interface{})
+		optionsPayload, _ := payload["optionsPayload"].(map[string]any)
 
 		if isSystemGenerated(title, slug) {
 			markdownBody, _ := s.generateMarkdownFromNodes(id, optionsPayload)
@@ -654,4 +657,158 @@ func (s *PaneService) triggerRebuildForPaneParents(tenantCtx *tenant.Context, pa
 			s.registryOrchestrator.EnqueueRebuild(tenantCtx.TenantID, sfID)
 		}
 	}
+}
+
+// SearchResults defines the structure for search results.
+type SearchResults struct {
+	StoryFragmentIDs []string `json:"storyFragmentIds"`
+	ContextPaneIDs   []string `json:"contextPaneIds"`
+	ResourceIDs      []string `json:"resourceIds"`
+}
+
+// SearchContent orchestrates a global search across different content types.
+func (s *PaneService) SearchContent(tenantCtx *tenant.Context, searchTerm string) (*SearchResults, error) {
+	start := time.Now()
+	paneRepo := tenantCtx.PaneRepo()
+	lowerSearchTerm := strings.ToLower(searchTerm)
+
+	// Get the flat content map from the cache
+	cachedContentMap, err := s.contentMapService.GetCachedContentMap(tenantCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cached content map for search: %w", err)
+	}
+
+	storyFragmentIDs := make(map[string]struct{})
+	contextPaneIDs := make(map[string]struct{})
+	resourceIDs := make(map[string]struct{})
+
+	// 1. Markdown Search (Already case-insensitive via SQL LIKE)
+	markdownIDs, err := paneRepo.SearchMarkdownContent(tenantCtx.TenantID, searchTerm)
+	if err != nil {
+		return nil, fmt.Errorf("markdown search failed: %w", err)
+	}
+	if len(markdownIDs) > 0 {
+		paneIDs, err := paneRepo.FindPaneIDsByMarkdownIDs(tenantCtx.TenantID, markdownIDs)
+		if err != nil {
+			return nil, fmt.Errorf("pane ID lookup from markdown IDs failed: %w", err)
+		}
+
+		paneToParent := make(map[string]string)
+		for _, item := range cachedContentMap {
+			if item.Type == "StoryFragment" {
+				for _, pID := range item.Panes {
+					paneToParent[pID] = item.ID
+				}
+			}
+		}
+
+		for _, paneID := range paneIDs {
+			if parentSFID, exists := paneToParent[paneID]; exists {
+				storyFragmentIDs[parentSFID] = struct{}{}
+			} else {
+				for _, item := range cachedContentMap {
+					if item.ID == paneID && item.Type == "Pane" && item.IsContext != nil && *item.IsContext {
+						contextPaneIDs[paneID] = struct{}{}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Content Map Search (Titles/Slugs) - Case-Insensitive
+	for _, item := range cachedContentMap {
+		if strings.Contains(strings.ToLower(item.Title), lowerSearchTerm) || strings.Contains(strings.ToLower(item.Slug), lowerSearchTerm) {
+			switch item.Type {
+			case "StoryFragment":
+				storyFragmentIDs[item.ID] = struct{}{}
+			case "Pane":
+				if item.IsContext != nil && *item.IsContext {
+					contextPaneIDs[item.ID] = struct{}{}
+				}
+			case "Resource":
+				resourceIDs[item.ID] = struct{}{}
+			}
+		}
+	}
+
+	// 3. Resource Body, Title, Slug, and OneLiner Search - Case-Insensitive
+	allResources, err := s.resourceService.GetAll(tenantCtx) // This is cache-first
+	if err != nil {
+		return nil, fmt.Errorf("failed to load all resources for body search: %w", err)
+	}
+	for _, resource := range allResources {
+		// Check standard fields first
+		if strings.Contains(strings.ToLower(resource.Title), lowerSearchTerm) ||
+			strings.Contains(strings.ToLower(resource.Slug), lowerSearchTerm) ||
+			strings.Contains(strings.ToLower(resource.OneLiner), lowerSearchTerm) {
+			resourceIDs[resource.ID] = struct{}{}
+			continue // Already found, no need to check body
+		}
+
+		// Then check the body in optionsPayload
+		if body, ok := resource.OptionsPayload["body"]; ok {
+			switch b := body.(type) {
+			case string:
+				if strings.Contains(strings.ToLower(b), lowerSearchTerm) {
+					resourceIDs[resource.ID] = struct{}{}
+				}
+			case []any:
+				for _, item := range b {
+					if strItem, ok := item.(string); ok {
+						if strings.Contains(strings.ToLower(strItem), lowerSearchTerm) {
+							resourceIDs[resource.ID] = struct{}{}
+							break
+						}
+					}
+				}
+			case []string:
+				for _, strItem := range b {
+					if strings.Contains(strings.ToLower(strItem), lowerSearchTerm) {
+						resourceIDs[resource.ID] = struct{}{}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 4. De-duplicate and convert maps to slices
+	results := &SearchResults{
+		StoryFragmentIDs: make([]string, 0, len(storyFragmentIDs)),
+		ContextPaneIDs:   make([]string, 0, len(contextPaneIDs)),
+		ResourceIDs:      make([]string, 0, len(resourceIDs)),
+	}
+	for id := range storyFragmentIDs {
+		results.StoryFragmentIDs = append(results.StoryFragmentIDs, id)
+	}
+	for id := range contextPaneIDs {
+		results.ContextPaneIDs = append(results.ContextPaneIDs, id)
+	}
+	for id := range resourceIDs {
+		results.ResourceIDs = append(results.ResourceIDs, id)
+	}
+
+	s.logger.Content().Info("Search completed", "tenantId", tenantCtx.TenantID, "term", searchTerm, "duration", time.Since(start))
+	return results, nil
+}
+
+const searchThrottleDuration = 1 * time.Second
+
+// IsSearchThrottled checks if a session has made a search request within the throttle duration.
+// It uses the generic cache to store the last request time and updates it if the request is allowed.
+func (s *PaneService) IsSearchThrottled(tenantCtx *tenant.Context, sessionID string) bool {
+	cache := tenantCtx.GetCacheManager()
+	cacheKey := fmt.Sprintf("search_throttle:%s", sessionID)
+
+	if lastRequestTime, found := cache.GetGeneric(tenantCtx.TenantID, cacheKey); found {
+		if time.Since(lastRequestTime.(time.Time)) < searchThrottleDuration {
+			return true // Throttled
+		}
+	}
+
+	// Not throttled, update the timestamp and allow the request.
+	// The TTL of 5 seconds ensures the cache cleans up automatically.
+	cache.SetGenericWithTTL(tenantCtx.TenantID, cacheKey, time.Now(), 5*time.Second)
+	return false
 }

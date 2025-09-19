@@ -26,6 +26,7 @@ var (
 type Manager struct {
 	Mu             sync.RWMutex
 	LastAccessed   map[string]time.Time
+	genericStore   map[string]types.GenericCacheItem
 	contentStore   *stores.ContentStore
 	analyticsStore *stores.AnalyticsStore
 	configStore    *stores.ConfigStore
@@ -956,4 +957,34 @@ func (m *Manager) RemoveSession(tenantID, sessionID string) {
 
 func (m *Manager) BatchInvalidateSessionBeliefContexts(tenantID string, targets []types.SessionBeliefTarget) {
 	m.sessionsStore.BatchInvalidateSessionBeliefContexts(tenantID, targets)
+}
+
+// GetGeneric retrieves a value from the generic cache if it exists and has not expired.
+func (m *Manager) GetGeneric(tenantID, key string) (any, bool) {
+	m.Mu.RLock()
+	defer m.Mu.RUnlock()
+	if m.genericStore == nil {
+		return nil, false
+	}
+
+	item, exists := m.genericStore[fmt.Sprintf("%s:%s", tenantID, key)]
+	if !exists || time.Now().UTC().After(item.ExpiresAt) {
+		return nil, false
+	}
+	return item.Value, true
+}
+
+// SetGenericWithTTL sets a value in the generic cache with a specific TTL.
+func (m *Manager) SetGenericWithTTL(tenantID, key string, value any, ttl time.Duration) {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	if m.genericStore == nil {
+		m.genericStore = make(map[string]types.GenericCacheItem)
+	}
+
+	item := types.GenericCacheItem{
+		Value:     value,
+		ExpiresAt: time.Now().UTC().Add(ttl),
+	}
+	m.genericStore[fmt.Sprintf("%s:%s", tenantID, key)] = item
 }

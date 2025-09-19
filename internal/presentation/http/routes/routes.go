@@ -187,6 +187,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.GET("/panes/:id/template", paneHandlers.GetPaneTemplate)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
 			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
+			nodes.POST("/panes/search", paneHandlers.SearchContent)
 			nodes.POST("/panes/create", paneHandlers.CreatePane)
 			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
 			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)

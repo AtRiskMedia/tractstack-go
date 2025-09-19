@@ -377,7 +377,6 @@ func (h *PaneHandlers) GetPaneTemplate(c *gin.Context) {
 		return
 	}
 
-	// Delegate to service layer for business logic
 	templatePayload, err := h.paneService.GetPaneTemplate(tenantCtx, paneID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -419,7 +418,6 @@ func (h *PaneHandlers) BulkUpdateFilePaneRelationships(c *gin.Context) {
 		return
 	}
 
-	// Convert request format to service format (map[paneID][]fileIDs)
 	relationships := make(map[string][]string)
 	for _, rel := range req.Relationships {
 		relationships[rel.PaneID] = rel.FileIDs
@@ -458,7 +456,6 @@ func (h *PaneHandlers) GetContextPaneFullPayload(c *gin.Context) {
 		return
 	}
 
-	// Get the context pane by slug
 	paneRepo := tenantCtx.PaneRepo()
 	contextPane, err := paneRepo.FindBySlug(tenantCtx.TenantID, slug)
 	if err != nil {
@@ -471,16 +468,13 @@ func (h *PaneHandlers) GetContextPaneFullPayload(c *gin.Context) {
 		return
 	}
 
-	// Verify this is actually a context pane
 	if !contextPane.IsContextPane {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "pane is not a context pane"})
 		return
 	}
 
-	// === EXTRACT CHILD NODES (same logic as storyfragment full-payload) ===
 	var allChildNodes []any
 
-	// Extract child nodes from the context pane's OptionsPayload
 	if contextPane.OptionsPayload != nil {
 		if nodes, exists := contextPane.OptionsPayload["nodes"]; exists {
 			if nodesArray, ok := nodes.([]any); ok {
@@ -489,11 +483,9 @@ func (h *PaneHandlers) GetContextPaneFullPayload(c *gin.Context) {
 		}
 	}
 
-	// Create cleaned pane (without embedded nodes)
 	cleanedPane := *contextPane
 	cleanedPane.OptionsPayload = make(map[string]any)
 
-	// Copy all fields except "nodes"
 	if contextPane.OptionsPayload != nil {
 		for k, v := range contextPane.OptionsPayload {
 			if k != "nodes" {
@@ -502,17 +494,72 @@ func (h *PaneHandlers) GetContextPaneFullPayload(c *gin.Context) {
 		}
 	}
 
-	// === BUILD RESPONSE (same structure as storyfragment full-payload) ===
 	response := gin.H{
-		"storyfragmentNodes": []*content.StoryFragmentNode{}, // empty for context panes
+		"storyfragmentNodes": []*content.StoryFragmentNode{},
 		"paneNodes":          []*content.PaneNode{&cleanedPane},
 		"childNodes":         allChildNodes,
-		"tractstackNodes":    []*content.TractStackNode{}, // empty for context panes
+		"tractstackNodes":    []*content.TractStackNode{},
 	}
 
 	h.logger.Content().Info("Get context pane full payload request completed", "slug", slug, "found", contextPane != nil, "childNodeCount", len(allChildNodes), "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetContextPaneFullPayload request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "slug", slug)
 
+	c.JSON(http.StatusOK, response)
+}
+
+type SearchRequest struct {
+	Query string `json:"query" binding:"required,min=3"`
+}
+
+type SearchResponse struct {
+	StoryFragmentIDs []string `json:"storyFragmentIds"`
+	ContextPaneIDs   []string `json:"contextPaneIds"`
+	ResourceIDs      []string `json:"resourceIds"`
+}
+
+func (h *PaneHandlers) SearchContent(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("search_content_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	sessionID := c.GetHeader("X-TractStack-Session-ID")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "X-TractStack-Session-ID header is required"})
+		return
+	}
+
+	var req SearchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request: query is required and must be at least 3 characters", "details": err.Error()})
+		return
+	}
+
+	if h.paneService.IsSearchThrottled(tenantCtx, sessionID) {
+		h.logger.Auth().Info("Search request throttled for session", "sessionId", sessionID, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "You are searching too frequently. Please wait a moment."})
+		return
+	}
+
+	results, err := h.paneService.SearchContent(tenantCtx, req.Query)
+	if err != nil {
+		h.logger.System().Error("Failed to execute search", "error", err, "tenantId", tenantCtx.TenantID, "query", req.Query)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to perform search"})
+		return
+	}
+
+	response := SearchResponse{
+		StoryFragmentIDs: results.StoryFragmentIDs,
+		ContextPaneIDs:   results.ContextPaneIDs,
+		ResourceIDs:      results.ResourceIDs,
+	}
+
+	h.logger.Content().Info("Search request completed", "query", req.Query, "duration", time.Since(start))
+	marker.SetSuccess(true)
 	c.JSON(http.StatusOK, response)
 }

@@ -334,3 +334,23 @@ func (cms *ContentMapService) RefreshContentMap(tenantCtx *tenant.Context, cache
 	marker.SetSuccess(true)
 	return nil
 }
+
+// GetCachedContentMap provides a cache-first way for internal services to get the content map.
+func (cms *ContentMapService) GetCachedContentMap(tenantCtx *tenant.Context) ([]types.FullContentMapItem, error) {
+	cache := tenantCtx.GetCacheManager()
+	if cachedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
+		return cachedItems, nil
+	}
+
+	// Cache miss, which is rare post-startup but should be handled.
+	cms.logger.Content().Warn("Cache miss for full content map, rebuilding...", "tenantId", tenantCtx.TenantID)
+	if err := cms.RefreshContentMap(tenantCtx, cache); err != nil {
+		return nil, err
+	}
+
+	if refreshedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
+		return refreshedItems, nil
+	}
+
+	return nil, fmt.Errorf("failed to retrieve content map even after refresh for tenant %s", tenantCtx.TenantID)
+}

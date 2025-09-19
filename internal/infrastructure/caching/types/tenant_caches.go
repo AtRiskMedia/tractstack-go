@@ -146,3 +146,9 @@ type PaneBeliefData struct {
 	LinkedBeliefs   []string            `json:"linkedBeliefs"`   // cascade unset - separate processing
 	HeldBadges      []string            `json:"heldBadges"`      // if implemented
 }
+
+// GenericCacheItem is a wrapper for a cache value that includes an expiration time.
+type GenericCacheItem struct {
+	Value     any
+	ExpiresAt time.Time
+}

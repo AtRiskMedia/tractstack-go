@@ -29,6 +29,23 @@ func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performanc
 	}
 }
 
+// GetAll returns all resources for a tenant, leveraging the cache-first repository.
+func (s *ResourceService) GetAll(tenantCtx *tenant.Context) ([]*content.ResourceNode, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_all_resources", tenantCtx.TenantID)
+	defer marker.Complete()
+	resourceRepo := tenantCtx.ResourceRepo()
+
+	resources, err := resourceRepo.FindAll(tenantCtx.TenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all resources from repository: %w", err)
+	}
+
+	s.logger.Content().Info("Successfully retrieved all resources", "tenantId", tenantCtx.TenantID, "count", len(resources), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	return resources, nil
+}
+
 // GetAllIDs returns all resource IDs for a tenant by leveraging the robust repository.
 func (s *ResourceService) GetAllIDs(tenantCtx *tenant.Context) ([]string, error) {
 	start := time.Now()
@@ -167,15 +184,11 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("failed to create resource %s: %w", resource.ID, err)
 	}
 
-	// 1. Surgically add the new item to the item cache.
 	tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
-	// 2. Surgically add the new ID to the master ID list.
 	tenantCtx.CacheManager.AddResourceID(tenantCtx.TenantID, resource.ID)
-	// 3. Refresh content map after successful creation
 	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 		s.logger.Content().Error("Failed to refresh content map after resource creation",
 			"error", err, "resourceId", resource.ID, "tenantId", tenantCtx.TenantID)
-		// Do not fail the operation; the content map will be refreshed on the next cache miss.
 	}
 
 	s.logger.Content().Info("Successfully created resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
@@ -218,13 +231,10 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("failed to update resource %s: %w", resource.ID, err)
 	}
 
-	// 1. Surgically update the item in the item cache. The ID list is not affected.
 	tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
-	// 2. Refresh content map after successful creation
 	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 		s.logger.Content().Error("Failed to refresh content map after resource update",
 			"error", err, "resourceId", resource.ID, "tenantId", tenantCtx.TenantID)
-		// Do not fail the operation; the content map will be refreshed on the next cache miss.
 	}
 
 	s.logger.Content().Info("Successfully updated resource", "tenantId", tenantCtx.TenantID, "resourceId", resource.ID, "title", resource.Title, "slug", resource.Slug, "duration", time.Since(start))
@@ -258,15 +268,11 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 		return fmt.Errorf("failed to delete resource %s: %w", id, err)
 	}
 
-	// 1. Surgically remove the single item from the item cache.
 	tenantCtx.CacheManager.InvalidateResource(tenantCtx.TenantID, id)
-	// 2. Surgically remove the ID from the master ID list.
 	tenantCtx.CacheManager.RemoveResourceID(tenantCtx.TenantID, id)
-	// 3. Refresh content map after successful creation
 	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 		s.logger.Content().Error("Failed to refresh content map after resource deletion",
 			"error", err, "resourceId", id, "tenantId", tenantCtx.TenantID)
-		// Do not fail the operation; the content map will be refreshed on the next cache miss.
 	}
 
 	s.logger.Content().Info("Successfully deleted resource", "tenantId", tenantCtx.TenantID, "resourceId", id, "duration", time.Since(start))
