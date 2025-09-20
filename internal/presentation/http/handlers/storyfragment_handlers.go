@@ -548,6 +548,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		"created":          storyFragment.Created,
 		"fragments":        fragmentsData,
 		"impressions":      impressions,
+		"socialImagePath":  storyFragment.SocialImagePath,
 	}
 
 	h.logger.Content().Info("Get story fragment personalized payload request completed", "slug", slug, "sessionId", sessionID, "paneCount", len(storyFragment.PaneIDs), "impressionCount", len(impressions), "duration", time.Since(start))
