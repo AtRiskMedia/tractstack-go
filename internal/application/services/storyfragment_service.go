@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
@@ -643,4 +644,10 @@ func (s *StoryFragmentService) UpdateComplete(tenantCtx *tenant.Context, payload
 	s.logger.Perf().Info("Performance for UpdateStoryFragmentComplete", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "storyFragmentId", payload.ID)
 
 	return nil
+}
+
+// SearchMetadata calls the repository to perform a prefix search on storyfragment metadata.
+func (s *StoryFragmentService) SearchMetadata(tenantCtx *tenant.Context, term string) ([]repositories.FTSResult, error) {
+	repo := tenantCtx.StoryFragmentRepo()
+	return repo.SearchMetadata(tenantCtx.TenantID, term)
 }

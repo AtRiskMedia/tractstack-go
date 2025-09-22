@@ -44,7 +44,7 @@ func (p *ImageProcessor) ProcessBase64Image(data, filename, subdir string) (stri
 
 	// Create target directory
 	targetDir := filepath.Join(p.basePath, subdir)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -71,7 +71,7 @@ func (p *ImageProcessor) ProcessVersionedImage(data, baseFilename, subdir string
 
 	// Create target directory
 	targetDir := filepath.Join(p.basePath, subdir)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return "", 0, fmt.Errorf("failed to create directory: %w", err)
 	}
 
@@ -121,7 +121,7 @@ func processSVG(data, filename, targetDir string) (string, error) {
 
 	// Write as UTF-8 text
 	fullPath := filepath.Join(targetDir, filename)
-	if err := os.WriteFile(fullPath, decoded, 0644); err != nil {
+	if err := os.WriteFile(fullPath, decoded, 0o644); err != nil {
 		return "", fmt.Errorf("failed to write SVG file: %w", err)
 	}
 
@@ -225,7 +225,7 @@ func (p *ImageProcessor) generateWebPThumbnails(originalPath, nodeID string, tim
 		// Save as WebP using webp library, NOT imaging.Save()
 		err := webp.Save(thumbPath, resized, &webp.Options{Quality: 85})
 		if err != nil {
-			// Clean up any previously created thumbnails - FIXED THE BUG HERE
+			// Clean up any previously created thumbnails
 			for j := range i {
 				os.Remove(thumbnailPaths[j])
 			}
@@ -260,10 +260,10 @@ func (p *ImageProcessor) ProcessOGImageWithThumbnails(data, nodeID string) (stri
 	ogDir := filepath.Join(p.basePath, "images", "og")
 	thumbsDir := filepath.Join(p.basePath, "images", "thumbs")
 
-	if err := os.MkdirAll(ogDir, 0755); err != nil {
+	if err := os.MkdirAll(ogDir, 0o755); err != nil {
 		return "", nil, fmt.Errorf("failed to create og directory: %w", err)
 	}
-	if err := os.MkdirAll(thumbsDir, 0755); err != nil {
+	if err := os.MkdirAll(thumbsDir, 0o755); err != nil {
 		return "", nil, fmt.Errorf("failed to create thumbs directory: %w", err)
 	}
 
@@ -309,7 +309,7 @@ func processBinaryImage(data, filename, targetDir string) (string, error) {
 	// Write as binary
 	fullPath := filepath.Join(targetDir, filename)
 
-	if err := os.WriteFile(fullPath, decoded, 0644); err != nil {
+	if err := os.WriteFile(fullPath, decoded, 0o644); err != nil {
 		return "", fmt.Errorf("failed to write binary file: %w", err)
 	}
 
@@ -340,7 +340,7 @@ func (p *ImageProcessor) ProcessContentImageWithSizes(data, fileID string) (stri
 
 	// Create month-based directory
 	monthDir := filepath.Join(p.basePath, "images", monthPath)
-	if err := os.MkdirAll(monthDir, 0755); err != nil {
+	if err := os.MkdirAll(monthDir, 0o755); err != nil {
 		return "", nil, fmt.Errorf("failed to create month directory: %w", err)
 	}
 

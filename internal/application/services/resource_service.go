@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
@@ -280,4 +281,10 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	s.logger.Perf().Info("Performance for DeleteResource", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", id)
 
 	return nil
+}
+
+// SearchBodies calls the repository to perform a prefix search on resource bodies.
+func (s *ResourceService) SearchBodies(tenantCtx *tenant.Context, term string) ([]repositories.FTSResult, error) {
+	repo := tenantCtx.ResourceRepo()
+	return repo.SearchBodies(tenantCtx.TenantID, term)
 }

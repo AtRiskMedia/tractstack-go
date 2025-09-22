@@ -51,6 +51,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	multiTenantHandlers := handlers.NewMultiTenantHandlers(container.MultiTenantService, container.Logger, container.PerfTracker)
 	aaiHandlers := handlers.NewAAIHandlers(container.AAIService, container.Logger, container.PerfTracker)
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
+	searchHandlers := handlers.NewSearchHandlers(container.SearchService, container.Logger, container.PerfTracker)
 
 	sysopAPI := r.Group("/api/sysop")
 	{
@@ -168,6 +169,13 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			fragments.POST("/preview", fragmentHandlers.GeneratePreviewFromPayload)
 		}
 
+		// Search endpoints
+		search := api.Group("/search")
+		{
+			search.GET("/discover", searchHandlers.HandleDiscovery)
+			search.GET("/retrieve", searchHandlers.HandleRetrieval)
+		}
+
 		// Content nodes - ALL PUBLIC for API access
 		nodes := api.Group("/nodes")
 		{
@@ -187,7 +195,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.GET("/panes/:id/template", paneHandlers.GetPaneTemplate)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
 			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
-			nodes.POST("/panes/search", paneHandlers.SearchContent)
 			nodes.POST("/panes/create", paneHandlers.CreatePane)
 			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
 			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)

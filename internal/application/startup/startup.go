@@ -21,33 +21,46 @@ import (
 func Initialize() error {
 	setupLogging()
 
-	start := time.Now().UTC()
+	// --- One Dark ANSI Color Codes ---
+	const (
+		brandGreen = "\033[38;2;200;223;140m" // c8df8c
+		darkGrey   = "\033[90m"
+		purple     = "\033[38;2;198;120;221m" // One Dark Purple
+		blue       = "\033[38;2;97;175;239m"  // One Dark Blue
+		cyan       = "\033[38;2;86;182;194m"  // One Dark Cyan/Teal
+		green      = "\033[38;2;152;195;121m" // One Dark Green
+		yellow     = "\033[38;2;229;192;123m" // One Dark Yellow
+		white      = "\033[97m"
+		reset      = "\033[0m"
+	)
 
+	totalStart := time.Now()
 	ctx, cancelBackgroundTasks := context.WithCancel(context.Background())
 	defer cancelBackgroundTasks()
 
-	log.Println("\033[32m" + `
+	log.Println(brandGreen + `
 
  ▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄██▄▄▄▄▄▄▄██▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄ ▄▄▄
   ██  ██ ██ ▀▀ ██ ██ ▀▀ ██ ██ ▀▀ ██ ▀▀ ██ ██ ▀▀ ██ ██
   ██  ██▀█▄ ██▀██ ██ ▄▄ ██ ▀▀▀██ ██ ██▀██ ██ ▄▄ ██▀█▄
   ██  ██ ██ ██▄██ ██▄██ ██ ██▄██ ██ ██▄██ ██▄██ ██ ██
    ▀▀                   ▀▀       ▀▀             ▀▀ ▀▀▀
-` + "\033[97m" + `
+` + darkGrey + `
   made by At Risk Media
-` + "\033[0m")
+` + reset)
 
-	// Step 1: Initialize tenant system
-	log.Println("Initializing...")
+	// --- Step 1: Initialize Core Systems ---
+	stepStart := time.Now()
 	tenantManager := tenant.NewManager(nil)
+	cacheManager := tenantManager.GetCacheManager()
+	log.Printf("%s✓ Core Systems Initialized %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
-	// Step 2: Load tenant registry to discover all tenants
-	log.Println("Loading tenant registry...")
+	// --- Step 2: Load Tenant Registry ---
+	stepStart = time.Now()
 	registry, err := tenant.LoadTenantRegistry()
 	if err != nil {
 		return fmt.Errorf("failed to load tenant registry: %w", err)
 	}
-
 	if len(registry.Tenants) == 0 {
 		log.Println("No tenants found in registry - creating default tenant")
 		if err := tenant.RegisterTenant("default"); err != nil {
@@ -58,140 +71,97 @@ func Initialize() error {
 			return fmt.Errorf("failed to reload registry: %w", err)
 		}
 	}
+	log.Printf("%s✓ Tenant Registry Loaded   %s(%d tenants in %s)%s", cyan, darkGrey, len(registry.Tenants), time.Since(stepStart), reset)
 
-	log.Printf("Found %d tenants in registry", len(registry.Tenants))
-
-	// Step 3: Initialize cache system
-	log.Println("Initializing cache system...")
-	cacheManager := tenantManager.GetCacheManager()
-
-	// Step 4: Create dependency injection container (MOVED HERE - BEFORE PRE-ACTIVATION!)
-	log.Println("Initializing dependency injection container...")
+	// --- Step 3: Create Dependency Injection Container ---
+	stepStart = time.Now()
 	appContainer := container.NewContainer(tenantManager, cacheManager)
-	log.Println("✓ Dependency injection container created with singleton services.")
 	logger := appContainer.Logger
-	logger.Startup().Info("Container initialization complete - switching to channeled logging")
 	tenantManager.SetLogger(logger)
-	logger.Tenant().Info("Tenant manager logger initialized", "hasDetector", true, "hasCache", true)
+	tenantManager.SetFTSService(appContainer.FTSService)
+	log.Printf("%s✓ DI Container Built       %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
-	// Step 5: Pre-activate inactive tenants (NOW HAS LOGGER!)
-	logger.Startup().Info("Starting tenant pre-activation...")
+	// --- Step 4: Run Startup Migrations for ALL Tenants ---
+	stepStart = time.Now()
+	log.Printf("\n%s✓ RUNNING STARTUP MIGRATIONS FOR ALL TENANTS%s", purple, reset)
+	if err := tenantManager.RunStartupMigrations(); err != nil {
+		return fmt.Errorf("startup migrations failed: %w", err)
+	}
+	log.Printf("%s✓ Migrations Complete      %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
+
+	// --- Step 5: Activate Reserved Tenants ---
+	stepStart = time.Now()
+	log.Printf("\n%s✓ ACTIVATING RESERVED TENANTS%s", purple, reset)
 	if err := tenantManager.PreActivateAllTenants(); err != nil {
 		return fmt.Errorf("tenant pre-activation failed: %w", err)
 	}
-
-	// Step 6: Validate tenant activation
-	logger.Startup().Info("Validating tenant activation...")
-	if err := tenantManager.ValidatePreActivation(); err != nil {
-		return fmt.Errorf("tenant validation failed: %w", err)
-	}
-
-	// Step 7: Verify active tenant connections
-	logger.Startup().Info("Verifying active tenant database connections...")
 	activeCount, err := tenantManager.GetActiveTenantCount()
 	if err != nil {
 		return fmt.Errorf("failed to get active tenant count: %w", err)
 	}
-	logger.Startup().Info("Active tenant connections verified", "count", activeCount)
+	log.Printf("%s✓ Activation Complete      %s(%d active in %s)%s", cyan, darkGrey, activeCount, time.Since(stepStart), reset)
 
-	// Step 8: Initialize tenant cache
-	logger.Startup().Info("Initializing tenant cache...")
-	for tenantID, tenantInfo := range registry.Tenants {
-		if tenantInfo.Status == "active" {
-			logger.Tenant().Info("Initializing cache for tenant", "tenantId", tenantID)
-			cacheManager.InitializeTenant(tenantID)
-		}
-	}
-
-	// Step 9: Initialize application services (handled by container)
-	logger.Startup().Info("Singleton application services initialized via container")
-
-	// Step 10: Initialize cache warming
-	logger.Startup().Info("Initializing cache warming...")
-	startWarmTime := time.Now()
-
+	// --- Step 6: Initialize and Warm Tenant Caches ---
+	stepStart = time.Now()
+	log.Printf("\n%s✓ WARMING CACHE FOR %d TENANTS%s", purple, activeCount, reset)
 	reporter := cleanup.NewReporter(cacheManager)
-	warmingService := appContainer.WarmingService
-	contentMapService := appContainer.ContentMapService
-	beliefRegistryService := appContainer.BeliefRegistryService
-
-	if err := warmingService.WarmAllTenants(tenantManager, cacheManager, contentMapService, beliefRegistryService, reporter); err != nil {
-		logger.Startup().Error("Cache warming failed", "error", err.Error(), "duration", time.Since(startWarmTime))
-	} else {
-		logger.Startup().Info("Cache warming completed successfully", "duration", time.Since(startWarmTime))
+	if err := appContainer.WarmingService.WarmAllTenants(tenantManager, cacheManager, appContainer.ContentMapService, appContainer.BeliefRegistryService, reporter); err != nil {
+		log.Printf("%s✗ Cache warming failed for %d tenants%s", yellow, activeCount, reset)
+		return fmt.Errorf("cache warming failed: %w", err)
 	}
+	log.Printf("%s✓ Caches Warmed          %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
-	// Step 11: Start background cleanup worker
-	logger.Startup().Info("Starting background cleanup worker...")
-	startWorkerTime := time.Now()
-
+	// --- Step 7: Start Background Services ---
+	stepStart = time.Now()
 	cleanupConfig := cleanup.NewConfig()
 	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig, logger)
 	go cleanupWorker.Start(ctx)
+	log.Printf("%s✓ Background Services Up   %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
-	logger.Startup().Info("Background cleanup worker started", "duration", time.Since(startWorkerTime))
-
-	// Step 12: Start HTTP server
-	logger.Startup().Info("Starting HTTP server...")
-	startServerTime := time.Now()
-
+	// --- Step 8: Start HTTP Server ---
+	stepStart = time.Now()
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	httpServer := server.New(port, appContainer)
-
-	logger.Startup().Info("HTTP server initialized", "port", port, "duration", time.Since(startServerTime))
-
-	// Step 13: Setup graceful shutdown
-	gracefulShutdown := make(chan os.Signal, 1)
-	signal.Notify(gracefulShutdown, syscall.SIGINT, syscall.SIGTERM)
-
 	go func() {
-		logger.System().Info("Starting HTTP server", "address", ":"+port)
 		if err := httpServer.Start(); err != nil {
 			logger.System().Error("HTTP server failed", "error", err.Error())
 		}
 	}()
+	log.Printf("%s✓ HTTP Server Listening    %s(port: %s, started in %s)%s", cyan, darkGrey, port, time.Since(stepStart), reset)
 
-	totalStartupTime := time.Since(start)
-	logger.Startup().Info("Application startup complete",
-		"totalDuration", totalStartupTime,
-		"activeTenants", activeCount,
-		"port", port)
+	// --- Startup Complete ---
+	log.Printf("\n%sApplication startup complete %s(%s total)%s", blue, darkGrey, time.Since(totalStart), reset)
+	log.Printf("%sServer is now accepting connections at %shttp://localhost:%s%s", white, green, port, reset)
 
-	// Wait for shutdown signal
+	// --- Graceful Shutdown Sequence ---
+	gracefulShutdown := make(chan os.Signal, 1)
+	signal.Notify(gracefulShutdown, syscall.SIGINT, syscall.SIGTERM)
 	<-gracefulShutdown
-	logger.Shutdown().Info("Shutdown signal received, starting graceful shutdown...")
 
 	shutdownStart := time.Now()
-
-	// Cancel background tasks
+	log.Printf("\n%s[Shutdown]%s Signal received, starting graceful shutdown...", yellow, reset)
 	cancelBackgroundTasks()
 
-	// Stop server
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	logger.Shutdown().Info("Stopping HTTP server...")
 	if err := httpServer.Stop(shutdownCtx); err != nil {
 		logger.Shutdown().Error("Error during server shutdown", "error", err.Error())
 	} else {
-		logger.Shutdown().Info("HTTP server stopped successfully")
+		log.Printf("%s[Shutdown]%s HTTP server stopped.", yellow, reset)
 	}
 
-	// Close tenant manager
-	logger.Shutdown().Info("Closing tenant manager...")
 	if err := tenantManager.Close(); err != nil {
 		logger.Shutdown().Error("Error closing tenant manager", "error", err.Error())
 	} else {
-		logger.Shutdown().Info("Tenant manager closed successfully")
+		log.Printf("%s[Shutdown]%s Tenant manager closed.", yellow, reset)
 	}
 
-	elapsed := time.Since(start)
-	logger.Shutdown().Info("Application shutdown complete",
-		"totalUptime", elapsed,
-		"shutdownDuration", time.Since(shutdownStart))
+	log.Printf("%s[Shutdown]%s Complete. Total uptime: %s, shutdown duration: %s.", yellow, reset,
+		time.Since(totalStart).Round(time.Second), time.Since(shutdownStart))
 
 	return nil
 }
@@ -201,5 +171,5 @@ func setupLogging() {
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetFlags(0) // Remove flags to allow for custom formatting
 }

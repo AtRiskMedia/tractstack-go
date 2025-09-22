@@ -29,7 +29,8 @@ type StoryFragmentRepository interface {
 	UpdatePaneRelationships(tenantID, storyFragmentID string, paneIDs []string) error
 	UpdateTopics(tenantID, storyFragmentID string, topics []string) error
 	UpdateDescription(tenantID, storyFragmentID string, description *string) error
-	FindIDsByPaneID(paneID string) ([]string, error) // This line is added
+	FindIDsByPaneID(paneID string) ([]string, error)
+	SearchMetadata(tenantID, term string) ([]FTSResult, error)
 }
 
 type PaneRepository interface {
@@ -44,6 +45,8 @@ type PaneRepository interface {
 	UpdateFilePaneRelationships(tenantID string, relationships map[string][]string) error
 	SearchMarkdownContent(tenantID, searchTerm string) ([]string, error)
 	FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs []string) ([]string, error)
+	FindPaneContextStatus(tenantID string, paneIDs []string) (map[string]bool, error)
+	SearchContent(tenantID, term string) ([]FTSResult, error)
 }
 
 type MenuRepository interface {
@@ -65,6 +68,7 @@ type ResourceRepository interface {
 	Store(tenantID string, resource *content.ResourceNode) error
 	Update(tenantID string, resource *content.ResourceNode) error
 	Delete(tenantID, id string) error
+	SearchBodies(tenantID, term string) ([]FTSResult, error)
 }
 
 type BeliefRepository interface {
@@ -94,4 +98,11 @@ type ImageFileRepository interface {
 	Store(tenantID string, imageFile *content.ImageFileNode) error
 	Update(tenantID string, imageFile *content.ImageFileNode) error
 	Delete(tenantID, id string) error
+}
+
+// FTSResult represents a generic result from a full-text search query.
+type FTSResult struct {
+	ID        string
+	Relevance float64
+	Term      string
 }

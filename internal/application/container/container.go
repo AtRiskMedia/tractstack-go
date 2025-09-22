@@ -11,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
@@ -35,6 +36,7 @@ type Container struct {
 	BeliefRegistryService       *services.BeliefRegistryService
 	WarmingService              *services.WarmingService
 	RegistryRebuildOrchestrator *services.RegistryRebuildOrchestrator
+	SearchService               *services.SearchService
 
 	// Fragment Services
 	SessionBeliefService *services.SessionBeliefService
@@ -63,6 +65,7 @@ type Container struct {
 	Broadcaster            messaging.Broadcaster
 	SysOpBroadcaster       *messaging.SysOpBroadcaster
 	SysOpService           *services.SysOpService
+	FTSService             *fts.FTSService
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -117,6 +120,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	}
 
 	aaiService := services.NewAAIService(logger, perfTracker)
+	ftsService := fts.NewFTSService(logger)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
 	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
@@ -167,6 +171,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
 	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)
+	searchService := services.NewSearchService(paneService, storyFragmentService, resourceService, contentMapService)
 
 	// Create WarmingService, now injecting all its required content service dependencies.
 	warmingService := services.NewWarmingService(
@@ -216,6 +221,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		BeliefRegistryService:       beliefRegistryService,
 		WarmingService:              warmingService,
 		RegistryRebuildOrchestrator: registryRebuildOrchestrator,
+		SearchService:               searchService,
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,
@@ -244,6 +250,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		Broadcaster:            broadcaster,
 		SysOpService:           sysOpService,
 		SysOpBroadcaster:       sysOpBroadcaster,
+		FTSService:             ftsService,
 
 		// Infrastructure
 		TenantManager: tenantManager,

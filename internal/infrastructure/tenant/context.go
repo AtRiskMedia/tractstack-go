@@ -6,6 +6,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	domainUser "github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	persistenceAnalytics "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/analytics"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
@@ -22,6 +23,7 @@ type Context struct {
 	Status       string
 	CacheManager *manager.Manager
 	Logger       *logging.ChanneledLogger
+	ftsService   *fts.FTSService
 }
 
 // Close cleans up the tenant context
@@ -101,17 +103,17 @@ func (ctx *Context) MenuRepo() repositories.MenuRepository {
 
 // PaneRepo returns a pane repository instance
 func (ctx *Context) PaneRepo() repositories.PaneRepository {
-	return content.NewPaneRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
+	return content.NewPaneRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger, ctx.ftsService)
 }
 
 // ResourceRepo returns a resource repository instance
 func (ctx *Context) ResourceRepo() repositories.ResourceRepository {
-	return content.NewResourceRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
+	return content.NewResourceRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger, ctx.ftsService)
 }
 
 // StoryFragmentRepo returns a storyfragment repository instance
 func (ctx *Context) StoryFragmentRepo() repositories.StoryFragmentRepository {
-	return content.NewStoryFragmentRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger)
+	return content.NewStoryFragmentRepository(ctx.Database.Conn, ctx.CacheManager, ctx.Logger, ctx.ftsService)
 }
 
 // TractStackRepo returns a tractstack repository instance

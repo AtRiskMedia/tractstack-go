@@ -9,23 +9,27 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type PaneRepository struct {
-	db     *sql.DB
-	cache  interfaces.ContentCache
-	logger *logging.ChanneledLogger
+	db         *sql.DB
+	cache      interfaces.ContentCache
+	logger     *logging.ChanneledLogger
+	ftsService *fts.FTSService
 }
 
-func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *PaneRepository {
+func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.FTSService) *PaneRepository {
 	return &PaneRepository{
-		db:     db,
-		cache:  cache,
-		logger: logger,
+		db:         db,
+		cache:      cache,
+		logger:     logger,
+		ftsService: ftsService,
 	}
 }
 
@@ -132,6 +136,14 @@ func (r *PaneRepository) Store(tenantID string, pane *content.PaneNode, markdown
 		return fmt.Errorf("failed to insert pane: %w", err)
 	}
 
+	// Index content for FTS
+	if pane.MarkdownID != nil && markdownBody != "" {
+		if err := r.ftsService.IndexPaneContent(tx, pane.ID, markdownBody); err != nil {
+			// Log as a warning but do not fail the transaction
+			r.logger.System().Warn("Failed to index new pane content", "error", err, "paneId", pane.ID)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -185,6 +197,19 @@ func (r *PaneRepository) Update(tenantID string, pane *content.PaneNode, markdow
 		return fmt.Errorf("failed to update pane: %w", err)
 	}
 
+	// Index content for FTS
+	if pane.MarkdownID != nil && markdownBody != "" {
+		if err := r.ftsService.IndexPaneContent(tx, pane.ID, markdownBody); err != nil {
+			// Log as a warning but do not fail the transaction
+			r.logger.System().Warn("Failed to index updated pane content", "error", err, "paneId", pane.ID)
+		}
+	} else {
+		// Ensure content is removed from index if markdown is removed
+		if err := r.ftsService.DeletePaneContent(tx, pane.ID); err != nil {
+			r.logger.System().Warn("Failed to delete pane content from index", "error", err, "paneId", pane.ID)
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -217,6 +242,11 @@ func (r *PaneRepository) Delete(tenantID, id string) error {
 		if _, err := tx.Exec(`DELETE FROM markdowns WHERE id = ?`, markdownID.String); err != nil {
 			return fmt.Errorf("failed to delete associated markdown: %w", err)
 		}
+	}
+
+	// Delete from FTS index
+	if err := r.ftsService.DeletePaneContent(tx, id); err != nil {
+		r.logger.System().Warn("Failed to delete pane content from index on delete", "error", err, "paneId", id)
 	}
 
 	return tx.Commit()
@@ -619,4 +649,57 @@ func (r *PaneRepository) FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs [
 		r.logger.LogSlowQuery(query, duration, tenantID)
 	}
 	return paneIDs, nil
+}
+
+// SearchContent performs a prefix search on the pane_content_fts table.
+func (r *PaneRepository) SearchContent(tenantID, term string) ([]repositories.FTSResult, error) {
+	query := `SELECT pane_id, rank, snippet(pane_content_fts, 1, '>>>', '<<<', '...', 1) FROM pane_content_fts WHERE content MATCH ? ORDER BY rank LIMIT 10`
+	searchTerm := term + "*"
+	rows, err := r.db.Query(query, searchTerm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search pane content: %w", err)
+	}
+	defer rows.Close()
+
+	var results []repositories.FTSResult
+	for rows.Next() {
+		var res repositories.FTSResult
+		if err := rows.Scan(&res.ID, &res.Relevance, &res.Term); err != nil {
+			return nil, fmt.Errorf("failed to scan pane content search result: %w", err)
+		}
+		results = append(results, res)
+	}
+	return results, rows.Err()
+}
+
+// FindPaneContextStatus checks a list of pane IDs and returns a map indicating which are context panes.
+func (r *PaneRepository) FindPaneContextStatus(tenantID string, paneIDs []string) (map[string]bool, error) {
+	if len(paneIDs) == 0 {
+		return make(map[string]bool), nil
+	}
+
+	placeholders := make([]string, len(paneIDs))
+	args := make([]interface{}, len(paneIDs))
+	for i, id := range paneIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := `SELECT id, is_context_pane FROM panes WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pane context status: %w", err)
+	}
+	defer rows.Close()
+
+	statusMap := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		var isContext bool
+		if err := rows.Scan(&id, &isContext); err != nil {
+			return nil, fmt.Errorf("failed to scan pane context status: %w", err)
+		}
+		statusMap[id] = isContext
+	}
+	return statusMap, rows.Err()
 }

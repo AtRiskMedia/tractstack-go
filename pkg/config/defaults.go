@@ -20,7 +20,11 @@ func loadEnvFile() {
 		if err != nil {
 			return
 		}
-		defer file.Close()
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil {
+				log.Printf("Warning: Failed to close .env file: %v", closeErr)
+			}
+		}()
 
 		log.Println("Loading configuration overrides from .env file...")
 		scanner := bufio.NewScanner(file)
@@ -40,8 +44,13 @@ func loadEnvFile() {
 			value := strings.Trim(strings.TrimSpace(parts[1]), `"'`)
 
 			if os.Getenv(key) == "" {
-				os.Setenv(key, value)
+				if setErr := os.Setenv(key, value); setErr != nil {
+					log.Printf("Warning: Failed to set environment variable %s: %v", key, setErr)
+				}
 			}
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			log.Printf("Warning: Error reading .env file: %v", scanErr)
 		}
 	})
 }
@@ -147,6 +156,9 @@ var (
 	SSLKeyPath  string
 	BindAddress string
 
+	// Collection Configuration
+	CollectionRoutes []string
+
 	// Logging Configuration
 	LogVerbosity string
 
@@ -156,6 +168,17 @@ var (
 	// Analytics Configuration
 	ExposeAnalytics bool
 )
+
+func parseCollectionRoutes(value string) []string {
+	if value == "" {
+		return []string{}
+	}
+	routes := strings.Split(value, ",")
+	for i, route := range routes {
+		routes[i] = strings.TrimSpace(route)
+	}
+	return routes
+}
 
 func init() {
 	loadEnvFile()
@@ -214,6 +237,9 @@ func init() {
 	SSLCertPath = getEnvString("SSL_CERT_PATH", "")
 	SSLKeyPath = getEnvString("SSL_KEY_PATH", "")
 	BindAddress = getEnvString("BIND_ADDRESS", "127.0.0.1")
+
+	// Collection Configuration
+	CollectionRoutes = parseCollectionRoutes(getEnvString("COLLECTION_ROUTES", ""))
 
 	// Logging Configuration
 	LogVerbosity = getEnvString("LOG_VERBOSITY", "WARN")

@@ -110,6 +110,9 @@ var tables = []string{
 	`CREATE TABLE IF NOT EXISTS storyfragment_topics (id NUMERIC PRIMARY KEY, title TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS storyfragment_has_topic (id NUMERIC PRIMARY KEY, storyfragment_id TEXT NOT NULL REFERENCES storyfragments(id), topic_id NUMERIC NOT NULL REFERENCES storyfragment_topics(id))`,
 	`CREATE TABLE IF NOT EXISTS storyfragment_details (id NUMERIC PRIMARY KEY, storyfragment_id TEXT NOT NULL REFERENCES storyfragments(id), description TEXT NOT NULL)`,
+	`CREATE VIRTUAL TABLE IF NOT EXISTS pane_content_fts USING fts5(pane_id UNINDEXED, content, tokenize = 'porter unicode61')`,
+	`CREATE VIRTUAL TABLE IF NOT EXISTS storyfragment_metadata_fts USING fts5(storyfragment_id UNINDEXED, content, tokenize = 'porter unicode61')`,
+	`CREATE VIRTUAL TABLE IF NOT EXISTS resource_body_fts USING fts5(resource_id UNINDEXED, content, tokenize = 'porter unicode61')`,
 }
 
 var indexes = []string{

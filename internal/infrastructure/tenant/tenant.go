@@ -8,7 +8,10 @@ import (
 	"sync"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/manager"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/database"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,6 +23,7 @@ type Manager struct {
 	contextMutexes sync.Map // Per-tenant mutexes for fine-grained locking
 	globalMutex    sync.RWMutex
 	logger         *logging.ChanneledLogger
+	ftsService     *fts.FTSService
 }
 
 // NewManager creates and initializes a new tenant manager.
@@ -80,7 +84,7 @@ func (m *Manager) NewContextFromID(tenantID string) (*Context, error) {
 	return m.createContext(tenantID)
 }
 
-// createContext creates a new tenant context
+// createContext creates a new tenant context - FAST, no migrations
 func (m *Manager) createContext(tenantID string) (*Context, error) {
 	config, err := LoadTenantConfig(tenantID, m.logger)
 	if err != nil {
@@ -101,6 +105,7 @@ func (m *Manager) createContext(tenantID string) (*Context, error) {
 		Status:       status,
 		CacheManager: m.cacheManager,
 		Logger:       m.logger,
+		ftsService:   m.ftsService,
 	}
 
 	m.globalMutex.Lock()
@@ -110,17 +115,112 @@ func (m *Manager) createContext(tenantID string) (*Context, error) {
 	return ctx, nil
 }
 
-// preActivateSingleTenant activates a single tenant during startup
+// RunStartupMigrations ensures all tenants have correct schema and FTS indexes during startup
+func (m *Manager) RunStartupMigrations() error {
+	detector := m.GetDetector()
+	registry := detector.GetRegistry()
+
+	if len(registry.Tenants) == 0 {
+		return nil
+	}
+
+	var failedTenants []string
+
+	for tenantID := range registry.Tenants {
+		log.Printf("[MIGRATION] Processing tenant: %s", tenantID)
+
+		// Create a temporary context for migration (will be discarded)
+		ctx, err := m.createContext(tenantID)
+		if err != nil {
+			m.logger.System().Warn("Failed to create context for migration", "error", err, "tenantId", tenantID)
+			failedTenants = append(failedTenants, tenantID)
+			continue
+		}
+
+		// 1. Run schema migrations to ensure all tables and indexes exist (idempotent)
+		tableCreator := database.NewTableCreator()
+		if err := tableCreator.CreateSchema(ctx.Database.Conn); err != nil {
+			m.logger.System().Error("Schema migration failed for tenant", "error", err, "tenantId", tenantID)
+			if closeErr := ctx.Close(); closeErr != nil {
+				m.logger.System().Warn("Failed to close context after schema error", "error", closeErr, "tenantId", tenantID)
+			}
+			failedTenants = append(failedTenants, tenantID)
+			continue
+		}
+
+		// 2. Check if FTS tables are populated
+		var paneCount, sfCount int
+
+		err = ctx.Database.Conn.QueryRow("SELECT count(*) FROM pane_content_fts").Scan(&paneCount)
+		if err != nil {
+			m.logger.System().Debug("Could not query pane_content_fts table, assuming re-index is needed", "error", err, "tenantId", tenantID)
+			paneCount = 0
+		}
+
+		err = ctx.Database.Conn.QueryRow("SELECT count(*) FROM storyfragment_metadata_fts").Scan(&sfCount)
+		if err != nil {
+			m.logger.System().Debug("Could not query storyfragment_metadata_fts table, assuming re-index is needed", "error", err, "tenantId", tenantID)
+			sfCount = 0
+		}
+
+		needsReindex := false
+		if paneCount == 0 || sfCount == 0 {
+			needsReindex = true
+		}
+
+		// Only check resource_body_fts if COLLECTION_ROUTES is configured
+		if len(config.CollectionRoutes) > 0 {
+			var resourceCount int
+			err = ctx.Database.Conn.QueryRow("SELECT count(*) FROM resource_body_fts").Scan(&resourceCount)
+			if err != nil {
+				m.logger.System().Debug("Could not query resource_body_fts table, assuming re-index is needed", "error", err, "tenantId", tenantID)
+				resourceCount = 0
+			}
+			if resourceCount == 0 {
+				needsReindex = true
+			}
+		}
+
+		// 3. If any FTS tables are empty, trigger a one-time re-index
+		if needsReindex {
+			log.Printf("    %s▒▓ Priming FTS Index for: %s%s", "\033[35;1m", tenantID, "\033[0m")
+			if err := database.ReindexFTSTables(ctx.Database.Conn, m.ftsService, m.logger); err != nil {
+				// Log as a warning but don't prevent startup for FTS failure
+				m.logger.System().Warn("FTS re-indexing failed for tenant", "error", err, "tenantId", tenantID)
+			}
+		}
+
+		// Close the temporary context
+		if err := ctx.Close(); err != nil {
+			m.logger.System().Warn("Failed to close temporary migration context", "error", err, "tenantId", tenantID)
+		}
+	}
+
+	if len(failedTenants) > 0 {
+		return fmt.Errorf("migration failed for tenants: %v", failedTenants)
+	}
+
+	return nil
+}
+
+// preActivateSingleTenant activates a single tenant during startup (status transition only)
 func (m *Manager) preActivateSingleTenant(tenantID string) error {
 	ctx, err := m.createContext(tenantID)
 	if err != nil {
 		return fmt.Errorf("failed to create context for tenant %s: %w", tenantID, err)
 	}
+	defer func() {
+		if err := ctx.Close(); err != nil {
+			m.logger.System().Warn("Failed to close context in preActivateSingleTenant", "error", err, "tenantId", tenantID)
+		}
+	}()
 
+	// Test database connection
 	if err := ctx.Database.Conn.Ping(); err != nil {
 		return fmt.Errorf("database connection test failed for tenant %s: %w", tenantID, err)
 	}
 
+	// Update tenant status to active
 	dbType := "sqlite3"
 	if ctx.Database.UseTurso {
 		dbType = "turso"
@@ -162,6 +262,11 @@ func (m *Manager) SetLogger(logger *logging.ChanneledLogger) {
 	if m.detector != nil && logger != nil {
 		m.detector.logger = logger
 	}
+}
+
+// SetFTSService sets the FTS service for the manager to pass to tenant contexts.
+func (m *Manager) SetFTSService(ftsService *fts.FTSService) {
+	m.ftsService = ftsService
 }
 
 // GetLogger returns the logger for middleware access

@@ -9,22 +9,26 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type ResourceRepository struct {
-	db     *sql.DB
-	cache  interfaces.ContentCache
-	logger *logging.ChanneledLogger
+	db         *sql.DB
+	cache      interfaces.ContentCache
+	logger     *logging.ChanneledLogger
+	ftsService *fts.FTSService
 }
 
-func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *ResourceRepository {
+func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.FTSService) *ResourceRepository {
 	return &ResourceRepository{
-		db:     db,
-		cache:  cache,
-		logger: logger,
+		db:         db,
+		cache:      cache,
+		logger:     logger,
+		ftsService: ftsService,
 	}
 }
 
@@ -125,71 +129,125 @@ func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*conten
 }
 
 func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNode) error {
-	optionsJSON, _ := json.Marshal(resource.OptionsPayload)
-
-	query := `INSERT INTO resources (id, title, slug, category_slug, oneliner, action_lisp, options_payload) 
-              VALUES (?, ?, ?, ?, ?, ?, ?)`
-
-	start := time.Now()
-	r.logger.Database().Debug("Executing resource insert", "id", resource.ID)
-
-	_, err := r.db.Exec(query, resource.ID, resource.Title, resource.Slug,
-		resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON))
+	tx, err := r.db.Begin()
 	if err != nil {
-		r.logger.Database().Error("Resource insert failed", "error", err.Error(), "id", resource.ID)
+		return fmt.Errorf("failed to begin transaction for resource store: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for resource store", "error", err)
+		}
+	}()
+
+	optionsJSON, _ := json.Marshal(resource.OptionsPayload)
+	query := `INSERT INTO resources (id, title, slug, category_slug, oneliner, action_lisp, options_payload) VALUES (?, ?, ?, ?, ?, ?, ?)`
+
+	if _, err := tx.Exec(query, resource.ID, resource.Title, resource.Slug, resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON)); err != nil {
 		return fmt.Errorf("failed to insert resource: %w", err)
 	}
 
-	r.logger.Database().Info("Resource insert completed", "id", resource.ID, "duration", time.Since(start))
-	duration := time.Since(start)
-	if duration > config.SlowQueryThreshold {
-		r.logger.LogSlowQuery(query, duration, tenantID)
+	// FTS Indexing (errors are logged and ignored) - only if category is in COLLECTION_ROUTES
+	shouldIndex := false
+	if len(config.CollectionRoutes) == 0 {
+		// If no collection routes configured, index all resources
+		shouldIndex = true
+	} else if resource.CategorySlug != nil {
+		// Check if this resource's category is in the collection routes
+		for _, route := range config.CollectionRoutes {
+			if *resource.CategorySlug == route {
+				shouldIndex = true
+				break
+			}
+		}
 	}
+
+	if shouldIndex {
+		// Extract body content and index it - handle both string and array formats
+		var bodyText string
+		if body, ok := resource.OptionsPayload["body"].(string); ok && body != "" {
+			bodyText = body
+		} else if bodyArray, ok := resource.OptionsPayload["body"].([]any); ok && len(bodyArray) > 0 {
+			// Convert array of strings to single string
+			var bodyParts []string
+			for _, part := range bodyArray {
+				if partStr, ok := part.(string); ok {
+					bodyParts = append(bodyParts, partStr)
+				}
+			}
+			bodyText = strings.Join(bodyParts, " ")
+		}
+
+		if bodyText != "" {
+			if err := r.ftsService.IndexResourceBody(tx, resource.ID, bodyText); err != nil {
+				r.logger.System().Warn("Failed to index new resource body", "error", err, "resourceId", resource.ID)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for resource store: %w", err)
+	}
+
 	r.cache.SetResource(tenantID, resource)
 	return nil
 }
 
 func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceNode) error {
-	optionsJSON, _ := json.Marshal(resource.OptionsPayload)
-
-	query := `UPDATE resources SET title = ?, slug = ?, category_slug = ?, oneliner = ?, 
-              action_lisp = ?, options_payload = ? WHERE id = ?`
-
-	start := time.Now()
-	r.logger.Database().Debug("Executing resource update", "id", resource.ID)
-
-	_, err := r.db.Exec(query, resource.Title, resource.Slug, resource.CategorySlug,
-		resource.OneLiner, resource.ActionLisp, string(optionsJSON), resource.ID)
+	tx, err := r.db.Begin()
 	if err != nil {
-		r.logger.Database().Error("Resource update failed", "error", err.Error(), "id", resource.ID)
+		return fmt.Errorf("failed to begin transaction for resource update: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for resource update", "error", err)
+		}
+	}()
+
+	optionsJSON, _ := json.Marshal(resource.OptionsPayload)
+	query := `UPDATE resources SET title = ?, slug = ?, category_slug = ?, oneliner = ?, action_lisp = ?, options_payload = ? WHERE id = ?`
+
+	if _, err := tx.Exec(query, resource.Title, resource.Slug, resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON), resource.ID); err != nil {
 		return fmt.Errorf("failed to update resource: %w", err)
 	}
 
-	r.logger.Database().Info("Resource update completed", "id", resource.ID, "duration", time.Since(start))
-	duration := time.Since(start)
-	if duration > config.SlowQueryThreshold {
-		r.logger.LogSlowQuery(query, duration, tenantID)
+	// FTS Indexing (errors are logged and ignored)
+	if body, ok := resource.OptionsPayload["body"].(string); ok && body != "" {
+		if err := r.ftsService.IndexResourceBody(tx, resource.ID, body); err != nil {
+			r.logger.System().Warn("Failed to index updated resource body", "error", err, "resourceId", resource.ID)
+		}
+	} else {
+		// If body is removed, delete from index
+		if err := r.ftsService.IndexResourceBody(tx, resource.ID, ""); err != nil {
+			r.logger.System().Warn("Failed to clear resource body index", "error", err, "resourceId", resource.ID)
+		}
 	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for resource update: %w", err)
+	}
+
 	r.cache.SetResource(tenantID, resource)
 	return nil
 }
 
 func (r *ResourceRepository) Delete(tenantID, id string) error {
-	query := `DELETE FROM resources WHERE id = ?`
-
-	start := time.Now()
-	r.logger.Database().Debug("Executing resource delete", "id", id)
-
-	_, err := r.db.Exec(query, id)
+	tx, err := r.db.Begin()
 	if err != nil {
-		r.logger.Database().Error("Resource delete failed", "error", err.Error(), "id", id)
+		return fmt.Errorf("failed to begin transaction for resource delete: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for resource delete", "error", err)
+		}
+	}()
+
+	query := `DELETE FROM resources WHERE id = ?`
+	if _, err := tx.Exec(query, id); err != nil {
 		return fmt.Errorf("failed to delete resource: %w", err)
 	}
 
-	r.logger.Database().Info("Resource delete completed", "id", id, "duration", time.Since(start))
-	duration := time.Since(start)
-	if duration > config.SlowQueryThreshold {
-		r.logger.LogSlowQuery(query, duration, tenantID)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for resource delete: %w", err)
 	}
 	return nil
 }
@@ -477,4 +535,25 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 	}
 
 	return finalResources, nil
+}
+
+// SearchBodies performs a prefix search on the resource_body_fts table.
+func (r *ResourceRepository) SearchBodies(tenantID, term string) ([]repositories.FTSResult, error) {
+	query := `SELECT resource_id, rank, snippet(resource_body_fts, 1, '>>>', '<<<', '...', 1) FROM resource_body_fts WHERE content MATCH ? ORDER BY rank LIMIT 10`
+	searchTerm := term + "*"
+	rows, err := r.db.Query(query, searchTerm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search resource bodies: %w", err)
+	}
+	defer rows.Close()
+
+	var results []repositories.FTSResult
+	for rows.Next() {
+		var res repositories.FTSResult
+		if err := rows.Scan(&res.ID, &res.Relevance, &res.Term); err != nil {
+			return nil, fmt.Errorf("failed to scan resource body search result: %w", err)
+		}
+		results = append(results, res)
+	}
+	return results, rows.Err()
 }

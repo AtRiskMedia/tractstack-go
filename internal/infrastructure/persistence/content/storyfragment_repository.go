@@ -8,23 +8,27 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 type StoryFragmentRepository struct {
-	db     *sql.DB
-	cache  interfaces.ContentCache
-	logger *logging.ChanneledLogger
+	db         *sql.DB
+	cache      interfaces.ContentCache
+	logger     *logging.ChanneledLogger
+	ftsService *fts.FTSService
 }
 
-func NewStoryFragmentRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *StoryFragmentRepository {
+func NewStoryFragmentRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.FTSService) *StoryFragmentRepository {
 	return &StoryFragmentRepository{
-		db:     db,
-		cache:  cache,
-		logger: logger,
+		db:         db,
+		cache:      cache,
+		logger:     logger,
+		ftsService: ftsService,
 	}
 }
 
@@ -120,51 +124,65 @@ func (r *StoryFragmentRepository) FindByIDs(tenantID string, ids []string) ([]*c
 }
 
 func (r *StoryFragmentRepository) Store(tenantID string, storyFragment *content.StoryFragmentNode) error {
-	query := `INSERT INTO storyfragments (id, title, slug, tractstack_id, menu_id, 
-              tailwind_background_colour, social_image_path, created, changed) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-
-	start := time.Now()
-	r.logger.Database().Debug("Executing storyfragment insert", "id", storyFragment.ID)
-
-	_, err := r.db.Exec(query, storyFragment.ID, storyFragment.Title, storyFragment.Slug,
-		storyFragment.TractStackID, storyFragment.MenuID, storyFragment.TailwindBgColour,
-		storyFragment.SocialImagePath, storyFragment.Created, storyFragment.Changed)
+	tx, err := r.db.Begin()
 	if err != nil {
-		r.logger.Database().Error("Storyfragment insert failed", "error", err.Error(), "id", storyFragment.ID)
+		return fmt.Errorf("failed to begin transaction for storyfragment store: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for storyfragment store", "error", err)
+		}
+	}()
+
+	query := `INSERT INTO storyfragments (id, title, slug, tractstack_id, menu_id, tailwind_background_colour, social_image_path, created, changed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if _, err := tx.Exec(query, storyFragment.ID, storyFragment.Title, storyFragment.Slug, storyFragment.TractStackID, storyFragment.MenuID, storyFragment.TailwindBgColour, storyFragment.SocialImagePath, storyFragment.Created, storyFragment.Changed); err != nil {
 		return fmt.Errorf("failed to insert storyfragment: %w", err)
 	}
 
-	r.logger.Database().Info("Storyfragment insert completed", "id", storyFragment.ID, "duration", time.Since(start))
-	duration := time.Since(start)
-	if duration > config.SlowQueryThreshold {
-		r.logger.LogSlowQuery(query, duration, tenantID)
+	// Index title (description is not available on initial store)
+	if err := r.ftsService.IndexStoryFragmentMetadata(tx, storyFragment.ID, storyFragment.Title, ""); err != nil {
+		r.logger.System().Warn("Failed to index new storyfragment metadata", "error", err, "storyFragmentId", storyFragment.ID)
 	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for storyfragment store: %w", err)
+	}
+
 	r.cache.SetStoryFragment(tenantID, storyFragment)
 	return nil
 }
 
 func (r *StoryFragmentRepository) Update(tenantID string, storyFragment *content.StoryFragmentNode) error {
-	query := `UPDATE storyfragments SET title = ?, slug = ?, tractstack_id = ?, menu_id = ?, 
-              tailwind_background_colour = ?, social_image_path = ?, changed = ? 
-              WHERE id = ?`
-
-	start := time.Now()
-	r.logger.Database().Debug("Executing storyfragment update", "id", storyFragment.ID)
-
-	_, err := r.db.Exec(query, storyFragment.Title, storyFragment.Slug, storyFragment.TractStackID,
-		storyFragment.MenuID, storyFragment.TailwindBgColour, storyFragment.SocialImagePath,
-		storyFragment.Changed, storyFragment.ID)
+	tx, err := r.db.Begin()
 	if err != nil {
-		r.logger.Database().Error("Storyfragment update failed", "error", err.Error(), "id", storyFragment.ID)
+		return fmt.Errorf("failed to begin transaction for storyfragment update: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for storyfragment update", "error", err)
+		}
+	}()
+
+	query := `UPDATE storyfragments SET title = ?, slug = ?, tractstack_id = ?, menu_id = ?, tailwind_background_colour = ?, social_image_path = ?, changed = ? WHERE id = ?`
+	if _, err := tx.Exec(query, storyFragment.Title, storyFragment.Slug, storyFragment.TractStackID, storyFragment.MenuID, storyFragment.TailwindBgColour, storyFragment.SocialImagePath, storyFragment.Changed, storyFragment.ID); err != nil {
 		return fmt.Errorf("failed to update storyfragment: %w", err)
 	}
 
-	r.logger.Database().Info("Storyfragment update completed", "id", storyFragment.ID, "duration", time.Since(start))
-	duration := time.Since(start)
-	if duration > config.SlowQueryThreshold {
-		r.logger.LogSlowQuery(query, duration, tenantID)
+	// For FTS, get existing description to re-index with new title
+	var existingDesc string
+	descQuery := `SELECT description FROM storyfragment_details WHERE storyfragment_id = ?`
+	if err := tx.QueryRow(descQuery, storyFragment.ID).Scan(&existingDesc); err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("failed to query existing description for fts update: %w", err)
 	}
+
+	if err := r.ftsService.IndexStoryFragmentMetadata(tx, storyFragment.ID, storyFragment.Title, existingDesc); err != nil {
+		r.logger.System().Warn("Failed to index updated storyfragment metadata", "error", err, "storyFragmentId", storyFragment.ID)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for storyfragment update: %w", err)
+	}
+
 	r.cache.SetStoryFragment(tenantID, storyFragment)
 	return nil
 }
@@ -211,6 +229,11 @@ func (r *StoryFragmentRepository) Delete(tenantID, id string) error {
 	if err != nil {
 		r.logger.Database().Error("Storyfragment delete failed", "error", err.Error(), "id", id)
 		return fmt.Errorf("failed to delete storyfragment: %w", err)
+	}
+
+	// 5. Delete from FTS index
+	if _, err = tx.Exec("DELETE FROM storyfragment_metadata_fts WHERE storyfragment_id = ?", id); err != nil {
+		return fmt.Errorf("failed to delete storyfragment fts metadata: %w", err)
 	}
 
 	if err = tx.Commit(); err != nil {
@@ -653,19 +676,41 @@ func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string,
 
 // UpdateDescription updates the description for a storyfragment
 func (r *StoryFragmentRepository) UpdateDescription(tenantID, storyFragmentID string, description *string) error {
-	if description == nil {
-		// Delete existing description
-		_, err := r.db.Exec("DELETE FROM storyfragment_details WHERE storyfragment_id = ?", storyFragmentID)
-		return err
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for description update: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for description update", "error", err)
+		}
+	}()
+
+	var currentTitle string
+	titleQuery := `SELECT title FROM storyfragments WHERE id = ?`
+	if err := tx.QueryRow(titleQuery, storyFragmentID).Scan(&currentTitle); err != nil {
+		return fmt.Errorf("failed to get current title for fts update: %w", err)
 	}
 
-	// Upsert description
-	_, err := r.db.Exec(`INSERT INTO storyfragment_details (storyfragment_id, description) 
-		VALUES (?, ?) 
-		ON CONFLICT(storyfragment_id) DO UPDATE SET description = excluded.description`,
-		storyFragmentID, *description)
+	descText := ""
+	if description != nil {
+		descText = *description
+		_, err = tx.Exec(`INSERT INTO storyfragment_details (storyfragment_id, description) VALUES (?, ?) ON CONFLICT(storyfragment_id) DO UPDATE SET description = excluded.description`, storyFragmentID, descText)
+		if err != nil {
+			return fmt.Errorf("failed to upsert description: %w", err)
+		}
+	} else {
+		_, err = tx.Exec("DELETE FROM storyfragment_details WHERE storyfragment_id = ?", storyFragmentID)
+		if err != nil {
+			return fmt.Errorf("failed to delete description: %w", err)
+		}
+	}
 
-	return err
+	if err := r.ftsService.IndexStoryFragmentMetadata(tx, storyFragmentID, currentTitle, descText); err != nil {
+		r.logger.System().Warn("Failed to index updated storyfragment metadata via description", "error", err, "storyFragmentId", storyFragmentID)
+	}
+
+	return tx.Commit()
 }
 
 // FindIDsByPaneID retrieves all storyfragment IDs that contain a specific pane ID.
@@ -701,4 +746,25 @@ func (r *StoryFragmentRepository) FindIDsByPaneID(paneID string) ([]string, erro
 		r.logger.LogSlowQuery(query, duration, "system")
 	}
 	return storyFragmentIDs, nil
+}
+
+// SearchMetadata performs a prefix search on the storyfragment_metadata_fts table.
+func (r *StoryFragmentRepository) SearchMetadata(tenantID, term string) ([]repositories.FTSResult, error) {
+	query := `SELECT storyfragment_id, rank, snippet(storyfragment_metadata_fts, 1, '>>>', '<<<', '...', 1) FROM storyfragment_metadata_fts WHERE content MATCH ? ORDER BY rank LIMIT 10`
+	searchTerm := term + "*"
+	rows, err := r.db.Query(query, searchTerm)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search storyfragment metadata: %w", err)
+	}
+	defer rows.Close()
+
+	var results []repositories.FTSResult
+	for rows.Next() {
+		var res repositories.FTSResult
+		if err := rows.Scan(&res.ID, &res.Relevance, &res.Term); err != nil {
+			return nil, fmt.Errorf("failed to scan storyfragment metadata search result: %w", err)
+		}
+		results = append(results, res)
+	}
+	return results, rows.Err()
 }

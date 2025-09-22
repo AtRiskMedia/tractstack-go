@@ -32,7 +32,6 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 	start := time.Now()
 	cmb.logger.Database().Debug("Starting content map build", "tenantID", tenantID)
 
-	// CORRECTED: This query is now aligned with the working implementation from api/content_handlers.go
 	query := `
 		SELECT 
 			id, 
@@ -206,7 +205,11 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 		cmb.logger.Database().Error("Content map UNION query failed", "error", err.Error(), "tenantID", tenantID)
 		return nil, fmt.Errorf("failed to execute content map query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			cmb.logger.Database().Error("Failed to close rows", "error", err)
+		}
+	}()
 
 	var items []*content.ContentMapItem
 	rowCount := 0
@@ -223,6 +226,35 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 	if err := rows.Err(); err != nil {
 		cmb.logger.Database().Error("Content map row iteration error", "error", err.Error(), "rowsProcessed", rowCount)
 		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	// Collect unique topics from StoryFragment items
+	topicSet := make(map[string]bool)
+	for _, item := range items {
+		if item.Type == "StoryFragment" && item.Topics != nil {
+			for _, topic := range item.Topics {
+				if topic != "" {
+					topicSet[topic] = true
+				}
+			}
+		}
+	}
+
+	// Create all-topics entry if we have topics
+	if len(topicSet) > 0 {
+		allTopics := make([]string, 0, len(topicSet))
+		for topic := range topicSet {
+			allTopics = append(allTopics, topic)
+		}
+
+		allTopicsItem := &content.ContentMapItem{
+			ID:     "all-topics",
+			Slug:   "all-topics",
+			Title:  "All Topics",
+			Type:   "Topic",
+			Topics: allTopics,
+		}
+		items = append(items, allTopicsItem)
 	}
 
 	cmb.logger.Database().Info("Content map build completed", "tenantID", tenantID, "itemCount", len(items), "duration", time.Since(start))
