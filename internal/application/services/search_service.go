@@ -210,9 +210,11 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 
 // RetrieveFullResults performs a deep search based on a selected term.
 func (s *SearchService) RetrieveFullResults(tenantCtx *tenant.Context, term string, isTopic bool) (*CategorizedResults, error) {
-	var wg sync.WaitGroup
-	var mutex sync.Mutex
-	var firstError error
+	// Get the entire content map from cache once. This is our primary lookup table.
+	cachedItems, err := s.contentMapService.GetCachedContentMap(tenantCtx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Initialize results
 	results := &CategorizedResults{
@@ -221,23 +223,8 @@ func (s *SearchService) RetrieveFullResults(tenantCtx *tenant.Context, term stri
 		ResourceResults:      []repositories.FTSResult{},
 	}
 
-	setError := func(err error) {
-		mutex.Lock()
-		defer mutex.Unlock()
-		if firstError == nil {
-			firstError = err
-		}
-	}
-
-	// If this is a topic search, ONLY search by topic
+	// --- Topic Search Path (uses content map) ---
 	if isTopic {
-		// Get cached content map
-		cachedItems, err := s.contentMapService.GetCachedContentMap(tenantCtx)
-		if err != nil {
-			return nil, err
-		}
-
-		// Find story fragments with the matching topic (case-insensitive)
 		termLower := strings.ToLower(term)
 		for _, item := range cachedItems {
 			if item.Type == "StoryFragment" && item.Topics != nil {
@@ -253,41 +240,24 @@ func (s *SearchService) RetrieveFullResults(tenantCtx *tenant.Context, term stri
 				}
 			}
 		}
-
 		return results, nil
 	}
 
-	// Non-topic search: Check for COLLECTION title matches first
-	if len(config.CollectionRoutes) > 0 {
-		resources, err := s.resourceService.GetAll(tenantCtx)
-		if err == nil {
-			for _, resource := range resources {
-				if resource.CategorySlug != nil {
-					// Check if resource is in COLLECTION_ROUTES
-					isInCollection := false
-					for _, route := range config.CollectionRoutes {
-						if *resource.CategorySlug == route {
-							isInCollection = true
-							break
-						}
-					}
+	// --- Standard Term Search Path (uses FTS then content map) ---
 
-					if isInCollection {
-						// Check for exact title match (case-insensitive)
-						if strings.EqualFold(resource.Title, term) {
-							results.ResourceResults = append(results.ResourceResults, repositories.FTSResult{
-								ID:        resource.ID,
-								Relevance: 0.95, // High relevance for exact title match
-								Term:      term,
-							})
-						}
-					}
-				}
-			}
+	var wg sync.WaitGroup
+	var mutex sync.Mutex
+	var firstError error
+
+	setError := func(err error) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		if firstError == nil {
+			firstError = err
 		}
 	}
 
-	// Search StoryFragment metadata
+	// 1. Search StoryFragment metadata (FTS)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -301,51 +271,7 @@ func (s *SearchService) RetrieveFullResults(tenantCtx *tenant.Context, term stri
 		mutex.Unlock()
 	}()
 
-	// Search ContextPane content
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		paneResults, err := s.paneService.SearchContent(tenantCtx, term)
-		if err != nil {
-			setError(err)
-			return
-		}
-
-		// Filter for context panes only
-		if len(paneResults) > 0 {
-			paneRepo := tenantCtx.PaneRepo()
-			resultsByPaneID := make(map[string]repositories.FTSResult)
-			for _, result := range paneResults {
-				resultsByPaneID[result.ID] = result
-			}
-
-			paneIDs := make([]string, 0, len(resultsByPaneID))
-			for paneID := range resultsByPaneID {
-				paneIDs = append(paneIDs, paneID)
-			}
-
-			panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, paneIDs)
-			if err != nil {
-				setError(err)
-				return
-			}
-
-			mutex.Lock()
-			for _, pane := range panes {
-				if pane.IsContextPane {
-					paneID := pane.ID
-					results.ContextPaneResults = append(results.ContextPaneResults, repositories.FTSResult{
-						ID:        paneID,
-						Relevance: resultsByPaneID[paneID].Relevance,
-						Term:      resultsByPaneID[paneID].Term,
-					})
-				}
-			}
-			mutex.Unlock()
-		}
-	}()
-
-	// Search Resource bodies (FTS search in addition to title matches above)
+	// 2. Search Resource bodies (FTS)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -359,10 +285,91 @@ func (s *SearchService) RetrieveFullResults(tenantCtx *tenant.Context, term stri
 		mutex.Unlock()
 	}()
 
+	// 3. Search Pane content (FTS) and then resolve parents using the Content Map
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Hit the FTS table to get matching pane IDs
+		paneFTSResults, err := s.paneService.SearchContent(tenantCtx, term)
+		if err != nil {
+			setError(err)
+			return
+		}
+		if len(paneFTSResults) == 0 {
+			return
+		}
+
+		// Create a quick lookup map of paneID -> FTS result
+		ftsResultMap := make(map[string]repositories.FTSResult)
+		for _, res := range paneFTSResults {
+			ftsResultMap[res.ID] = res
+		}
+
+		// Now, iterate through the *cached content map* to find parents and context panes
+		// This avoids any further database hits.
+		parentStoryFragmentIDs := make(map[string]bool)
+
+		mutex.Lock()
+		for _, item := range cachedItems {
+			// Case A: The map item is a Pane that matched our FTS search
+			if item.Type == "Pane" {
+				if _, ok := ftsResultMap[item.ID]; ok {
+					// Check if it's a context pane
+					if item.IsContext != nil && *item.IsContext {
+						results.ContextPaneResults = append(results.ContextPaneResults, ftsResultMap[item.ID])
+					}
+				}
+			}
+
+			// Case B: The map item is a StoryFragment. Check if it contains a pane that matched our FTS search.
+			if item.Type == "StoryFragment" && item.Panes != nil {
+				for _, paneIDInSF := range item.Panes {
+					if _, ok := ftsResultMap[paneIDInSF]; ok {
+						parentStoryFragmentIDs[item.ID] = true // Found a parent
+						break                                  // Move to the next story fragment
+					}
+				}
+			}
+		}
+
+		// Add the discovered parent StoryFragments to the results
+		for sfID := range parentStoryFragmentIDs {
+			results.StoryFragmentResults = append(results.StoryFragmentResults, repositories.FTSResult{
+				ID:        sfID,
+				Relevance: 0.5, // Indicate that this was a match via pane content
+				Term:      term,
+			})
+		}
+		mutex.Unlock()
+	}()
+
 	wg.Wait()
 
 	if firstError != nil {
 		return nil, firstError
+	}
+
+	// Non-topic search: Check for COLLECTION title matches first (uses cache-first GetAll)
+	if len(config.CollectionRoutes) > 0 {
+		resources, err := s.resourceService.GetAll(tenantCtx) // This uses cache
+		if err == nil {
+			for _, resource := range resources {
+				if resource.CategorySlug != nil {
+					isInCollection := false
+					for _, route := range config.CollectionRoutes {
+						if *resource.CategorySlug == route {
+							isInCollection = true
+							break
+						}
+					}
+					if isInCollection && strings.EqualFold(resource.Title, term) {
+						results.ResourceResults = append(results.ResourceResults, repositories.FTSResult{
+							ID: resource.ID, Relevance: 0.95, Term: term,
+						})
+					}
+				}
+			}
+		}
 	}
 
 	// De-duplicate results within each category by ID
