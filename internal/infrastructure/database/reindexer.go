@@ -118,8 +118,7 @@ func ReindexFTSTables(db *sql.DB, ftsService *fts.FTSService, logger *logging.Ch
 		shouldIndex := false
 		if len(config.CollectionRoutes) == 0 {
 			// If no collection routes configured, index all resources
-			shouldIndex = true
-			logger.Database().Debug("No COLLECTION_ROUTES configured, indexing all resources")
+			logger.Database().Debug("No COLLECTION_ROUTES configured, skipping indexing on resources")
 		} else if categorySlug.Valid {
 			// Check if this resource's category is in the collection routes
 			for _, route := range config.CollectionRoutes {
