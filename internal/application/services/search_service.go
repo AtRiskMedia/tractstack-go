@@ -43,22 +43,28 @@ func NewSearchService(ps *PaneService, sfs *StoryFragmentService, rs *ResourceSe
 	}
 }
 
-// GetDiscoverSuggestions provides "as-you-type" suggestions.
+// GetDiscoverSuggestions provides "as-you-type" suggestions using FTS indexes.
 func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query string) ([]DiscoverySuggestion, error) {
 	var wg sync.WaitGroup
 	var mutex sync.Mutex
 	suggestions := make(map[string]string) // Use map for easy de-duplication: term -> type
 	var firstError error
 
+	// Helper function to safely add suggestions with type priority
 	addSuggestion := func(term, termType string) {
 		mutex.Lock()
 		defer mutex.Unlock()
 
-		// Remove the snippet markers and ellipses
+		// Remove FTS snippet markers and ellipses
 		term = strings.ReplaceAll(term, ">>>", "")
 		term = strings.ReplaceAll(term, "<<<", "")
 		term = strings.ReplaceAll(term, "...", "")
 		cleanedTerm := strings.ToLower(strings.TrimSpace(term))
+
+		// Skip empty terms or single characters
+		if len(cleanedTerm) < 2 {
+			return
+		}
 
 		// Prioritize better match types (TITLE > COLLECTION > TOPIC > CONTENT)
 		if existingType, exists := suggestions[cleanedTerm]; exists {
@@ -82,94 +88,133 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 		}
 	}
 
-	// Wrapper for FTS searches
-	runFTSSearch := func(searcher func(*tenant.Context, string) ([]repositories.FTSResult, error)) {
+	// Prepare FTS prefix search term
+	searchTerm := query + "*"
+
+	// 1. Search StoryFragment metadata (FTS) for TITLE matches
+	wg.Add(1)
+	go func() {
 		defer wg.Done()
-		results, err := searcher(tenantCtx, query)
+		results, err := s.storyFragmentService.SearchMetadata(tenantCtx, searchTerm)
 		if err != nil {
 			setError(err)
 			return
 		}
-		for _, res := range results {
-			addSuggestion(res.Term, "CONTENT")
+
+		// Extract meaningful terms from story fragment titles
+		for _, result := range results {
+			// Get the actual story fragment to access the title
+			cachedItems, err := s.contentMapService.GetCachedContentMap(tenantCtx)
+			if err != nil {
+				continue
+			}
+
+			for _, item := range cachedItems {
+				if item.Type == "StoryFragment" && item.ID == result.ID {
+					addSuggestion(item.Title, "TITLE")
+					break
+				}
+			}
 		}
-	}
+	}()
 
-	// Goroutine 1, 2, 3: FTS Searches
-	wg.Add(3)
-	go runFTSSearch(s.paneService.SearchContent)
-	go runFTSSearch(s.storyFragmentService.SearchMetadata)
-	go runFTSSearch(s.resourceService.SearchBodies)
-
-	// Goroutine 4: Topic Search using ContentMap
+	// 2. Search Pane content (FTS) for CONTENT matches
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		results, err := s.paneService.SearchContent(tenantCtx, searchTerm)
+		if err != nil {
+			setError(err)
+			return
+		}
 
-		// Get cached content map
+		// Extract terms from FTS snippets
+		for _, result := range results {
+			// Parse the snippet to extract relevant terms
+			snippetWords := extractWordsFromSnippet(result.Term, query)
+			for _, word := range snippetWords {
+				addSuggestion(word, "CONTENT")
+			}
+		}
+	}()
+
+	// 3. Search Resource bodies (FTS) for CONTENT matches
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		results, err := s.resourceService.SearchBodies(tenantCtx, searchTerm)
+		if err != nil {
+			setError(err)
+			return
+		}
+
+		// Extract terms from resource FTS snippets
+		for _, result := range results {
+			snippetWords := extractWordsFromSnippet(result.Term, query)
+			for _, word := range snippetWords {
+				addSuggestion(word, "CONTENT")
+			}
+		}
+	}()
+
+	// 4. Search Topics from content map (cached, fast)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		cachedItems, err := s.contentMapService.GetCachedContentMap(tenantCtx)
 		if err != nil {
 			setError(err)
 			return
 		}
 
-		// Find the special "all-topics" entry
-		var allTopics []string
+		queryLower := strings.ToLower(query)
 		for _, item := range cachedItems {
-			if item.Type == "Topic" && item.ID == "all-topics" {
-				allTopics = item.Topics
-				break
-			}
-		}
-
-		// Filter topics by query (case-insensitive substring match)
-		queryLower := strings.ToLower(query)
-		for _, topic := range allTopics {
-			if strings.Contains(strings.ToLower(topic), queryLower) {
-				addSuggestion(topic, "TOPIC")
-			}
-		}
-	}()
-
-	// Goroutine 5: Resource Title N-gram Search (COLLECTION)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// Only search collection resources if COLLECTION_ROUTES is configured
-		if len(config.CollectionRoutes) == 0 {
-			return
-		}
-
-		// Get all resources from cache-first repository
-		resources, err := s.resourceService.GetAll(tenantCtx)
-		if err != nil {
-			setError(err)
-			return
-		}
-
-		// Filter and search resource titles for n-gram matches
-		queryLower := strings.ToLower(query)
-		for _, resource := range resources {
-			// Only include resources from collection routes
-			if resource.CategorySlug != nil {
-				isInCollection := false
-				for _, route := range config.CollectionRoutes {
-					if *resource.CategorySlug == route {
-						isInCollection = true
-						break
-					}
-				}
-
-				if isInCollection {
-					titleLower := strings.ToLower(resource.Title)
-					// Simple n-gram match: check if query is contained in title
-					if strings.Contains(titleLower, queryLower) {
-						addSuggestion(resource.Title, "COLLECTION")
+			if item.Type == "StoryFragment" && item.Topics != nil {
+				for _, topic := range item.Topics {
+					topicLower := strings.ToLower(topic)
+					// Only suggest topics that start with the query (prefix matching)
+					if strings.HasPrefix(topicLower, queryLower) {
+						addSuggestion(topic, "TOPIC")
 					}
 				}
 			}
 		}
 	}()
+
+	// 5. Search Collection titles (exact matches and prefix matches)
+	if len(config.CollectionRoutes) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resources, err := s.resourceService.GetAll(tenantCtx)
+			if err != nil {
+				setError(err)
+				return
+			}
+
+			queryLower := strings.ToLower(query)
+			for _, resource := range resources {
+				// Only include resources from collection routes
+				if resource.CategorySlug != nil {
+					isInCollection := false
+					for _, route := range config.CollectionRoutes {
+						if *resource.CategorySlug == route {
+							isInCollection = true
+							break
+						}
+					}
+
+					if isInCollection {
+						titleLower := strings.ToLower(resource.Title)
+						// Prefix match for better relevance
+						if strings.HasPrefix(titleLower, queryLower) {
+							addSuggestion(resource.Title, "COLLECTION")
+						}
+					}
+				}
+			}
+		}()
+	}
 
 	wg.Wait()
 
@@ -177,6 +222,7 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 		return nil, firstError
 	}
 
+	// Convert map to slice
 	resultList := make([]DiscoverySuggestion, 0, len(suggestions))
 	for term, termType := range suggestions {
 		resultList = append(resultList, DiscoverySuggestion{Term: term, Type: termType})
@@ -205,7 +251,35 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 		return resultList[i].Term < resultList[j].Term
 	})
 
+	// Limit results to prevent overwhelming the UI
+	if len(resultList) > 20 {
+		resultList = resultList[:20]
+	}
+
 	return resultList, nil
+}
+
+// extractWordsFromSnippet extracts meaningful words from FTS snippets
+func extractWordsFromSnippet(snippet, query string) []string {
+	// Remove FTS markers
+	cleaned := strings.ReplaceAll(snippet, ">>>", "")
+	cleaned = strings.ReplaceAll(cleaned, "<<<", "")
+	cleaned = strings.ReplaceAll(cleaned, "...", "")
+
+	// Split into words and filter
+	words := strings.Fields(strings.ToLower(cleaned))
+	var result []string
+	queryLower := strings.ToLower(query)
+
+	for _, word := range words {
+		// Only include words that start with the query (prefix matching)
+		// and are reasonable length
+		if len(word) >= 3 && len(word) <= 20 && strings.HasPrefix(word, queryLower) {
+			result = append(result, word)
+		}
+	}
+
+	return result
 }
 
 // RetrieveFullResults performs a deep search based on a selected term.
