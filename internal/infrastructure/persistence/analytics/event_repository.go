@@ -544,7 +544,7 @@ func (r *SQLEventRepository) LoadFingerprintBeliefs(fingerprintID string) (map[s
 			// Regular belief values (BELIEVES_YES, BELIEVES_NO, etc.)
 			currentValues := beliefs[slug]
 			if !slices.Contains(currentValues, verb) {
-				beliefs[slug] = append(currentValues, verb)
+				beliefs[slug] = []string{verb}
 			}
 		}
 	}

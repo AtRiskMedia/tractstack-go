@@ -277,7 +277,7 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 	default:
 		currentValues := fingerprintState.HeldBeliefs[beliefSlug]
 		if !slices.Contains(currentValues, event.Verb) {
-			fingerprintState.HeldBeliefs[beliefSlug] = append(currentValues, event.Verb)
+			fingerprintState.HeldBeliefs[beliefSlug] = []string{event.Verb}
 			changed = true
 		}
 	}

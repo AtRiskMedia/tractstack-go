@@ -16,9 +16,9 @@ var toggleWidgetTmpl = template.Must(template.New("toggleWidget").Parse(
     <div class="flex items-center">
         <input type="checkbox"
                id="{{.CheckboxID}}"
-               name="beliefValue"
+               name="beliefVerb"
                {{if .IsEnabled}}checked{{end}}
-               class="sr-only peer"
+               class="sr-only"
                data-belief-id="{{.Slug}}"
                data-belief-type="Belief"
                data-pane-id="{{.PaneID}}"
@@ -30,7 +30,9 @@ var toggleWidgetTmpl = template.Must(template.New("toggleWidget").Parse(
         <label for="{{.CheckboxID}}"
                class="relative inline-flex items-center cursor-pointer"
                id="{{.LabelID}}">
-            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-cyan-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600">
+            <div class="w-11 h-6 {{if .IsEnabled}}bg-cyan-600{{else}}bg-gray-200{{end}} rounded-full transition-colors duration-200 ease-in-out focus-within:ring-2 focus-within:ring-cyan-500 focus-within:ring-offset-2">
+                <div class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 ease-in-out {{if .IsEnabled}}translate-x-5{{end}}">
+                </div>
             </div>
             <span class="ml-3 text-sm text-gray-900">{{.Prompt}}</span>
         </label>
@@ -59,6 +61,16 @@ func RenderToggle(ctx *rendering.RenderContext, classNames, slug, prompt string)
 	userBeliefs := getUserBeliefs(ctx)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
 	isEnabled := getToggleState(currentBelief)
+
+	log.Printf("===== TOGGLE RENDER DEBUG =====")
+	log.Printf("SLUG: %s", slug)
+	log.Printf("USER BELIEFS: %+v", userBeliefs)
+	log.Printf("CURRENT BELIEF: %+v", currentBelief)
+	log.Printf("IS ENABLED: %v", isEnabled)
+	if currentBelief != nil {
+		log.Printf("BELIEF VERB: %s", currentBelief.Verb)
+	}
+	log.Printf("===== END TOGGLE DEBUG =====")
 
 	checkboxID := "toggle-checkbox-" + slug
 	labelID := "toggle-label-" + slug
@@ -103,7 +115,7 @@ func getToggleState(currentBelief *BeliefState) bool {
 		return false
 	}
 	switch currentBelief.Verb {
-	case "BELIEVES_YES", "ENABLE", "ACTIVATE", "TOGGLE_ON":
+	case "BELIEVES_YES", "BELIEVES_TRUE":
 		return true
 	default:
 		return false
