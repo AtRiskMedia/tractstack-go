@@ -184,3 +184,28 @@ func (s *BeliefEvaluationService) ExtractBeliefsToUnset(
 
 	return beliefsToUnset
 }
+
+// CalculateCodeHookVisibilityState determines CodeHook pane visibility and unset button state
+// Returns: false (hidden), true (visible no unset), or []string (visible with unset buttons)
+func (s *BeliefEvaluationService) CalculateCodeHookVisibilityState(
+	paneBeliefs types.PaneBeliefData,
+	userBeliefs map[string][]string,
+) any {
+	visibility := s.EvaluatePaneVisibility(paneBeliefs, userBeliefs)
+	if visibility == "hidden" {
+		return false
+	}
+
+	// visible - check if unset is needed
+	effectiveFilter := s.CalculateEffectiveFilter(paneBeliefs, userBeliefs)
+	if len(effectiveFilter) > 0 {
+		beliefsToUnset := s.ExtractBeliefsToUnset(effectiveFilter)
+		if len(beliefsToUnset) > 0 {
+			return beliefsToUnset
+		} else {
+			return true
+		}
+	} else {
+		return true
+	}
+}

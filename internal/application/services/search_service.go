@@ -91,7 +91,7 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 			return
 		}
 		for _, res := range results {
-			addSuggestion(res.Term, "CONTENT")
+			addSuggestion(res.Term, "TEXT")
 		}
 	}
 
@@ -164,7 +164,7 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 					titleLower := strings.ToLower(resource.Title)
 					// Simple n-gram match: check if query is contained in title
 					if strings.Contains(titleLower, queryLower) {
-						addSuggestion(resource.Title, "COLLECTION")
+						addSuggestion(resource.Title, "EXACT")
 					}
 				}
 			}
@@ -188,10 +188,10 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 
 		// Define type priorities
 		priorityMap := map[string]int{
-			"TITLE":      1,
-			"COLLECTION": 2,
-			"TOPIC":      3,
-			"CONTENT":    4,
+			"TITLE": 1,
+			"EXACT": 2,
+			"TOPIC": 3,
+			"TEXT":  4,
 		}
 
 		priorityI := priorityMap[typeI]

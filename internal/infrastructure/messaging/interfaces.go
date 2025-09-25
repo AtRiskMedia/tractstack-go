@@ -6,6 +6,6 @@ type Broadcaster interface {
 	AddClientWithSession(tenantID, sessionID string) chan string
 	RemoveClientWithSession(ch chan string, tenantID, sessionID string)
 	GetSessionConnectionCount(tenantID, sessionID string) int
-	BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string)
+	BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string, codeHookVisibility map[string]any)
 	HasViewingSessions(tenantID, storyfragmentID string) bool
 }

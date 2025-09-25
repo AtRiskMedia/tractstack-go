@@ -24,9 +24,10 @@ var (
 
 // StoryfragmentUpdate represents an update for a single storyfragment
 type StoryfragmentUpdate struct {
-	StoryfragmentID string   `json:"storyfragmentId"`
-	AffectedPanes   []string `json:"affectedPanes"`
-	GotoPaneID      *string  `json:"gotoPaneId,omitempty"`
+	StoryfragmentID    string   `json:"storyfragmentId"`
+	AffectedPanes      []string `json:"affectedPanes"`
+	GotoPaneID         *string  `json:"gotoPaneId,omitempty"`
+	CodeHookVisibility map[string]any
 }
 
 // BatchUpdate represents a batch of storyfragment updates
@@ -106,18 +107,19 @@ func (b *SSEBroadcaster) GetSessionConnectionCount(tenantID, sessionID string) i
 }
 
 // BroadcastToSpecificSession sends updates to a specific session within a tenant.
-func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string) {
+func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string, codeHookVisibility map[string]any) {
 	defer func() {
 		if r := recover(); r != nil {
 			b.logger.SSE().Error("Panic recovered in BroadcastToSpecificSession", "error", r, "tenantId", tenantID, "sessionId", sessionID)
 		}
 	}()
 
-	// Create batch format with single update
+	// Create batch format with single update including code hook visibility
 	update := StoryfragmentUpdate{
-		StoryfragmentID: storyfragmentID,
-		AffectedPanes:   paneIDs,
-		GotoPaneID:      scrollTarget,
+		StoryfragmentID:    storyfragmentID,
+		AffectedPanes:      paneIDs,
+		GotoPaneID:         scrollTarget,
+		CodeHookVisibility: codeHookVisibility,
 	}
 
 	batchUpdate := BatchUpdate{

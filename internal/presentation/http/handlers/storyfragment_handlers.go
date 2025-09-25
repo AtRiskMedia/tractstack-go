@@ -14,6 +14,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/media"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
@@ -248,7 +249,6 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 		cleanedPanes[i] = &cleanedPane
 	}
 
-	// === BUILD V1-COMPATIBLE RESPONSE ===
 	var tractStackNodes []*content.TractStackNode
 	if fullPayload.TractStack != nil {
 		tractStackNodes = []*content.TractStackNode{fullPayload.TractStack}
@@ -534,21 +534,24 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		}
 	}
 
+	codeHookVisibility := h.calculateInitialCodeHookVisibility(tenantCtx, sessionID, storyFragment.ID)
+
 	h.logger.Content().Debug("Final impressions before response", "count", len(impressions), "impressions", impressions)
 
 	response := gin.H{
-		"id":               storyFragment.ID,
-		"title":            storyFragment.Title,
-		"slug":             storyFragment.Slug,
-		"paneIds":          storyFragment.PaneIDs,
-		"codeHookTargets":  storyFragment.CodeHookTargets,
-		"resourcesPayload": resourcesPayload,
-		"menu":             storyFragment.Menu,
-		"isHome":           storyFragment.IsHome,
-		"created":          storyFragment.Created,
-		"fragments":        fragmentsData,
-		"impressions":      impressions,
-		"socialImagePath":  storyFragment.SocialImagePath,
+		"id":                 storyFragment.ID,
+		"title":              storyFragment.Title,
+		"slug":               storyFragment.Slug,
+		"paneIds":            storyFragment.PaneIDs,
+		"codeHookTargets":    storyFragment.CodeHookTargets,
+		"codeHookVisibility": codeHookVisibility,
+		"resourcesPayload":   resourcesPayload,
+		"menu":               storyFragment.Menu,
+		"isHome":             storyFragment.IsHome,
+		"created":            storyFragment.Created,
+		"fragments":          fragmentsData,
+		"impressions":        impressions,
+		"socialImagePath":    storyFragment.SocialImagePath,
 	}
 
 	h.logger.Content().Info("Get story fragment personalized payload request completed", "slug", slug, "sessionId", sessionID, "paneCount", len(storyFragment.PaneIDs), "impressionCount", len(impressions), "duration", time.Since(start))
@@ -640,4 +643,46 @@ func (h *StoryFragmentHandlers) UpdateStoryFragmentComplete(c *gin.Context) {
 		"message":         "storyfragment updated successfully",
 		"storyFragmentId": payload.ID,
 	})
+}
+
+func (h *StoryFragmentHandlers) calculateInitialCodeHookVisibility(tenantCtx *tenant.Context, sessionID, storyfragmentID string) map[string]any {
+	codeHookVisibility := make(map[string]any)
+
+	storyFragment, exists := tenantCtx.CacheManager.GetStoryFragment(tenantCtx.TenantID, storyfragmentID)
+	if !exists {
+		return codeHookVisibility
+	}
+	if storyFragment.CodeHookTargets == nil {
+		return codeHookVisibility
+	}
+
+	var userBeliefs map[string][]string
+	sessionData, sessionExists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
+	if sessionExists {
+		fpState, fpExists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID)
+		if fpExists && fpState.HeldBeliefs != nil {
+			userBeliefs = fpState.HeldBeliefs
+		}
+	}
+	if userBeliefs == nil {
+		userBeliefs = make(map[string][]string)
+	}
+
+	beliefRegistry, exists := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID)
+	if !exists {
+		return codeHookVisibility
+	}
+
+	beliefEngine := services.NewBeliefEvaluationService()
+
+	for paneID := range storyFragment.CodeHookTargets {
+		if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
+			visibilityState := beliefEngine.CalculateCodeHookVisibilityState(paneBeliefs, userBeliefs)
+			codeHookVisibility[paneID] = visibilityState
+		} else {
+			codeHookVisibility[paneID] = true
+		}
+	}
+
+	return codeHookVisibility
 }

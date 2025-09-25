@@ -275,7 +275,7 @@ func (s *SessionService) processProfileUnlock(sessionID, storyfragmentID, encryp
 					"affectedStoryfragmentId", affectedStoryfragmentID,
 					"affectedPanes", storyfragmentAffectedPanes)
 
-				broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, targetSessionID, affectedStoryfragmentID, storyfragmentAffectedPanes, nil)
+				broadcaster.BroadcastToSpecificSession(tenantCtx.TenantID, targetSessionID, affectedStoryfragmentID, storyfragmentAffectedPanes, nil, make(map[string]any))
 				broadcastCount++
 			}
 		}

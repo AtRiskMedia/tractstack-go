@@ -2,6 +2,8 @@
 package services
 
 import (
+	"slices"
+
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
@@ -19,9 +21,10 @@ func NewBeliefBroadcastService(cacheManager interfaces.Cache) *BeliefBroadcastSe
 
 // StoryfragmentUpdate represents an update for a single storyfragment
 type StoryfragmentUpdate struct {
-	StoryfragmentID string   `json:"storyfragmentId"`
-	AffectedPanes   []string `json:"affectedPanes"`
-	GotoPaneID      *string  `json:"gotoPaneId,omitempty"`
+	StoryfragmentID    string   `json:"storyfragmentId"`
+	AffectedPanes      []string `json:"affectedPanes"`
+	GotoPaneID         *string  `json:"gotoPaneId,omitempty"`
+	CodeHookVisibility map[string]bool
 }
 
 // BatchUpdate represents a batch of storyfragment updates
@@ -92,34 +95,21 @@ func (b *BeliefBroadcastService) computeScrollTarget(
 }
 
 func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, storyfragmentID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID, gotoPaneID string, broadcaster messaging.Broadcaster) {
-	// Get session data to find fingerprint
 	sessionData, exists := b.cacheManager.GetSession(tenantID, sessionID)
 	if !exists {
 		return
 	}
 
-	// Find ALL sessions using this fingerprint (cross-browser sync!)
 	allSessionIDs := b.cacheManager.GetSessionsByFingerprint(tenantID, sessionData.FingerprintID)
 
-	// Find ALL storyfragments affected by these belief changes
 	affectedStoryfragments := b.FindAffectedStoryfragments(tenantID, changedBeliefs)
 
-	// Include the current pane that contains the widget
 	if currentPaneID != "" && storyfragmentID != "" {
 		if panes, exists := affectedStoryfragments[storyfragmentID]; exists {
-			// Check if currentPaneID is already in the list
-			found := false
-			for _, paneID := range panes {
-				if paneID == currentPaneID {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !slices.Contains(panes, currentPaneID) {
 				affectedStoryfragments[storyfragmentID] = append(panes, currentPaneID)
 			}
 		} else {
-			// Create new entry for this storyfragment
 			affectedStoryfragments[storyfragmentID] = []string{currentPaneID}
 		}
 	}
@@ -128,7 +118,6 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 		return
 	}
 
-	// Collect all invalidation targets first
 	var invalidationTargets []types.SessionBeliefTarget
 
 	for _, targetSessionID := range allSessionIDs {
@@ -140,12 +129,12 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 		}
 	}
 
-	// Now handle the SSE broadcasting
+	b.cacheManager.BatchInvalidateSessionBeliefContexts(tenantID, invalidationTargets)
+
 	for _, targetSessionID := range allSessionIDs {
 		for affectedStoryfragmentID, affectedPanes := range affectedStoryfragments {
 			var scrollTarget *string
 
-			// Only add scroll target for the original triggering session and storyfragment
 			if targetSessionID == sessionID && affectedStoryfragmentID == storyfragmentID {
 				if visibilitySnapshot != nil && currentPaneID != "" && gotoPaneID == "" {
 					scrollTarget = b.computeScrollTarget(tenantID, sessionID, storyfragmentID, visibilitySnapshot[storyfragmentID], affectedPanes)
@@ -154,12 +143,53 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 				}
 			}
 
-			// Send SSE broadcast (cache already invalidated above)
-			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget)
+			codeHookVisibility := b.calculateSSECodeHookVisibility(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes)
+
+			broadcaster.BroadcastToSpecificSession(tenantID, targetSessionID, affectedStoryfragmentID, affectedPanes, scrollTarget, codeHookVisibility)
 		}
 	}
-	// Single batch invalidation operation
-	b.cacheManager.BatchInvalidateSessionBeliefContexts(tenantID, invalidationTargets)
+}
+
+func (b *BeliefBroadcastService) calculateSSECodeHookVisibility(tenantID, sessionID, storyfragmentID string, affectedPanes []string) map[string]any {
+	codeHookVisibility := make(map[string]any)
+	storyFragment, exists := b.cacheManager.GetStoryFragment(tenantID, storyfragmentID)
+	if !exists {
+		return codeHookVisibility
+	}
+	if storyFragment.CodeHookTargets == nil {
+		return codeHookVisibility
+	}
+
+	var userBeliefs map[string][]string
+	sessionData, sessionExists := b.cacheManager.GetSession(tenantID, sessionID)
+	if sessionExists {
+		fpState, fpExists := b.cacheManager.GetFingerprintState(tenantID, sessionData.FingerprintID)
+		if fpExists && fpState.HeldBeliefs != nil {
+			userBeliefs = fpState.HeldBeliefs
+		}
+	}
+	if userBeliefs == nil {
+		userBeliefs = make(map[string][]string)
+	}
+
+	beliefRegistry, exists := b.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
+	if !exists {
+		return codeHookVisibility
+	}
+
+	beliefEngine := NewBeliefEvaluationService()
+
+	for _, paneID := range affectedPanes {
+		if _, isCodeHook := storyFragment.CodeHookTargets[paneID]; isCodeHook {
+			if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
+				visibilityState := beliefEngine.CalculateCodeHookVisibilityState(paneBeliefs, userBeliefs)
+				codeHookVisibility[paneID] = visibilityState
+			} else {
+				codeHookVisibility[paneID] = true
+			}
+		}
+	}
+	return codeHookVisibility
 }
 
 func (b *BeliefBroadcastService) FindAffectedStoryfragments(tenantID string, changedBeliefs []string) map[string][]string {
@@ -168,15 +198,36 @@ func (b *BeliefBroadcastService) FindAffectedStoryfragments(tenantID string, cha
 	for _, belief := range changedBeliefs {
 		beliefSet[belief] = true
 	}
+
 	storyfragmentIDs := b.cacheManager.GetAllStoryfragmentBeliefRegistryIDs(tenantID)
 	for _, storyfragmentID := range storyfragmentIDs {
 		if registry, exists := b.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID); exists {
 			var affectedPanes []string
+
+			// Check panes with belief visibility requirements
 			for paneID, paneBeliefData := range registry.PaneBeliefPayloads {
 				if b.paneUsesChangedBeliefs(paneBeliefData, beliefSet) {
 					affectedPanes = append(affectedPanes, paneID)
 				}
 			}
+
+			// Check panes containing widgets that control changed beliefs
+			for paneID, widgetBeliefs := range registry.PaneWidgetBeliefs {
+				// Check if this pane contains widgets for any of the changed beliefs
+				paneHasChangedWidget := false
+				for _, widgetBelief := range widgetBeliefs {
+					if beliefSet[widgetBelief] {
+						paneHasChangedWidget = true
+						break
+					}
+				}
+
+				// Add to affected panes if not already included
+				if paneHasChangedWidget && !slices.Contains(affectedPanes, paneID) {
+					affectedPanes = append(affectedPanes, paneID)
+				}
+			}
+
 			if len(affectedPanes) > 0 {
 				result[storyfragmentID] = affectedPanes
 			}

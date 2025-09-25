@@ -62,16 +62,6 @@ func RenderToggle(ctx *rendering.RenderContext, classNames, slug, prompt string)
 	currentBelief := getCurrentBeliefState(userBeliefs, slug)
 	isEnabled := getToggleState(currentBelief)
 
-	log.Printf("===== TOGGLE RENDER DEBUG =====")
-	log.Printf("SLUG: %s", slug)
-	log.Printf("USER BELIEFS: %+v", userBeliefs)
-	log.Printf("CURRENT BELIEF: %+v", currentBelief)
-	log.Printf("IS ENABLED: %v", isEnabled)
-	if currentBelief != nil {
-		log.Printf("BELIEF VERB: %s", currentBelief.Verb)
-	}
-	log.Printf("===== END TOGGLE DEBUG =====")
-
 	checkboxID := "toggle-checkbox-" + slug
 	labelID := "toggle-label-" + slug
 	helpID := "toggle-help-" + slug
