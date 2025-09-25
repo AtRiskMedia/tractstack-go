@@ -424,6 +424,7 @@ func (s *PaneService) GetContextPanes(tenantCtx *tenant.Context) ([]*content.Pan
 }
 
 // Create creates a new pane
+// Create creates a new pane
 func (s *PaneService) Create(tenantCtx *tenant.Context, pane *content.PaneNode) error {
 	start := time.Now()
 	if pane.ID == "" {
@@ -462,6 +463,8 @@ func (s *PaneService) Create(tenantCtx *tenant.Context, pane *content.PaneNode) 
 		s.logger.Content().Error("Failed to refresh content map after pane creation",
 			"error", err, "paneId", pane.ID, "tenantId", tenantCtx.TenantID)
 	}
+
+	s.triggerRebuildForPaneParents(tenantCtx, pane.ID)
 
 	s.logger.Content().Info("Successfully created pane", "tenantId", tenantCtx.TenantID, "paneId", pane.ID, "title", pane.Title, "slug", pane.Slug, "duration", time.Since(start))
 	s.logger.Perf().Info("Performance for CreatePane", "duration", time.Since(start), "tenantId", tenantCtx.TenantID, "success", true, "paneId", pane.ID)
