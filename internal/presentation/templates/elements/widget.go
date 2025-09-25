@@ -10,9 +10,23 @@ import (
 	templates "github.com/AtRiskMedia/tractstack-go/internal/presentation/templates/elements/widgets"
 )
 
+// liteYouTubeTmpl renders a high-performance, lazy-loaded YouTube embed.
+var liteYouTubeTmpl = template.Must(template.New("liteYouTube").Parse(
+	`
+{{/* The browser ensures the CSS is fetched and applied only once. */}}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.css" />
+
+{{/* The lightweight custom element that acts as a facade for the real player. */}}
+<lite-youtube videoid="{{.Value1}}" playlabel="{{.Value2}}"></lite-youtube>
+
+{{/* As a module, the browser ensures this script is fetched and executed only once,
+     providing idempotency even if multiple video widgets are on the page. */}}
+<script type="module" src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.js"></script>
+`))
+
+// widgetTmpl contains templates for other placeholder widgets.
 var widgetTmpl = template.Must(template.New("mainWidget").Parse(
 	`{{define "unknown"}}<div class="{{.ClassNames}}">unknown widget: {{.Hook}}</div>{{end}}` +
-		`{{define "youtube"}}<div class="{{.ClassNames}}"><div>YouTube Widget: {{.Value1}} - {{.Value2}}</div></div>{{end}}` +
 		`{{define "bunny"}}<div class="{{.ClassNames}}"><div>Bunny Video Widget: {{.Value1}} - {{.Value2}}</div></div>{{end}}` +
 		`{{define "signup"}}<div class="{{.ClassNames}}"><div>SignUp Widget: {{.Persona}} - {{.Prompt}} (consent: {{.ClarifyConsent}})</div></div>{{end}}` +
 		`{{define "resource"}}<div class="{{.ClassNames}}"><div><strong>Resource Template (not yet implemented):</strong> {{.Value1}}, {{.Value2}}</div></div>{{end}}`,
@@ -28,17 +42,17 @@ type widgetData struct {
 	ClarifyConsent bool
 }
 
-// WidgetRenderer handles Widget.astro rendering logic - dispatcher for all widget types
+// WidgetRenderer handles rendering for all widget types.
 type WidgetRenderer struct {
 	ctx *rendering.RenderContext
 }
 
-// NewWidgetRenderer creates a new widget renderer
+// NewWidgetRenderer creates a new widget renderer.
 func NewWidgetRenderer(ctx *rendering.RenderContext) *WidgetRenderer {
 	return &WidgetRenderer{ctx: ctx}
 }
 
-// Render implements the Widget.astro rendering logic - exact dispatcher pattern
+// Render dispatches a node to the appropriate widget rendering function.
 func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string {
 	if hook == nil {
 		return `<div>widget error: no hook</div>`
@@ -46,22 +60,18 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 
 	classNames := wr.getNodeClasses(nodeID)
 
-	// Dispatch to specific widget renderers exactly like Widget.astro switch pattern
 	switch hook.Hook {
 	case "youtube":
-		return wr.renderYouTube(classNames, hook)
+		return wr.renderLiteYouTube(classNames, hook)
 	case "bunny":
 		return wr.renderBunny(classNames, hook)
 	case "signup":
 		return wr.renderSignUp(classNames, hook)
 	case "belief":
-		// Fixed: Use pre-resolved widget context instead of direct cache calls
 		return templates.RenderBelief(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
 	case "identifyAs":
-		// Fixed: Use pre-resolved widget context instead of direct cache calls
 		return templates.RenderIdentifyAs(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
 	case "toggle":
-		// Fixed: Use pre-resolved widget context instead of direct cache calls
 		return templates.RenderToggle(wr.ctx, classNames, *hook.Value1, *hook.Value2)
 	case "resource":
 		return wr.renderResource(classNames, hook)
@@ -77,14 +87,14 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 	}
 }
 
-// renderYouTube matches Widget.astro youtube condition exactly
-func (wr *WidgetRenderer) renderYouTube(classNames string, hook *rendering.CodeHook) string {
+// renderLiteYouTube renders a performant YouTube player.
+func (wr *WidgetRenderer) renderLiteYouTube(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
-		data := widgetData{ClassNames: classNames, Value1: *hook.Value1, Value2: *hook.Value2}
+		data := widgetData{Value1: *hook.Value1, Value2: *hook.Value2}
 		var buf bytes.Buffer
-		err := widgetTmpl.ExecuteTemplate(&buf, "youtube", data)
+		err := liteYouTubeTmpl.Execute(&buf, data)
 		if err != nil {
-			log.Printf("ERROR: Failed to execute youtube widget template: %v", err)
+			log.Printf("ERROR: Failed to execute lite youtube template: %v", err)
 			return "<!-- template error -->"
 		}
 		return buf.String()
@@ -92,7 +102,7 @@ func (wr *WidgetRenderer) renderYouTube(classNames string, hook *rendering.CodeH
 	return ""
 }
 
-// renderBunny matches Widget.astro bunny condition exactly
+// renderBunny renders a placeholder for a Bunny video widget.
 func (wr *WidgetRenderer) renderBunny(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
 		data := widgetData{ClassNames: classNames, Value1: *hook.Value1, Value2: *hook.Value2}
@@ -107,7 +117,7 @@ func (wr *WidgetRenderer) renderBunny(classNames string, hook *rendering.CodeHoo
 	return ""
 }
 
-// renderSignUp matches Widget.astro signup condition exactly
+// renderSignUp renders a placeholder for a signup widget.
 func (wr *WidgetRenderer) renderSignUp(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && *hook.Value1 != "" {
 		persona := *hook.Value1
@@ -134,7 +144,7 @@ func (wr *WidgetRenderer) renderSignUp(classNames string, hook *rendering.CodeHo
 	return ""
 }
 
-// renderResource matches Widget.astro resource condition exactly
+// renderResource renders a placeholder for a resource widget.
 func (wr *WidgetRenderer) renderResource(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && *hook.Value1 != "" {
 		value2 := ""
@@ -153,7 +163,7 @@ func (wr *WidgetRenderer) renderResource(classNames string, hook *rendering.Code
 	return ""
 }
 
-// getNodeClasses retrieves CSS classes for widget - direct elementCss access like other renderers
+// getNodeClasses retrieves CSS classes for the widget node.
 func (wr *WidgetRenderer) getNodeClasses(nodeID string) string {
 	nodeData := wr.getNodeData(nodeID)
 	if nodeData != nil && nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
@@ -162,7 +172,7 @@ func (wr *WidgetRenderer) getNodeClasses(nodeID string) string {
 	return "auto" // Default fallback
 }
 
-// getNodeData retrieves node data from real context - matches other renderer patterns
+// getNodeData retrieves node data from the render context.
 func (wr *WidgetRenderer) getNodeData(nodeID string) *rendering.NodeRenderData {
 	if wr.ctx.AllNodes == nil {
 		return nil
