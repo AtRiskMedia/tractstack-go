@@ -187,6 +187,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		beliefService,
 		epinetService,
 		imageFileService,
+		contentMapService,
 	)
 
 	tailwindService := services.NewTailwindService(paneService, configService, logger, perfTracker)

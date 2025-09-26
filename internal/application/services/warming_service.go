@@ -54,6 +54,7 @@ type WarmingService struct {
 	beliefService        *BeliefService
 	epinetService        *EpinetService
 	imageFileService     *ImageFileService
+	contentMapService    *ContentMapService
 }
 
 func NewWarmingService(
@@ -69,6 +70,7 @@ func NewWarmingService(
 	beliefService *BeliefService,
 	epinetService *EpinetService,
 	imageFileService *ImageFileService,
+	contentMapService *ContentMapService,
 ) *WarmingService {
 	return &WarmingService{
 		logger:                  logger,
@@ -83,6 +85,7 @@ func NewWarmingService(
 		beliefService:           beliefService,
 		epinetService:           epinetService,
 		imageFileService:        imageFileService,
+		contentMapService:       contentMapService,
 	}
 }
 
@@ -228,10 +231,14 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 		ws.logger.Cache().Info("No epinets found for tenant. Aborting analytics warming task.", "tenantId", tenantCtx.TenantID)
 		return nil
 	}
-	contentItems, err := ws.getContentItems(tenantCtx)
+	cachedContentMap, err := ws.contentMapService.GetCachedContentMap(tenantCtx)
 	if err != nil {
-		ws.logger.Cache().Error("Could not pre-fetch content items for analytics warming", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("could not pre-fetch content items: %w", err)
+		ws.logger.Cache().Error("Could not get content map for analytics warming", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("could not get content map for warming: %w", err)
+	}
+	contentMap := make(map[string]types.FullContentMapItem, len(cachedContentMap))
+	for _, item := range cachedContentMap {
+		contentMap[item.ID] = item
 	}
 
 	now := time.Now().UTC()
@@ -281,7 +288,7 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 				var transitions map[string]map[string]*types.HourlyEpinetTransitionData
 
 				if hasEvents {
-					steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems, knownFingerprints)
+					steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentMap, knownFingerprints)
 					transitions = ws.buildTransitionsFromSteps(steps)
 				} else {
 					steps = make(map[string]*types.HourlyEpinetStepData)
@@ -320,10 +327,14 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 		return nil
 	}
 
-	contentItems, err := ws.getContentItems(tenantCtx)
+	cachedContentMap, err := ws.contentMapService.GetCachedContentMap(tenantCtx)
 	if err != nil {
-		ws.logger.Cache().Error("Failed to get content items for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("failed to get content items: %w", err)
+		ws.logger.Cache().Error("Could not get content map for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("could not get content map for rapid catch-up: %w", err)
+	}
+	contentMap := make(map[string]types.FullContentMapItem, len(cachedContentMap))
+	for _, item := range cachedContentMap {
+		contentMap[item.ID] = item
 	}
 
 	now := time.Now().UTC()
@@ -361,7 +372,7 @@ func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache inter
 			var transitions map[string]map[string]*types.HourlyEpinetTransitionData
 
 			if hasEvents {
-				steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentItems, knownFingerprints)
+				steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentMap, knownFingerprints)
 				transitions = ws.buildTransitionsFromSteps(steps)
 			} else {
 				steps = make(map[string]*types.HourlyEpinetStepData)
@@ -599,29 +610,6 @@ func (ws *WarmingService) getEpinets(tenantCtx *tenant.Context) ([]types.EpinetC
 	return epinets, nil
 }
 
-func (ws *WarmingService) getContentItems(tenantCtx *tenant.Context) (map[string]types.ContentItem, error) {
-	contentItems := make(map[string]types.ContentItem)
-
-	sfRepo := tenantCtx.StoryFragmentRepo()
-	storyFragments, err := sfRepo.FindAll(tenantCtx.TenantID)
-	if err != nil {
-		return nil, err
-	}
-	for _, sf := range storyFragments {
-		contentItems[sf.ID] = types.ContentItem{Title: sf.Title, Slug: sf.Slug}
-	}
-
-	paneRepo := tenantCtx.PaneRepo()
-	panes, err := paneRepo.FindAll(tenantCtx.TenantID)
-	if err != nil {
-		return nil, err
-	}
-	for _, pane := range panes {
-		contentItems[pane.ID] = types.ContentItem{Title: pane.Title, Slug: pane.Slug}
-	}
-	return contentItems, nil
-}
-
 func (ws *WarmingService) analyzeEpinets(epinets []types.EpinetConfig) *EpinetAnalysis {
 	analysis := &EpinetAnalysis{
 		BeliefValues:     make(map[string]bool),
@@ -657,9 +645,13 @@ func (ws *WarmingService) analyzeEpinets(epinets []types.EpinetConfig) *EpinetAn
 	return analysis
 }
 
-func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, actionEvents []analytics.ActionEvent, beliefEvents []analytics.BeliefEvent, contentItems map[string]types.ContentItem, knownFingerprints map[string]bool) map[string]*types.HourlyEpinetStepData {
+func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, actionEvents []analytics.ActionEvent, beliefEvents []analytics.BeliefEvent, contentMap map[string]types.FullContentMapItem, knownFingerprints map[string]bool) map[string]*types.HourlyEpinetStepData {
 	steps := make(map[string]*types.HourlyEpinetStepData)
 	for _, event := range actionEvents {
+		if _, exists := contentMap[event.ObjectID]; !exists {
+			// Content for this event has been deleted, so skip it.
+			continue
+		}
 		for stepIndex, step := range epinet.Steps {
 			if ws.eventMatchesStep(event, step) {
 				nodeID := ws.getStepNodeID(step, event.ObjectID, event.Verb)
@@ -668,7 +660,7 @@ func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, action
 						Visitors:          make(map[string]bool),
 						KnownVisitors:     make(map[string]bool),
 						AnonymousVisitors: make(map[string]bool),
-						Name:              ws.getNodeName(step, event.ObjectID, contentItems, event.Verb),
+						Name:              ws.getNodeName(step, event.ObjectID, contentMap, event.Verb),
 						StepIndex:         stepIndex + 1,
 					}
 				}
@@ -690,7 +682,7 @@ func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, action
 						Visitors:          make(map[string]bool),
 						KnownVisitors:     make(map[string]bool),
 						AnonymousVisitors: make(map[string]bool),
-						Name:              ws.getNodeName(step, "", contentItems, *event.Object),
+						Name:              ws.getNodeName(step, "", contentMap, *event.Object),
 						StepIndex:         stepIndex + 1,
 					}
 				}
@@ -771,14 +763,14 @@ func (ws *WarmingService) getStepNodeID(step types.EpinetStep, contentID string,
 	return strings.Join(parts, "_")
 }
 
-func (ws *WarmingService) getNodeName(step types.EpinetStep, contentID string, contentItems map[string]types.ContentItem, matchedValue string) string {
+func (ws *WarmingService) getNodeName(step types.EpinetStep, contentID string, contentMap map[string]types.FullContentMapItem, matchedValue string) string {
 	var parts []string
 	switch step.GateType {
 	case "belief", "identifyAs":
 		parts = append(parts, step.Title)
 	case "commitmentAction", "conversionAction":
 		parts = append(parts, step.Title, matchedValue)
-		if item, exists := contentItems[contentID]; exists {
+		if item, exists := contentMap[contentID]; exists {
 			parts = append(parts, item.Title)
 		}
 	}
