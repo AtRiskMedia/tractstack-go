@@ -13,21 +13,14 @@ import (
 // liteYouTubeTmpl renders a high-performance, lazy-loaded YouTube embed.
 var liteYouTubeTmpl = template.Must(template.New("liteYouTube").Parse(
 	`
-{{/* The browser ensures the CSS is fetched and applied only once. */}}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.css" />
-
-{{/* The lightweight custom element that acts as a facade for the real player. */}}
 <lite-youtube videoid="{{.Value1}}" playlabel="{{.Value2}}"></lite-youtube>
-
-{{/* As a module, the browser ensures this script is fetched and executed only once,
-     providing idempotency even if multiple video widgets are on the page. */}}
 <script type="module" src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.js"></script>
 `))
 
 // widgetTmpl contains templates for other placeholder widgets.
 var widgetTmpl = template.Must(template.New("mainWidget").Parse(
 	`{{define "unknown"}}<div class="{{.ClassNames}}">unknown widget: {{.Hook}}</div>{{end}}` +
-		`{{define "bunny"}}<div class="{{.ClassNames}}"><div>Bunny Video Widget: {{.Value1}} - {{.Value2}}</div></div>{{end}}` +
 		`{{define "signup"}}<div class="{{.ClassNames}}"><div>SignUp Widget: {{.Persona}} - {{.Prompt}} (consent: {{.ClarifyConsent}})</div></div>{{end}}` +
 		`{{define "resource"}}<div class="{{.ClassNames}}"><div><strong>Resource Template (not yet implemented):</strong> {{.Value1}}, {{.Value2}}</div></div>{{end}}`,
 ))
@@ -64,7 +57,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 	case "youtube":
 		return wr.renderLiteYouTube(classNames, hook)
 	case "bunny":
-		return wr.renderBunny(classNames, hook)
+		return templates.RenderBunny(classNames, hook)
 	case "signup":
 		return wr.renderSignUp(classNames, hook)
 	case "belief":
@@ -95,21 +88,6 @@ func (wr *WidgetRenderer) renderLiteYouTube(classNames string, hook *rendering.C
 		err := liteYouTubeTmpl.Execute(&buf, data)
 		if err != nil {
 			log.Printf("ERROR: Failed to execute lite youtube template: %v", err)
-			return "<!-- template error -->"
-		}
-		return buf.String()
-	}
-	return ""
-}
-
-// renderBunny renders a placeholder for a Bunny video widget.
-func (wr *WidgetRenderer) renderBunny(classNames string, hook *rendering.CodeHook) string {
-	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
-		data := widgetData{ClassNames: classNames, Value1: *hook.Value1, Value2: *hook.Value2}
-		var buf bytes.Buffer
-		err := widgetTmpl.ExecuteTemplate(&buf, "bunny", data)
-		if err != nil {
-			log.Printf("ERROR: Failed to execute bunny widget template: %v", err)
 			return "<!-- template error -->"
 		}
 		return buf.String()
