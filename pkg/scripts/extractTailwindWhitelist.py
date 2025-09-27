@@ -39,8 +39,10 @@ def extract_classes_from_js(js_content: str) -> Set[str]:
         for match in matches:
             tokens = match.split()
             for token in tokens:
-                if re.match(r'^-?[a-z][a-zA-Z0-9_/:.,-]*$', token) and len(token) < 50:
-                    classes.add(token)
+                # Strip all illegal characters from start and end
+                clean_token = re.sub(r'^[^a-zA-Z-]+|[^a-zA-Z0-9_/:.,-]+$', '', token)
+                if clean_token and re.match(r'^-?[a-z][a-zA-Z0-9_/:.,-]*$', clean_token) and len(clean_token) < 50:
+                    classes.add(clean_token)
 
     # Method 2: Direct class attribute search
     start_pos = 0
@@ -56,8 +58,10 @@ def extract_classes_from_js(js_content: str) -> Set[str]:
             class_content = js_content[content_start:quote_end]
             tokens = class_content.split()
             for token in tokens:
-                if re.match(r'^-?[a-z][a-zA-Z0-9_/:.,-]*$', token) and len(token) < 50:
-                    classes.add(token)
+                # Strip all illegal characters from start and end
+                clean_token = re.sub(r'^[^a-zA-Z-]+|[^a-zA-Z0-9_/:.,-]+$', '', token)
+                if clean_token and re.match(r'^-?[a-z][a-zA-Z0-9_/:.,-]*$', clean_token) and len(clean_token) < 50:
+                    classes.add(clean_token)
 
         start_pos = class_start + 1
 
