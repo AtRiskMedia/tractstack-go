@@ -126,7 +126,13 @@ func (m *Manager) RunStartupMigrations() error {
 
 	var failedTenants []string
 
-	for tenantID := range registry.Tenants {
+	for tenantID, tenantInfo := range registry.Tenants {
+		// Skip inactive tenants - they don't have config files yet
+		if tenantInfo.Status == "inactive" {
+			log.Printf("[MIGRATION] Skipping inactive tenant: %s", tenantID)
+			continue
+		}
+
 		log.Printf("[MIGRATION] Processing tenant: %s", tenantID)
 
 		// Create a temporary context for migration (will be discarded)
