@@ -23,8 +23,8 @@ def extract_classes_from_html(html_content: str) -> Set[str]:
         print(f"Error parsing HTML: {e}")
     return classes
 
-def extract_classes_from_js(js_content: str) -> Set[str]:
-    """Extract classes from JavaScript using multiple methods"""
+def extract_classes_from_code(code_content: str) -> Set[str]:
+    """Extract classes from JavaScript/Go code using multiple methods"""
     classes = set()
 
     # Method 1: Quote pattern extraction
@@ -35,7 +35,7 @@ def extract_classes_from_js(js_content: str) -> Set[str]:
     ]
 
     for pattern in quote_patterns:
-        matches = re.findall(pattern, js_content)
+        matches = re.findall(pattern, code_content)
         for match in matches:
             tokens = match.split()
             for token in tokens:
@@ -47,15 +47,15 @@ def extract_classes_from_js(js_content: str) -> Set[str]:
     # Method 2: Direct class attribute search
     start_pos = 0
     while True:
-        class_start = js_content.find('class="', start_pos)
+        class_start = code_content.find('class="', start_pos)
         if class_start == -1:
             break
 
         content_start = class_start + 7
-        quote_end = js_content.find('"', content_start)
+        quote_end = code_content.find('"', content_start)
 
         if quote_end != -1:
-            class_content = js_content[content_start:quote_end]
+            class_content = code_content[content_start:quote_end]
             tokens = class_content.split()
             for token in tokens:
                 # Strip all illegal characters from start and end
@@ -90,7 +90,7 @@ def scan_dist_directory(dist_path: Path) -> Set[str]:
         try:
             with open(js_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                classes = extract_classes_from_js(content)
+                classes = extract_classes_from_code(content)
                 all_classes.update(classes)
         except Exception as e:
             print(f"Error reading {js_file}: {e}")
@@ -100,25 +100,54 @@ def scan_dist_directory(dist_path: Path) -> Set[str]:
         try:
             with open(mjs_file, 'r', encoding='utf-8') as f:
                 content = f.read()
-                classes = extract_classes_from_js(content)
+                classes = extract_classes_from_code(content)
                 all_classes.update(classes)
         except Exception as e:
             print(f"Error reading {mjs_file}: {e}")
 
     return all_classes
 
+def scan_go_templates(go_templates_path: Path) -> Set[str]:
+    """Scan Go template files for CSS classes"""
+    all_classes = set()
+
+    if not go_templates_path.exists():
+        print(f"Warning: Go templates directory not found at {go_templates_path}")
+        return all_classes
+
+    # Scan all .go files recursively
+    for go_file in go_templates_path.rglob('*.go'):
+        try:
+            with open(go_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+                classes = extract_classes_from_code(content)
+                all_classes.update(classes)
+        except Exception as e:
+            print(f"Error reading {go_file}: {e}")
+
+    return all_classes
+
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python3 extractTailwindWhitelist.py <dist_path> <output_json>")
+    if len(sys.argv) != 3 and len(sys.argv) != 4:
+        print("Usage: python3 extractTailwindWhitelist.py <dist_path> <output_json> [go_templates_path]")
         sys.exit(1)
 
     dist_path = Path(sys.argv[1])
     output_path = Path(sys.argv[2])
+    go_templates_path = Path(sys.argv[3]) if len(sys.argv) == 4 else None
 
     print(f"Scanning dist directory: {dist_path}")
+    dist_classes = scan_dist_directory(dist_path)
+    print(f"Found {len(dist_classes)} classes in dist directory")
 
-    # Extract all classes
-    all_classes = scan_dist_directory(dist_path)
+    go_classes = set()
+    if go_templates_path:
+        print(f"Scanning Go templates directory: {go_templates_path}")
+        go_classes = scan_go_templates(go_templates_path)
+        print(f"Found {len(go_classes)} classes in Go templates")
+
+    # Combine all classes
+    all_classes = dist_classes | go_classes
 
     # Minimal filtering - only exclude obvious non-CSS junk
     tailwind_classes = set()
@@ -152,7 +181,7 @@ def main():
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=2)
 
-    print(f"Extracted {len(sorted_classes)} classes to {output_path}")
+    print(f"Extracted {len(sorted_classes)} total classes to {output_path}")
 
 if __name__ == '__main__':
     main()

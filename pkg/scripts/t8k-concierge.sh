@@ -153,9 +153,10 @@ build_astro_frontend() {
   # Extract Tailwind whitelist from built assets
   log "Extracting Tailwind whitelist from built assets..."
   local astro_dist_dir="$BUILD_SRC_DIR/my-tractstack/dist"
+  local go_templates_dir="$BUILD_SRC_DIR/tractstack-go/internal/presentation/templates"
   local whitelist_output="$BUILD_DATA_DIR/config/default/tailwindWhitelist.json"
 
-  if python3 /home/t8k/scripts/extractTailwindWhitelist.py "$astro_dist_dir" "$whitelist_output"; then
+  if python3 /home/t8k/scripts/extractTailwindWhitelist.py "$astro_dist_dir" "$whitelist_output" "$go_templates_dir"; then
     log "Tailwind whitelist extracted successfully"
   else
     log_error "Failed to extract Tailwind whitelist"

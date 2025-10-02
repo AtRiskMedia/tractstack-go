@@ -1096,7 +1096,8 @@ quick_install() {
   # Extract whitelist from built assets
   python3 "$INSTALL_DIR/src/tractstack-go/pkg/scripts/extractTailwindWhitelist.py" \
     "$INSTALL_DIR/src/my-tractstack/dist" \
-    "/home/$USER/t8k/t8k-go-server/config/default/tailwindWhitelist.json"
+    "/home/$USER/t8k/t8k-go-server/config/default/tailwindWhitelist.json" \
+    "$INSTALL_DIR/src/tractstack-go/internal/presentation/templates"
 
   echo -e "\n${GREEN}🎉 TractStack installation complete!${RESET}\n"
   echo -e "${WHITE}To start your TractStack site:${RESET}"
@@ -1227,7 +1228,7 @@ extract_initial_whitelist() {
   fi
 
   # Run extraction as t8k user
-  if sudo -u t8k python3 /home/t8k/scripts/extractTailwindWhitelist.py "$astro_dist_dir" "$whitelist_output"; then
+  if sudo -u t8k python3 /home/t8k/scripts/extractTailwindWhitelist.py "$astro_dist_dir" "$whitelist_output" "$base_dir/src/tractstack-go/internal/presentation/templates"; then
     echo -e "${GREEN}✅ Tailwind whitelist extracted successfully${RESET}"
   else
     echo -e "${RED}⌘ Failed to extract Tailwind whitelist${RESET}"
