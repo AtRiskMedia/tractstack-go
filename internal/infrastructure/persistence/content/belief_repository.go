@@ -201,7 +201,11 @@ func (r *BeliefRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query belief IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query beliefs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var beliefIDs []string
 	for rows.Next() {
@@ -281,7 +285,11 @@ func (r *BeliefRepository) loadMultipleFromDB(ids []string) ([]*content.BeliefNo
 		r.logger.Database().Error("Failed to query multiple beliefs", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query beliefs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var beliefs []*content.BeliefNode
 	for rows.Next() {

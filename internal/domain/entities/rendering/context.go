@@ -12,4 +12,5 @@ type RenderContext struct {
 	StoryfragmentID  string                     `json:"storyfragmentId,omitempty"`
 	ContainingPaneID string                     `json:"containingPaneId,omitempty"`
 	WidgetContext    *widgets.WidgetContext     `json:"widgetContext,omitempty"`
+	HomeSlug         string                     `json:"homeSlug,omitempty"`
 }

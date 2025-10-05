@@ -2,11 +2,13 @@ package templates
 
 import (
 	"encoding/json"
+	"fmt"
 	"html/template"
 	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/lisp"
 )
 
 var nodeActionButtonTmpl = template.Must(template.New("nodeActionButton").Parse(
@@ -45,28 +47,24 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 		}
 	}
 
-	var htmlBuilder strings.Builder
+	// Use the new centralized parser. A homeSlug is not needed as nodeButton only handles actions.
+	parsedAction := lisp.Parse(callbackPayloadStr, nbr.ctx.ContainingPaneID, "")
 
-	hxValsMap := parseActionLispToGoPayload(callbackPayloadStr)
-	if hxValsMap == nil {
-		log.Printf("ERROR: Failed to parse action Lisp for state change button: %q", callbackPayloadStr)
-		return `<!-- error parsing action button -->`
+	if !parsedAction.IsValid || parsedAction.HxVals == nil {
+		log.Printf("WARN: nodeButton.go failed to get valid HxVals from parser for payload: %q", callbackPayloadStr)
+		// Render a disabled button to prevent errors
+		return fmt.Sprintf(`<button class="%s" disabled>`, nbr.getClasses(nodeData))
 	}
 
-	hxValsBytes, err := json.Marshal(hxValsMap)
+	hxValsBytes, err := json.Marshal(parsedAction.HxVals)
 	if err != nil {
-		log.Printf("ERROR: Failed to marshal hx-vals for action button: %v", err)
-		return `<!-- error marshalling action button -->`
+		log.Printf("ERROR: Failed to marshal hx-vals for nodeButton: %v", err)
+		return `<!-- error marshalling node button -->`
 	}
 
-	var cssClasses strings.Builder
-	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
-		cssClasses.WriteString(*nodeData.ElementCSS)
-	}
-	cssClasses.WriteString(" whitespace-nowrap")
-
+	var htmlBuilder strings.Builder
 	buttonData := nodeActionButtonData{
-		Class:  strings.TrimSpace(cssClasses.String()),
+		Class:  nbr.getClasses(nodeData),
 		HxVals: template.HTML(hxValsBytes),
 	}
 
@@ -94,41 +92,13 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	return htmlBuilder.String()
 }
 
-func parseActionLispToGoPayload(payload string) map[string]string {
-	trimmed := strings.Trim(payload, "() ")
-	parts := strings.Fields(trimmed)
-	if len(parts) == 0 {
-		return nil
+func (nbr *NodeButtonRenderer) getClasses(nodeData *rendering.NodeRenderData) string {
+	var cssClasses strings.Builder
+	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
+		cssClasses.WriteString(*nodeData.ElementCSS)
 	}
-
-	command := parts[0]
-	innerPayload := strings.Trim(trimmed[len(command):], "() ")
-	params := strings.Fields(innerPayload)
-
-	if len(params) < 2 {
-		return nil
-	}
-
-	beliefId := params[0]
-	value := params[1]
-
-	switch command {
-	case "declare":
-		return map[string]string{
-			"beliefId":    beliefId,
-			"beliefType":  "Belief",
-			"beliefValue": value,
-		}
-	case "identifyAs":
-		return map[string]string{
-			"beliefId":     beliefId,
-			"beliefType":   "Belief",
-			"beliefVerb":   "IDENTIFY_AS",
-			"beliefObject": value,
-		}
-	}
-
-	return nil
+	cssClasses.WriteString(" whitespace-nowrap")
+	return strings.TrimSpace(cssClasses.String())
 }
 
 func (nbr *NodeButtonRenderer) checkNeedsTrailingSpace(nodeID string) bool {

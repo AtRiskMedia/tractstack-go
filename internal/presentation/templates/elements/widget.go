@@ -68,6 +68,11 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 		return templates.RenderToggle(wr.ctx, classNames, *hook.Value1, *hook.Value2)
 	case "resource":
 		return wr.renderResource(classNames, hook)
+	case "interactiveDisclosure":
+		if hook.Value1 != nil && hook.Value2 != nil {
+			return templates.RenderInteractiveDisclosure(wr.ctx, classNames, *hook.Value1, *hook.Value2)
+		}
+		return "<!-- interactiveDisclosure error: missing parameters -->"
 	default:
 		data := widgetData{ClassNames: classNames, Hook: hook.Hook}
 		var buf bytes.Buffer

@@ -153,7 +153,7 @@ func (brs *BeliefRegistryService) scanNodeRecursive(nodeData any, foundBeliefs *
 		widgetType := extractWidgetTypeFromCopy(copyText)
 
 		// Check if it's a widget that controls a belief.
-		if widgetType == "belief" || widgetType == "toggle" || widgetType == "identifyAs" {
+		if widgetType == "belief" || widgetType == "toggle" || widgetType == "identifyAs" || widgetType == "interactiveDisclosure" {
 			// The belief slug is passed as the first parameter in `codeHookParams`.
 			if params, ok := nodeMap["codeHookParams"].([]any); ok && len(params) > 0 {
 				if beliefSlug, ok := params[0].(string); ok && beliefSlug != "" {

@@ -52,7 +52,7 @@ func (s *FragmentService) GenerateFragment(
 	tenantCtx *tenant.Context,
 	paneID, sessionID, storyfragmentID string,
 ) (string, error) {
-	s.logger.Content().Debug("🎯 GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
+	s.logger.Content().Debug("GENERATE FRAGMENT START", "paneId", paneID, "sessionId", sessionID, "storyfragmentId", storyfragmentID)
 
 	// Step 1: Load the essential static data for the pane.
 	paneRepo := tenantCtx.PaneRepo()
@@ -328,6 +328,7 @@ func (s *FragmentService) generateFreshHTMLWithWidgets(
 		StoryfragmentID:  storyfragmentID,
 		ContainingPaneID: pane.ID,
 		WidgetContext:    widgetCtx,
+		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
 	}
 
 	generator := templates.NewGenerator(renderCtx)
@@ -365,6 +366,7 @@ func (s *FragmentService) generateBaseHTML(tenantCtx *tenant.Context, pane *cont
 		StoryfragmentID:  "",
 		ContainingPaneID: pane.ID,
 		WidgetContext:    nil,
+		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
 	}
 
 	generator := templates.NewGenerator(renderCtx)
@@ -525,6 +527,7 @@ func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, pan
 		StoryfragmentID:  "preview-fragment",
 		ContainingPaneID: paneID,
 		WidgetContext:    nil,
+		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
 	}
 
 	generator := templates.NewGenerator(renderCtx)

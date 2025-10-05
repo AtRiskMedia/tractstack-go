@@ -3,6 +3,7 @@ package bulk
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -516,10 +517,18 @@ func (ds *DependencyScanner) scanMapForBeliefWidgets(data any, beliefs *[]string
 		if tagName, ok := v["tagName"].(string); ok && tagName == "code" {
 			if copy, ok := v["copy"].(string); ok {
 				if params, ok := v["codeHookParams"].([]any); ok && len(params) > 0 {
-					// Extract widget type from copy (belief(...), toggle(...), identifyAs(...))
-					if strings.HasPrefix(copy, "belief(") || strings.HasPrefix(copy, "toggle(") || strings.HasPrefix(copy, "identifyAs(") {
-						if beliefSlug, ok := params[0].(string); ok && beliefSlug != "" {
-							*beliefs = append(*beliefs, beliefSlug)
+					// Use a slice for extensible widget detection
+					beliefWidgetPrefixes := []string{"belief(", "toggle(", "identifyAs(", "interactiveDisclosure("}
+
+					for _, prefix := range beliefWidgetPrefixes {
+						if strings.HasPrefix(copy, prefix) {
+							if beliefSlug, ok := params[0].(string); ok && beliefSlug != "" {
+								// Prevent duplicates
+								if !slices.Contains(*beliefs, beliefSlug) {
+									*beliefs = append(*beliefs, beliefSlug)
+								}
+								break // Found a match, no need to check other prefixes
+							}
 						}
 					}
 				}
