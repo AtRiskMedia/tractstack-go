@@ -4,6 +4,7 @@ package services
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
@@ -121,17 +122,40 @@ func (s *BeliefService) GetBySlug(tenantCtx *tenant.Context, slug string) (*cont
 	return belief, nil
 }
 
+// validateBelief performs validation on a belief's fields.
+func (s *BeliefService) validateBelief(belief *content.BeliefNode) error {
+	// Slug must be alphabetic only
+	slugRegex := regexp.MustCompile("^[a-zA-Z]+$")
+	if !slugRegex.MatchString(belief.Slug) {
+		return fmt.Errorf("belief slug '%s' is invalid; must contain only letters (a-z, A-Z)", belief.Slug)
+	}
+
+	// Custom values must contain only allowed characters
+	if belief.Scale == "custom" {
+		valueRegex := regexp.MustCompile("^[a-zA-Z][a-zA-Z0-9?!]*( [a-zA-Z0-9?!]+)*$")
+		for _, value := range belief.CustomValues {
+			if !valueRegex.MatchString(value) {
+				return fmt.Errorf("custom value '%s' is invalid: must start with a letter and use only letters, numbers, !, ?, and single spaces (no trailing space)", value)
+			}
+		}
+	}
+
+	return nil
+}
+
 // Create creates a new belief
 func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.BeliefNode) error {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_belief", tenantCtx.TenantID)
 	defer marker.Complete()
-	if belief.ID == "" {
-		belief.ID = security.GenerateULID()
-	}
 	if belief == nil {
 		return fmt.Errorf("belief cannot be nil")
 	}
+	if belief.ID == "" {
+		belief.ID = security.GenerateULID()
+	}
+
+	// Emptiness checks
 	if belief.Title == "" {
 		return fmt.Errorf("belief title cannot be empty")
 	}
@@ -140,6 +164,11 @@ func (s *BeliefService) Create(tenantCtx *tenant.Context, belief *content.Belief
 	}
 	if belief.Scale == "" {
 		return fmt.Errorf("belief scale cannot be empty")
+	}
+
+	// Stricter validation
+	if err := s.validateBelief(belief); err != nil {
+		return err
 	}
 
 	beliefRepo := tenantCtx.BeliefRepo()
@@ -182,6 +211,11 @@ func (s *BeliefService) Update(tenantCtx *tenant.Context, belief *content.Belief
 	}
 	if belief.Scale == "" {
 		return fmt.Errorf("belief scale cannot be empty")
+	}
+
+	// Stricter validation
+	if err := s.validateBelief(belief); err != nil {
+		return err
 	}
 
 	beliefRepo := tenantCtx.BeliefRepo()

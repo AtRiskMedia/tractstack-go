@@ -15,6 +15,57 @@ type ParsedAction struct {
 	HxVals   map[string]string
 }
 
+// lexer tokenizes the actionLisp string, respecting double-quoted segments.
+func lexer(input string) []string {
+	var tokens []string
+	var currentToken strings.Builder
+	inString := false
+
+	trimmedInput := strings.TrimSpace(input)
+
+	for _, char := range trimmedInput {
+		switch char {
+		case '"':
+			// When a quote is found, toggle the inString state.
+			// If a token is being built, flush it first.
+			if currentToken.Len() > 0 {
+				tokens = append(tokens, currentToken.String())
+				currentToken.Reset()
+			}
+			inString = !inString
+		case '(', ')':
+			if !inString {
+				// Flush any existing token, then ignore the parenthesis for this parser's needs.
+				if currentToken.Len() > 0 {
+					tokens = append(tokens, currentToken.String())
+					currentToken.Reset()
+				}
+				continue
+			}
+			currentToken.WriteRune(char)
+		case ' ', '\t', '\n', '\r':
+			if inString {
+				// If inside a string, whitespace is part of the token.
+				currentToken.WriteRune(char)
+			} else if currentToken.Len() > 0 {
+				// If not in a string, whitespace is a delimiter. Flush the token.
+				tokens = append(tokens, currentToken.String())
+				currentToken.Reset()
+			}
+		default:
+			// Any other character is part of the current token.
+			currentToken.WriteRune(char)
+		}
+	}
+
+	// After the loop, flush any remaining token.
+	if currentToken.Len() > 0 {
+		tokens = append(tokens, currentToken.String())
+	}
+
+	return tokens
+}
+
 // Parse takes a raw actionLisp string and returns a structured ParsedAction object.
 // It acts as the single source of truth for actionLisp business logic.
 func Parse(actionLisp string, paneID string, homeSlug string) *ParsedAction {
@@ -24,15 +75,16 @@ func Parse(actionLisp string, paneID string, homeSlug string) *ParsedAction {
 		HxVals:   nil,
 	}
 
-	trimmed := strings.Trim(actionLisp, "() ")
-	parts := strings.Fields(trimmed)
-	if len(parts) == 0 {
+	tokens := lexer(actionLisp)
+	if len(tokens) == 0 {
 		return defaultAction
 	}
 
-	command := parts[0]
-	innerPayload := strings.Trim(trimmed[len(command):], "() ")
-	params := strings.Fields(innerPayload)
+	command := tokens[0]
+	var params []string
+	if len(tokens) > 1 {
+		params = tokens[1:]
+	}
 
 	switch command {
 	case "goto":
@@ -51,7 +103,7 @@ func Parse(actionLisp string, paneID string, homeSlug string) *ParsedAction {
 		}
 
 	case "declare", "identifyAs":
-		hxVals := buildStateChangePayload(command, params, paneID) // FIXED: Pass paneID
+		hxVals := buildStateChangePayload(command, params, paneID)
 		if hxVals == nil {
 			log.Printf("WARN: Could not build state change payload for command %q with params %v", command, params)
 			return defaultAction
@@ -69,7 +121,7 @@ func Parse(actionLisp string, paneID string, homeSlug string) *ParsedAction {
 }
 
 // buildStateChangePayload creates the specific map for a direct state change hx-vals payload.
-func buildStateChangePayload(command string, params []string, paneID string) map[string]string { // FIXED: Accept paneID
+func buildStateChangePayload(command string, params []string, paneID string) map[string]string {
 	if len(params) < 2 {
 		return nil
 	}
@@ -81,7 +133,7 @@ func buildStateChangePayload(command string, params []string, paneID string) map
 			"beliefId":    beliefID,
 			"beliefType":  "Belief",
 			"beliefValue": value,
-			"paneId":      paneID, // FIXED: Add paneId to payload
+			"paneId":      paneID,
 		}
 	}
 
@@ -91,7 +143,7 @@ func buildStateChangePayload(command string, params []string, paneID string) map
 			"beliefType":   "Belief",
 			"beliefVerb":   "IDENTIFY_AS",
 			"beliefObject": value,
-			"paneId":       paneID, // FIXED: Add paneId to payload
+			"paneId":       paneID,
 		}
 	}
 
