@@ -133,6 +133,11 @@ build_astro_frontend() {
 
   # Build Astro project
   cd "$astro_src_dir"
+  log "Updating astro-tractstack to the latest version..."
+  if ! pnpm up astro-tractstack --latest; then
+    log_error "Failed to update astro-tractstack package"
+    return 1
+  fi
   if ! pnpm install; then
     log_error "pnpm install failed"
     return 1
