@@ -55,7 +55,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 
 	switch hook.Hook {
 	case "youtube":
-		return wr.renderLiteYouTube(classNames, hook)
+		return wr.renderLiteYouTube(hook)
 	case "bunny":
 		return templates.RenderBunny(classNames, hook)
 	case "signup":
@@ -65,7 +65,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 	case "identifyAs":
 		return templates.RenderIdentifyAs(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
 	case "toggle":
-		return templates.RenderToggle(wr.ctx, classNames, *hook.Value1, *hook.Value2)
+		return templates.RenderToggle(wr.ctx, classNames, *hook.Value1, *hook.Value2, hook.Value3)
 	case "resource":
 		return wr.renderResource(classNames, hook)
 	case "interactiveDisclosure":
@@ -86,7 +86,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 }
 
 // renderLiteYouTube renders a performant YouTube player.
-func (wr *WidgetRenderer) renderLiteYouTube(classNames string, hook *rendering.CodeHook) string {
+func (wr *WidgetRenderer) renderLiteYouTube(hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
 		data := widgetData{Value1: *hook.Value1, Value2: *hook.Value2}
 		var buf bytes.Buffer

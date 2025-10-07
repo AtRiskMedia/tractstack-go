@@ -2,6 +2,8 @@
 package templates
 
 import (
+	"log"
+
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 )
 
@@ -33,11 +35,22 @@ func getUserBeliefs(ctx *rendering.RenderContext) map[string][]string {
 
 // getCurrentBeliefState finds the belief state for a given slug from the user's belief map.
 func getCurrentBeliefState(userBeliefs map[string][]string, beliefSlug string) *BeliefState {
+	log.Printf("--- DEBUG [getCurrentBeliefState] ---")
+	log.Printf("Looking for beliefSlug: [%s]", beliefSlug)
+	log.Printf("Searching within userBeliefs map: [%+v]", userBeliefs)
 	if userBeliefs == nil {
 		return nil
 	}
 
 	beliefValues, exists := userBeliefs[beliefSlug]
+	if !exists {
+		log.Printf("Result: beliefSlug [%s] does NOT exist in the map.", beliefSlug)
+	} else if len(beliefValues) == 0 {
+		log.Printf("Result: beliefSlug [%s] exists but its value slice is empty.", beliefSlug)
+	} else {
+		log.Printf("Result: beliefSlug [%s] exists with values: %+v", beliefSlug, beliefValues)
+		log.Printf("Using Verb from index 0: [%s]", beliefValues[0])
+	}
 	if !exists || len(beliefValues) == 0 {
 		return nil
 	}
