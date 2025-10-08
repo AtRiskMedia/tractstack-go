@@ -64,7 +64,11 @@ func (ds *DependencyScanner) ScanAllContentIDs(tenantID string) (*admin.ContentI
 			ds.logger.Database().Error("Content ID query failed", "error", err.Error(), "query", query)
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				ds.logger.Database().Error("Failed to close content ID rows", "error", err)
+			}
+		}()
 
 		count := 0
 		for rows.Next() {
@@ -98,7 +102,11 @@ func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map
 		ds.logger.Database().Error("Story fragment dependency query failed", "error", err.Error(), "query", query)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close storyfragment dependency rows", "error", err)
+		}
+	}()
 
 	count := 0
 	for rows.Next() {
@@ -130,7 +138,11 @@ func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map
 		ds.logger.Database().Error("Menu query failed", "error", err.Error())
 		return dependencies, nil // Continue with what we have
 	}
-	defer menuRows.Close()
+	defer func() {
+		if err := menuRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close menu rows", "error", err)
+		}
+	}()
 
 	menuDepCount := 0
 	for menuRows.Next() {
@@ -192,7 +204,11 @@ func (ds *DependencyScanner) ScanPaneDependencies(tenantID string) (map[string][
 		ds.logger.Database().Error("Pane IDs query failed", "error", err.Error(), "query", query1)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to pane rows", "error", err)
+		}
+	}()
 
 	paneCount := 0
 	for rows.Next() {
@@ -214,7 +230,11 @@ func (ds *DependencyScanner) ScanPaneDependencies(tenantID string) (map[string][
 		ds.logger.Database().Error("Pane dependencies query failed", "error", err.Error(), "query", query2)
 		return nil, err
 	}
-	defer sfPaneRows.Close()
+	defer func() {
+		if err := sfPaneRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to storyfragment pane rows", "error", err)
+		}
+	}()
 
 	depCount := 0
 	for sfPaneRows.Next() {
@@ -246,7 +266,11 @@ func (ds *DependencyScanner) ScanMenuDependencies(tenantID string) (map[string][
 		ds.logger.Database().Error("Menu IDs query failed", "error", err.Error(), "query", query1)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to menu rows", "error", err)
+		}
+	}()
 
 	menuCount := 0
 	for rows.Next() {
@@ -268,7 +292,11 @@ func (ds *DependencyScanner) ScanMenuDependencies(tenantID string) (map[string][
 		ds.logger.Database().Error("Menu dependencies query failed", "error", err.Error(), "query", query2)
 		return nil, err
 	}
-	defer sfMenuRows.Close()
+	defer func() {
+		if err := sfMenuRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close storyfragment menu rows", "error", err)
+		}
+	}()
 
 	depCount := 0
 	for sfMenuRows.Next() {
@@ -300,7 +328,11 @@ func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][
 		ds.logger.Database().Error("File IDs query failed", "error", err.Error(), "query", query1)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close file rows", "error", err)
+		}
+	}()
 
 	fileCount := 0
 	for rows.Next() {
@@ -322,7 +354,11 @@ func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][
 		ds.logger.Database().Error("File dependencies query failed", "error", err.Error(), "query", query2)
 		return nil, err
 	}
-	defer filePaneRows.Close()
+	defer func() {
+		if err := filePaneRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close file pane rows", "error", err)
+		}
+	}()
 
 	depCount := 0
 	for filePaneRows.Next() {
@@ -335,13 +371,45 @@ func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][
 		}
 	}
 
+	// Query for file_resources dependencies
+	query3 := "SELECT file_id, resource_id FROM file_resources"
+	ds.logger.Database().Debug("Executing file dependencies query (resources)", "query", query3)
+
+	fileResourceRows, err := ds.db.Query(query3)
+	if err != nil {
+		ds.logger.Database().Error("File resource dependencies query failed", "error", err.Error(), "query", query3)
+		return nil, err
+	}
+	defer func() {
+		if err := fileResourceRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close file resource rows", "error", err)
+		}
+	}()
+
+	for fileResourceRows.Next() {
+		var fileID, resourceID string
+		if err := fileResourceRows.Scan(&fileID, &resourceID); err == nil {
+			if _, exists := dependencies[fileID]; exists {
+				// Prevent duplicates if a file is linked multiple ways
+				if !slices.Contains(dependencies[fileID], resourceID) {
+					dependencies[fileID] = append(dependencies[fileID], resourceID)
+					depCount++
+				}
+			}
+		}
+	}
+
 	// Third query: pane options_payload fileId references
 	paneRows, err := ds.db.Query("SELECT id, options_payload FROM panes WHERE options_payload LIKE '%fileId%'")
 	if err != nil {
 		ds.logger.Database().Error("Pane fileId query failed", "error", err.Error())
 		return dependencies, nil // Continue with what we have
 	}
-	defer paneRows.Close()
+	defer func() {
+		if err := paneRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close pane rows", "error", err)
+		}
+	}()
 
 	for paneRows.Next() {
 		var paneID, optionsPayload string
@@ -388,7 +456,11 @@ func (ds *DependencyScanner) ScanBeliefDependencies(tenantID string) (map[string
 		ds.logger.Database().Error("Belief IDs query failed", "error", err.Error(), "query", query)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close belief rows", "error", err)
+		}
+	}()
 
 	beliefCount := 0
 	for rows.Next() {
@@ -407,7 +479,11 @@ func (ds *DependencyScanner) ScanBeliefDependencies(tenantID string) (map[string
 		ds.logger.Database().Error("Pane belief query failed", "error", err.Error())
 		return dependencies, nil
 	}
-	defer paneRows.Close()
+	defer func() {
+		if err := paneRows.Close(); err != nil {
+			ds.logger.Database().Error("Failed to close pane belief rows", "error", err)
+		}
+	}()
 
 	// Collect all belief slugs first, then bulk lookup belief IDs
 	beliefSlugs := make(map[string][]string) // beliefSlug -> []paneIDs

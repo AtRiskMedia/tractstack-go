@@ -68,6 +68,9 @@ func PreParseAction(payload []LispToken, slug string, isContext bool, brandConfi
 // handleGotoCommand processes goto commands with their parameters
 func handleGotoCommand(command, parameterOne, parameterTwo, slug string, isContext bool, brandConfig BrandConfig) string {
 	switch command {
+	case "identifyAs":
+	case "declare":
+		return ""
 	case "storykeep":
 		if parameterOne != "" {
 			switch parameterOne {

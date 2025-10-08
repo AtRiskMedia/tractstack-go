@@ -4,6 +4,9 @@ package services
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
@@ -11,6 +14,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // ImageFileService orchestrates imagefile operations with cache-first repository pattern
@@ -185,7 +189,7 @@ func (s *ImageFileService) Update(tenantCtx *tenant.Context, imageFile *content.
 	return nil
 }
 
-// Delete deletes an imagefile
+// Delete deletes an imagefile from the database and removes its associated physical files from disk.
 func (s *ImageFileService) Delete(tenantCtx *tenant.Context, id string) error {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("delete_imagefile", tenantCtx.TenantID)
@@ -196,22 +200,64 @@ func (s *ImageFileService) Delete(tenantCtx *tenant.Context, id string) error {
 
 	imageFileRepo := tenantCtx.ImageFileRepo()
 
-	existing, err := imageFileRepo.FindByID(tenantCtx.TenantID, id)
+	// Step 1: Find the file record to get its paths before deleting it.
+	imageFileToDelete, err := imageFileRepo.FindByID(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to verify imagefile %s exists: %w", id, err)
 	}
-	if existing == nil {
-		return fmt.Errorf("imagefile %s not found", id)
+	// If the record doesn't exist, we can consider the operation successful.
+	if imageFileToDelete == nil {
+		s.logger.Content().Warn("Attempted to delete a non-existent imagefile record", "tenantId", tenantCtx.TenantID, "imagefileId", id)
+		return nil
 	}
 
+	// Step 2: Delete the physical files from disk.
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
+	var pathsToDelete []string
+
+	// Add the main src file
+	if imageFileToDelete.Src != "" {
+		pathsToDelete = append(pathsToDelete, imageFileToDelete.Src)
+	}
+
+	// Add all files from the srcSet
+	if imageFileToDelete.SrcSet != nil && *imageFileToDelete.SrcSet != "" {
+		// Example srcSet: "/path1 1920w, /path2 1080w"
+		pairs := strings.Split(*imageFileToDelete.SrcSet, ",")
+		for _, pair := range pairs {
+			parts := strings.Fields(strings.TrimSpace(pair))
+			if len(parts) > 0 {
+				pathsToDelete = append(pathsToDelete, parts[0])
+			}
+		}
+	}
+
+	for _, relativePath := range pathsToDelete {
+		// Convert relative URL path to absolute disk path
+		// e.g., /media/images/resources/file.webp -> /server/config/tenant/media/images/resources/file.webp
+		if !strings.HasPrefix(relativePath, "/media/") {
+			s.logger.Content().Warn("Cannot delete file with invalid path prefix", "path", relativePath)
+			continue
+		}
+		absolutePath := filepath.Join(mediaPath, strings.TrimPrefix(relativePath, "/media/"))
+
+		err := os.Remove(absolutePath)
+		// We log an error but don't fail the whole operation if a file doesn't exist.
+		if err != nil && !os.IsNotExist(err) {
+			s.logger.Content().Error("Failed to delete physical image file", "path", absolutePath, "error", err)
+		} else if err == nil {
+			s.logger.Content().Debug("Successfully deleted physical image file", "path", absolutePath)
+		}
+	}
+
+	// Step 3: Delete the database record.
 	err = imageFileRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
-		return fmt.Errorf("failed to delete imagefile %s: %w", id, err)
+		return fmt.Errorf("failed to delete imagefile record %s: %w", id, err)
 	}
 
-	// Surgically remove the single item from the item cache.
+	// Step 4: Invalidate caches.
 	tenantCtx.CacheManager.InvalidateFile(tenantCtx.TenantID, id)
-	// Surgically remove the ID from the master ID list.
 	tenantCtx.CacheManager.RemoveFileID(tenantCtx.TenantID, id)
 	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 		s.logger.Content().Error("Failed to refresh content map after imagefile deletion",

@@ -65,10 +65,11 @@ type ResourceRepository interface {
 	FindAll(tenantID string) ([]*content.ResourceNode, error)
 	FindByIDs(tenantID string, ids []string) ([]*content.ResourceNode, error)
 	FindByFilters(tenantID string, ids []string, categories []string, slugs []string) ([]*content.ResourceNode, error)
-	Store(tenantID string, resource *content.ResourceNode) error
-	Update(tenantID string, resource *content.ResourceNode) error
+	Store(tenantID string, resource *content.ResourceNode, fileIDs []string) error
+	Update(tenantID string, resource *content.ResourceNode, fileIDs []string) error
 	Delete(tenantID, id string) error
 	SearchBodies(tenantID, term string) ([]FTSResult, error)
+	FindFileIDsByResourceID(tenantID string, resourceID string) ([]string, error)
 }
 
 type BeliefRepository interface {

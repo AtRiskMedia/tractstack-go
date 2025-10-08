@@ -13,6 +13,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
@@ -128,7 +129,7 @@ func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*conten
 	return result, nil
 }
 
-func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNode) error {
+func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNode, fileIDs []string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction for resource store: %w", err)
@@ -144,6 +145,11 @@ func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNo
 
 	if _, err := tx.Exec(query, resource.ID, resource.Title, resource.Slug, resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON)); err != nil {
 		return fmt.Errorf("failed to insert resource: %w", err)
+	}
+
+	// Update file relationships
+	if err := r.bulkUpdateFileResourceRelationships(tx, resource.ID, fileIDs); err != nil {
+		return fmt.Errorf("failed to update file relationships for resource store: %w", err)
 	}
 
 	// FTS Indexing (errors are logged and ignored) - only if category is in COLLECTION_ROUTES
@@ -192,7 +198,7 @@ func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNo
 	return nil
 }
 
-func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceNode) error {
+func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceNode, fileIDs []string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction for resource update: %w", err)
@@ -208,6 +214,11 @@ func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceN
 
 	if _, err := tx.Exec(query, resource.Title, resource.Slug, resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON), resource.ID); err != nil {
 		return fmt.Errorf("failed to update resource: %w", err)
+	}
+
+	// Update file relationships
+	if err := r.bulkUpdateFileResourceRelationships(tx, resource.ID, fileIDs); err != nil {
+		return fmt.Errorf("failed to update file relationships for resource update: %w", err)
 	}
 
 	// FTS Indexing (errors are logged and ignored)
@@ -241,6 +252,13 @@ func (r *ResourceRepository) Delete(tenantID, id string) error {
 		}
 	}()
 
+	// First, delete relationships from the junction table
+	relQuery := `DELETE FROM file_resources WHERE resource_id = ?`
+	if _, err := tx.Exec(relQuery, id); err != nil {
+		return fmt.Errorf("failed to delete resource file relationships: %w", err)
+	}
+
+	// Then, delete the resource itself
 	query := `DELETE FROM resources WHERE id = ?`
 	if _, err := tx.Exec(query, id); err != nil {
 		return fmt.Errorf("failed to delete resource: %w", err)
@@ -249,6 +267,37 @@ func (r *ResourceRepository) Delete(tenantID, id string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction for resource delete: %w", err)
 	}
+	return nil
+}
+
+func (r *ResourceRepository) bulkUpdateFileResourceRelationships(tx *sql.Tx, resourceID string, fileIDs []string) error {
+	// First, delete all existing relationships for this resource
+	if _, err := tx.Exec("DELETE FROM file_resources WHERE resource_id = ?", resourceID); err != nil {
+		return fmt.Errorf("failed to delete old file relationships for resource %s: %w", resourceID, err)
+	}
+
+	// If there are no new file IDs, we're done
+	if len(fileIDs) == 0 {
+		return nil
+	}
+
+	// Next, insert the new relationships
+	stmt, err := tx.Prepare("INSERT INTO file_resources (id, file_id, resource_id) VALUES (?, ?, ?)")
+	if err != nil {
+		return fmt.Errorf("failed to prepare insert statement for file_resources: %w", err)
+	}
+	defer func() {
+		if err := stmt.Close(); err != nil {
+			r.logger.Content().Debug("Failed to close insert statement for file_resources", "error", err.Error())
+		}
+	}()
+
+	for _, fileID := range fileIDs {
+		if _, err := stmt.Exec(security.GenerateULID(), fileID, resourceID); err != nil {
+			return fmt.Errorf("failed to insert file relationship for resource %s and file %s: %w", resourceID, fileID, err)
+		}
+	}
+
 	return nil
 }
 
@@ -556,4 +605,29 @@ func (r *ResourceRepository) SearchBodies(tenantID, term string) ([]repositories
 		results = append(results, res)
 	}
 	return results, rows.Err()
+}
+
+// FindFileIDsByResourceID queries the junction table for all file IDs linked to a specific resource ID.
+func (r *ResourceRepository) FindFileIDsByResourceID(tenantID string, resourceID string) ([]string, error) {
+	query := `SELECT file_id FROM file_resources WHERE resource_id = ?`
+	rows, err := r.db.Query(query, resourceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query file_resources by resource_id: %w", err)
+	}
+	defer rows.Close()
+
+	var fileIDs []string
+	for rows.Next() {
+		var fileID string
+		if err := rows.Scan(&fileID); err != nil {
+			return nil, fmt.Errorf("failed to scan file_id: %w", err)
+		}
+		fileIDs = append(fileIDs, fileID)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error in FindFileIDsByResourceID: %w", err)
+	}
+
+	return fileIDs, nil
 }

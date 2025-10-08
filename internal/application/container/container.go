@@ -143,7 +143,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
 	beliefRegistryService := services.NewBeliefRegistryService(logger)
-	resourceService := services.NewResourceService(logger, perfTracker, contentMapService)
+	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)
+	resourceService := services.NewResourceService(logger, perfTracker, contentMapService, imageFileService)
 
 	// Create the orchestrator first, omitting the PaneService to break the dependency cycle.
 	registryRebuildOrchestrator := services.NewRegistryRebuildOrchestrator(
@@ -170,7 +171,6 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	menuService := services.NewMenuService(logger, perfTracker, contentMapService)
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
-	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)
 	searchService := services.NewSearchService(paneService, storyFragmentService, resourceService, contentMapService)
 
 	// Create WarmingService, now injecting all its required content service dependencies.

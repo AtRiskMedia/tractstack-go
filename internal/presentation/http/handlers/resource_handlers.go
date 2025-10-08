@@ -2,15 +2,22 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/media"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
+	"github.com/oklog/ulid/v2"
 )
 
 // ResourceIDsRequest represents the request body for bulk resource loading
@@ -22,17 +29,19 @@ type ResourceIDsRequest struct {
 
 // ResourceHandlers contains all resource-related HTTP handlers
 type ResourceHandlers struct {
-	resourceService *services.ResourceService
-	logger          *logging.ChanneledLogger
-	perfTracker     *performance.Tracker
+	resourceService  *services.ResourceService
+	imageFileService *services.ImageFileService
+	logger           *logging.ChanneledLogger
+	perfTracker      *performance.Tracker
 }
 
 // NewResourceHandlers creates resource handlers with injected dependencies
-func NewResourceHandlers(resourceService *services.ResourceService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ResourceHandlers {
+func NewResourceHandlers(resourceService *services.ResourceService, imageFileService *services.ImageFileService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ResourceHandlers {
 	return &ResourceHandlers{
-		resourceService: resourceService,
-		logger:          logger,
-		perfTracker:     perfTracker,
+		resourceService:  resourceService,
+		imageFileService: imageFileService,
+		logger:           logger,
+		perfTracker:      perfTracker,
 	}
 }
 
@@ -181,7 +190,7 @@ func (h *ResourceHandlers) GetResourceBySlug(c *gin.Context) {
 	c.JSON(http.StatusOK, resourceNode)
 }
 
-// CreateResource creates a new resource
+// CreateResource creates a new resource, handling image uploads within the payload.
 func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	marker := h.perfTracker.StartOperation("create_resource_request", tenantCtx.TenantID)
@@ -197,22 +206,56 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 		return
 	}
 
-	err := h.resourceService.Create(tenantCtx, &resource)
+	// Process embedded images and mutate the resource payload
+	fileIDs, err := h.processResourceImages(tenantCtx, &resource)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process resource images", "details": err.Error()})
+		return
+	}
+
+	err = h.resourceService.Create(tenantCtx, &resource, fileIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for CreateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+	h.logger.Perf().Info("Performance for CreateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message":    "resource created successfully",
-		"resourceId": resource.ID,
-	})
+	// Return the mutated resource so the frontend has the resolved image paths
+	c.JSON(http.StatusCreated, resource)
 }
 
-// UpdateResource updates an existing resource
+// findOrphanedFileIDs compares an existing resource with an incoming update payload
+// to identify file IDs that are being replaced and will become orphans.
+func (h *ResourceHandlers) findOrphanedFileIDs(existingResource *content.ResourceNode, newResource *content.ResourceNode) []string {
+	var orphanedIDs []string
+	if existingResource.OptionsPayload == nil || newResource.OptionsPayload == nil {
+		return orphanedIDs
+	}
+
+	// Iterate through the fields of the incoming payload.
+	for key, newValue := range newResource.OptionsPayload {
+		// A base64 string indicates a new file is being uploaded for this field.
+		if newStringValue, ok := newValue.(string); ok && strings.HasPrefix(newStringValue, "data:image/") {
+			// Check if the existing resource had a file for this field.
+			if existingValue, exists := existingResource.OptionsPayload[key]; exists {
+				// The existing value should be a map if it's a processed image.
+				if existingMap, ok := existingValue.(map[string]interface{}); ok {
+					// If it has a fileId, it's an orphan.
+					if fileID, ok := existingMap["fileId"].(string); ok && fileID != "" {
+						orphanedIDs = append(orphanedIDs, fileID)
+						h.logger.Content().Debug("Identified orphaned file for replacement", "field", key, "orphanedFileId", fileID)
+					}
+				}
+			}
+		}
+	}
+
+	return orphanedIDs
+}
+
+// UpdateResource updates an existing resource, handling the replacement and cleanup of images.
 func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	marker := h.perfTracker.StartOperation("update_resource_request", tenantCtx.TenantID)
@@ -228,28 +271,60 @@ func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 		return
 	}
 
-	var resource content.ResourceNode
-	if err := c.ShouldBindJSON(&resource); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+	// Step 1: Fetch the current state of the resource before binding the new data.
+	existingResource, err := h.resourceService.GetByID(tenantCtx, resourceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve existing resource", "details": err.Error()})
+		return
+	}
+	if existingResource == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
 		return
 	}
 
-	// Ensure ID matches URL parameter
-	resource.ID = resourceID
+	// Step 2: Bind the incoming update payload.
+	var updatedResource content.ResourceNode
+	if err := c.ShouldBindJSON(&updatedResource); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+	updatedResource.ID = resourceID // Ensure ID is set correctly.
 
-	err := h.resourceService.Update(tenantCtx, &resource)
+	// Step 3: Compare payloads to find files that are being replaced.
+	orphanedFileIDs := h.findOrphanedFileIDs(existingResource, &updatedResource)
+
+	// Step 4: Process any new Base64 images in the payload.
+	newFileIDs, err := h.processResourceImages(tenantCtx, &updatedResource)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process resource images", "details": err.Error()})
+		return
+	}
+
+	// Step 5: Update the resource in the database with the new data.
+	err = h.resourceService.Update(tenantCtx, &updatedResource, newFileIDs)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for UpdateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
+	// Step 6: On successful update, clean up the orphaned files in the background.
+	if len(orphanedFileIDs) > 0 {
+		go func() {
+			h.logger.Content().Info("Starting background cleanup of orphaned resource files", "count", len(orphanedFileIDs))
+			for _, orphanID := range orphanedFileIDs {
+				if err := h.imageFileService.Delete(tenantCtx, orphanID); err != nil {
+					h.logger.Content().Error("Failed to delete orphaned file during background cleanup", "error", err, "fileId", orphanID)
+				}
+			}
+			h.logger.Content().Info("Background cleanup of orphaned resource files completed.")
+		}()
+	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":    "resource updated successfully",
-		"resourceId": resource.ID,
-	})
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for UpdateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", updatedResource.ID)
+
+	// Return the mutated resource so the frontend has the resolved image paths.
+	c.JSON(http.StatusOK, updatedResource)
 }
 
 // DeleteResource deletes a resource
@@ -281,4 +356,65 @@ func (h *ResourceHandlers) DeleteResource(c *gin.Context) {
 		"message":    "resource deleted successfully",
 		"resourceId": resourceID,
 	})
+}
+
+// processResourceImages scans a resource's optionsPayload for Base64 image data,
+// processes each image, creates an ImageFileNode record, and mutates the payload
+// to replace the Base64 data with the final image details.
+// It returns a slice of the newly created file IDs.
+func (h *ResourceHandlers) processResourceImages(tenantCtx *tenant.Context, resource *content.ResourceNode) ([]string, error) {
+	var createdFileIDs []string
+	if resource.OptionsPayload == nil {
+		return createdFileIDs, nil
+	}
+
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
+	processor := media.NewImageProcessor(mediaPath)
+
+	for key, value := range resource.OptionsPayload {
+		base64Data, ok := value.(string)
+		if !ok || !strings.HasPrefix(base64Data, "data:image/") {
+			continue
+		}
+
+		fileID := ulid.Make().String()
+		h.logger.Content().Debug("Processing new resource image", "field", key, "assignedFileId", fileID)
+
+		src, srcSet, err := processor.ProcessResourceImageWithSizes(base64Data, fileID)
+		if err != nil {
+			h.logger.Content().Error("Failed to process resource image", "error", err, "field", key)
+			return nil, fmt.Errorf("failed to process image for field '%s': %w", key, err)
+		}
+
+		filename := filepath.Base(src)
+		imageFile := content.ImageFileNode{
+			ID:             fileID,
+			NodeType:       "File",
+			Filename:       filename,
+			AltDescription: "Image requiring description",
+			Src:            src,
+			SrcSet:         srcSet,
+		}
+
+		if err := h.imageFileService.Create(tenantCtx, &imageFile); err != nil {
+			h.logger.Content().Error("Failed to create image file record", "error", err, "fileID", fileID)
+			// Note: Could add cleanup logic here to delete the physically saved files if the DB record fails.
+			return nil, fmt.Errorf("failed to create database record for image file '%s': %w", fileID, err)
+		}
+
+		createdFileIDs = append(createdFileIDs, fileID)
+
+		// Mutate the payload: replace base64 with a structured object.
+		// This keeps the payload consistent and provides the frontend with necessary data.
+		imagePayload := map[string]interface{}{
+			"fileId": fileID,
+			"src":    src,
+		}
+		if srcSet != nil {
+			imagePayload["srcSet"] = *srcSet
+		}
+		resource.OptionsPayload[key] = imagePayload
+	}
+
+	return createdFileIDs, nil
 }

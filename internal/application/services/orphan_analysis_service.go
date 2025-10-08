@@ -294,6 +294,31 @@ func (s *OrphanAnalysisService) scanFileDependenciesOptimized(tenantCtx *tenant.
 		}
 	}
 
+	// Also get file dependencies from file_resources table
+	resDepRows, err := db.Query("SELECT file_id, resource_id FROM file_resources")
+	if err != nil {
+		s.logger.Content().Error("File resource dependencies query failed", "error", err.Error(), "tenantId", tenantCtx.TenantID)
+		return nil, err
+	}
+	defer func() {
+		if err := resDepRows.Close(); err != nil {
+			s.logger.Content().Debug("Failed to close resDepRows", "error", err.Error(), "tenantId", tenantCtx.TenantID)
+		}
+	}()
+
+	for resDepRows.Next() {
+		var fileID, resourceID string
+		if err := resDepRows.Scan(&fileID, &resourceID); err == nil {
+			if _, exists := dependencies[fileID]; exists {
+				// Prevent duplicates in case a file is linked in multiple ways
+				if !slices.Contains(dependencies[fileID], resourceID) {
+					dependencies[fileID] = append(dependencies[fileID], resourceID)
+					depCount++
+				}
+			}
+		}
+	}
+
 	s.logger.Content().Debug("Optimized file dependencies scan completed", "tenantId", tenantCtx.TenantID,
 		"fileCount", fileCount, "depCount", depCount, "duration", time.Since(start))
 	return dependencies, nil

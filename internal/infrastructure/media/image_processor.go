@@ -154,8 +154,11 @@ func deleteVersionedFile(baseFilename string, version int64, targetDir string) {
 		oldFilename := fmt.Sprintf("%s-%d.%s", baseFilename, version, ext)
 		oldPath := filepath.Join(targetDir, oldFilename)
 
-		// Ignore errors - file might not exist or might have different extension
-		os.Remove(oldPath)
+		defer func() {
+			if err := os.Remove(oldPath); err != nil {
+				fmt.Printf("[ERROR] Failed to remove original file: %v\n", err)
+			}
+		}()
 	}
 }
 
@@ -201,7 +204,11 @@ func (p *ImageProcessor) generateWebPThumbnails(originalPath, nodeID string, tim
 	if err != nil {
 		return nil, fmt.Errorf("failed to open original file: %w", err)
 	}
-	defer originalFile.Close()
+	defer func() {
+		if err := originalFile.Close(); err != nil {
+			fmt.Printf("[ERROR] Failed to close original file: %v\n", err)
+		}
+	}()
 
 	// Decode the image
 	img, err := imaging.Decode(originalFile)
@@ -227,7 +234,11 @@ func (p *ImageProcessor) generateWebPThumbnails(originalPath, nodeID string, tim
 		if err != nil {
 			// Clean up any previously created thumbnails
 			for j := range i {
-				os.Remove(thumbnailPaths[j])
+				defer func() {
+					if err := os.Remove(thumbnailPaths[j]); err != nil {
+						fmt.Printf("[ERROR] Failed to remove original file: %v\n", err)
+					}
+				}()
 			}
 			return nil, fmt.Errorf("failed to save WebP thumbnail %s: %w", thumbFilename, err)
 		}
@@ -277,7 +288,11 @@ func (p *ImageProcessor) ProcessOGImageWithThumbnails(data, nodeID string) (stri
 	thumbnailPaths, err := p.generateWebPThumbnails(originalPath, nodeID, timestamp, thumbsDir)
 	if err != nil {
 		// If thumbnail generation fails, clean up original and return error
-		os.Remove(originalPath)
+		defer func() {
+			if err := os.Remove(originalPath); err != nil {
+				fmt.Printf("[ERROR] Failed to remove original thumbnail: %v\n", err)
+			}
+		}()
 		return "", nil, fmt.Errorf("failed to generate thumbnails: %w", err)
 	}
 
@@ -370,7 +385,11 @@ func (p *ImageProcessor) ProcessContentImageWithSizes(data, fileID string) (stri
 	if err != nil {
 		// If responsive generation fails, clean up original and return error
 		fmt.Printf("[ERROR] Responsive image generation failed, cleaning up original: %s\n", originalPath)
-		os.Remove(originalPath)
+		defer func() {
+			if err := os.Remove(originalPath); err != nil {
+				fmt.Printf("[ERROR] Failed to remove original thumbnail: %v\n", err)
+			}
+		}()
 		return "", nil, fmt.Errorf("failed to generate responsive images: %w", err)
 	}
 
@@ -389,7 +408,11 @@ func (p *ImageProcessor) generateContentImageSizes(originalPath, fileID, monthDi
 		fmt.Printf("[ERROR] Failed to open original file: %v\n", err)
 		return nil, fmt.Errorf("failed to open original file: %w", err)
 	}
-	defer originalFile.Close()
+	defer func() {
+		if err := originalFile.Close(); err != nil {
+			fmt.Printf("[ERROR] Failed to close original file: %v\n", err)
+		}
+	}()
 
 	// Decode the image
 	img, err := imaging.Decode(originalFile)
@@ -415,7 +438,11 @@ func (p *ImageProcessor) generateContentImageSizes(originalPath, fileID, monthDi
 		if err != nil {
 			// Clean up any previously created responsive images
 			for j := range i {
-				os.Remove(responsivePaths[j])
+				defer func() {
+					if err := os.Remove(responsivePaths[j]); err != nil {
+						fmt.Printf("[ERROR] Failed to remove responsive path thumbnail: %v\n", err)
+					}
+				}()
 			}
 			return nil, fmt.Errorf("failed to save WebP responsive image %s: %w", webpFilename, err)
 		}
@@ -450,4 +477,68 @@ func (p *ImageProcessor) buildContentImageSrcSet(responsivePaths []string, month
 func getMonthPath() string {
 	now := time.Now()
 	return now.Format("2006-01")
+}
+
+// ProcessResourceImageWithSizes handles resource image processing with responsive sizes.
+// It creates responsive WebP versions for raster images and saves them to the 'resources' subdirectory.
+// Returns main src path and srcSet string (srcSet is nil for SVGs).
+func (p *ImageProcessor) ProcessResourceImageWithSizes(data, fileID string) (string, *string, error) {
+	if data == "" {
+		return "", nil, fmt.Errorf("empty base64 data")
+	}
+
+	// Extract file extension from MIME type
+	ext := extractExtension(data)
+	if ext == "" {
+		return "", nil, fmt.Errorf("unsupported image format")
+	}
+
+	// Use a dedicated 'resources' path for organization
+	const resourcePath = "resources"
+
+	// Create resource-specific directory
+	resourceDir := filepath.Join(p.basePath, "images", resourcePath)
+	if err := os.MkdirAll(resourceDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("failed to create resources directory: %w", err)
+	}
+
+	// Handle SVG files (no resizing needed)
+	if ext == "svg" {
+		filename := fmt.Sprintf("%s.%s", fileID, ext)
+		_, err := processSVG(data, filename, resourceDir)
+		if err != nil {
+			fmt.Printf("[ERROR] Failed to save SVG for resource: %v\n", err)
+			return "", nil, fmt.Errorf("failed to save SVG for resource: %w", err)
+		}
+
+		relativePath := fmt.Sprintf("/media/images/%s/%s", resourcePath, filename)
+		return relativePath, nil, nil
+	}
+
+	// Handle raster images (PNG, JPG, WebP) - create responsive versions
+	filename := fmt.Sprintf("%s.%s", fileID, ext)
+	originalPath, err := processBinaryImage(data, filename, resourceDir)
+	if err != nil {
+		fmt.Printf("[ERROR] Failed to save original resource image: %v\n", err)
+		return "", nil, fmt.Errorf("failed to save original resource image: %w", err)
+	}
+
+	// Generate responsive WebP versions
+	responsivePaths, err := p.generateContentImageSizes(originalPath, fileID, resourceDir)
+	if err != nil {
+		// If responsive generation fails, clean up original and return error
+		fmt.Printf("[ERROR] Responsive resource image generation failed, cleaning up original: %s\n", originalPath)
+		defer func() {
+			if err := os.Remove(originalPath); err != nil {
+				fmt.Printf("[ERROR] Failed to remove original path: %v\n", err)
+			}
+		}()
+		return "", nil, fmt.Errorf("failed to generate responsive resource images: %w", err)
+	}
+
+	// Build srcSet string and determine main src
+	srcSet := p.buildContentImageSrcSet(responsivePaths, resourcePath)
+	mainSrc := fmt.Sprintf("/media/images/%s/%s_1920px.webp", resourcePath, fileID)
+
+	return mainSrc, &srcSet, nil
 }

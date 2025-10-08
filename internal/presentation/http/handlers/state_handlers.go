@@ -56,7 +56,7 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 	}
 
 	storyFragmentID := c.GetHeader("X-StoryFragment-ID")
-	h.logger.System().Debug("🚨 UNSET DEBUG: Headers received",
+	h.logger.System().Debug("UNSET DEBUG: Headers received",
 		"sessionId", sessionID,
 		"storyFragmentId", storyFragmentID,
 		"tenantId", tenantCtx.TenantID)
@@ -102,12 +102,12 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 	}
 
 	if unsetBeliefIds := c.PostForm("unsetBeliefIds"); unsetBeliefIds != "" {
-		h.logger.System().Debug("🚨 UNSET DEBUG: Processing UNSET request",
+		h.logger.System().Debug("UNSET DEBUG: Processing UNSET request",
 			"unsetBeliefIds", unsetBeliefIds,
 			"storyFragmentId", storyFragmentID,
 			"eventCount", len(eventList))
 	}
-	h.logger.System().Debug("🚨 UNSET DEBUG: Calling ProcessEventsWithSSE",
+	h.logger.System().Debug("UNSET DEBUG: Calling ProcessEventsWithSSE",
 		"sessionId", sessionID,
 		"storyFragmentId", storyFragmentID,
 		"eventCount", len(eventList))

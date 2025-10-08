@@ -19,14 +19,16 @@ type ResourceService struct {
 	logger            *logging.ChanneledLogger
 	perfTracker       *performance.Tracker
 	contentMapService *ContentMapService
+	imageFileService  *ImageFileService
 }
 
 // NewResourceService creates a new resource service singleton
-func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService) *ResourceService {
+func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService, imageFileService *ImageFileService) *ResourceService {
 	return &ResourceService{
 		logger:            logger,
 		perfTracker:       perfTracker,
 		contentMapService: contentMapService,
+		imageFileService:  imageFileService,
 	}
 }
 
@@ -161,8 +163,8 @@ func (s *ResourceService) GetByFilters(tenantCtx *tenant.Context, ids []string, 
 	return resources, nil
 }
 
-// Create creates a new resource
-func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
+// Create creates a new resource and links any associated files
+func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.ResourceNode, fileIDs []string) error {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("create_resource", tenantCtx.TenantID)
 	defer marker.Complete()
@@ -180,7 +182,7 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 	}
 
 	resourceRepo := tenantCtx.ResourceRepo()
-	err := resourceRepo.Store(tenantCtx.TenantID, resource)
+	err := resourceRepo.Store(tenantCtx.TenantID, resource, fileIDs)
 	if err != nil {
 		return fmt.Errorf("failed to create resource %s: %w", resource.ID, err)
 	}
@@ -199,8 +201,8 @@ func (s *ResourceService) Create(tenantCtx *tenant.Context, resource *content.Re
 	return nil
 }
 
-// Update updates an existing resource
-func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
+// Update updates an existing resource and links any associated files
+func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.ResourceNode, fileIDs []string) error {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("update_resource", tenantCtx.TenantID)
 	defer marker.Complete()
@@ -227,7 +229,7 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 		return fmt.Errorf("resource %s not found", resource.ID)
 	}
 
-	err = resourceRepo.Update(tenantCtx.TenantID, resource)
+	err = resourceRepo.Update(tenantCtx.TenantID, resource, fileIDs)
 	if err != nil {
 		return fmt.Errorf("failed to update resource %s: %w", resource.ID, err)
 	}
@@ -245,7 +247,7 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 	return nil
 }
 
-// Delete deletes a resource
+// Delete deletes a resource and orchestrates the deletion of its associated image files.
 func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("delete_resource", tenantCtx.TenantID)
@@ -256,19 +258,31 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 
 	resourceRepo := tenantCtx.ResourceRepo()
 
-	existing, err := resourceRepo.FindByID(tenantCtx.TenantID, id)
+	// Step 1: Find all file IDs associated with this resource before deleting it.
+	fileIDs, err := resourceRepo.FindFileIDsByResourceID(tenantCtx.TenantID, id)
 	if err != nil {
-		return fmt.Errorf("failed to verify resource %s exists: %w", id, err)
-	}
-	if existing == nil {
-		return fmt.Errorf("resource %s not found", id)
+		// Log the error but proceed. It's better to have an orphaned file than a resource that can't be deleted.
+		s.logger.Content().Error("Failed to find associated file IDs for resource deletion", "error", err, "resourceId", id)
 	}
 
+	// Step 2: Delete the resource itself. The repository's Delete method handles the resource and junction table relationships.
 	err = resourceRepo.Delete(tenantCtx.TenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete resource %s: %w", id, err)
 	}
 
+	// Step 3: Now that the resource is gone, clean up the associated image files.
+	if len(fileIDs) > 0 {
+		s.logger.Content().Info("Deleting associated image files for resource", "resourceId", id, "fileCount", len(fileIDs))
+		for _, fileID := range fileIDs {
+			if err := s.imageFileService.Delete(tenantCtx, fileID); err != nil {
+				// Log errors for individual file deletions but don't stop the overall process.
+				s.logger.Content().Error("Failed to delete associated image file", "error", err, "fileId", fileID, "resourceId", id)
+			}
+		}
+	}
+
+	// Step 4: Invalidate caches.
 	tenantCtx.CacheManager.InvalidateResource(tenantCtx.TenantID, id)
 	tenantCtx.CacheManager.RemoveResourceID(tenantCtx.TenantID, id)
 	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {

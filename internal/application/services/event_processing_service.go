@@ -45,7 +45,7 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 	gotoPaneID string,
 	broadcaster messaging.Broadcaster,
 ) error {
-	s.logger.System().Debug("🚨 BROADCAST DEBUG: ProcessEventsWithSSE called",
+	s.logger.System().Debug("BROADCAST DEBUG: ProcessEventsWithSSE called",
 		"sessionId", sessionID,
 		"storyfragmentId", storyfragmentID,
 		"eventCount", len(events))
@@ -163,13 +163,13 @@ func (s *EventProcessingService) ProcessEventsWithSSE(
 		}
 	}
 
-	s.logger.System().Debug("🚨 BROADCAST DEBUG: Events processed",
+	s.logger.System().Debug("BROADCAST DEBUG: Events processed",
 		"changedBeliefs", changedBeliefs,
 		"willBroadcast", len(changedBeliefs) > 0)
 
 	if len(changedBeliefs) > 0 {
 		s.beliefBroadcaster.BroadcastBeliefChange(tenantCtx.TenantID, sessionID, storyfragmentID, changedBeliefs, visibilitySnapshot, currentPaneID, gotoPaneID, broadcaster)
-		s.logger.System().Debug("🚨 BROADCAST DEBUG: Calling BroadcastBeliefChange",
+		s.logger.System().Debug("BROADCAST DEBUG: Calling BroadcastBeliefChange",
 			"tenantId", tenantCtx.TenantID,
 			"sessionId", sessionID,
 			"storyfragmentId", storyfragmentID,
