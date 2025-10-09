@@ -474,7 +474,6 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		fragmentsData = make(map[string]string)
 	}
 
-	// Get impressions for this storyfragment
 	h.logger.Content().Debug("About to call GetImpressionsByPaneIDs", "paneIDsCount", len(storyFragment.PaneIDs))
 
 	var impressions []map[string]any
@@ -491,30 +490,38 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		impressions = []map[string]any{}
 	}
 
-	// Build resources payload from codeHook categories
 	resourcesPayload := make(map[string][]map[string]any)
 	if len(storyFragment.PaneIDs) > 0 {
 		paneRepo := tenantCtx.PaneRepo()
 		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
 		if err == nil {
 			allCategories := make([]string, 0)
+			allSlugs := make([]string, 0)
+
 			for _, pane := range panes {
 				if pane != nil && pane.CodeHookPayload != nil {
 					if optionsStr, ok := pane.CodeHookPayload["options"]; ok {
 						var options map[string]any
 						if json.Unmarshal([]byte(optionsStr), &options) == nil {
-							if categoryStr, ok := options["category"].(string); ok {
+							if categoryStr, ok := options["category"].(string); ok && categoryStr != "" {
 								categories := strings.Split(categoryStr, "|")
 								allCategories = append(allCategories, categories...)
+							}
+							if slugsStr, ok := options["slugs"].(string); ok && slugsStr != "" {
+								slugs := strings.Split(slugsStr, ",")
+								allSlugs = append(allSlugs, slugs...)
+							}
+							if slugStr, ok := options["slug"].(string); ok && slugStr != "" {
+								allSlugs = append(allSlugs, slugStr)
 							}
 						}
 					}
 				}
 			}
 
-			if len(allCategories) > 0 {
+			if len(allCategories) > 0 || len(allSlugs) > 0 {
 				resourceRepo := tenantCtx.ResourceRepo()
-				resources, err := resourceRepo.FindByFilters(tenantCtx.TenantID, []string{}, allCategories, []string{})
+				resources, err := resourceRepo.FindByFilters(tenantCtx.TenantID, []string{}, allCategories, allSlugs)
 				if err == nil {
 					for _, resource := range resources {
 						categoryKey := "default"
