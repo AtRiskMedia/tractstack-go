@@ -100,17 +100,15 @@ func (nar *NodeARenderer) Render(nodeID string) string {
 	// This matches the expected output: <span class="whitespace-nowrap">See Pricing</span>
 	childNodeIDs := nar.nodeRenderer.GetChildNodeIDs(nodeID)
 	if len(childNodeIDs) > 0 {
-		html.WriteString(` <span class="whitespace-nowrap">`)
+		// html.WriteString(` <span class="whitespace-nowrap">`)
 		for _, childID := range childNodeIDs {
 			html.WriteString(nar.nodeRenderer.RenderNode(childID))
 		}
-
 		// Add external link icon for external URLs
 		if isExternalURL {
 			html.WriteString(`<span class="ml-1" aria-label="external link">↗</span>`)
 		}
-
-		html.WriteString(`</span>`)
+		// html.WriteString(`</span>`)
 	}
 
 	// Closing </a> tag

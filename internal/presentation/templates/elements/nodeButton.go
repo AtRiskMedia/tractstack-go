@@ -76,11 +76,11 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 
 	childNodeIDs := nbr.nodeRenderer.GetChildNodeIDs(nodeID)
 	if len(childNodeIDs) > 0 {
-		htmlBuilder.WriteString(`<span class="whitespace-nowrap">`)
+		// htmlBuilder.WriteString(`<span class="whitespace-nowrap">`)
 		for _, childID := range childNodeIDs {
 			htmlBuilder.WriteString(nbr.nodeRenderer.RenderNode(childID))
 		}
-		htmlBuilder.WriteString(`</span>`)
+		// htmlBuilder.WriteString(`</span>`)
 	}
 
 	htmlBuilder.WriteString(`</button>`)
@@ -97,7 +97,7 @@ func (nbr *NodeButtonRenderer) getClasses(nodeData *rendering.NodeRenderData) st
 	if nodeData.ElementCSS != nil && *nodeData.ElementCSS != "" {
 		cssClasses.WriteString(*nodeData.ElementCSS)
 	}
-	cssClasses.WriteString(" whitespace-nowrap")
+	// cssClasses.WriteString(" whitespace-nowrap")
 	return strings.TrimSpace(cssClasses.String())
 }
 
