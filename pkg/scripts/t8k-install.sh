@@ -1068,13 +1068,36 @@ quick_install() {
   cd "$INSTALL_DIR/src"
   echo -e "${BLUE}Cloning and building Go backend...${RESET}"
   git clone https://github.com/AtRiskMedia/tractstack-go.git
+  # NEW CONDITIONAL BLOCK
   cd tractstack-go
-  echo "GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/" >.env
-  go build -o tractstack-go ./cmd/tractstack-go
+
+  # Check if we're running in the non-interactive mode used by Docker.
+  # If so, create a container-friendly .env file.
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    echo -e "${BLUE}Creating Docker-specific Go backend configuration...${RESET}"
+    tee .env >/dev/null <<EOF
+GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/
+PORT=8080
+BIND_ADDRESS=0.0.0.0
+GIN_MODE=release
+EOF
+  # Otherwise, use the standard configuration for local development.
+  else
+    echo "GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/" >.env
+  fi
+
+  echo -e "${BLUE}Building Go backend with embedded FTS5 support...${RESET}"
+  go build -tags "sqlite_fts5" -o tractstack-go ./cmd/tractstack-go
 
   echo -e "${BLUE}Creating Astro frontend project...${RESET}"
   cd "$INSTALL_DIR/src"
-  pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
+
+  # This if/else handles non-interactive mode for Docker
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git
+  else
+    pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
+  fi
 
   echo -e "${BLUE}Installing and configuring TractStack integration...${RESET}"
   cd my-tractstack
@@ -1082,8 +1105,18 @@ quick_install() {
   echo "PRIVATE_GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/" >.env
   echo "PUBLIC_GO_BACKEND=http://localhost:8080" >>.env
   echo "PUBLIC_TENANTID=default" >>.env
-  echo "ENABLE_MULTI_TENANT=false" >>.env
-  npx create-tractstack </dev/tty
+  # --- FIX #1: Corrected variable name to prevent multi-tenant prompt ---
+  echo "PUBLIC_ENABLE_MULTI_TENANT=false" >>.env
+  # --- FIX #2: Added Bunny variable (enabled by default) to prevent prompt ---
+  echo "PUBLIC_ENABLE_BUNNY=true" >>.env
+
+  # This if/else handles non-interactive mode for Docker
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    # The --examples flag is passed to create-tractstack
+    echo "y" | npx create-tractstack --examples
+  else
+    npx create-tractstack </dev/tty
+  fi
 
   echo -e "${BLUE}Building Astro project for whitelist extraction...${RESET}"
   pnpm build
@@ -1091,13 +1124,15 @@ quick_install() {
   # Ensure config directory exists
   mkdir -p "/home/$USER/t8k/t8k-go-server/config/default"
   echo -e "${BLUE}Extracting Tailwind whitelist...${RESET}"
-  # Ensure config directory exists
-  mkdir -p "/home/$USER/t8k/t8k-go-server/config/default"
   # Extract whitelist from built assets
   python3 "$INSTALL_DIR/src/tractstack-go/pkg/scripts/extractTailwindWhitelist.py" \
     "$INSTALL_DIR/src/my-tractstack/dist" \
     "/home/$USER/t8k/t8k-go-server/config/default/tailwindWhitelist.json" \
     "$INSTALL_DIR/src/tractstack-go/internal/presentation/templates"
+
+  # --- FIX #3: Remove default index page that conflicts with TractStack routing ---
+  echo -e "${BLUE}Removing default Astro index page...${RESET}"
+  rm -f "$INSTALL_DIR/src/my-tractstack/src/pages/index.astro"
 
   echo -e "\n${GREEN}🎉 TractStack installation complete!${RESET}\n"
   echo -e "${WHITE}To start your TractStack site:${RESET}"
