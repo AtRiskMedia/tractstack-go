@@ -60,39 +60,53 @@ func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Contex
 			if len(stepData.Visitors) == 0 {
 				continue
 			}
-			originalNodeID := strings.ReplaceAll(nodeID, "_", "-")
-			parts := strings.Split(originalNodeID, "-")
 
-			if len(parts) >= 3 {
-				contentID := parts[len(parts)-1]
-				verb := parts[len(parts)-2]
+			var contentID string
+			var verb string
 
-				if _, ok := hourNodeData[contentID]; !ok {
-					hourNodeData[contentID] = struct {
-						Events     map[string]int `json:"events"`
-						VisitorIDs []string       `json:"visitorIds"`
-					}{Events: make(map[string]int), VisitorIDs: []string{}}
+			if strings.HasPrefix(nodeID, "identifyAs_") || strings.HasPrefix(nodeID, "belief_") {
+				parts := strings.SplitN(nodeID, "_", 3)
+				if len(parts) == 3 {
+					contentID = nodeID
+					verb = parts[2]
 				}
-
-				currentData := hourNodeData[contentID]
-				currentData.Events[verb] += len(stepData.Visitors)
-
-				visitorSet := make(map[string]struct{})
-				for _, vID := range currentData.VisitorIDs {
-					visitorSet[vID] = struct{}{}
+			} else if strings.HasPrefix(nodeID, "commitmentAction_") || strings.HasPrefix(nodeID, "conversionAction_") {
+				parts := strings.Split(nodeID, "_")
+				if len(parts) >= 4 {
+					contentID = parts[len(parts)-1]
+					verb = parts[len(parts)-2]
 				}
-				for vID := range stepData.Visitors {
-					visitorSet[vID] = struct{}{}
-				}
-
-				var newVisitorList []string
-				for vID := range visitorSet {
-					newVisitorList = append(newVisitorList, vID)
-				}
-				currentData.VisitorIDs = newVisitorList
-
-				hourNodeData[contentID] = currentData
 			}
+
+			if contentID == "" || verb == "" {
+				continue
+			}
+
+			if _, ok := hourNodeData[contentID]; !ok {
+				hourNodeData[contentID] = struct {
+					Events     map[string]int `json:"events"`
+					VisitorIDs []string       `json:"visitorIds"`
+				}{Events: make(map[string]int), VisitorIDs: []string{}}
+			}
+
+			currentData := hourNodeData[contentID]
+			currentData.Events[verb] += len(stepData.Visitors)
+
+			visitorSet := make(map[string]struct{})
+			for _, vID := range currentData.VisitorIDs {
+				visitorSet[vID] = struct{}{}
+			}
+			for vID := range stepData.Visitors {
+				visitorSet[vID] = struct{}{}
+			}
+
+			var newVisitorList []string
+			for vID := range visitorSet {
+				newVisitorList = append(newVisitorList, vID)
+			}
+			currentData.VisitorIDs = newVisitorList
+
+			hourNodeData[contentID] = currentData
 		}
 		if len(hourNodeData) > 0 {
 			hourlyActivity[hourKey] = hourNodeData
