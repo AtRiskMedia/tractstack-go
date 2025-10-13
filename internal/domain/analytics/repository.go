@@ -19,8 +19,11 @@ type BeliefEvent struct {
 	BeliefID      string
 	FingerprintID string
 	Verb          string
-	Object        *string // For identifyAs events
+	Object        *string
 	UpdatedAt     time.Time
+	BeliefSlug    string `json:"beliefSlug"`
+	BeliefTitle   string `json:"beliefTitle"`
+	BeliefScale   string `json:"beliefScale"`
 }
 
 // EventRepository defines the contract for storing and retrieving analytics events.

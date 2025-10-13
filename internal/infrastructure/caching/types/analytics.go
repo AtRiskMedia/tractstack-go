@@ -156,6 +156,7 @@ type EpinetStep struct {
 	ObjectType string   `json:"objectType"`
 	ObjectIds  []string `json:"objectIds"`
 	Title      string   `json:"title"`
+	BeliefSlug string   `json:"beliefSlug"`
 }
 
 // ContentItem holds a simplified view of a content node for analytics naming.

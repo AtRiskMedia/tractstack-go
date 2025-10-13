@@ -70,6 +70,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 	}
 
 	stepUserSets := make(map[int]map[string]map[string]bool)
+	nodeNames := make(map[string]string)
 
 	for _, hourKey := range hourKeys {
 		bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinetID, hourKey)
@@ -77,71 +78,106 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 			continue
 		}
 		for nodeID, stepData := range bin.Data.Steps {
-			originalNodeID := strings.ReplaceAll(nodeID, "_", "-")
+			mangledID := strings.ReplaceAll(nodeID, "_", "-")
 			stepIndex := stepData.StepIndex
 
 			if stepUserSets[stepIndex] == nil {
 				stepUserSets[stepIndex] = make(map[string]map[string]bool)
 			}
-			if stepUserSets[stepIndex][originalNodeID] == nil {
-				stepUserSets[stepIndex][originalNodeID] = make(map[string]bool)
+			if stepUserSets[stepIndex][mangledID] == nil {
+				stepUserSets[stepIndex][mangledID] = make(map[string]bool)
 			}
+
+			nodeNames[mangledID] = stepData.Name
 
 			for visitorID := range stepData.Visitors {
 				if !s.shouldIncludeVisitor(visitorID, filters, stepData) {
 					continue
 				}
-				stepUserSets[stepIndex][originalNodeID][visitorID] = true
+				stepUserSets[stepIndex][mangledID][visitorID] = true
 			}
 		}
 	}
 
-	// Initialize slices to be non-nil.
 	potentialLinks := make([]potentialLink, 0)
 	stepOrder := make([]int, 0, len(stepUserSets))
-
 	for stepIndex := range stepUserSets {
 		stepOrder = append(stepOrder, stepIndex)
 	}
 	sort.Ints(stepOrder)
-
-	// If there are no steps with visitor data for the given time range, return an empty diagram.
 	if len(stepOrder) == 0 {
-		s.logger.Analytics().Info("No epinet steps with data in range, returning empty sankey.", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "duration", time.Since(start))
 		return &SankeyDiagram{
-			ID:    epinetID,
-			Title: "User Journey Flow",
-			Nodes: []SankeyNode{},
-			Links: []SankeyLink{},
+			ID: epinetID, Title: "User Journey Flow", Nodes: []SankeyNode{}, Links: []SankeyLink{},
 		}, nil
 	}
 
-	// 1. Identify all visitors who appear in the first step of the funnel. These are the only journeys we will trace.
+	// Begin Anonymous Traffic Calculation
+	if len(stepOrder) > 1 {
+		firstStepIndex := stepOrder[0]
+		secondStepIndex := stepOrder[1]
+
+		identifiedVisitors := make(map[string]bool)
+		if firstStepNodes, ok := stepUserSets[firstStepIndex]; ok {
+			for _, visitors := range firstStepNodes {
+				for visitorID := range visitors {
+					identifiedVisitors[visitorID] = true
+				}
+			}
+		}
+
+		anonymousVisitors := make(map[string]bool)
+		if secondStepNodes, ok := stepUserSets[secondStepIndex]; ok {
+			for _, visitors := range secondStepNodes {
+				for visitorID := range visitors {
+					if !identifiedVisitors[visitorID] {
+						anonymousVisitors[visitorID] = true
+					}
+				}
+			}
+		}
+
+		if len(anonymousVisitors) > 0 {
+			anonymousNodeID := "identifyAs-Anonymous-Traffic"
+			if stepUserSets[firstStepIndex] == nil {
+				stepUserSets[firstStepIndex] = make(map[string]map[string]bool)
+			}
+			stepUserSets[firstStepIndex][anonymousNodeID] = anonymousVisitors
+			nodeNames[anonymousNodeID] = "Anonymous Traffic"
+		}
+	}
+	// End Anonymous Traffic Calculation
+
+	visitorsWhoReachedStep := make(map[int]map[string]bool)
+
 	firstStepIndex := stepOrder[0]
-	startingVisitors := make(map[string]bool)
+	visitorsWhoReachedStep[firstStepIndex] = make(map[string]bool)
 	if nodes, ok := stepUserSets[firstStepIndex]; ok {
 		for _, nodeVisitors := range nodes {
 			for visitorID := range nodeVisitors {
-				startingVisitors[visitorID] = true
+				visitorsWhoReachedStep[firstStepIndex][visitorID] = true
 			}
 		}
 	}
 
-	// 2. Create links only between an epinet step and its immediate successor, and only for visitors who started their journey at Step 1.
 	for i := 0; i < len(stepOrder)-1; i++ {
-		sourceStep := stepOrder[i]
-		targetStep := stepOrder[i+1]
+		sourceStepIndex := stepOrder[i]
+		targetStepIndex := stepOrder[i+1]
 
-		for sourceNode, sourceNodeVisitors := range stepUserSets[sourceStep] {
-			// From the current source node, find which visitors also started their journey at the first step.
-			validSourceVisitors := s.intersectVisitors(sourceNodeVisitors, startingVisitors)
-			if len(validSourceVisitors) == 0 {
-				continue // No one in this source node began their journey at the start of the funnel, so skip.
+		validPathVisitors := visitorsWhoReachedStep[sourceStepIndex]
+		if len(validPathVisitors) == 0 {
+			break
+		}
+
+		visitorsWhoReachedStep[targetStepIndex] = make(map[string]bool)
+
+		for sourceNode, sourceNodeVisitors := range stepUserSets[sourceStepIndex] {
+			qualifiedVisitorsAtSource := s.intersectVisitors(sourceNodeVisitors, validPathVisitors)
+			if len(qualifiedVisitorsAtSource) == 0 {
+				continue
 			}
 
-			for targetNode, targetNodeVisitors := range stepUserSets[targetStep] {
-				// Find the intersection between the valid source visitors and the visitors of the target node.
-				intersection := s.intersectVisitors(validSourceVisitors, targetNodeVisitors)
+			for targetNode, targetNodeVisitors := range stepUserSets[targetStepIndex] {
+				intersection := s.intersectVisitors(qualifiedVisitorsAtSource, targetNodeVisitors)
 
 				if len(intersection) > 0 {
 					potentialLinks = append(potentialLinks, potentialLink{
@@ -149,6 +185,9 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 						to:    targetNode,
 						value: len(intersection),
 					})
+					for visitorID := range intersection {
+						visitorsWhoReachedStep[targetStepIndex][visitorID] = true
+					}
 				}
 			}
 		}
@@ -162,16 +201,21 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 
 	var finalNodes []SankeyNode
 	finalNodeIndexMap := make(map[string]int)
+
 	for nodeID := range nodeSet {
 		var title string
-		contentID := s.extractContentIDFromNodeID(nodeID)
-		if item, exists := contentItems[contentID]; exists {
-			// If the content ID is found in the map, use its title.
-			title = item.Title
+
+		if strings.HasPrefix(nodeID, "belief-") || strings.HasPrefix(nodeID, "identifyAs-") {
+			title = nodeNames[nodeID]
 		} else {
-			// If the lookup fails (due to deleted content, etc.), use a redacted placeholder.
-			title = "[deleted content]"
+			contentID := s.extractContentIDFromNodeID(nodeID)
+			if item, exists := contentItems[contentID]; exists {
+				title = item.Title
+			} else {
+				title = "[deleted content]"
+			}
 		}
+
 		finalNodeIndexMap[nodeID] = len(finalNodes)
 		finalNodes = append(finalNodes, SankeyNode{ID: nodeID, Name: title})
 	}
@@ -180,7 +224,6 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 	for _, plink := range potentialLinks {
 		sourceIndex, sourceExists := finalNodeIndexMap[plink.from]
 		targetIndex, targetExists := finalNodeIndexMap[plink.to]
-
 		if sourceExists && targetExists {
 			finalLinks = append(finalLinks, SankeyLink{Source: sourceIndex, Target: targetIndex, Value: plink.value})
 		}

@@ -102,6 +102,7 @@ type EpinetStep struct {
 	Values     []string `json:"values"`
 	ObjectType *string  `json:"objectType,omitempty"`
 	ObjectIDs  []string `json:"objectIds,omitempty"`
+	BeliefSlug *string  `json:"beliefSlug,omitempty"`
 }
 
 type ImageFileNode struct {

@@ -31,6 +31,12 @@ const (
 	weeklyBatchSize     = 168 // 7 days * 24 hours
 )
 
+type potentialNode struct {
+	id        string
+	name      string
+	stepIndex int
+}
+
 type EpinetAnalysis struct {
 	BeliefValues     map[string]bool
 	IdentifyAsValues map[string]bool
@@ -218,184 +224,6 @@ func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string,
 	return nil
 }
 
-func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, hoursBack int) error {
-	const fullAnalyticsRange = 674
-
-	log.Printf("Starting analytics cache warming for tenant '%s' - full %d hour range (requested: %d)",
-		tenantCtx.TenantID, fullAnalyticsRange, hoursBack)
-	ws.logger.Cache().Info("Starting analytics cache warming", "tenantId", tenantCtx.TenantID, "range", fullAnalyticsRange, "requestedHours", hoursBack)
-
-	epinets, err := ws.getEpinets(tenantCtx)
-	if err != nil || len(epinets) == 0 {
-		log.Printf("No epinets found for tenant '%s'. Aborting analytics warming task.", tenantCtx.TenantID)
-		ws.logger.Cache().Info("No epinets found for tenant. Aborting analytics warming task.", "tenantId", tenantCtx.TenantID)
-		return nil
-	}
-	cachedContentMap, err := ws.contentMapService.GetCachedContentMap(tenantCtx)
-	if err != nil {
-		ws.logger.Cache().Error("Could not get content map for analytics warming", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("could not get content map for warming: %w", err)
-	}
-	contentMap := make(map[string]types.FullContentMapItem, len(cachedContentMap))
-	for _, item := range cachedContentMap {
-		contentMap[item.ID] = item
-	}
-
-	now := time.Now().UTC()
-	fullRangeStartTime := now.Add(-time.Duration(fullAnalyticsRange) * time.Hour)
-
-	estimatedEvents, err := ws.countEventsInRange(tenantCtx, fullRangeStartTime, now)
-	if err != nil {
-		estimatedEvents = eventCountThreshold + 1
-	}
-
-	batchSizeInHours := fullAnalyticsRange
-	if estimatedEvents > eventCountThreshold {
-		batchSizeInHours = weeklyBatchSize
-	}
-
-	for startHourOffset := 0; startHourOffset < fullAnalyticsRange; startHourOffset += batchSizeInHours {
-		endHourOffset := min(startHourOffset+batchSizeInHours, fullAnalyticsRange)
-		batchStartTime := now.Add(-time.Duration(endHourOffset) * time.Hour)
-		batchEndTime := now.Add(-time.Duration(startHourOffset) * time.Hour)
-
-		knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
-		if err != nil {
-			ws.logger.Cache().Error("Analytics warming batch failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
-			return fmt.Errorf("batch failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
-		}
-
-		analysis := ws.analyzeEpinets(epinets)
-		allActionEvents, err := ws.getActionEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
-		if err != nil {
-			ws.logger.Cache().Error("Analytics warming batch failed: could not get action events", "tenantId", tenantCtx.TenantID, "error", err)
-			return fmt.Errorf("batch failed for tenant '%s': could not get action events: %w", tenantCtx.TenantID, err)
-		}
-		allBeliefEvents, err := ws.getBeliefEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
-		if err != nil {
-			ws.logger.Cache().Error("Analytics warming batch failed: could not get belief events", "tenantId", tenantCtx.TenantID, "error", err)
-			return fmt.Errorf("batch failed for tenant '%s': could not get belief events: %w", tenantCtx.TenantID, err)
-		}
-
-		eventsByHour := ws.groupEventsByHour(allActionEvents, allBeliefEvents)
-		batchHourKeys := ws.getHourKeysForBatch(startHourOffset, endHourOffset)
-
-		for _, hourKey := range batchHourKeys {
-			for _, epinet := range epinets {
-				events, hasEvents := eventsByHour[hourKey]
-
-				var steps map[string]*types.HourlyEpinetStepData
-				var transitions map[string]map[string]*types.HourlyEpinetTransitionData
-
-				if hasEvents {
-					steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentMap, knownFingerprints)
-					transitions = ws.buildTransitionsFromSteps(steps)
-				} else {
-					steps = make(map[string]*types.HourlyEpinetStepData)
-					transitions = make(map[string]map[string]*types.HourlyEpinetTransitionData)
-				}
-
-				bin := &types.HourlyEpinetBin{
-					Data: &types.HourlyEpinetData{
-						Steps:       steps,
-						Transitions: transitions,
-					},
-					ComputedAt: time.Now().UTC(),
-					TTL:        ws.getTTLForHour(hourKey),
-				}
-				cache.SetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey, bin)
-			}
-		}
-	}
-
-	log.Printf("Analytics cache warming process for tenant '%s' completed successfully.", tenantCtx.TenantID)
-	ws.logger.Cache().Info("Analytics cache warming process completed successfully", "tenantId", tenantCtx.TenantID)
-	return nil
-}
-
-func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, missingHourKeys []string) error {
-	if len(missingHourKeys) == 0 {
-		return nil
-	}
-
-	log.Printf("Rapid catch-up refresh for tenant '%s' - %d hours", tenantCtx.TenantID, len(missingHourKeys))
-	ws.logger.Cache().Info("Starting rapid catch-up refresh", "tenantId", tenantCtx.TenantID, "missingHours", len(missingHourKeys))
-
-	epinets, err := ws.getEpinets(tenantCtx)
-	if err != nil || len(epinets) == 0 {
-		ws.logger.Cache().Info("No epinets found for tenant. Aborting rapid catch-up.", "tenantId", tenantCtx.TenantID)
-		return nil
-	}
-
-	cachedContentMap, err := ws.contentMapService.GetCachedContentMap(tenantCtx)
-	if err != nil {
-		ws.logger.Cache().Error("Could not get content map for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("could not get content map for rapid catch-up: %w", err)
-	}
-	contentMap := make(map[string]types.FullContentMapItem, len(cachedContentMap))
-	for _, item := range cachedContentMap {
-		contentMap[item.ID] = item
-	}
-
-	now := time.Now().UTC()
-	oldestHour, err := utilities.ParseHourKeyToDate(missingHourKeys[len(missingHourKeys)-1])
-	if err != nil {
-		ws.logger.Cache().Error("Invalid hour key during rapid catch-up", "tenantId", tenantCtx.TenantID, "hourKey", missingHourKeys[len(missingHourKeys)-1], "error", err)
-		return fmt.Errorf("invalid hour key: %w", err)
-	}
-
-	analysis := ws.analyzeEpinets(epinets)
-	allActionEvents, err := ws.getActionEventsForRange(tenantCtx, oldestHour, now, analysis)
-	if err != nil {
-		ws.logger.Cache().Error("Failed to get action events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("failed to get action events: %w", err)
-	}
-	allBeliefEvents, err := ws.getBeliefEventsForRange(tenantCtx, oldestHour, now, analysis)
-	if err != nil {
-		ws.logger.Cache().Error("Failed to get belief events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("failed to get belief events: %w", err)
-	}
-
-	eventsByHour := ws.groupEventsByHour(allActionEvents, allBeliefEvents)
-
-	knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
-	if err != nil {
-		ws.logger.Cache().Error("Recent hours warming failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
-		return fmt.Errorf("recent hours warming failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
-	}
-
-	for _, hourKey := range missingHourKeys {
-		for _, epinet := range epinets {
-			events, hasEvents := eventsByHour[hourKey]
-
-			var steps map[string]*types.HourlyEpinetStepData
-			var transitions map[string]map[string]*types.HourlyEpinetTransitionData
-
-			if hasEvents {
-				steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentMap, knownFingerprints)
-				transitions = ws.buildTransitionsFromSteps(steps)
-			} else {
-				steps = make(map[string]*types.HourlyEpinetStepData)
-				transitions = make(map[string]map[string]*types.HourlyEpinetTransitionData)
-			}
-
-			bin := &types.HourlyEpinetBin{
-				Data: &types.HourlyEpinetData{
-					Steps:       steps,
-					Transitions: transitions,
-				},
-				ComputedAt: time.Now().UTC(),
-				TTL:        ws.getTTLForHour(hourKey),
-			}
-			cache.SetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey, bin)
-		}
-	}
-
-	log.Printf("Rapid catch-up completed for tenant '%s'", tenantCtx.TenantID)
-	ws.logger.Cache().Info("Rapid catch-up completed", "tenantId", tenantCtx.TenantID)
-	return nil
-}
-
 func (ws *WarmingService) warmContentMap(tenantCtx *tenant.Context, contentMapSvc *ContentMapService, cache interfaces.Cache) error {
 	_, _, err := contentMapSvc.GetContentMap(tenantCtx, "", cache)
 	if err != nil {
@@ -519,66 +347,6 @@ func (ws *WarmingService) getActionEventsForRange(tenantCtx *tenant.Context, sta
 	return events, nil
 }
 
-func (ws *WarmingService) getBeliefEventsForRange(tenantCtx *tenant.Context, startTime, endTime time.Time, analysis *EpinetAnalysis) ([]analytics.BeliefEvent, error) {
-	var events []analytics.BeliefEvent
-	if len(analysis.BeliefValues) == 0 && len(analysis.IdentifyAsValues) == 0 {
-		return events, nil
-	}
-
-	var allValues []string
-	for val := range analysis.BeliefValues {
-		allValues = append(allValues, val)
-	}
-	for val := range analysis.IdentifyAsValues {
-		allValues = append(allValues, val)
-	}
-	if len(allValues) == 0 {
-		return events, nil
-	}
-
-	valuePlaceholders := strings.Repeat("?,", len(allValues)-1) + "?"
-	args := []any{startTime, endTime}
-	for _, val := range allValues {
-		args = append(args, val)
-	}
-
-	query := fmt.Sprintf(`
-        SELECT belief_id, fingerprint_id, verb, object, updated_at
-        FROM heldbeliefs
-        WHERE updated_at >= ? AND updated_at < ? AND object IN (%s)
-    `, valuePlaceholders)
-
-	rows, err := tenantCtx.Database.Conn.Query(query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query belief events: %w", err)
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			ws.logger.Cache().Error("Failed to close rows in getBeliefEventsForRange", "error", err)
-		}
-	}(rows)
-
-	for rows.Next() {
-		var event analytics.BeliefEvent
-		var updatedAtStr string
-		if err := rows.Scan(&event.BeliefID, &event.FingerprintID, &event.Verb, &event.Object, &updatedAtStr); err != nil {
-			log.Printf("WARN: Failed to scan belief event row: %v", err)
-			ws.logger.Cache().Warn("Failed to scan belief event row", "error", err)
-			continue
-		}
-		updatedAt, err := ws.parseTimestamp(updatedAtStr)
-		if err != nil {
-			log.Printf("WARN: Failed to parse updated_at timestamp '%s': %v", updatedAtStr, err)
-			ws.logger.Cache().Warn("Failed to parse updated_at timestamp", "timestamp", updatedAtStr, "error", err)
-			continue
-		}
-		event.UpdatedAt = updatedAt
-		events = append(events, event)
-	}
-	return events, nil
-}
-
 func (ws *WarmingService) getEpinets(tenantCtx *tenant.Context) ([]types.EpinetConfig, error) {
 	epinetRepo := tenantCtx.EpinetRepo()
 	epinetNodes, err := epinetRepo.FindAll(tenantCtx.TenantID)
@@ -645,87 +413,6 @@ func (ws *WarmingService) analyzeEpinets(epinets []types.EpinetConfig) *EpinetAn
 	return analysis
 }
 
-func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, actionEvents []analytics.ActionEvent, beliefEvents []analytics.BeliefEvent, contentMap map[string]types.FullContentMapItem, knownFingerprints map[string]bool) map[string]*types.HourlyEpinetStepData {
-	steps := make(map[string]*types.HourlyEpinetStepData)
-	for _, event := range actionEvents {
-		if _, exists := contentMap[event.ObjectID]; !exists {
-			// Content for this event has been deleted, so skip it.
-			continue
-		}
-		for stepIndex, step := range epinet.Steps {
-			if ws.eventMatchesStep(event, step) {
-				nodeID := ws.getStepNodeID(step, event.ObjectID, event.Verb)
-				if steps[nodeID] == nil {
-					steps[nodeID] = &types.HourlyEpinetStepData{
-						Visitors:          make(map[string]bool),
-						KnownVisitors:     make(map[string]bool),
-						AnonymousVisitors: make(map[string]bool),
-						Name:              ws.getNodeName(step, event.ObjectID, contentMap, event.Verb),
-						StepIndex:         stepIndex + 1,
-					}
-				}
-				steps[nodeID].Visitors[event.FingerprintID] = true
-				if knownFingerprints[event.FingerprintID] {
-					steps[nodeID].KnownVisitors[event.FingerprintID] = true
-				} else {
-					steps[nodeID].AnonymousVisitors[event.FingerprintID] = true
-				}
-			}
-		}
-	}
-	for _, event := range beliefEvents {
-		for stepIndex, step := range epinet.Steps {
-			if ws.beliefEventMatchesStep(event, step) {
-				nodeID := ws.getStepNodeID(step, "", *event.Object)
-				if steps[nodeID] == nil {
-					steps[nodeID] = &types.HourlyEpinetStepData{
-						Visitors:          make(map[string]bool),
-						KnownVisitors:     make(map[string]bool),
-						AnonymousVisitors: make(map[string]bool),
-						Name:              ws.getNodeName(step, "", contentMap, *event.Object),
-						StepIndex:         stepIndex + 1,
-					}
-				}
-				steps[nodeID].Visitors[event.FingerprintID] = true
-				if knownFingerprints[event.FingerprintID] {
-					steps[nodeID].KnownVisitors[event.FingerprintID] = true
-				} else {
-					steps[nodeID].AnonymousVisitors[event.FingerprintID] = true
-				}
-			}
-		}
-	}
-	return steps
-}
-
-func (ws *WarmingService) buildTransitionsFromSteps(steps map[string]*types.HourlyEpinetStepData) map[string]map[string]*types.HourlyEpinetTransitionData {
-	transitions := make(map[string]map[string]*types.HourlyEpinetTransitionData)
-	visitorSteps := make(map[string][]string)
-	for nodeID, stepData := range steps {
-		for visitor := range stepData.Visitors {
-			visitorSteps[visitor] = append(visitorSteps[visitor], nodeID)
-		}
-	}
-	for visitor, nodeIDs := range visitorSteps {
-		sort.Slice(nodeIDs, func(i, j int) bool {
-			return steps[nodeIDs[i]].StepIndex < steps[nodeIDs[j]].StepIndex
-		})
-		for i := 0; i < len(nodeIDs)-1; i++ {
-			fromNode, toNode := nodeIDs[i], nodeIDs[i+1]
-			if transitions[fromNode] == nil {
-				transitions[fromNode] = make(map[string]*types.HourlyEpinetTransitionData)
-			}
-			if transitions[fromNode][toNode] == nil {
-				transitions[fromNode][toNode] = &types.HourlyEpinetTransitionData{
-					Visitors: make(map[string]bool),
-				}
-			}
-			transitions[fromNode][toNode].Visitors[visitor] = true
-		}
-	}
-	return transitions
-}
-
 func (ws *WarmingService) eventMatchesStep(event analytics.ActionEvent, step types.EpinetStep) bool {
 	if step.GateType != "commitmentAction" && step.GateType != "conversionAction" {
 		return false
@@ -740,41 +427,6 @@ func (ws *WarmingService) eventMatchesStep(event analytics.ActionEvent, step typ
 		return slices.Contains(step.ObjectIds, event.ObjectID)
 	}
 	return true
-}
-
-func (ws *WarmingService) beliefEventMatchesStep(event analytics.BeliefEvent, step types.EpinetStep) bool {
-	if step.GateType != "belief" && step.GateType != "identifyAs" {
-		return false
-	}
-	if event.Object != nil {
-		return slices.Contains(step.Values, *event.Object)
-	}
-	return false
-}
-
-func (ws *WarmingService) getStepNodeID(step types.EpinetStep, contentID string, matchedValue string) string {
-	parts := []string{step.GateType}
-	switch step.GateType {
-	case "belief", "identifyAs":
-		parts = append(parts, matchedValue)
-	case "commitmentAction", "conversionAction":
-		parts = append(parts, step.ObjectType, matchedValue, contentID)
-	}
-	return strings.Join(parts, "_")
-}
-
-func (ws *WarmingService) getNodeName(step types.EpinetStep, contentID string, contentMap map[string]types.FullContentMapItem, matchedValue string) string {
-	var parts []string
-	switch step.GateType {
-	case "belief", "identifyAs":
-		parts = append(parts, step.Title)
-	case "commitmentAction", "conversionAction":
-		parts = append(parts, step.Title, matchedValue)
-		if item, exists := contentMap[contentID]; exists {
-			parts = append(parts, item.Title)
-		}
-	}
-	return strings.Join(parts, " - ")
 }
 
 func (ws *WarmingService) getTTLForHour(hourKey string) time.Duration {
@@ -933,4 +585,383 @@ func (ws *WarmingService) getKnownFingerprints(tenantCtx *tenant.Context) (map[s
 		knownFingerprints[fingerprintID] = isKnown
 	}
 	return knownFingerprints, nil
+}
+
+func (ws *WarmingService) getBeliefEventsForRange(tenantCtx *tenant.Context, startTime, endTime time.Time, analysis *EpinetAnalysis) ([]analytics.BeliefEvent, error) {
+	var events []analytics.BeliefEvent
+	if len(analysis.BeliefValues) == 0 && len(analysis.IdentifyAsValues) == 0 {
+		return events, nil
+	}
+
+	var conditions []string
+	var args []any
+	args = append(args, startTime, endTime)
+
+	if len(analysis.IdentifyAsValues) > 0 {
+		placeholders := strings.Repeat("?,", len(analysis.IdentifyAsValues)-1) + "?"
+		conditions = append(conditions, fmt.Sprintf("(b.scale = 'custom' AND hb.object IN (%s))", placeholders))
+		for val := range analysis.IdentifyAsValues {
+			args = append(args, val)
+		}
+	}
+
+	if len(analysis.BeliefValues) > 0 {
+		placeholders := strings.Repeat("?,", len(analysis.BeliefValues)-1) + "?"
+		conditions = append(conditions, fmt.Sprintf("(b.scale != 'custom' AND hb.verb IN (%s))", placeholders))
+		for val := range analysis.BeliefValues {
+			args = append(args, val)
+		}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			hb.belief_id,
+			hb.fingerprint_id,
+			hb.verb,
+			hb.object,
+			hb.updated_at,
+			b.slug,
+			b.title,
+			b.scale
+		FROM heldbeliefs hb
+		JOIN beliefs b ON hb.belief_id = b.id
+		WHERE
+			hb.updated_at >= ? AND hb.updated_at < ?
+			AND (%s)
+	`, strings.Join(conditions, " OR "))
+
+	rows, err := tenantCtx.Database.Conn.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query belief events: %w", err)
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			ws.logger.Cache().Error("Failed to close rows in getBeliefEventsForRange", "error", err)
+		}
+	}(rows)
+
+	for rows.Next() {
+		var event analytics.BeliefEvent
+		var updatedAtStr string
+		if err := rows.Scan(
+			&event.BeliefID,
+			&event.FingerprintID,
+			&event.Verb,
+			&event.Object,
+			&updatedAtStr,
+			&event.BeliefSlug,
+			&event.BeliefTitle,
+			&event.BeliefScale,
+		); err != nil {
+			log.Printf("WARN: Failed to scan belief event row: %v", err)
+			ws.logger.Cache().Warn("Failed to scan belief event row", "error", err)
+			continue
+		}
+		updatedAt, err := ws.parseTimestamp(updatedAtStr)
+		if err != nil {
+			log.Printf("WARN: Failed to parse updated_at timestamp '%s': %v", updatedAtStr, err)
+			ws.logger.Cache().Warn("Failed to parse updated_at timestamp", "timestamp", updatedAtStr, "error", err)
+			continue
+		}
+		event.UpdatedAt = updatedAt
+		events = append(events, event)
+	}
+	return events, nil
+}
+
+func (ws *WarmingService) beliefEventMatchesStep(event analytics.BeliefEvent, step types.EpinetStep) bool {
+	if step.BeliefSlug != "" && event.BeliefSlug != step.BeliefSlug {
+		return false
+	}
+
+	switch step.GateType {
+	case "identifyAs":
+		if event.BeliefScale != "custom" || event.Object == nil {
+			return false
+		}
+		return slices.Contains(step.Values, *event.Object)
+	case "belief":
+		if event.BeliefScale == "custom" {
+			return false
+		}
+		return slices.Contains(step.Values, event.Verb)
+	default:
+		return false
+	}
+}
+
+func (ws *WarmingService) buildStepsFromEvents(epinet types.EpinetConfig, actionEvents []analytics.ActionEvent, beliefEvents []analytics.BeliefEvent, contentMap map[string]types.FullContentMapItem, knownFingerprints map[string]bool) map[string]*types.HourlyEpinetStepData {
+	type potentialNode struct {
+		id        string
+		name      string
+		stepIndex int
+	}
+	visitorJourneys := make(map[string][]potentialNode)
+
+	for _, event := range actionEvents {
+		if _, exists := contentMap[event.ObjectID]; !exists {
+			continue
+		}
+		for stepIndex, step := range epinet.Steps {
+			if ws.eventMatchesStep(event, step) {
+				nodeID := ws.getStepNodeID(step, event.ObjectID, event.Verb)
+				nodeName := ws.getNodeName(step, event.ObjectID, contentMap, event.Verb)
+				visitorJourneys[event.FingerprintID] = append(visitorJourneys[event.FingerprintID], potentialNode{
+					id:        nodeID,
+					name:      nodeName,
+					stepIndex: stepIndex + 1,
+				})
+			}
+		}
+	}
+
+	for _, event := range beliefEvents {
+		for stepIndex, step := range epinet.Steps {
+			if ws.beliefEventMatchesStep(event, step) {
+				var matchedValue string
+				if event.BeliefScale == "custom" && event.Object != nil {
+					matchedValue = *event.Object
+				} else {
+					matchedValue = event.Verb
+				}
+				nodeID := ws.getStepNodeID(step, event.BeliefSlug, matchedValue)
+				nodeName := ws.getNodeName(step, event.BeliefTitle, contentMap, matchedValue)
+				visitorJourneys[event.FingerprintID] = append(visitorJourneys[event.FingerprintID], potentialNode{
+					id:        nodeID,
+					name:      nodeName,
+					stepIndex: stepIndex + 1,
+				})
+			}
+		}
+	}
+
+	finalSteps := make(map[string]*types.HourlyEpinetStepData)
+
+	for visitorID, journey := range visitorJourneys {
+		sort.Slice(journey, func(i, j int) bool {
+			return journey[i].stepIndex < journey[j].stepIndex
+		})
+
+		validStepsAchieved := make(map[int]bool)
+		for _, node := range journey {
+			if len(validStepsAchieved) == 0 || validStepsAchieved[node.stepIndex-1] {
+				if finalSteps[node.id] == nil {
+					finalSteps[node.id] = &types.HourlyEpinetStepData{
+						Visitors:          make(map[string]bool),
+						KnownVisitors:     make(map[string]bool),
+						AnonymousVisitors: make(map[string]bool),
+						Name:              node.name,
+						StepIndex:         node.stepIndex,
+					}
+				}
+				finalSteps[node.id].Visitors[visitorID] = true
+				if knownFingerprints[visitorID] {
+					finalSteps[node.id].KnownVisitors[visitorID] = true
+				} else {
+					finalSteps[node.id].AnonymousVisitors[visitorID] = true
+				}
+				validStepsAchieved[node.stepIndex] = true
+			}
+		}
+	}
+
+	return finalSteps
+}
+
+func (ws *WarmingService) getStepNodeID(step types.EpinetStep, contextID string, matchedValue string) string {
+	parts := []string{step.GateType}
+	switch step.GateType {
+	case "belief", "identifyAs":
+		sanitizedValue := strings.ReplaceAll(matchedValue, " ", "-")
+		parts = append(parts, contextID, sanitizedValue)
+	case "commitmentAction", "conversionAction":
+		parts = append(parts, step.ObjectType, matchedValue, contextID)
+	}
+	return strings.Join(parts, "_")
+}
+
+func (ws *WarmingService) getNodeName(step types.EpinetStep, contextValue string, contentMap map[string]types.FullContentMapItem, matchedValue string) string {
+	switch step.GateType {
+	case "belief", "identifyAs":
+		return fmt.Sprintf("%s - %s", contextValue, matchedValue)
+	case "commitmentAction", "conversionAction":
+		var parts []string
+		parts = append(parts, step.Title, matchedValue)
+		if item, exists := contentMap[contextValue]; exists {
+			parts = append(parts, item.Title)
+		}
+		return strings.Join(parts, " - ")
+	}
+	return ""
+}
+
+func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, hoursBack int) error {
+	const fullAnalyticsRange = 674
+
+	log.Printf("Starting analytics cache warming for tenant '%s' - full %d hour range (requested: %d)",
+		tenantCtx.TenantID, fullAnalyticsRange, hoursBack)
+	ws.logger.Cache().Info("Starting analytics cache warming", "tenantId", tenantCtx.TenantID, "range", fullAnalyticsRange, "requestedHours", hoursBack)
+
+	epinets, err := ws.getEpinets(tenantCtx)
+	if err != nil || len(epinets) == 0 {
+		log.Printf("No epinets found for tenant '%s'. Aborting analytics warming task.", tenantCtx.TenantID)
+		ws.logger.Cache().Info("No epinets found for tenant. Aborting analytics warming task.", "tenantId", tenantCtx.TenantID)
+		return nil
+	}
+	cachedContentMap, err := ws.contentMapService.GetCachedContentMap(tenantCtx)
+	if err != nil {
+		ws.logger.Cache().Error("Could not get content map for analytics warming", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("could not get content map for warming: %w", err)
+	}
+	contentMap := make(map[string]types.FullContentMapItem, len(cachedContentMap))
+	for _, item := range cachedContentMap {
+		contentMap[item.ID] = item
+	}
+
+	now := time.Now().UTC()
+	fullRangeStartTime := now.Add(-time.Duration(fullAnalyticsRange) * time.Hour)
+
+	estimatedEvents, err := ws.countEventsInRange(tenantCtx, fullRangeStartTime, now)
+	if err != nil {
+		estimatedEvents = eventCountThreshold + 1
+	}
+
+	batchSizeInHours := fullAnalyticsRange
+	if estimatedEvents > eventCountThreshold {
+		batchSizeInHours = weeklyBatchSize
+	}
+
+	for startHourOffset := 0; startHourOffset < fullAnalyticsRange; startHourOffset += batchSizeInHours {
+		endHourOffset := min(startHourOffset+batchSizeInHours, fullAnalyticsRange)
+		batchStartTime := now.Add(-time.Duration(endHourOffset) * time.Hour)
+		batchEndTime := now.Add(-time.Duration(startHourOffset) * time.Hour)
+
+		knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
+		if err != nil {
+			ws.logger.Cache().Error("Analytics warming batch failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
+			return fmt.Errorf("batch failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
+		}
+
+		analysis := ws.analyzeEpinets(epinets)
+		allActionEvents, err := ws.getActionEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
+		if err != nil {
+			ws.logger.Cache().Error("Analytics warming batch failed: could not get action events", "tenantId", tenantCtx.TenantID, "error", err)
+			return fmt.Errorf("batch failed for tenant '%s': could not get action events: %w", tenantCtx.TenantID, err)
+		}
+		allBeliefEvents, err := ws.getBeliefEventsForRange(tenantCtx, batchStartTime, batchEndTime, analysis)
+		if err != nil {
+			ws.logger.Cache().Error("Analytics warming batch failed: could not get belief events", "tenantId", tenantCtx.TenantID, "error", err)
+			return fmt.Errorf("batch failed for tenant '%s': could not get belief events: %w", tenantCtx.TenantID, err)
+		}
+
+		eventsByHour := ws.groupEventsByHour(allActionEvents, allBeliefEvents)
+		batchHourKeys := ws.getHourKeysForBatch(startHourOffset, endHourOffset)
+
+		for _, hourKey := range batchHourKeys {
+			for _, epinet := range epinets {
+				events, hasEvents := eventsByHour[hourKey]
+
+				var steps map[string]*types.HourlyEpinetStepData
+				if hasEvents {
+					steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentMap, knownFingerprints)
+				} else {
+					steps = make(map[string]*types.HourlyEpinetStepData)
+				}
+
+				bin := &types.HourlyEpinetBin{
+					Data: &types.HourlyEpinetData{
+						Steps:       steps,
+						Transitions: make(map[string]map[string]*types.HourlyEpinetTransitionData),
+					},
+					ComputedAt: time.Now().UTC(),
+					TTL:        ws.getTTLForHour(hourKey),
+				}
+				cache.SetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey, bin)
+			}
+		}
+	}
+
+	log.Printf("Analytics cache warming process for tenant '%s' completed successfully.", tenantCtx.TenantID)
+	ws.logger.Cache().Info("Analytics cache warming process completed successfully", "tenantId", tenantCtx.TenantID)
+	return nil
+}
+
+func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, missingHourKeys []string) error {
+	if len(missingHourKeys) == 0 {
+		return nil
+	}
+
+	log.Printf("Rapid catch-up refresh for tenant '%s' - %d hours", tenantCtx.TenantID, len(missingHourKeys))
+	ws.logger.Cache().Info("Starting rapid catch-up refresh", "tenantId", tenantCtx.TenantID, "missingHours", len(missingHourKeys))
+
+	epinets, err := ws.getEpinets(tenantCtx)
+	if err != nil || len(epinets) == 0 {
+		ws.logger.Cache().Info("No epinets found for tenant. Aborting rapid catch-up.", "tenantId", tenantCtx.TenantID)
+		return nil
+	}
+
+	cachedContentMap, err := ws.contentMapService.GetCachedContentMap(tenantCtx)
+	if err != nil {
+		ws.logger.Cache().Error("Could not get content map for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("could not get content map for rapid catch-up: %w", err)
+	}
+	contentMap := make(map[string]types.FullContentMapItem, len(cachedContentMap))
+	for _, item := range cachedContentMap {
+		contentMap[item.ID] = item
+	}
+
+	now := time.Now().UTC()
+	oldestHour, err := utilities.ParseHourKeyToDate(missingHourKeys[len(missingHourKeys)-1])
+	if err != nil {
+		ws.logger.Cache().Error("Invalid hour key during rapid catch-up", "tenantId", tenantCtx.TenantID, "hourKey", missingHourKeys[len(missingHourKeys)-1], "error", err)
+		return fmt.Errorf("invalid hour key: %w", err)
+	}
+
+	analysis := ws.analyzeEpinets(epinets)
+	allActionEvents, err := ws.getActionEventsForRange(tenantCtx, oldestHour, now, analysis)
+	if err != nil {
+		ws.logger.Cache().Error("Failed to get action events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("failed to get action events: %w", err)
+	}
+	allBeliefEvents, err := ws.getBeliefEventsForRange(tenantCtx, oldestHour, now, analysis)
+	if err != nil {
+		ws.logger.Cache().Error("Failed to get belief events for rapid catch-up", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("failed to get belief events: %w", err)
+	}
+
+	eventsByHour := ws.groupEventsByHour(allActionEvents, allBeliefEvents)
+
+	knownFingerprints, err := ws.getKnownFingerprints(tenantCtx)
+	if err != nil {
+		ws.logger.Cache().Error("Recent hours warming failed: could not get known fingerprints", "tenantId", tenantCtx.TenantID, "error", err)
+		return fmt.Errorf("recent hours warming failed for tenant '%s': could not get known fingerprints: %w", tenantCtx.TenantID, err)
+	}
+
+	for _, hourKey := range missingHourKeys {
+		for _, epinet := range epinets {
+			events, hasEvents := eventsByHour[hourKey]
+
+			var steps map[string]*types.HourlyEpinetStepData
+			if hasEvents {
+				steps = ws.buildStepsFromEvents(epinet, events.ActionEvents, events.BeliefEvents, contentMap, knownFingerprints)
+			} else {
+				steps = make(map[string]*types.HourlyEpinetStepData)
+			}
+
+			bin := &types.HourlyEpinetBin{
+				Data: &types.HourlyEpinetData{
+					Steps:       steps,
+					Transitions: make(map[string]map[string]*types.HourlyEpinetTransitionData),
+				},
+				ComputedAt: time.Now().UTC(),
+				TTL:        ws.getTTLForHour(hourKey),
+			}
+			cache.SetHourlyEpinetBin(tenantCtx.TenantID, epinet.ID, hourKey, bin)
+		}
+	}
+
+	log.Printf("Rapid catch-up completed for tenant '%s'", tenantCtx.TenantID)
+	ws.logger.Cache().Info("Rapid catch-up completed", "tenantId", tenantCtx.TenantID)
+	return nil
 }
