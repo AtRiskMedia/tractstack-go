@@ -787,7 +787,10 @@ func (ws *WarmingService) getNodeName(step types.EpinetStep, contextValue string
 		return fmt.Sprintf("%s - %s", contextValue, matchedValue)
 	case "commitmentAction", "conversionAction":
 		var parts []string
-		parts = append(parts, step.Title, matchedValue)
+		parts = append(parts, step.Title)
+		if matchedValue != "ENTERED" {
+			parts = append(parts, matchedValue)
+		}
 		if item, exists := contentMap[contextValue]; exists {
 			parts = append(parts, item.Title)
 		}

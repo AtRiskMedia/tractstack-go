@@ -1,6 +1,7 @@
 package services
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -69,6 +70,12 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		return nil, err
 	}
 
+	epinetConfig, err := s.getEpinetConfig(tenantCtx, epinetID)
+	if err != nil {
+		s.logger.Analytics().Error("Failed to get epinet config", "epinetId", epinetID, "error", err)
+		return nil, err
+	}
+
 	stepUserSets := make(map[int]map[string]map[string]bool)
 	nodeNames := make(map[string]string)
 
@@ -99,7 +106,6 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		}
 	}
 
-	potentialLinks := make([]potentialLink, 0)
 	stepOrder := make([]int, 0, len(stepUserSets))
 	for stepIndex := range stepUserSets {
 		stepOrder = append(stepOrder, stepIndex)
@@ -111,44 +117,77 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		}, nil
 	}
 
-	// Begin Anonymous Traffic Calculation
-	if len(stepOrder) > 1 {
-		firstStepIndex := stepOrder[0]
-		secondStepIndex := stepOrder[1]
-
-		identifiedVisitors := make(map[string]bool)
-		if firstStepNodes, ok := stepUserSets[firstStepIndex]; ok {
-			for _, visitors := range firstStepNodes {
+	getUsersInStep := func(stepIndex int) map[string]bool {
+		users := make(map[string]bool)
+		if nodes, ok := stepUserSets[stepIndex]; ok {
+			for _, visitors := range nodes {
 				for visitorID := range visitors {
-					identifiedVisitors[visitorID] = true
+					users[visitorID] = true
 				}
 			}
 		}
+		return users
+	}
 
-		anonymousVisitors := make(map[string]bool)
-		if secondStepNodes, ok := stepUserSets[secondStepIndex]; ok {
-			for _, visitors := range secondStepNodes {
-				for visitorID := range visitors {
-					if !identifiedVisitors[visitorID] {
-						anonymousVisitors[visitorID] = true
+	if epinetConfig != nil {
+		for i := 0; i < len(stepOrder)-1; i++ {
+			currentStepIndex := stepOrder[i]
+			nextStepIndex := stepOrder[i+1]
+
+			var currentStepDef *types.EpinetStep
+			for j := range epinetConfig.Steps {
+				if epinetConfig.Steps[j].StepIndex == currentStepIndex {
+					currentStepDef = &epinetConfig.Steps[j]
+					break
+				}
+			}
+
+			if currentStepDef == nil {
+				continue
+			}
+
+			usersInCurrentStep := getUsersInStep(currentStepIndex)
+			usersInNextStep := getUsersInStep(nextStepIndex)
+
+			if currentStepDef.GateType == "commitmentAction" && slices.Contains(currentStepDef.Values, "ENTERED") {
+				previouslyEntered := make(map[string]bool)
+				for visitorID := range usersInNextStep {
+					if !usersInCurrentStep[visitorID] {
+						previouslyEntered[visitorID] = true
 					}
 				}
-			}
-		}
 
-		if len(anonymousVisitors) > 0 {
-			anonymousNodeID := "identifyAs-Anonymous-Traffic"
-			if stepUserSets[firstStepIndex] == nil {
-				stepUserSets[firstStepIndex] = make(map[string]map[string]bool)
+				if len(previouslyEntered) > 0 {
+					nodeID := "commitmentAction-Previously-Entered"
+					if stepUserSets[currentStepIndex] == nil {
+						stepUserSets[currentStepIndex] = make(map[string]map[string]bool)
+					}
+					stepUserSets[currentStepIndex][nodeID] = previouslyEntered
+					nodeNames[nodeID] = "Previously Entered"
+				}
 			}
-			stepUserSets[firstStepIndex][anonymousNodeID] = anonymousVisitors
-			nodeNames[anonymousNodeID] = "Anonymous Traffic"
+
+			if currentStepDef.GateType == "identifyAs" || currentStepDef.GateType == "belief" {
+				anonymous := make(map[string]bool)
+				for visitorID := range usersInNextStep {
+					if !usersInCurrentStep[visitorID] {
+						anonymous[visitorID] = true
+					}
+				}
+
+				if len(anonymous) > 0 {
+					nodeID := "identifyAs-Anonymous-Traffic"
+					if stepUserSets[currentStepIndex] == nil {
+						stepUserSets[currentStepIndex] = make(map[string]map[string]bool)
+					}
+					stepUserSets[currentStepIndex][nodeID] = anonymous
+					nodeNames[nodeID] = "Anonymous Traffic"
+				}
+			}
 		}
 	}
-	// End Anonymous Traffic Calculation
 
 	visitorsWhoReachedStep := make(map[int]map[string]bool)
-
 	firstStepIndex := stepOrder[0]
 	visitorsWhoReachedStep[firstStepIndex] = make(map[string]bool)
 	if nodes, ok := stepUserSets[firstStepIndex]; ok {
@@ -159,6 +198,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		}
 	}
 
+	potentialLinks := make([]potentialLink, 0)
 	for i := 0; i < len(stepOrder)-1; i++ {
 		sourceStepIndex := stepOrder[i]
 		targetStepIndex := stepOrder[i+1]
@@ -204,9 +244,8 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 
 	for nodeID := range nodeSet {
 		var title string
-
-		if strings.HasPrefix(nodeID, "belief-") || strings.HasPrefix(nodeID, "identifyAs-") {
-			title = nodeNames[nodeID]
+		if name, ok := nodeNames[nodeID]; ok {
+			title = name
 		} else {
 			contentID := s.extractContentIDFromNodeID(nodeID)
 			if item, exists := contentItems[contentID]; exists {
@@ -231,7 +270,6 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 
 	s.logger.Analytics().Info("Successfully computed epinet sankey", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "nodeCount", len(finalNodes), "linkCount", len(finalLinks), "duration", time.Since(start))
 	marker.SetSuccess(true)
-	s.logger.Perf().Info("Performance for ComputeEpinetSankey", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	return &SankeyDiagram{
 		ID:    epinetID,
@@ -239,6 +277,44 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		Nodes: finalNodes,
 		Links: finalLinks,
 	}, nil
+}
+
+func (s *EpinetAnalyticsService) getEpinetConfig(tenantCtx *tenant.Context, epinetID string) (*types.EpinetConfig, error) {
+	epinetRepo := tenantCtx.EpinetRepo()
+	allEpinets, err := epinetRepo.FindAll(tenantCtx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, node := range allEpinets {
+		if node != nil && node.ID == epinetID {
+			var steps []types.EpinetStep
+			for i, nodeStep := range node.Steps {
+				step := types.EpinetStep{
+					GateType:  nodeStep.GateType,
+					Title:     nodeStep.Title,
+					Values:    nodeStep.Values,
+					ObjectIds: nodeStep.ObjectIDs,
+					StepIndex: i + 1,
+				}
+				if nodeStep.ObjectType != nil {
+					step.ObjectType = *nodeStep.ObjectType
+				}
+				if nodeStep.BeliefSlug != nil {
+					step.BeliefSlug = *nodeStep.BeliefSlug
+				}
+				steps = append(steps, step)
+			}
+
+			return &types.EpinetConfig{
+				ID:    node.ID,
+				Title: node.Title,
+				Steps: steps,
+			}, nil
+		}
+	}
+
+	return nil, nil
 }
 
 func (s *EpinetAnalyticsService) intersectVisitors(set1, set2 map[string]bool) map[string]bool {
