@@ -47,13 +47,10 @@ func (r *EpinetRepository) FindByID(tenantID, id string) (*content.EpinetNode, e
 
 // FindAll retrieves all epinets for a tenant, employing a cache-first strategy.
 func (r *EpinetRepository) FindAll(tenantID string) ([]*content.EpinetNode, error) {
-	// 1. Check cache for the master list of IDs first.
 	if ids, found := r.cache.GetAllEpinetIDs(tenantID); found {
 		return r.FindByIDs(tenantID, ids)
 	}
 
-	// --- CACHE MISS FALLBACK ---
-	// 2. Load all IDs from the database.
 	ids, err := r.loadAllIDsFromDB()
 	if err != nil {
 		return nil, err
@@ -62,10 +59,8 @@ func (r *EpinetRepository) FindAll(tenantID string) ([]*content.EpinetNode, erro
 		return []*content.EpinetNode{}, nil
 	}
 
-	// 3. Set the master ID list in the cache immediately.
 	r.cache.SetAllEpinetIDs(tenantID, ids)
 
-	// 4. Use the robust FindByIDs method to load the actual objects.
 	return r.FindByIDs(tenantID, ids)
 }
 
@@ -173,7 +168,11 @@ func (r *EpinetRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query epinet IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query epinet IDs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.System().Error("Failed to close epinets query")
+		}
+	}()
 
 	var ids []string
 	for rows.Next() {
@@ -204,6 +203,7 @@ func (r *EpinetRepository) loadFromDB(id string) (*content.EpinetNode, error) {
 	var optionsPayloadStr string
 
 	err := row.Scan(&epinet.ID, &epinet.Title, &optionsPayloadStr)
+
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -250,7 +250,11 @@ func (r *EpinetRepository) loadMultipleFromDB(ids []string) ([]*content.EpinetNo
 		r.logger.Database().Error("Failed to query multiple epinets", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query epinets: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.System().Error("Failed to close epinets query")
+		}
+	}()
 
 	var epinets []*content.EpinetNode
 	for rows.Next() {
@@ -263,7 +267,7 @@ func (r *EpinetRepository) loadMultipleFromDB(ids []string) ([]*content.EpinetNo
 		}
 
 		if err := r.parseOptionsPayload(&epinet, optionsPayloadStr); err != nil {
-			continue // Skip malformed records
+			continue
 		}
 
 		epinet.NodeType = "Epinet"
@@ -319,6 +323,9 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 						}
 					}
 				}
+				if beliefSlug, ok := stepMap["beliefSlug"].(string); ok {
+					step.BeliefSlug = &beliefSlug
+				}
 
 				steps[i] = step
 			}
@@ -359,7 +366,9 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 							}
 						}
 					}
-
+					if beliefSlug, ok := stepMap["beliefSlug"].(string); ok {
+						step.BeliefSlug = &beliefSlug
+					}
 					steps[i] = step
 				}
 			}

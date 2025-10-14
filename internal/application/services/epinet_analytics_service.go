@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -42,6 +43,11 @@ type potentialLink struct {
 	value int
 }
 
+type AvailableFilter struct {
+	BeliefSlug string   `json:"beliefSlug"`
+	Values     []string `json:"values"`
+}
+
 type EpinetAnalyticsService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
@@ -54,7 +60,9 @@ func NewEpinetAnalyticsService(logger *logging.ChanneledLogger, perfTracker *per
 	}
 }
 
-func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, epinetID string, filters *SankeyFilters) (*SankeyDiagram, error) {
+// in: internal/application/services/epinet_analytics_service.go
+
+func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, epinetID string, filters *SankeyFilters) (*SankeyDiagram, []AvailableFilter, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("compute_epinet_sankey", tenantCtx.TenantID)
 	defer marker.Complete()
@@ -67,13 +75,13 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 
 	contentItems, err := s.getContentItems(tenantCtx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	epinetConfig, err := s.getEpinetConfig(tenantCtx, epinetID)
 	if err != nil {
 		s.logger.Analytics().Error("Failed to get epinet config", "epinetId", epinetID, "error", err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	stepUserSets := make(map[int]map[string]map[string]bool)
@@ -98,10 +106,121 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 			nodeNames[mangledID] = stepData.Name
 
 			for visitorID := range stepData.Visitors {
-				if !s.shouldIncludeVisitor(visitorID, filters, stepData) {
+				stepUserSets[stepIndex][mangledID][visitorID] = true
+			}
+		}
+	}
+
+	allowedVisitors := make(map[string]bool)
+	isFiltered := false
+	if filters != nil && len(filters.AppliedFilters) > 0 {
+		isFiltered = true
+		var initialized bool
+		stepOrder := make([]int, 0, len(stepUserSets))
+		for stepIndex := range stepUserSets {
+			stepOrder = append(stepOrder, stepIndex)
+		}
+		sort.Ints(stepOrder)
+
+		getUsersInStep := func(stepIndex int) map[string]bool {
+			users := make(map[string]bool)
+			if nodes, ok := stepUserSets[stepIndex]; ok {
+				for _, visitors := range nodes {
+					for visitorID := range visitors {
+						users[visitorID] = true
+					}
+				}
+			}
+			return users
+		}
+
+		for _, filter := range filters.AppliedFilters {
+			if filter.Value == "Anonymous Traffic" && filter.BeliefSlug != "" {
+				filterStepIndex := -1
+				for _, step := range epinetConfig.Steps {
+					if step.BeliefSlug == filter.BeliefSlug {
+						filterStepIndex = step.StepIndex
+						break
+					}
+				}
+				if filterStepIndex == -1 {
 					continue
 				}
-				stepUserSets[stepIndex][mangledID][visitorID] = true
+
+				usersWithBeliefValue := make(map[string]bool)
+				if nodesInStep, ok := stepUserSets[filterStepIndex]; ok {
+					for nodeID, visitors := range nodesInStep {
+						if nodeID == "identifyAs-Anonymous-Traffic" {
+							continue
+						}
+						for visitorID := range visitors {
+							usersWithBeliefValue[visitorID] = true
+						}
+					}
+				}
+
+				nextStepIndex := -1
+				for i, stepIdx := range stepOrder {
+					if stepIdx == filterStepIndex && i+1 < len(stepOrder) {
+						nextStepIndex = stepOrder[i+1]
+						break
+					}
+				}
+				if nextStepIndex == -1 {
+					continue
+				}
+				usersInNextStep := getUsersInStep(nextStepIndex)
+
+				visitorsForThisFilter := make(map[string]bool)
+				for visitorID := range usersInNextStep {
+					if !usersWithBeliefValue[visitorID] {
+						visitorsForThisFilter[visitorID] = true
+					}
+				}
+
+				if !initialized {
+					allowedVisitors = visitorsForThisFilter
+					initialized = true
+				} else {
+					allowedVisitors = s.intersectVisitors(allowedVisitors, visitorsForThisFilter)
+				}
+				continue
+			}
+
+			var targetNodeID string
+			safeValue := strings.ReplaceAll(filter.Value, " ", "-")
+			expectedNodeIDPart := fmt.Sprintf("%s-%s", filter.BeliefSlug, safeValue)
+
+			for _, nodes := range stepUserSets {
+				for nodeID := range nodes {
+					if strings.Contains(nodeID, expectedNodeIDPart) {
+						targetNodeID = nodeID
+						break
+					}
+				}
+				if targetNodeID != "" {
+					break
+				}
+			}
+
+			if targetNodeID != "" {
+				var visitorsForThisFilter map[string]bool
+				for _, nodes := range stepUserSets {
+					if visitors, ok := nodes[targetNodeID]; ok {
+						visitorsForThisFilter = visitors
+						break
+					}
+				}
+
+				if !initialized {
+					allowedVisitors = make(map[string]bool)
+					for visitorID := range visitorsForThisFilter {
+						allowedVisitors[visitorID] = true
+					}
+					initialized = true
+				} else {
+					allowedVisitors = s.intersectVisitors(allowedVisitors, visitorsForThisFilter)
+				}
 			}
 		}
 	}
@@ -114,7 +233,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 	if len(stepOrder) == 0 {
 		return &SankeyDiagram{
 			ID: epinetID, Title: "User Journey Flow", Nodes: []SankeyNode{}, Links: []SankeyLink{},
-		}, nil
+		}, []AvailableFilter{}, nil
 	}
 
 	getUsersInStep := func(stepIndex int) map[string]bool {
@@ -191,8 +310,26 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 	firstStepIndex := stepOrder[0]
 	visitorsWhoReachedStep[firstStepIndex] = make(map[string]bool)
 	if nodes, ok := stepUserSets[firstStepIndex]; ok {
-		for _, nodeVisitors := range nodes {
+		for nodeID, nodeVisitors := range nodes {
 			for visitorID := range nodeVisitors {
+				if isFiltered && !allowedVisitors[visitorID] {
+					continue
+				}
+
+				var stepDataForVisitorCheck *types.HourlyEpinetStepData
+				for _, hourKey := range hourKeys {
+					if bin, exists := tenantCtx.CacheManager.GetHourlyEpinetBin(tenantCtx.TenantID, epinetID, hourKey); exists {
+						originalNodeID := strings.ReplaceAll(nodeID, "-", "_")
+						if sd, ok := bin.Data.Steps[originalNodeID]; ok {
+							stepDataForVisitorCheck = sd
+							break
+						}
+					}
+				}
+
+				if stepDataForVisitorCheck != nil && !s.shouldIncludeVisitor(visitorID, filters, stepDataForVisitorCheck) {
+					continue
+				}
 				visitorsWhoReachedStep[firstStepIndex][visitorID] = true
 			}
 		}
@@ -268,6 +405,45 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		}
 	}
 
+	availableFilters := []AvailableFilter{}
+	if epinetConfig != nil {
+		for _, step := range epinetConfig.Steps {
+			if (step.GateType == "identifyAs" || step.GateType == "belief") && step.BeliefSlug != "" {
+				valuesWithData := make(map[string]bool)
+				if nodes, ok := stepUserSets[step.StepIndex]; ok {
+					for nodeID := range nodes {
+						var value string
+						if nodeID == "identifyAs-Anonymous-Traffic" {
+							value = "Anonymous Traffic"
+						} else {
+							prefix := fmt.Sprintf("%s-%s-", step.GateType, step.BeliefSlug)
+							if strings.HasPrefix(nodeID, prefix) {
+								value = strings.TrimPrefix(nodeID, prefix)
+								value = strings.ReplaceAll(value, "-", " ")
+							}
+						}
+
+						if value != "" {
+							valuesWithData[value] = true
+						}
+					}
+				}
+
+				if len(valuesWithData) > 0 {
+					var values []string
+					for value := range valuesWithData {
+						values = append(values, value)
+					}
+					sort.Strings(values)
+					availableFilters = append(availableFilters, AvailableFilter{
+						BeliefSlug: step.BeliefSlug,
+						Values:     values,
+					})
+				}
+			}
+		}
+	}
+
 	s.logger.Analytics().Info("Successfully computed epinet sankey", "tenantId", tenantCtx.TenantID, "epinetId", epinetID, "nodeCount", len(finalNodes), "linkCount", len(finalLinks), "duration", time.Since(start))
 	marker.SetSuccess(true)
 
@@ -276,7 +452,7 @@ func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, 
 		Title: "User Journey Flow",
 		Nodes: finalNodes,
 		Links: finalLinks,
-	}, nil
+	}, availableFilters, nil
 }
 
 func (s *EpinetAnalyticsService) getEpinetConfig(tenantCtx *tenant.Context, epinetID string) (*types.EpinetConfig, error) {
@@ -319,9 +495,17 @@ func (s *EpinetAnalyticsService) getEpinetConfig(tenantCtx *tenant.Context, epin
 
 func (s *EpinetAnalyticsService) intersectVisitors(set1, set2 map[string]bool) map[string]bool {
 	intersection := make(map[string]bool)
-	for visitor := range set1 {
-		if set2[visitor] {
-			intersection[visitor] = true
+	if len(set1) < len(set2) {
+		for visitor := range set1 {
+			if set2[visitor] {
+				intersection[visitor] = true
+			}
+		}
+	} else {
+		for visitor := range set2 {
+			if set1[visitor] {
+				intersection[visitor] = true
+			}
 		}
 	}
 	return intersection
@@ -336,7 +520,11 @@ func (s *EpinetAnalyticsService) shouldIncludeVisitor(visitorID string, filters 
 		return false
 	}
 
-	isKnown := stepData.KnownVisitors[visitorID]
+	isKnown := false
+	if stepData != nil {
+		isKnown = stepData.KnownVisitors[visitorID]
+	}
+
 	switch filters.VisitorType {
 	case "known":
 		return isKnown

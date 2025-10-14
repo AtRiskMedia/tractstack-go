@@ -19,11 +19,17 @@ type UserCount struct {
 	IsKnown bool   `json:"isKnown"`
 }
 
+type AppliedFilter struct {
+	BeliefSlug string `json:"beliefSlug"`
+	Value      string `json:"value"`
+}
+
 type SankeyFilters struct {
-	VisitorType    string  `json:"visitorType"`
-	SelectedUserID *string `json:"selectedUserID,omitempty"`
-	StartHour      *int    `json:"startHour,omitempty"`
-	EndHour        *int    `json:"endHour,omitempty"`
+	VisitorType    string          `json:"visitorType"`
+	SelectedUserID *string         `json:"selectedUserID,omitempty"`
+	StartHour      *int            `json:"startHour,omitempty"`
+	EndHour        *int            `json:"endHour,omitempty"`
+	AppliedFilters []AppliedFilter `json:"appliedFilters,omitempty"`
 }
 
 type AnalyticsService struct {

@@ -1,7 +1,7 @@
-// Package handlers provides HTTP handlers for analytics endpoints
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -58,6 +58,144 @@ func NewAnalyticsHandlers(
 	}
 }
 
+// HandleEpinetSankey handles GET /api/v1/analytics/epinets/:id
+func (h *AnalyticsHandlers) HandleEpinetSankey(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("epinet_sankey_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Analytics().Debug("Received epinet analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
+
+	epinetID := c.Param("id")
+	startHour, endHour := h.parseTimeRange(c)
+
+	cacheStatus := tenantCtx.CacheManager.GetRangeCacheStatus(tenantCtx.TenantID, epinetID, startHour, endHour)
+	if cacheStatus.Action != "proceed" {
+		h.triggerBackgroundWarming(tenantCtx, startHour, cacheStatus)
+		c.JSON(http.StatusOK, gin.H{
+			"epinet":             gin.H{"status": "loading"},
+			"userCounts":         []services.UserCount{},
+			"hourlyNodeActivity": make(services.HourlyActivity),
+		})
+		return
+	}
+
+	visitorType := c.DefaultQuery("visitorType", "all")
+	selectedUserID := c.Query("selectedUserId")
+	var selectedUserIDPtr *string
+	if selectedUserID != "" {
+		selectedUserIDPtr = &selectedUserID
+	}
+
+	var appliedFilters []services.AppliedFilter
+	appliedFiltersJSON := c.Query("appliedFilters")
+	if appliedFiltersJSON != "" {
+		if err := json.Unmarshal([]byte(appliedFiltersJSON), &appliedFilters); err != nil {
+			h.logger.Analytics().Warn("Failed to parse appliedFilters JSON", "error", err, "tenantId", tenantCtx.TenantID)
+		}
+	}
+
+	filters := &services.SankeyFilters{
+		VisitorType:    visitorType,
+		SelectedUserID: selectedUserIDPtr,
+		StartHour:      &startHour,
+		EndHour:        &endHour,
+		AppliedFilters: appliedFilters,
+	}
+
+	epinet, availableFilters, err := h.epinetAnalyticsService.ComputeEpinetSankey(tenantCtx, epinetID, filters)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	userCounts, _ := h.analyticsService.GetFilteredVisitorCounts(tenantCtx, epinetID, visitorType, &startHour, &endHour)
+	hourlyNodeActivity, _ := h.contentAnalyticsService.GetHourlyNodeActivity(tenantCtx, epinetID, &startHour, &endHour)
+
+	h.logger.Analytics().Info("Epinet analytics request completed", "epinetId", epinetID, "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for HandleEpinetSankey request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"epinet":             epinet,
+		"userCounts":         userCounts,
+		"hourlyNodeActivity": hourlyNodeActivity,
+		"availableFilters":   availableFilters,
+	})
+}
+
+func (h *AnalyticsHandlers) parseTimeRange(c *gin.Context) (int, int) {
+	startHour, _ := strconv.Atoi(c.DefaultQuery("startHour", "168"))
+	endHour, _ := strconv.Atoi(c.DefaultQuery("endHour", "0"))
+
+	if startHour < 0 {
+		startHour = 168
+	}
+	if endHour < 0 {
+		endHour = 0
+	}
+	if startHour <= endHour {
+		startHour = endHour + 1
+	}
+
+	return startHour, endHour
+}
+
+func (h *AnalyticsHandlers) getEpinetIDs(tenantCtx *tenant.Context) ([]string, error) {
+	epinetRepo := tenantCtx.EpinetRepo()
+	epinets, err := epinetRepo.FindAll(tenantCtx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, e := range epinets {
+		if e != nil {
+			ids = append(ids, e.ID)
+		}
+	}
+	return ids, nil
+}
+
+func (h *AnalyticsHandlers) triggerBackgroundWarming(tenantCtx *tenant.Context, startHour int, status types.RangeCacheStatus) {
+	locker := caching.GetGlobalWarmingLock()
+	lockKey := fmt.Sprintf("warm:hourly:%s:%d", tenantCtx.TenantID, startHour)
+
+	if locker.TryLock(lockKey) {
+		log.Printf("Lock acquired for '%s'. Starting background analytics warming.", lockKey)
+		go func() {
+			defer locker.Unlock(lockKey)
+			bgCtx, err := h.tenantManager.NewContextFromID(tenantCtx.TenantID)
+			if err != nil {
+				log.Printf("ERROR: Failed to create background context for warming tenant %s: %v", tenantCtx.TenantID, err)
+				return
+			}
+			defer func() {
+				if err := bgCtx.Close(); err != nil {
+					h.logger.System().Error("Failed to close background context after warming", "error", err, "tenantId", bgCtx.TenantID)
+				}
+			}()
+
+			writeCache := adapters.NewWriteOnlyAnalyticsCacheAdapter(bgCtx.CacheManager)
+			if status.Action == "refresh_current" {
+				if err := h.warmingService.WarmRecentHours(bgCtx, writeCache, status.MissingHours); err != nil {
+					log.Printf("ERROR: Rapid refresh for key '%s' failed: %v", lockKey, err)
+				}
+			} else {
+				if err := h.warmingService.WarmHourlyEpinetData(bgCtx, writeCache, startHour); err != nil {
+					log.Printf("ERROR: Full warming for key '%s' failed: %v", lockKey, err)
+				}
+			}
+		}()
+	} else {
+		log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
+	}
+}
+
 // HandleDashboardAnalytics handles GET /api/v1/analytics/dashboard
 func (h *AnalyticsHandlers) HandleDashboardAnalytics(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
@@ -98,66 +236,6 @@ func (h *AnalyticsHandlers) HandleDashboardAnalytics(c *gin.Context) {
 	h.logger.Perf().Info("Performance for HandleDashboardAnalytics request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, gin.H{"dashboard": dashboard})
-}
-
-// HandleEpinetSankey handles GET /api/v1/analytics/epinets/:id
-func (h *AnalyticsHandlers) HandleEpinetSankey(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	start := time.Now()
-	marker := h.perfTracker.StartOperation("epinet_sankey_request", tenantCtx.TenantID)
-	defer marker.Complete()
-	h.logger.Analytics().Debug("Received epinet analytics request", "method", c.Request.Method, "path", c.Request.URL.Path)
-
-	epinetID := c.Param("id")
-	startHour, endHour := h.parseTimeRange(c)
-
-	cacheStatus := tenantCtx.CacheManager.GetRangeCacheStatus(tenantCtx.TenantID, epinetID, startHour, endHour)
-	if cacheStatus.Action != "proceed" {
-		h.triggerBackgroundWarming(tenantCtx, startHour, cacheStatus)
-		c.JSON(http.StatusOK, gin.H{
-			"epinet":             gin.H{"status": "loading"},
-			"userCounts":         []services.UserCount{},
-			"hourlyNodeActivity": make(services.HourlyActivity),
-		})
-		return
-	}
-
-	visitorType := c.DefaultQuery("visitorType", "all")
-	selectedUserID := c.Query("selectedUserId")
-	var selectedUserIDPtr *string
-	if selectedUserID != "" {
-		selectedUserIDPtr = &selectedUserID
-	}
-	filters := &services.SankeyFilters{
-		VisitorType:    visitorType,
-		SelectedUserID: selectedUserIDPtr,
-		StartHour:      &startHour,
-		EndHour:        &endHour,
-	}
-
-	epinet, err := h.epinetAnalyticsService.ComputeEpinetSankey(tenantCtx, epinetID, filters)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	userCounts, _ := h.analyticsService.GetFilteredVisitorCounts(tenantCtx, epinetID, visitorType, &startHour, &endHour)
-	hourlyNodeActivity, _ := h.contentAnalyticsService.GetHourlyNodeActivity(tenantCtx, epinetID, &startHour, &endHour)
-
-	h.logger.Analytics().Info("Epinet analytics request completed", "epinetId", epinetID, "startHour", startHour, "endHour", endHour, "duration", time.Since(start))
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for HandleEpinetSankey request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
-
-	c.JSON(http.StatusOK, gin.H{
-		"epinet":             epinet,
-		"userCounts":         userCounts,
-		"hourlyNodeActivity": hourlyNodeActivity,
-	})
 }
 
 // HandleStoryfragmentAnalytics handles GET /api/v1/analytics/storyfragments
@@ -281,6 +359,7 @@ func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
 	var epinet *services.SankeyDiagram
 	var userCounts []services.UserCount
 	var hourlyNodeActivity services.HourlyActivity
+	var availableFilters []services.AvailableFilter
 	var wg sync.WaitGroup
 	errChan := make(chan error, 5)
 
@@ -313,8 +392,17 @@ func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
 		if selectedUserID != "" {
 			selectedUserIDPtr = &selectedUserID
 		}
-		filters := &services.SankeyFilters{VisitorType: visitorType, SelectedUserID: selectedUserIDPtr, StartHour: &startHour, EndHour: &endHour}
-		epinet, err = h.epinetAnalyticsService.ComputeEpinetSankey(tenantCtx, epinetID, filters)
+
+		var appliedFilters []services.AppliedFilter
+		appliedFiltersJSON := c.Query("appliedFilters")
+		if appliedFiltersJSON != "" {
+			if err := json.Unmarshal([]byte(appliedFiltersJSON), &appliedFilters); err != nil {
+				h.logger.Analytics().Warn("Failed to parse appliedFilters JSON in HandleAllAnalytics", "error", err, "tenantId", tenantCtx.TenantID)
+			}
+		}
+
+		filters := &services.SankeyFilters{VisitorType: visitorType, SelectedUserID: selectedUserIDPtr, StartHour: &startHour, EndHour: &endHour, AppliedFilters: appliedFilters}
+		epinet, availableFilters, err = h.epinetAnalyticsService.ComputeEpinetSankey(tenantCtx, epinetID, filters)
 		if err != nil {
 			errChan <- fmt.Errorf("epinet sankey error: %w", err)
 		}
@@ -358,74 +446,10 @@ func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
 		"epinet":             epinet,
 		"userCounts":         userCounts,
 		"hourlyNodeActivity": hourlyNodeActivity,
+		"availableFilters":   availableFilters,
 	})
 }
 
-func (h *AnalyticsHandlers) parseTimeRange(c *gin.Context) (int, int) {
-	startHour, _ := strconv.Atoi(c.DefaultQuery("startHour", "168"))
-	endHour, _ := strconv.Atoi(c.DefaultQuery("endHour", "0"))
-	
-	// Validate and clamp parameters
-	if startHour < 0 {
-		startHour = 168 // Default to 1 week
-	}
-	if endHour < 0 {
-		endHour = 0 // Never allow negative end hours (future times)
-	}
-	if startHour <= endHour {
-		startHour = endHour + 1 // Ensure valid range
-	}
-	
-	return startHour, endHour
-}
-
-func (h *AnalyticsHandlers) getEpinetIDs(tenantCtx *tenant.Context) ([]string, error) {
-	epinetRepo := tenantCtx.EpinetRepo()
-	epinets, err := epinetRepo.FindAll(tenantCtx.TenantID)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for _, e := range epinets {
-		if e != nil {
-			ids = append(ids, e.ID)
-		}
-	}
-	return ids, nil
-}
-
-func (h *AnalyticsHandlers) triggerBackgroundWarming(tenantCtx *tenant.Context, startHour int, status types.RangeCacheStatus) {
-	locker := caching.GetGlobalWarmingLock()
-	lockKey := fmt.Sprintf("warm:hourly:%s:%d", tenantCtx.TenantID, startHour)
-
-	if locker.TryLock(lockKey) {
-		log.Printf("Lock acquired for '%s'. Starting background analytics warming.", lockKey)
-		go func() {
-			defer locker.Unlock(lockKey)
-			bgCtx, err := h.tenantManager.NewContextFromID(tenantCtx.TenantID)
-			if err != nil {
-				log.Printf("ERROR: Failed to create background context for warming tenant %s: %v", tenantCtx.TenantID, err)
-				return
-			}
-			defer bgCtx.Close()
-
-			writeCache := adapters.NewWriteOnlyAnalyticsCacheAdapter(bgCtx.CacheManager)
-			if status.Action == "refresh_current" {
-				if err := h.warmingService.WarmRecentHours(bgCtx, writeCache, status.MissingHours); err != nil {
-					log.Printf("ERROR: Rapid refresh for key '%s' failed: %v", lockKey, err)
-				}
-			} else {
-				if err := h.warmingService.WarmHourlyEpinetData(bgCtx, writeCache, startHour); err != nil {
-					log.Printf("ERROR: Full warming for key '%s' failed: %v", lockKey, err)
-				}
-			}
-		}()
-	} else {
-		log.Printf("Cache warming already in progress for key '%s'. Skipping new task.", lockKey)
-	}
-}
-
-// HandleContentSummary handles GET /api/v1/analytics/content-summary
 func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -438,10 +462,7 @@ func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Analytics().Debug("Received content summary request", "method", c.Request.Method, "path", c.Request.URL.Path)
 
-	// Parse time range same as HandleAllAnalytics
 	startHour, endHour := h.parseTimeRange(c)
-
-	// Get epinet IDs same as HandleAllAnalytics
 	epinetIDs, err := h.getEpinetIDs(tenantCtx)
 	if err != nil || len(epinetIDs) == 0 {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get epinet IDs"})
@@ -449,7 +470,6 @@ func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 	}
 	epinetID := epinetIDs[0]
 
-	// Check cache status same as HandleAllAnalytics
 	cacheStatus := tenantCtx.CacheManager.GetRangeCacheStatus(tenantCtx.TenantID, epinetID, startHour, endHour)
 
 	if cacheStatus.Action != "proceed" {
@@ -458,7 +478,6 @@ func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 		return
 	}
 
-	// Compute dashboard same as HandleAllAnalytics
 	dashboard, err := h.dashboardAnalyticsService.ComputeDashboard(tenantCtx, startHour, endHour)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -472,7 +491,6 @@ func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hotContent": dashboard.HotContent})
 }
 
-// HandleLeadsDownload handles GET /api/v1/admin/leads/download
 func (h *AnalyticsHandlers) HandleLeadsDownload(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {

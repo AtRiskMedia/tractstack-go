@@ -31,12 +31,6 @@ const (
 	weeklyBatchSize     = 168 // 7 days * 24 hours
 )
 
-type potentialNode struct {
-	id        string
-	name      string
-	stepIndex int
-}
-
 type EpinetAnalysis struct {
 	BeliefValues     map[string]bool
 	IdentifyAsValues map[string]bool
