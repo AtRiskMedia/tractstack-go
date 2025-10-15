@@ -69,8 +69,12 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 	case "resource":
 		return wr.renderResource(classNames, hook)
 	case "interactiveDisclosure":
-		if hook.Value1 != nil && hook.Value2 != nil {
-			return templates.RenderInteractiveDisclosure(wr.ctx, classNames, *hook.Value1, *hook.Value2)
+		if hook.Value2 != nil {
+			var beliefSlug string
+			if hook.Value1 != nil {
+				beliefSlug = *hook.Value1
+			}
+			return templates.RenderInteractiveDisclosure(wr.ctx, classNames, beliefSlug, *hook.Value2)
 		}
 		return "<!-- interactiveDisclosure error: missing parameters -->"
 	default:
