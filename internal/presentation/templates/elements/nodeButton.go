@@ -15,6 +15,8 @@ var nodeActionButtonTmpl = template.Must(template.New("nodeActionButton").Parse(
 	`<button class="{{.Class}}" hx-post="/api/v1/state" hx-trigger="click" hx-swap="none" hx-vals='{{.HxVals}}'>`,
 ))
 
+var playIconSVG = `<svg viewBox="0 0 459 459" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" class="inline-block" style="height:1em; margin-left: 0.25em;"><path d="M229.5,0C102.751,0,0,102.751,0,229.5S102.751,459,229.5,459S459,356.249,459,229.5S356.249,0,229.5,0z M310.292,239.651 l-111.764,76.084c-3.761,2.56-8.63,2.831-12.652,0.704c-4.022-2.128-6.538-6.305-6.538-10.855V153.416 c0-4.55,2.516-8.727,6.538-10.855c4.022-2.127,8.891-1.857,12.652,0.704l111.764,76.084c3.359,2.287,5.37,6.087,5.37,10.151 C315.662,233.564,313.652,237.364,310.292,239.651z" fill="currentColor"></path></svg>`
+
 type nodeActionButtonData struct {
 	Class  string
 	HxVals template.HTML
@@ -47,31 +49,55 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 		}
 	}
 
-	// Use the new centralized parser. A homeSlug is not needed as nodeButton only handles actions.
 	parsedAction := lisp.Parse(callbackPayloadStr, nbr.ctx.ContainingPaneID, "")
 
-	if !parsedAction.IsValid || parsedAction.HxVals == nil {
-		log.Printf("WARN: nodeButton.go failed to get valid HxVals from parser for payload: %q", callbackPayloadStr)
-		// Render a disabled button to prevent errors
-		return fmt.Sprintf(`<button class="%s" disabled>`, nbr.getClasses(nodeData))
-	}
-
-	hxValsBytes, err := json.Marshal(parsedAction.HxVals)
-	if err != nil {
-		log.Printf("ERROR: Failed to marshal hx-vals for nodeButton: %v", err)
-		return `<!-- error marshalling node button -->`
+	if !parsedAction.IsValid {
+		log.Printf("WARN: nodeButton.go failed to get valid action from parser for payload: %q", callbackPayloadStr)
+		return fmt.Sprintf(`<button class="%s" disabled></button>`, nbr.getClasses(nodeData))
 	}
 
 	var htmlBuilder strings.Builder
-	buttonData := nodeActionButtonData{
-		Class:  nbr.getClasses(nodeData),
-		HxVals: template.HTML(hxValsBytes),
-	}
 
-	err = nodeActionButtonTmpl.Execute(&htmlBuilder, buttonData)
-	if err != nil {
-		log.Printf("ERROR: Failed to execute nodeActionButton template for nodeID %s: %v", nodeID, err)
-		return `<!-- error rendering action button -->`
+	if parsedAction.IsClientSideEvent {
+		payloadBytes, err := json.Marshal(parsedAction.ClientSidePayload)
+		if err != nil {
+			log.Printf("ERROR: Failed to marshal client-side payload for nodeButton: %v", err)
+			return ``
+		}
+
+		onclickVal := fmt.Sprintf(`document.dispatchEvent(new CustomEvent('%s', { bubbles: true, detail: %s }))`,
+			parsedAction.ClientSideEventName,
+			string(payloadBytes),
+		)
+
+		htmlBuilder.WriteString(fmt.Sprintf(
+			`<button class="%s" onclick="%s">`,
+			nbr.getClasses(nodeData),
+			template.HTMLEscapeString(onclickVal),
+		))
+
+	} else {
+		if parsedAction.HxVals == nil {
+			log.Printf("WARN: nodeButton.go got a valid server-side action but HxVals was nil for payload: %q", callbackPayloadStr)
+			return fmt.Sprintf(`<button class="%s" disabled></button>`, nbr.getClasses(nodeData))
+		}
+
+		hxValsBytes, err := json.Marshal(parsedAction.HxVals)
+		if err != nil {
+			log.Printf("ERROR: Failed to marshal hx-vals for nodeButton: %v", err)
+			return ``
+		}
+
+		buttonData := nodeActionButtonData{
+			Class:  nbr.getClasses(nodeData),
+			HxVals: template.HTML(hxValsBytes),
+		}
+
+		err = nodeActionButtonTmpl.Execute(&htmlBuilder, buttonData)
+		if err != nil {
+			log.Printf("ERROR: Failed to execute nodeActionButton template for nodeID %s: %v", nodeID, err)
+			return ``
+		}
 	}
 
 	childNodeIDs := nbr.nodeRenderer.GetChildNodeIDs(nodeID)
@@ -81,6 +107,10 @@ func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 			htmlBuilder.WriteString(nbr.nodeRenderer.RenderNode(childID))
 		}
 		// htmlBuilder.WriteString(`</span>`)
+	}
+
+	if parsedAction.IsClientSideEvent && parsedAction.ClientSideEventName == "update-video" {
+		htmlBuilder.WriteString(playIconSVG)
 	}
 
 	htmlBuilder.WriteString(`</button>`)

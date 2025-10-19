@@ -13,6 +13,11 @@ type ParsedAction struct {
 	RenderAs string // "a" or "button"
 	Href     string
 	HxVals   map[string]string
+
+	// For Client-Side Actions
+	IsClientSideEvent   bool
+	ClientSideEventName string
+	ClientSidePayload   map[string]string
 }
 
 // lexer tokenizes the actionLisp string, respecting double-quoted segments.
@@ -87,6 +92,52 @@ func Parse(actionLisp string, paneID string, homeSlug string) *ParsedAction {
 	}
 
 	switch command {
+	case "bunnyMoment":
+		lastOpen := strings.LastIndex(actionLisp, "(")
+		if lastOpen == -1 {
+			log.Printf("WARN: bunnyMoment action has no inner parameters: %q", actionLisp)
+			return defaultAction
+		}
+
+		// We find the *last* ')'.
+		lastClose := strings.LastIndex(actionLisp, ")")
+		if lastClose == -1 || lastClose < lastOpen {
+			log.Printf("WARN: bunnyMoment action is unclosed: %q", actionLisp)
+			return defaultAction
+		}
+
+		// This gives us the content *between* the last '(' and last ')'.
+		// e.g., "252933/3ed9... 0" or "252933/3ed9... 0)" (from double-nesting)
+		innerContent := actionLisp[lastOpen+1 : lastClose]
+
+		// Get the parts.
+		parts := strings.Fields(innerContent)
+
+		var videoID, time string
+
+		if len(parts) >= 2 {
+			// Take the last two elements.
+			videoID = parts[len(parts)-2]
+			time = parts[len(parts)-1]
+
+			time = strings.TrimRight(time, ")")
+
+		} else {
+			log.Printf("WARN: bunnyMoment action has unparseable inner content: %q", innerContent)
+			return defaultAction
+		}
+
+		return &ParsedAction{
+			IsValid:             true,
+			RenderAs:            "button",
+			IsClientSideEvent:   true,
+			ClientSideEventName: "update-video",
+			ClientSidePayload: map[string]string{
+				"videoId": videoID,
+				"time":    time,
+			},
+		}
+
 	case "goto":
 		href := resolveGotoURL(params, homeSlug)
 		hxVals := map[string]string{

@@ -300,7 +300,7 @@ var bunnyWidgetTmpl = template.Must(template.New("bunnyWidget").Parse(
             }
         }
 
-        document.addEventListener('update-video', function(event) {
+	      document.addEventListener('update-video', function(event) {
           if (event.detail && event.detail.videoId === videoId && player && typeof player.setCurrentTime === 'function') {
             var timeString = String(event.detail.time).replace('s', '');
             var timeInSeconds = parseInt(timeString, 10);
@@ -309,6 +309,7 @@ var bunnyWidgetTmpl = template.Must(template.New("bunnyWidget").Parse(
               if (typeof player.play === 'function') {
                   player.play();
               }
+              container.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
           }
         });
