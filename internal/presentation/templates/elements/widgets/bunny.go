@@ -54,254 +54,26 @@ var bunnyWidgetTmpl = template.Must(template.New("bunnyWidget").Parse(
     </div>
     {{end}}
     
-    <script>
+	<script>
       (function() {
+	      const VERBOSE = false;
         var sanitizedId = '{{.SanitizedVideoID}}';
-        var container = document.getElementById('bunny-container-' + sanitizedId);
-        if (!container) return;
-
-        var videoId = container.dataset.videoId;
-        var title = container.dataset.title;
-        var chaptersJson = container.dataset.chapters;
+	      if( VERBOSE )
+          console.log('BUNNY DEBUG: Script block for ' + sanitizedId + ' is EXECUTING.');
         
-        var iframeId = 'bunny-iframe-' + sanitizedId;
-        var loader = document.getElementById('bunny-loader-' + sanitizedId);
-        var error = document.getElementById('bunny-error-' + sanitizedId);
-        var playerContainer = container.querySelector('.aspect-video');
-
+        var videoId = '{{.VideoID}}';
         var player = null;
-        var chapters = [];
-        var activeChapter = null;
         var chapterWatcher = null;
+        var iframeId = 'bunny-iframe-' + sanitizedId;
+        var hasInitialized = false;
 
-        if (chaptersJson) {
-            try {
-                chapters = JSON.parse(chaptersJson);
-            } catch(e) {
-                console.error("Failed to parse bunny chapters:", e);
-                chapters = [];
-            }
-        }
-        
-        var hasChapters = chapters.length > 0;
-
-        var urlParams = new URLSearchParams(window.location.search);
-        var startTime = urlParams.get('t') || urlParams.get('bunny_start');
-        var timeInSeconds = -1;
-
-        if (startTime) {
-          var timeString = startTime.replace('s', '');
-          var parsedTime = parseInt(timeString, 10);
-          if (!isNaN(parsedTime)) {
-            timeInSeconds = parsedTime;
-          }
-        }
-
-        var iframe = document.createElement('iframe');
-        var baseURL = 'https://iframe.mediadelivery.net/embed/' + videoId;
-        
-        var params = new URLSearchParams({
-          autoplay: timeInSeconds >= 0 ? '1' : '0',
-          preload: 'true',
-          responsive: 'true',
-          muted: 'false',
-        });
-
-        iframe.id = iframeId;
-        iframe.src = baseURL + '?' + params.toString();
-        iframe.className = 'w-full h-full absolute inset-0';
-        iframe.title = title;
-        iframe.setAttribute('allow', 'autoplay; fullscreen');
-        iframe.setAttribute('loading', 'lazy');
-
-        function formatTime(seconds) {
-            var mins = Math.floor(seconds / 60);
-            var secs = Math.floor(seconds % 60);
-            return mins + ':' + secs.toString().padStart(2, '0');
-        }
-
-        function renderChaptersList() {
-            var listEl = document.getElementById('bunny-chapters-list-' + sanitizedId);
-            if (!listEl) return;
-            listEl.innerHTML = '';
-            chapters.forEach(function(chapter, index) {
-                var li = document.createElement('li');
-                li.className = 'p-3 hover:bg-gray-50 cursor-pointer';
-                li.dataset.startTime = chapter.startTime;
-                
-                var content = document.createElement('div');
-                content.className = 'flex justify-between items-center';
-                
-                var titleSpan = document.createElement('span');
-                titleSpan.className = 'flex items-center text-sm';
-                titleSpan.innerHTML = '<span class="w-6 h-6 flex items-center justify-center bg-gray-200 rounded-full text-xs mr-2">' + (index + 1) + '</span> ' + chapter.title;
-                
-                var timeLabel = document.createElement('span');
-                timeLabel.className = 'text-sm text-gray-500 ml-auto';
-                timeLabel.textContent = formatTime(chapter.startTime);
-
-                content.appendChild(titleSpan);
-                content.appendChild(timeLabel);
-                li.appendChild(content);
-
-                li.addEventListener('click', function() {
-                    if (player && typeof player.setCurrentTime === 'function') {
-                        player.setCurrentTime(chapter.startTime);
-                        if(typeof player.play === 'function') player.play();
-                    }
-                });
-                listEl.appendChild(li);
-            });
-        }
-        
-        function navigateToLinkedPane(paneId) {
-            if (!paneId) return;
-
-            var paneElement = document.getElementById('pane-' + paneId);
-            if (!paneElement) {
-                console.warn('Linked pane with id ' + paneId + ' not found.');
-                return;
-            }
-
-            if (player && typeof player.pause === 'function') {
-                player.pause();
-            }
-
-            var headerOffset = 60;
-            var elementPosition = paneElement.getBoundingClientRect().top;
-            var offsetPosition = elementPosition + window.pageYOffset - headerOffset;
-
-            window.scrollTo({
-                top: offsetPosition,
-                behavior: 'smooth'
-            });
-
-            paneElement.style.transition = 'box-shadow 0.5s ease-out';
-            paneElement.style.boxShadow = '0 0 0 4px rgba(59, 130, 246, 0.5)';
-            setTimeout(function() {
-                paneElement.style.boxShadow = '';
-            }, 2000);
-        }
-
-        function updateChapterUI(chapter) {
-            var overlay = document.getElementById('bunny-chapter-overlay-' + sanitizedId);
-            var overlayTitle = document.getElementById('bunny-chapter-title-' + sanitizedId);
-            var overlayLink = document.getElementById('bunny-chapter-link-' + sanitizedId);
-            var listEl = document.getElementById('bunny-chapters-list-' + sanitizedId);
-
-            if (chapter) {
-                if (overlay && overlayTitle) {
-                    overlayTitle.textContent = chapter.title;
-                    overlay.style.display = 'block';
-                }
-                if (overlayLink) {
-                    if (chapter.linkedPaneId) {
-                        overlayLink.style.display = 'inline';
-                    } else {
-                        overlayLink.style.display = 'none';
-                    }
-                }
-                if(listEl) {
-                    var items = listEl.querySelectorAll('li');
-                    items.forEach(function(item) { item.classList.remove('bg-blue-50'); });
-                    var activeItem = listEl.querySelector('li[data-start-time="' + chapter.startTime + '"]');
-                    if (activeItem) {
-                        activeItem.classList.add('bg-blue-50');
-                    }
-                }
-            } else {
-                if (overlay) {
-                    overlay.style.display = 'none';
-                }
-                if(listEl) {
-                   var items = listEl.querySelectorAll('li');
-                   items.forEach(function(item) { item.classList.remove('bg-blue-50'); });
-                }
-            }
-        }
-
-        function checkCurrentTime(currentTime) {
-            var chapter = chapters.find(function(c) { return currentTime >= c.startTime && currentTime < c.endTime; }) || null;
-            if ((chapter && !activeChapter) || (chapter && activeChapter && chapter.startTime !== activeChapter.startTime)) {
-                activeChapter = chapter;
-                updateChapterUI(activeChapter);
-            } else if (!chapter && activeChapter) {
-                activeChapter = null;
-                updateChapterUI(null);
-            }
-        }
-
-        function startChapterTracking() {
-            if (chapterWatcher) clearInterval(chapterWatcher);
-            chapterWatcher = setInterval(function() {
-                if (player && typeof player.getCurrentTime === 'function') {
-                    player.getCurrentTime(checkCurrentTime);
-                }
-            }, 1000);
-        }
-
-        iframe.onload = function() {
-          if (!window.playerjs) {
-            if (loader) loader.style.display = 'none';
-            if (error) error.style.display = 'flex';
-            return;
-          }
-
-          try {
-            player = new window.playerjs.Player(iframeId);
-            player.on('ready', function() {
-              if (loader) loader.style.display = 'none';
-              if (timeInSeconds >= 0 && player && typeof player.setCurrentTime === 'function') {
-                player.setCurrentTime(timeInSeconds);
-                if (typeof player.play === 'function') {
-                  player.play();
-                }
-                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }
-              if (hasChapters) {
-                  startChapterTracking();
-              }
-            });
-            player.on('error', function() {
-              if (loader) loader.style.display = 'none';
-              if (error) error.style.display = 'flex';
-            });
-          } catch (e) {
-            console.error('Error initializing player.js:', e);
-            if (loader) loader.style.display = 'none';
-            if (error) error.style.display = 'flex';
-          }
-        };
-        
-        if (playerContainer) {
-            playerContainer.appendChild(iframe);
-        }
-
-        if (hasChapters) {
-            renderChaptersList();
-            var header = document.getElementById('bunny-chapters-header-' + sanitizedId);
-            var content = document.getElementById('bunny-chapters-content-' + sanitizedId);
-            var overlayLink = document.getElementById('bunny-chapter-link-' + sanitizedId);
-
-            if(header && content) {
-                header.addEventListener('click', function() {
-                    var isHidden = content.classList.contains('hidden');
-                    content.classList.toggle('hidden');
-                    header.querySelector('.toggle-text').textContent = isHidden ? 'Hide' : 'Show';
-                });
-            }
-            if (overlayLink) {
-                overlayLink.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    if (activeChapter && activeChapter.linkedPaneId) {
-                        navigateToLinkedPane(activeChapter.linkedPaneId);
-                    }
-                });
-            }
-        }
-
-	      document.addEventListener('update-video', function(event) {
+        function handleUpdateVideo(event) {
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: handleUpdateVideo CALLED for videoId: ' + event.detail.videoId);
           if (event.detail && event.detail.videoId === videoId && player && typeof player.setCurrentTime === 'function') {
+            var container = document.getElementById('bunny-container-' + sanitizedId); // Re-acquire container
+	          if( VERBOSE )
+              console.log('BUNNY DEBUG: Seeking player ' + sanitizedId + ' to ' + event.detail.time);
             var timeString = String(event.detail.time).replace('s', '');
             var timeInSeconds = parseInt(timeString, 10);
             if (!isNaN(timeInSeconds)) {
@@ -309,10 +81,346 @@ var bunnyWidgetTmpl = template.Must(template.New("bunnyWidget").Parse(
               if (typeof player.play === 'function') {
                   player.play();
               }
-              container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              if (container) {
+                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
             }
           }
-        });
+        }
+
+        function cleanupBunnyPlayer() {
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: cleanupBunnyPlayer CALLED for ' + sanitizedId);
+
+          if (chapterWatcher) {
+	          if( VERBOSE )
+              console.log('BUNNY DEBUG: Clearing chapterWatcher interval ' + sanitizedId);
+            clearInterval(chapterWatcher);
+            chapterWatcher = null;
+          }
+          
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: REMOVING document event listener for update-video');
+          document.removeEventListener('update-video', handleUpdateVideo);
+
+          if (player) {
+	          if( VERBOSE )
+              console.log('BUNNY DEBUG: Pausing player ' + sanitizedId);
+            if (typeof player.pause === 'function') {
+                player.pause();
+            }
+            player = null; 
+          }
+
+          var iframe = document.getElementById(iframeId);
+          if (iframe) {
+	          if( VERBOSE )
+              console.log('BUNNY DEBUG: Removing iframe ' + iframeId);
+            iframe.src = 'about:blank';
+            iframe.remove();
+          }
+          
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: hasInitialized SET to FALSE for ' + sanitizedId);
+          hasInitialized = false;
+        }
+
+        function initBunnyPlayer() {
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: initBunnyPlayer CALLED for ' + sanitizedId);
+
+          if (hasInitialized) {
+	          if( VERBOSE )
+              console.warn('BUNNY DEBUG: Init ' + sanitizedId + ' called but hasInitialized is TRUE. Aborting to prevent race condition.');
+            return;
+          }
+
+          // The container MUST be re-acquired inside init(), because this function
+          // is called on astro:page-load when the *old* container is gone.
+          var container = document.getElementById('bunny-container-' + sanitizedId);
+          if (!container) {
+	          if( VERBOSE )
+              console.error('BUNNY DEBUG: initBunnyPlayer FAILED to find container ' + sanitizedId + '. Aborting.');
+            return;
+          }
+
+          hasInitialized = true;
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: hasInitialized SET to TRUE for ' + sanitizedId);
+
+          var title = container.dataset.title;
+          var chaptersJson = container.dataset.chapters;
+          var loader = document.getElementById('bunny-loader-' + sanitizedId);
+          var error = document.getElementById('bunny-error-' + sanitizedId);
+          var playerContainer = container.querySelector('.aspect-video');
+
+          if (!playerContainer) {
+	          if( VERBOSE )
+              console.error('BUNNY DEBUG: playerContainer not found for ' + sanitizedId);
+            return;
+          }
+          
+          var existingIframe = document.getElementById(iframeId);
+          if (existingIframe) {
+	          if( VERBOSE )
+              console.warn('BUNNY DEBUG: Found STALE iframe for ' + sanitizedId + '. Removing it.');
+            existingIframe.remove();
+          }
+
+          var chapters = [];
+          var activeChapter = null;
+          var hasChapters = false;
+
+          if (chaptersJson) {
+              try {
+                  chapters = JSON.parse(chaptersJson);
+              } catch(e) {
+	                if( VERBOSE )
+                    console.error("BUNNY DEBUG: Failed to parse bunny chapters:", e);
+                  chapters = [];
+              }
+          }
+          hasChapters = chapters.length > 0;
+
+          var urlParams = new URLSearchParams(window.location.search);
+          var startTime = urlParams.get('t') || urlParams.get('bunny_start');
+          var timeInSeconds = -1;
+
+          if (startTime) {
+            var timeString = startTime.replace('s', '');
+            var parsedTime = parseInt(timeString, 10);
+            if (!isNaN(parsedTime)) {
+              timeInSeconds = parsedTime;
+            }
+          }
+
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: Creating new iframe ' + iframeId);
+          var iframe = document.createElement('iframe');
+          var baseURL = 'https://iframe.mediadelivery.net/embed/' + videoId;
+          
+          var params = new URLSearchParams({
+            autoplay: timeInSeconds >= 0 ? '1' : '0',
+            preload: 'true',
+            responsive: 'true',
+            muted: 'false',
+          });
+
+          iframe.id = iframeId;
+          iframe.src = baseURL + '?' + params.toString();
+          iframe.className = 'w-full h-full absolute inset-0';
+          iframe.title = title;
+          iframe.setAttribute('allow', 'autoplay; fullscreen');
+          iframe.setAttribute('loading', 'lazy');
+
+          function formatTime(seconds) {
+              var mins = Math.floor(seconds / 60);
+              var secs = Math.floor(seconds % 60);
+              return mins + ':' + secs.toString().padStart(2, '0');
+          }
+
+          function renderChaptersList() {
+	            if( VERBOSE )
+                console.log('BUNNY DEBUG: renderChaptersList ' + sanitizedId);
+              var listEl = document.getElementById('bunny-chapters-list-' + sanitizedId);
+              if (!listEl) return;
+              listEl.innerHTML = '';
+              chapters.forEach(function(chapter, index) {
+                  var li = document.createElement('li');
+                  li.className = 'p-3 hover:bg-gray-50 cursor-pointer';
+                  li.dataset.startTime = chapter.startTime;
+                  
+                  var content = document.createElement('div');
+                  content.className = 'flex justify-between items-center';
+                  
+                  var titleSpan = document.createElement('span');
+                  titleSpan.className = 'flex items-center text-sm';
+                  titleSpan.innerHTML = '<span class="w-6 h-6 flex items-center justify-center bg-gray-200 rounded-full text-xs mr-2">' + (index + 1) + '</span> ' + chapter.title;
+                  
+                  var timeLabel = document.createElement('span');
+                  timeLabel.className = 'text-sm text-gray-500 ml-auto';
+                  timeLabel.textContent = formatTime(chapter.startTime);
+
+                  content.appendChild(titleSpan);
+                  content.appendChild(timeLabel);
+                  li.appendChild(content);
+
+                  li.addEventListener('click', function() {
+	                    if( VERBOSE )
+                        console.log('BUNNY DEBUG: Chapter click ' + chapter.startTime);
+                      if (player && typeof player.setCurrentTime === 'function') {
+                          player.setCurrentTime(chapter.startTime);
+                          if(typeof player.play === 'function') player.play();
+                      }
+                  });
+                  listEl.appendChild(li);
+              });
+          }
+          
+          function navigateToLinkedPane(paneId) {
+              if (!paneId) return;
+	            if( VERBOSE )
+                console.log('BUNNY DEBUG: NavigateToLinkedPane ' + paneId);
+              var paneElement = document.getElementById('pane-' + paneId);
+              if (!paneElement) {
+	                if( VERBOSE )
+                    console.warn('BUNNY DEBUG: Linked pane with id ' + paneId + ' not found.');
+                  return;
+              }
+              if (player && typeof player.pause === 'function') {
+                  player.pause();
+              }
+              var headerOffset = 60;
+              var elementPosition = paneElement.getBoundingClientRect().top;
+              var offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+              window.scrollTo({ top: offsetPosition, behavior: 'smooth' });
+              paneElement.style.transition = 'box-shadow 0.5s ease-out';
+              paneElement.style.boxShadow = '0 0 0 4px rgba(59, 130, 246, 0.5)';
+              setTimeout(function() { paneElement.style.boxShadow = ''; }, 2000);
+          }
+
+          function updateChapterUI(chapter) {
+              var overlay = document.getElementById('bunny-chapter-overlay-' + sanitizedId);
+              var overlayTitle = document.getElementById('bunny-chapter-title-' + sanitizedId);
+              var overlayLink = document.getElementById('bunny-chapter-link-' + sanitizedId);
+              var listEl = document.getElementById('bunny-chapters-list-' + sanitizedId);
+
+              if (chapter) {
+                  if (overlay && overlayTitle) {
+                      overlayTitle.textContent = chapter.title;
+                      overlay.style.display = 'block';
+                  }
+                  if (overlayLink) {
+                      overlayLink.style.display = chapter.linkedPaneId ? 'inline' : 'none';
+                  }
+                  if(listEl) {
+                      listEl.querySelectorAll('li').forEach(function(item) { item.classList.remove('bg-blue-50'); });
+                      var activeItem = listEl.querySelector('li[data-start-time="' + chapter.startTime + '"]');
+                      if (activeItem) { activeItem.classList.add('bg-blue-50'); }
+                  }
+              } else {
+                  if (overlay) { overlay.style.display = 'none'; }
+                  if(listEl) {
+                     listEl.querySelectorAll('li').forEach(function(item) { item.classList.remove('bg-blue-50'); });
+                  }
+              }
+          }
+
+          function checkCurrentTime(currentTime) {
+              var chapter = chapters.find(function(c) { return currentTime >= c.startTime && currentTime < c.endTime; }) || null;
+              if ((chapter && !activeChapter) || (chapter && activeChapter && chapter.startTime !== activeChapter.startTime)) {
+                  activeChapter = chapter;
+                  updateChapterUI(activeChapter);
+              } else if (!chapter && activeChapter) {
+                  activeChapter = null;
+                  updateChapterUI(null);
+              }
+          }
+
+          function startChapterTracking() {
+	            if( VERBOSE )
+                console.log('BUNNY DEBUG: startChapterTracking ' + sanitizedId);
+              if (chapterWatcher) clearInterval(chapterWatcher);
+              chapterWatcher = setInterval(function() {
+                  if (player && typeof player.getCurrentTime === 'function') {
+                      player.getCurrentTime(checkCurrentTime);
+                  }
+              }, 1000);
+          }
+
+
+          iframe.onload = function() {
+	          if( VERBOSE )
+              console.log('BUNNY DEBUG: iframe.onload FIRED for ' + iframeId);
+            if (!window.playerjs) {
+	            if( VERBOSE )
+                console.error('BUNNY DEBUG: window.playerjs not found!');
+              if (loader) loader.style.display = 'none';
+              if (error) error.style.display = 'flex';
+              return;
+            }
+
+            try {
+	            if( VERBOSE )
+                console.log('BUNNY DEBUG: Creating new window.playerjs.Player ' + iframeId);
+              player = new window.playerjs.Player(iframeId);
+              
+              player.on('ready', function() {
+	              if( VERBOSE )
+                  console.log('BUNNY DEBUG: player.on(ready) FIRED for ' + iframeId);
+                if (loader) loader.style.display = 'none';
+                if (timeInSeconds >= 0 && player && typeof player.setCurrentTime === 'function') {
+	                if( VERBOSE )
+                    console.log('BUNNY DEBUG: Setting start time to ' + timeInSeconds);
+                  player.setCurrentTime(timeInSeconds);
+                  if (typeof player.play === 'function') {
+                    player.play();
+                  }
+                  if (container) {
+                    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }
+                }
+                if (hasChapters) {
+                    startChapterTracking();
+                }
+              });
+
+              player.on('error', function() {
+	              if( VERBOSE )
+                  console.error('BUNNY DEBUG: player.on(error) FIRED for ' + iframeId);
+                if (loader) loader.style.display = 'none';
+                if (error) error.style.display = 'flex';
+              });
+            } catch (e) {
+	            if( VERBOSE )
+                console.error('BUNNY DEBUG: Error initializing player.js: ', e);
+              if (loader) loader.style.display = 'none';
+              if (error) error.style.display = 'flex';
+            }
+          };
+          
+          if (playerContainer) {
+	            if( VERBOSE )
+                console.log('BUNNY DEBUG: Appending iframe ' + iframeId + ' to container.');
+              playerContainer.appendChild(iframe);
+          }
+
+          if (hasChapters) {
+              renderChaptersList();
+              var header = document.getElementById('bunny-chapters-header-' + sanitizedId);
+              var content = document.getElementById('bunny-chapters-content-' + sanitizedId);
+              var overlayLink = document.getElementById('bunny-chapter-link-' + sanitizedId);
+
+              if(header && content) {
+                  header.addEventListener('click', function() {
+                      var isHidden = content.classList.contains('hidden');
+                      content.classList.toggle('hidden');
+                      header.querySelector('.toggle-text').textContent = isHidden ? 'Hide' : 'Show';
+                  });
+              }
+              if (overlayLink) {
+                  overlayLink.addEventListener('click', function(e) {
+                      e.preventDefault();
+                      if (activeChapter && activeChapter.linkedPaneId) {
+                          navigateToLinkedPane(activeChapter.linkedPaneId);
+                      }
+                  });
+              }
+          }
+          
+	        if( VERBOSE )
+            console.log('BUNNY DEBUG: ADDING document event listener for update-video');
+          document.addEventListener('update-video', handleUpdateVideo);
+        }
+
+	      if( VERBOSE )
+          console.log('BUNNY DEBUG: ADDING Astro lifecycle listeners for ' + sanitizedId);
+        document.addEventListener('astro:page-load', initBunnyPlayer);
+        document.addEventListener('astro:before-swap', cleanupBunnyPlayer);
+
+	      if( VERBOSE )
+          console.log('BUNNY DEBUG: Calling IMMEDIATE initBunnyPlayer for ' + sanitizedId + ' (first load)');
+        initBunnyPlayer();
       })();
     </script>
 </div>{{end}}`))
@@ -350,7 +458,7 @@ func RenderBunny(classNames string, hook *rendering.CodeHook) string {
 	err := bunnyWidgetTmpl.ExecuteTemplate(&buf, "bunnyWidget", data)
 	if err != nil {
 		log.Printf("ERROR: Failed to execute bunny widget template: %v", err)
-		return `<!-- template error -->`
+		return ``
 	}
 
 	return buf.String()
