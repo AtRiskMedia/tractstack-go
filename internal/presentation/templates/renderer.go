@@ -103,7 +103,7 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 		return nr.renderBgPaneWrapper(nodeID)
 	case "TagElement":
 		return nr.renderTagElement(nodeID)
-	case "h2", "h3", "h4", "p", "em", "strong", "li", "ol", "ul", "aside":
+	case "h2", "h3", "h4", "p", "em", "strong", "li", "ol", "ul", "aside", "span":
 		return nr.renderNodeBasicTag(nodeID)
 	case "text":
 		return nr.renderNodeText(nodeID)
