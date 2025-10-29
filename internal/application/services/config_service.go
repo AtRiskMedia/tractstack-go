@@ -77,6 +77,9 @@ type BrandConfigUpdateRequest struct {
 
 	// Known Resources Field
 	KnownResources *types.KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
+
+	// Design Library Field
+	DesignLibrary *types.DesignLibraryConfig `json:"DESIGN_LIBRARY,omitempty"`
 }
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
@@ -257,9 +260,15 @@ func (c *ConfigService) SaveBrandConfig(tenantID string, config *types.BrandConf
 		return err
 	}
 
-	// Create copy without KnownResources for brand.json
+	// Save designLibrary separately
+	if err := c.saveDesignLibrary(tenantID, config.DesignLibrary); err != nil {
+		return err
+	}
+
+	// Create copy without KnownResources or DesignLibrary for brand.json
 	brandConfigForFile := *config
 	brandConfigForFile.KnownResources = nil
+	brandConfigForFile.DesignLibrary = nil
 
 	// Write brand config
 	brandPath := filepath.Join(configPath, "brand.json")
@@ -322,14 +331,14 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		// Remove file
 		if config.Logo != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Logo, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		config.Logo = ""
 	} else if request.LogoBase64 != "" {
 		// Add file (remove old if exists)
 		if config.Logo != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Logo, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		filename := "logo" + c.getExtensionFromBase64(request.LogoBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
@@ -354,14 +363,14 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		// Remove file
 		if config.Wordmark != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Wordmark, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		config.Wordmark = ""
 	} else if request.WordmarkBase64 != "" {
 		// Add file (remove old if exists)
 		if config.Wordmark != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Wordmark, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		filename := "wordmark" + c.getExtensionFromBase64(request.WordmarkBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
@@ -386,14 +395,14 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		// Remove file
 		if config.Favicon != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Favicon, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		config.Favicon = ""
 	} else if request.FaviconBase64 != "" {
 		// Add file (remove old if exists)
 		if config.Favicon != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.Favicon, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		filename := "favicon" + c.getExtensionFromBase64(request.FaviconBase64)
 		targetDir := filepath.Join(mediaPath, "images/brand")
@@ -410,14 +419,14 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		// Remove file
 		if config.OG != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OG, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		config.OG = ""
 	} else if request.OGBase64 != "" {
 		// Add file (remove old if exists)
 		if config.OG != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OG, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		newVersion := time.Now().Unix()
 		filename := fmt.Sprintf("og-v%d%s", newVersion, c.getExtensionFromBase64(request.OGBase64))
@@ -436,14 +445,14 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 		// Remove file
 		if config.OGLogo != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OGLogo, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		config.OGLogo = ""
 	} else if request.OGLogoBase64 != "" {
 		// Add file (remove old if exists)
 		if config.OGLogo != "" {
 			oldPath := filepath.Join(mediaPath, strings.TrimPrefix(config.OGLogo, "/media/"))
-			os.Remove(oldPath)
+			go func() { _ = os.Remove(oldPath) }()
 		}
 		newVersion := time.Now().Unix()
 		filename := fmt.Sprintf("oglogo-v%d%s", newVersion, c.getExtensionFromBase64(request.OGLogoBase64))
@@ -594,6 +603,11 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 		config.KnownResources = request.KnownResources
 	}
 
+	// Update design library (already properly protected with != nil)
+	if request.DesignLibrary != nil {
+		config.DesignLibrary = request.DesignLibrary
+	}
+
 	return config
 }
 
@@ -618,6 +632,32 @@ func (c *ConfigService) saveKnownResources(tenantID string, knownResources *type
 
 	if err := os.WriteFile(knownResourcesPath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write known resources config: %w", err)
+	}
+
+	return nil
+}
+
+func (c *ConfigService) saveDesignLibrary(tenantID string, designLibrary *types.DesignLibraryConfig) error {
+	if designLibrary == nil {
+		return nil // Nothing to save
+	}
+
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID)
+
+	// Ensure config directory exists
+	if err := os.MkdirAll(configPath, 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	// Write design library config
+	designLibraryPath := filepath.Join(configPath, "designLibrary.json")
+	data, err := json.MarshalIndent(designLibrary, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal design library config: %w", err)
+	}
+
+	if err := os.WriteFile(designLibraryPath, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write design library config: %w", err)
 	}
 
 	return nil
@@ -671,20 +711,20 @@ func (c *ConfigService) updateBrandColorsInCustomCSS(mediaPath, brandColours str
 
 	// Verify temp file can be read
 	if _, err := os.ReadFile(tmpPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to verify temp CSS: %w", err)
 	}
 
 	// Atomic replacement: backup original, activate new
 	if err := os.Rename(cssPath, goodPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to backup CSS: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, cssPath); err != nil {
-		// Restore from backup on failure
-		os.Rename(goodPath, cssPath)
-		os.Remove(tmpPath)
+		// Restore from backup on failure. This MUST be synchronous.
+		_ = os.Rename(goodPath, cssPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("failed to activate new CSS: %w", err)
 	}
 

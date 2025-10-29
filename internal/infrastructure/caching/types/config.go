@@ -21,6 +21,17 @@ type TenantConfigCache struct {
 	Mu          sync.RWMutex `json:"-"`
 }
 
+// ComponentDefinition represents a single component in the design library.
+type ComponentDefinition struct {
+	Markup      string `json:"markup"`
+	Styles      string `json:"styles"`
+	Description string `json:"description,omitempty"`
+}
+
+// DesignLibraryConfig holds the structure of the design library.
+// It's a map of component types (e.g., "buttons") to a map of specific components.
+type DesignLibraryConfig map[string]map[string]ComponentDefinition
+
 // KnownResourcesConfig holds resource category definitions
 type KnownResourcesConfig map[string]map[string]FieldDefinition
 
@@ -64,6 +75,7 @@ type BrandConfig struct {
 	FaviconBase64      string                `json:"FAVICON_BASE64,omitempty"`
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 	HasAAI             bool                  `json:"HAS_AAI"`
+	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go

@@ -105,6 +105,7 @@ func LoadBrandConfig(tenantID string) (*types.BrandConfig, error) {
 			OG:                 "",
 			OGLogo:             "",
 			KnownResources:     &types.KnownResourcesConfig{},
+			DesignLibrary:      &types.DesignLibraryConfig{},
 		}, nil
 	}
 
@@ -124,6 +125,13 @@ func LoadBrandConfig(tenantID string) (*types.BrandConfig, error) {
 		return nil, fmt.Errorf("failed to load known resources: %w", err)
 	}
 	brand.KnownResources = knownResources
+
+	// Load design library separately
+	designLibrary, err := LoadDesignLibrary(tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load design library: %w", err)
+	}
+	brand.DesignLibrary = designLibrary
 
 	return &brand, nil
 }
@@ -148,6 +156,28 @@ func LoadKnownResources(tenantID string) (*types.KnownResourcesConfig, error) {
 	}
 
 	return &knownResources, nil
+}
+
+// LoadDesignLibrary loads the design library configuration for a specific tenant
+func LoadDesignLibrary(tenantID string) (*types.DesignLibraryConfig, error) {
+	designLibraryPath := filepath.Join(config.BackendPath, "config", tenantID, "designLibrary.json")
+
+	// Return empty config if file doesn't exist
+	if _, err := os.Stat(designLibraryPath); os.IsNotExist(err) {
+		return &types.DesignLibraryConfig{}, nil
+	}
+
+	data, err := os.ReadFile(designLibraryPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read design library config: %w", err)
+	}
+
+	var designLibrary types.DesignLibraryConfig
+	if err := json.Unmarshal(data, &designLibrary); err != nil {
+		return nil, fmt.Errorf("failed to parse design library config: %w", err)
+	}
+
+	return &designLibrary, nil
 }
 
 // TenantRegistry holds the global tenant configuration
