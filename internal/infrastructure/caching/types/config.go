@@ -21,16 +21,39 @@ type TenantConfigCache struct {
 	Mu          sync.RWMutex `json:"-"`
 }
 
-// ComponentDefinition represents a single component in the design library.
-type ComponentDefinition struct {
-	Markup      string `json:"markup"`
-	Styles      string `json:"styles"`
-	Description string `json:"description,omitempty"`
+type TemplateNode struct {
+	NodeType        string          `json:"nodeType"`
+	TagName         string          `json:"tagName,omitempty"`
+	Copy            string          `json:"copy,omitempty"`
+	Href            string          `json:"href,omitempty"`
+	Src             string          `json:"src,omitempty"`
+	Alt             string          `json:"alt,omitempty"`
+	ButtonPayload   string          `json:"buttonPayload,omitempty"`
+	CodeHookParams  []string        `json:"codeHookParams,omitempty"`
+	OverrideClasses []string        `json:"overrideClasses,omitempty"`
+	Nodes           []*TemplateNode `json:"nodes,omitempty"`
 }
 
-// DesignLibraryConfig holds the structure of the design library.
-// It's a map of component types (e.g., "buttons") to a map of specific components.
-type DesignLibraryConfig map[string]map[string]ComponentDefinition
+type TemplateMarkdown struct {
+	NodeType string          `json:"nodeType"`
+	Nodes    []*TemplateNode `json:"nodes"`
+}
+
+type TemplatePane struct {
+	NodeType      string            `json:"nodeType"`
+	Title         string            `json:"title"`
+	Slug          string            `json:"slug,omitempty"`
+	IsContextPane bool              `json:"isContextPane,omitempty"`
+	Markdown      *TemplateMarkdown `json:"markdown,omitempty"`
+}
+
+type DesignLibraryEntry struct {
+	Category string       `json:"category"`
+	Title    string       `json:"title"`
+	Template TemplatePane `json:"template"`
+}
+
+type DesignLibraryConfig []DesignLibraryEntry
 
 // KnownResourcesConfig holds resource category definitions
 type KnownResourcesConfig map[string]map[string]FieldDefinition
