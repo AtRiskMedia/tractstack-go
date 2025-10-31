@@ -55,7 +55,7 @@ func (s *AAIService) AskLemur(tenantCtx *tenant.Context, request AskLemurRequest
 
 	// Set defaults
 	if request.FinalModel == "" {
-		request.FinalModel = "anthropic/claude-3-5-sonnet"
+		request.FinalModel = "anthropic/claude-sonnet-4-20250514"
 	}
 	if request.MaxTokens == 0 {
 		request.MaxTokens = 4000

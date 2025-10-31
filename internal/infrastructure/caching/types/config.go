@@ -47,10 +47,73 @@ type TemplatePane struct {
 	Markdown      *TemplateMarkdown `json:"markdown,omitempty"`
 }
 
+type StorageButtonPayload struct {
+	ButtonClasses      map[string][]string `json:"buttonClasses"`
+	ButtonHoverClasses map[string][]string `json:"buttonHoverClasses"`
+	CallbackPayload    string              `json:"callbackPayload"`
+}
+
+type StorageNode struct {
+	NodeType        string                       `json:"nodeType"`
+	TagName         string                       `json:"tagName,omitempty"`
+	Copy            string                       `json:"copy,omitempty"`
+	Href            string                       `json:"href,omitempty"`
+	Src             string                       `json:"src,omitempty"`
+	Alt             string                       `json:"alt,omitempty"`
+	ButtonPayload   *StorageButtonPayload        `json:"buttonPayload,omitempty"`
+	CodeHookParams  []interface{}                `json:"codeHookParams,omitempty"`
+	OverrideClasses map[string]map[string]string `json:"overrideClasses,omitempty"`
+	Nodes           []*StorageNode               `json:"nodes,omitempty"`
+}
+
+type StorageMarkdown struct {
+	NodeType       string                   `json:"nodeType"`
+	Type           string                   `json:"type"`
+	DefaultClasses map[string]interface{}   `json:"defaultClasses"`
+	ParentClasses  []map[string]interface{} `json:"parentClasses"`
+	Nodes          []*StorageNode           `json:"nodes"`
+}
+
+type VisualBreakData struct {
+	Collection string `json:"collection"`
+	Image      string `json:"image"`
+	SvgFill    string `json:"svgFill"`
+}
+
+type StorageBgPane struct {
+	NodeType              string           `json:"nodeType"`
+	Type                  string           `json:"type"`
+	Collection            string           `json:"collection,omitempty"`
+	Image                 string           `json:"image,omitempty"`
+	Src                   string           `json:"src,omitempty"`
+	SrcSet                string           `json:"srcSet,omitempty"`
+	Alt                   string           `json:"alt,omitempty"`
+	FileId                string           `json:"fileId,omitempty"`
+	ObjectFit             string           `json:"objectFit,omitempty"`
+	Position              string           `json:"position,omitempty"`
+	Size                  string           `json:"size,omitempty"`
+	BreakDesktop          *VisualBreakData `json:"breakDesktop,omitempty"`
+	BreakTablet           *VisualBreakData `json:"breakTablet,omitempty"`
+	BreakMobile           *VisualBreakData `json:"breakMobile,omitempty"`
+	HiddenViewportDesktop bool             `json:"hiddenViewportDesktop,omitempty"`
+	HiddenViewportTablet  bool             `json:"hiddenViewportTablet,omitempty"`
+	HiddenViewportMobile  bool             `json:"hiddenViewportMobile,omitempty"`
+}
+
+type StoragePane struct {
+	NodeType     string           `json:"nodeType"`
+	Title        string           `json:"title"`
+	Slug         string           `json:"slug,omitempty"`
+	BgColour     string           `json:"bgColour,omitempty"`
+	IsDecorative bool             `json:"isDecorative"`
+	Markdown     *StorageMarkdown `json:"markdown,omitempty"`
+	BgPane       *StorageBgPane   `json:"bgPane,omitempty"`
+}
+
 type DesignLibraryEntry struct {
-	Category string       `json:"category"`
-	Title    string       `json:"title"`
-	Template TemplatePane `json:"template"`
+	Category string      `json:"category"`
+	Title    string      `json:"title"`
+	Template StoragePane `json:"template"`
 }
 
 type DesignLibraryConfig []DesignLibraryEntry
