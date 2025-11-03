@@ -2,7 +2,6 @@
 package services
 
 import (
-	"database/sql"
 	"fmt"
 	"slices"
 	"strconv"
@@ -222,27 +221,17 @@ func (s *EventProcessingService) captureVisibilitySnapshot(tenantCtx *tenant.Con
 func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessionID string, event domainEvents.Event) (bool, error) {
 	cacheManager := tenantCtx.CacheManager
 	beliefSlug := event.ID
-	beliefID, exists := cacheManager.GetContentBySlug(tenantCtx.TenantID, "belief:"+beliefSlug)
-	if !exists {
-		var foundID string
-		err := tenantCtx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", beliefSlug).Scan(&foundID)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				s.logger.Content().Warn("Belief slug not found in database", "slug", beliefSlug, "tenantId", tenantCtx.TenantID)
-				return false, nil
-			}
-			return false, fmt.Errorf("failed to query belief by slug: %w", err)
-		}
-		beliefID = foundID
-	}
 
+	// --- 1. Get User State from Cache ---
 	sessionData, exists := cacheManager.GetSession(tenantCtx.TenantID, sessionID)
 	if !exists {
+		// If we can't get the session, we can't get the fingerprint. This is a hard error.
 		return false, fmt.Errorf("session not found: %s", sessionID)
 	}
 
 	fingerprintState, exists := cacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID)
 	if !exists {
+		// If we can't get the fingerprint state, we can't update it. Hard error.
 		return false, fmt.Errorf("fingerprint state not found: %s", sessionData.FingerprintID)
 	}
 
@@ -250,6 +239,7 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 		fingerprintState.HeldBeliefs = make(map[string][]string)
 	}
 
+	// --- 2. Apply Belief Change to In-Memory State ---
 	changed := false
 	switch event.Verb {
 	case "UNSET":
@@ -282,23 +272,50 @@ func (s *EventProcessingService) processBelief(tenantCtx *tenant.Context, sessio
 		}
 	}
 
+	// --- 3. Save In-Memory State *Immediately* ---
 	if changed {
+		// This is the critical change: save the state *before* any DB ops.
 		cacheManager.SetFingerprintState(tenantCtx.TenantID, fingerprintState)
-
-		eventRepo := tenantCtx.EventRepo()
-		beliefEventForStorage := &analytics.BeliefEvent{
-			BeliefID:      beliefID,
-			FingerprintID: sessionData.FingerprintID,
-			Verb:          event.Verb,
-			Object:        &event.Object,
-			UpdatedAt:     time.Now().UTC(),
-		}
-
-		if err := eventRepo.StoreBeliefEvent(beliefEventForStorage); err != nil {
-			s.logger.Database().Error("Failed to store belief event for analytics",
-				"error", err.Error(), "tenantId", tenantCtx.TenantID, "beliefId", beliefID, "verb", event.Verb)
-		}
+	} else {
+		// No change, nothing more to do.
+		return false, nil
 	}
 
-	return changed, nil
+	// --- 4. Attempt to Store Analytics (Eventual Consistency) ---
+	// From this point on, failure is logged but does not block the user's state.
+
+	// A. Find the belief's database ID for analytics logging.
+	beliefID, exists := cacheManager.GetContentBySlug(tenantCtx.TenantID, "belief:"+beliefSlug)
+	if !exists {
+		// Cache miss, try to get it from the DB.
+		var foundID string
+		err := tenantCtx.Database.Conn.QueryRow("SELECT id FROM beliefs WHERE slug = ?", beliefSlug).Scan(&foundID)
+		if err != nil {
+			s.logger.Content().Warn("Failed to get belief ID from DB for analytics, but user state was saved.",
+				"slug", beliefSlug, "tenantId", tenantCtx.TenantID, "error", err.Error())
+			// Return (true, nil) to signal the state change was successful.
+			return true, nil
+		}
+		beliefID = foundID
+		// We don't need to cache this; the belief service will on next load.
+	}
+
+	// B. Store the analytics event.
+	eventRepo := tenantCtx.EventRepo()
+	beliefEventForStorage := &analytics.BeliefEvent{
+		BeliefID:      beliefID,
+		FingerprintID: sessionData.FingerprintID,
+		Verb:          event.Verb,
+		Object:        &event.Object,
+		UpdatedAt:     time.Now().UTC(),
+	}
+
+	// This call is already non-blocking (it just logs its own errors).
+	if err := eventRepo.StoreBeliefEvent(beliefEventForStorage); err != nil {
+		s.logger.Database().Error("Failed to store belief event for analytics",
+			"error", err.Error(), "tenantId", tenantCtx.TenantID, "beliefId", beliefID, "verb", event.Verb)
+	}
+
+	// Return success.
+	return true, nil
 }
