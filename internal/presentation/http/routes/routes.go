@@ -157,7 +157,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		{
 			admin.GET("/orphan-analysis", orphanHandlers.GetOrphanAnalysis)
 			admin.GET("/leads/download", analyticsHandlers.HandleLeadsDownload)
-			api.POST("/aai/askLemur", authHandlers.AuthMiddleware(), aaiHandlers.PostAskLemur)
+			api.POST("/aai/askLemur", authHandlers.AskLemurAuthMiddleware(), aaiHandlers.PostAskLemur)
 		}
 
 		// Fragment rendering endpoints

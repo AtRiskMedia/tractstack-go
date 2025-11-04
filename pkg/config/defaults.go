@@ -59,7 +59,11 @@ func getEnvInt(key string, defaultValue int) int {
 	if valStr := os.Getenv(key); valStr != "" {
 		if val, err := strconv.Atoi(valStr); err == nil {
 			if val != defaultValue {
-				log.Printf("Config override: %s=%d (default: %d)", key, val, defaultValue)
+				if strings.Contains(strings.ToUpper(key), "SECRET") {
+					log.Printf("Config override: %s is set", key)
+				} else {
+					log.Printf("Config override: %s=%d (default: %d)", key, val, defaultValue)
+				}
 			}
 			return val
 		}
@@ -70,7 +74,11 @@ func getEnvInt(key string, defaultValue int) int {
 func getEnvString(key string, defaultValue string) string {
 	if val := os.Getenv(key); val != "" {
 		if val != defaultValue {
-			log.Printf("Config override: %s=%s (default: %s)", key, val, defaultValue)
+			if strings.Contains(strings.ToUpper(key), "SECRET") {
+				log.Printf("Config override: %s is set", key)
+			} else {
+				log.Printf("Config override: %s=%s (default: %s)", key, val, defaultValue)
+			}
 		}
 		return val
 	}
@@ -81,7 +89,11 @@ func getEnvBool(key string, defaultValue bool) bool {
 	if valStr := os.Getenv(key); valStr != "" {
 		if val, err := strconv.ParseBool(valStr); err == nil {
 			if val != defaultValue {
-				log.Printf("Config override: %s=%t (default: %t)", key, val, defaultValue)
+				if strings.Contains(strings.ToUpper(key), "SECRET") {
+					log.Printf("Config override: %s is set", key)
+				} else {
+					log.Printf("Config override: %s=%t (default: %t)", key, val, defaultValue)
+				}
 			}
 			return val
 		}
@@ -93,7 +105,11 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	if valStr := os.Getenv(key); valStr != "" {
 		if val, err := time.ParseDuration(valStr); err == nil {
 			if val != defaultValue {
-				log.Printf("Config override: %s=%s (default: %s)", key, val, defaultValue)
+				if strings.Contains(strings.ToUpper(key), "SECRET") {
+					log.Printf("Config override: %s is set", key)
+				} else {
+					log.Printf("Config override: %s=%s (default: %s)", key, val, defaultValue)
+				}
 			}
 			return val
 		}
@@ -164,6 +180,9 @@ var (
 
 	// SysOp Configuration
 	SysopPassword string
+
+	// Allow Sandbox access to askLemur? (CAREFUL)
+	SandboxSecret string
 
 	// Analytics Configuration
 	ExposeAnalytics bool
@@ -246,6 +265,9 @@ func init() {
 
 	// SysOp Configuration
 	SysopPassword = getEnvString("SYSOP_PASSWORD", "")
+
+	// Sandbox Access
+	SandboxSecret = getEnvString("SANDBOX_SECRET", "")
 
 	// Analytics Configuration
 	ExposeAnalytics = getEnvBool("EXPOSE_ANALYTICS", false)

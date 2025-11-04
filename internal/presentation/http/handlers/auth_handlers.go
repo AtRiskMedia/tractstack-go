@@ -3,12 +3,14 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -17,6 +19,38 @@ type AuthHandlers struct {
 	authService *services.AuthService
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+}
+
+// LoginRequest represents the structure for login requests
+type LoginRequest struct {
+	Password string `json:"password" binding:"required"`
+}
+
+// LoginResponse represents the response structure for login requests
+type LoginResponse struct {
+	Success bool   `json:"success"`
+	Role    string `json:"role,omitempty"`
+	Token   string `json:"token,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// AuthStatusResponse represents the response structure for auth status requests
+type AuthStatusResponse struct {
+	Authenticated bool      `json:"authenticated"`
+	Method        string    `json:"method,omitempty"`
+	Role          string    `json:"role,omitempty"`
+	TenantID      string    `json:"tenantId,omitempty"`
+	ExpiresAt     time.Time `json:"expiresAt,omitempty"`
+}
+
+// RefreshTokenResponse represents the response structure for token refresh requests
+type RefreshTokenResponse struct {
+	Success bool   `json:"success"`
+	Role    string `json:"role,omitempty"`
+	Token   string `json:"token,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // NewAuthHandlers creates auth handlers with injected dependencies
@@ -380,34 +414,47 @@ func (h *AuthHandlers) AdminOnlyMiddleware() gin.HandlerFunc {
 	}
 }
 
-// LoginRequest represents the structure for login requests
-type LoginRequest struct {
-	Password string `json:"password" binding:"required"`
-}
+// AskLemurAuthMiddleware provides specific authentication for the askLemur endpoint.
+// It allows access for EITHER a standard admin/editor user OR a request
+// from the sandbox proxy authenticated with a shared secret.
+func (h *AuthHandlers) AskLemurAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantCtx, exists := middleware.GetTenantContext(c)
+		if !exists {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+			c.Abort()
+			return
+		}
 
-// LoginResponse represents the response structure for login requests
-type LoginResponse struct {
-	Success bool   `json:"success"`
-	Role    string `json:"role,omitempty"`
-	Token   string `json:"token,omitempty"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
-}
+		// Path 1: Check for standard admin/editor JWT cookie.
+		// This authenticates a real user logged into the editor.
+		if adminCookie, err := c.Cookie("admin_auth"); err == nil && adminCookie != "" {
+			if h.authService.ValidateAdminOrEditorToken(adminCookie, tenantCtx) {
+				c.Next()
+				return
+			}
+		} else if editorCookie, err := c.Cookie("editor_auth"); err == nil && editorCookie != "" {
+			if h.authService.ValidateAdminOrEditorToken(editorCookie, tenantCtx) {
+				c.Next()
+				return
+			}
+		}
 
-// AuthStatusResponse represents the response structure for auth status requests
-type AuthStatusResponse struct {
-	Authenticated bool      `json:"authenticated"`
-	Method        string    `json:"method,omitempty"`
-	Role          string    `json:"role,omitempty"`
-	TenantID      string    `json:"tenantId,omitempty"`
-	ExpiresAt     time.Time `json:"expiresAt,omitempty"`
-}
+		// Path 2: Check for the sandbox proxy's shared secret in the Authorization header.
+		// This authenticates the server-to-server request from the Astro BFF.
+		authHeader := c.GetHeader("Authorization")
+		if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
+			token := authHeader[7:]
+			// The secret must be configured on the server and must match the token.
+			if config.SandboxSecret != "" && token == config.SandboxSecret {
+				c.Next()
+				return
+			}
+		}
 
-// RefreshTokenResponse represents the response structure for token refresh requests
-type RefreshTokenResponse struct {
-	Success bool   `json:"success"`
-	Role    string `json:"role,omitempty"`
-	Token   string `json:"token,omitempty"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
+		// If neither authentication path succeeded, deny access.
+		h.logger.Auth().Warn("Unauthorized askLemur access attempt", "tenantId", tenantCtx.TenantID, "path", c.Request.URL.Path)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		c.Abort()
+	}
 }
