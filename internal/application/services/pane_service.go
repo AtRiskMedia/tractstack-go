@@ -91,7 +91,6 @@ func StringToTimeHookFunc() mapstructure.DecodeHookFunc {
 	}
 }
 
-// generateMarkdownFromNodes extracts nodes from the optionsPayload and converts them to a markdown string.
 func (s *PaneService) generateMarkdownFromNodes(paneID string, optionsPayload map[string]any) (string, error) {
 	if optionsPayload == nil {
 		return "", nil
@@ -110,13 +109,108 @@ func (s *PaneService) generateMarkdownFromNodes(paneID string, optionsPayload ma
 		return "", nil
 	}
 
-	markdownBody, err := s.markdownConverter.ConvertNodesToMarkdown(nodes)
-	if err != nil {
-		s.logger.Content().Error("Failed to generate markdown from pane nodes, proceeding without it.",
-			"error", err, "paneId", paneID)
-		return "", nil
+	nodeMap := make(map[string]map[string]any)
+	childMap := make(map[string][]string)
+
+	for _, nodeInterface := range nodes {
+		node, ok := nodeInterface.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, idOk := node["id"].(string)
+		if !idOk {
+			continue
+		}
+		nodeMap[id] = node
+		if parentID, parentIDOk := node["parentId"].(string); parentIDOk {
+			childMap[parentID] = append(childMap[parentID], id)
+		}
 	}
-	return markdownBody, nil
+
+	gatherDescendants := func(startNodeID string) []any {
+		var result []any
+		var queue []string
+		queue = append(queue, startNodeID)
+		visited := make(map[string]bool)
+
+		for len(queue) > 0 {
+			currentID := queue[0]
+			queue = queue[1:]
+
+			if visited[currentID] {
+				continue
+			}
+			visited[currentID] = true
+
+			if startNode, ok := nodeMap[currentID]; ok {
+				result = append(result, startNode)
+			}
+
+			if children, ok := childMap[currentID]; ok {
+				queue = append(queue, children...)
+			}
+		}
+		return result
+	}
+
+	for _, nodeInterface := range nodes {
+		node, _ := nodeInterface.(map[string]any)
+		id, _ := node["id"].(string)
+		if strings.HasPrefix(id, "fts-markdown-") {
+			nodesForConversion := gatherDescendants(id)
+			return s.markdownConverter.ConvertNodesToMarkdown(nodesForConversion)
+		}
+	}
+
+	var rootContentNodeIDs []string
+	for _, nodeInterface := range nodes {
+		node, _ := nodeInterface.(map[string]any)
+		id, _ := node["id"].(string)
+		parentID, _ := node["parentId"].(string)
+		if parentID == paneID {
+			nodeType, _ := node["nodeType"].(string)
+			if nodeType == "Markdown" || nodeType == "GridLayoutNode" {
+				rootContentNodeIDs = append(rootContentNodeIDs, id)
+			}
+		}
+	}
+
+	var markdownStrings []string
+	for _, rootID := range rootContentNodeIDs {
+		rootNode := nodeMap[rootID]
+		nodeType, _ := rootNode["nodeType"].(string)
+
+		if nodeType == "Markdown" {
+			nodesForConversion := gatherDescendants(rootID)
+			markdownBody, err := s.markdownConverter.ConvertNodesToMarkdown(nodesForConversion)
+			if err != nil {
+				s.logger.Content().Error("Failed to generate markdown from a direct MarkdownNode",
+					"error", err, "paneId", paneID, "markdownNodeId", rootID)
+				continue
+			}
+			markdownStrings = append(markdownStrings, markdownBody)
+		} else if nodeType == "GridLayoutNode" {
+			columnIDs := childMap[rootID]
+			for _, columnID := range columnIDs {
+				columnNode, exists := nodeMap[columnID]
+				if !exists {
+					continue
+				}
+				if colNodeType, _ := columnNode["nodeType"].(string); colNodeType == "Markdown" {
+					nodesForConversion := gatherDescendants(columnID)
+					markdownBody, err := s.markdownConverter.ConvertNodesToMarkdown(nodesForConversion)
+					if err != nil {
+						s.logger.Content().Error("Failed to generate markdown from a GridLayout column",
+							"error", err, "paneId", paneID, "gridLayoutId", rootID, "columnId", columnID)
+						continue
+					}
+					markdownStrings = append(markdownStrings, markdownBody)
+				}
+			}
+		}
+	}
+
+	return strings.Join(markdownStrings, "\n\n"), nil
 }
 
 // isSystemGenerated checks if a title and slug match the system-generated pattern.

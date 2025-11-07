@@ -27,11 +27,17 @@ type NodeRenderData struct {
 	Copy            *string              `json:"copy,omitempty"`
 	ElementCSS      *string              `json:"elementCss,omitempty"`
 	ParentCSS       []string             `json:"parentCss,omitempty"`
+	GridCSS         string               `json:"gridCss,omitempty"`
 	ParentID        string               `json:"parentId,omitempty"`
 	Children        []string             `json:"children,omitempty"`
 	PaneData        *PaneRenderData      `json:"paneData,omitempty"`
 	BgImageData     *BackgroundImageData `json:"bgImageData,omitempty"`
 	VisualBreakData *VisualBreakNode     `json:"visualBreakData,omitempty"`
+
+	// Fields for responsive visibility
+	HiddenViewportMobile  bool `json:"hiddenViewportMobile,omitempty"`
+	HiddenViewportTablet  bool `json:"hiddenViewportTablet,omitempty"`
+	HiddenViewportDesktop bool `json:"hiddenViewportDesktop,omitempty"`
 
 	// Fields for NodeImg template
 	ImageURL *string `json:"imageUrl,omitempty"`

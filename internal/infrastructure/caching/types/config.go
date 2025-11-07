@@ -61,17 +61,31 @@ type StorageNode struct {
 	Src             string                       `json:"src,omitempty"`
 	Alt             string                       `json:"alt,omitempty"`
 	ButtonPayload   *StorageButtonPayload        `json:"buttonPayload,omitempty"`
-	CodeHookParams  []interface{}                `json:"codeHookParams,omitempty"`
+	CodeHookParams  []any                        `json:"codeHookParams,omitempty"`
 	OverrideClasses map[string]map[string]string `json:"overrideClasses,omitempty"`
 	Nodes           []*StorageNode               `json:"nodes,omitempty"`
 }
 
 type StorageMarkdown struct {
-	NodeType       string                   `json:"nodeType"`
-	Type           string                   `json:"type"`
-	DefaultClasses map[string]interface{}   `json:"defaultClasses"`
-	ParentClasses  []map[string]interface{} `json:"parentClasses"`
-	Nodes          []*StorageNode           `json:"nodes"`
+	NodeType       string           `json:"nodeType"`
+	Type           string           `json:"type"`
+	DefaultClasses map[string]any   `json:"defaultClasses"`
+	ParentClasses  []map[string]any `json:"parentClasses"`
+	Nodes          []*StorageNode   `json:"nodes"`
+}
+
+type GridColumns struct {
+	Mobile  int `json:"mobile"`
+	Tablet  int `json:"tablet"`
+	Desktop int `json:"desktop"`
+}
+
+type StorageGridLayoutNode struct {
+	NodeType       string           `json:"nodeType"`
+	Type           string           `json:"type"`
+	DefaultClasses map[string]any   `json:"defaultClasses"`
+	ParentClasses  []map[string]any `json:"parentClasses"`
+	GridColumns    GridColumns      `json:"gridColumns"`
 }
 
 type VisualBreakData struct {
@@ -88,7 +102,7 @@ type StorageBgPane struct {
 	Src                   string           `json:"src,omitempty"`
 	SrcSet                string           `json:"srcSet,omitempty"`
 	Alt                   string           `json:"alt,omitempty"`
-	FileId                string           `json:"fileId,omitempty"`
+	FileID                string           `json:"fileId,omitempty"`
 	ObjectFit             string           `json:"objectFit,omitempty"`
 	Position              string           `json:"position,omitempty"`
 	Size                  string           `json:"size,omitempty"`

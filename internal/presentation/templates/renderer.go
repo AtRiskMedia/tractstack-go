@@ -49,6 +49,7 @@ type CSSProcessor interface {
 	GetNodeClasses(nodeID string, defaultClasses string) string
 	GetNodeStringStyles(nodeID string) string
 	ExtractParentCSSClasses(optionsPayload map[string]any) []string
+	GetNodeGridCSS(nodeID string) string
 }
 
 // NodeRenderer interface for child node rendering
@@ -115,6 +116,8 @@ func (nr *NodeRendererImpl) RenderNode(nodeID string) string {
 		return nr.renderNodeA(nodeID)
 	case "impression":
 		return nr.renderEmptyNode()
+	case "GridLayoutNode":
+		return nr.renderGridLayout(nodeID)
 	default:
 		fmt.Printf("Node.astro miss on %s\n", nodeType)
 		return nr.renderEmptyNode()
@@ -451,4 +454,9 @@ func extractWidgetTypeFromCopy(copyText string) string {
 	}
 
 	return copyText[:parenIndex]
+}
+
+func (nr *NodeRendererImpl) renderGridLayout(nodeID string) string {
+	gridLayoutRenderer := templates.NewGridLayoutRenderer(nr.ctx, nr)
+	return gridLayoutRenderer.Render(nodeID, 0)
 }

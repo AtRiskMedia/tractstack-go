@@ -35,43 +35,50 @@ func (mr *MarkdownRenderer) Render(nodeID string, depth int) string {
 		return `<div></div>`
 	}
 
-	// Get parentCss - matches Markdown.astro: const parentCss = (node?.parentCss as string[]) || [];
+	responsiveClasses := mr.buildResponsiveClass(nodeData)
 	parentCSS := nodeData.ParentCSS
 	if parentCSS == nil {
 		parentCSS = []string{}
 	}
 
-	// Check for positioned background image in parent pane
 	bgNode := mr.getBackgroundNodeFromParent(nodeID)
 	useFlexLayout := bgNode != nil && (bgNode.Position == "left" || bgNode.Position == "right")
 
-	// Recursive parentCSS wrapping - matches Markdown.astro exactly
 	if len(parentCSS) > 0 && depth < len(parentCSS) {
 		var sb strings.Builder
+		currentClass := parentCSS[depth]
+		if depth == 0 {
+			currentClass = strings.TrimSpace(currentClass + " " + responsiveClasses)
+		}
+
 		sb.WriteString(`<div class="`)
-		sb.WriteString(html.EscapeString(parentCSS[depth]))
+		sb.WriteString(html.EscapeString(currentClass))
 		sb.WriteString(`"`)
 
-		// Add style for depth 0 - matches: style={depth === 0 ? "position: relative; z-index: 10;" : ""}
 		if depth == 0 {
 			sb.WriteString(` style="position: relative; z-index: 10;"`)
 		}
 
 		sb.WriteString(`>`)
-
-		// Recursive call - matches Astro.self pattern: <Astro.self nodeId={nodeId} depth={depth + 1} />
 		sb.WriteString(mr.Render(nodeID, depth+1))
-
 		sb.WriteString(`</div>`)
 		return sb.String()
 	}
 
-	// Main content rendering with flex layout detection
 	var sb strings.Builder
-	sb.WriteString(`<div style="position: relative; z-index: 10;">`)
+	finalClasses := ""
+	if nodeData.GridCSS != "" {
+		finalClasses = nodeData.GridCSS
+	}
+	if len(parentCSS) == 0 {
+		finalClasses = strings.TrimSpace(finalClasses + " " + responsiveClasses)
+	}
+
+	sb.WriteString(`<div class="`)
+	sb.WriteString(html.EscapeString(finalClasses))
+	sb.WriteString(`" style="position: relative; z-index: 10;">`)
 
 	if useFlexLayout {
-		// Create flex layout for left/right positioned images
 		flexDirection := "flex-col md:flex-row"
 		if bgNode.Position == "right" {
 			flexDirection = "flex-col md:flex-row-reverse"
@@ -81,7 +88,6 @@ func (mr *MarkdownRenderer) Render(nodeID string, depth int) string {
 		sb.WriteString(flexDirection)
 		sb.WriteString(`">`)
 
-		// Image side
 		imageSizeClass := mr.getSizeClasses(bgNode.Size, "image")
 		sb.WriteString(`<div class="relative overflow-hidden `)
 		sb.WriteString(imageSizeClass)
@@ -89,13 +95,11 @@ func (mr *MarkdownRenderer) Render(nodeID string, depth int) string {
 		sb.WriteString(mr.nodeRenderer.RenderNode(bgNode.ID))
 		sb.WriteString(`</div>`)
 
-		// Content side
 		contentSizeClass := mr.getSizeClasses(bgNode.Size, "content")
 		sb.WriteString(`<div class="`)
 		sb.WriteString(contentSizeClass)
 		sb.WriteString(`">`)
 
-		// Render content children (excluding BgPane)
 		contentChildren := mr.getContentChildren(nodeID)
 		for _, childID := range contentChildren {
 			sb.WriteString(mr.nodeRenderer.RenderNode(childID))
@@ -104,7 +108,6 @@ func (mr *MarkdownRenderer) Render(nodeID string, depth int) string {
 		sb.WriteString(`</div>`)
 		sb.WriteString(`</div>`)
 	} else {
-		// Normal rendering - render all direct children
 		childNodeIDs := mr.nodeRenderer.GetChildNodeIDs(nodeID)
 		for _, childID := range childNodeIDs {
 			sb.WriteString(mr.nodeRenderer.RenderNode(childID))
@@ -115,7 +118,33 @@ func (mr *MarkdownRenderer) Render(nodeID string, depth int) string {
 	return sb.String()
 }
 
-// getBackgroundNodeFromParent checks parent pane for positioned background image
+func (mr *MarkdownRenderer) buildResponsiveClass(nodeData *rendering.NodeRenderData) string {
+	if nodeData == nil {
+		return ""
+	}
+
+	var classes []string
+	if nodeData.HiddenViewportMobile {
+		classes = append(classes, "hidden")
+	} else {
+		classes = append(classes, "block")
+	}
+
+	if nodeData.HiddenViewportTablet {
+		classes = append(classes, "md:hidden")
+	} else if nodeData.HiddenViewportMobile {
+		classes = append(classes, "md:block")
+	}
+
+	if nodeData.HiddenViewportDesktop {
+		classes = append(classes, "xl:hidden")
+	} else if nodeData.HiddenViewportTablet {
+		classes = append(classes, "xl:block")
+	}
+
+	return strings.Join(classes, " ")
+}
+
 func (mr *MarkdownRenderer) getBackgroundNodeFromParent(nodeID string) *rendering.BackgroundNode {
 	nodeData := mr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.ParentID == "" {
@@ -128,7 +157,6 @@ func (mr *MarkdownRenderer) getBackgroundNodeFromParent(nodeID string) *renderin
 		return nil
 	}
 
-	// Get parent pane's children to find BgPane
 	childNodeIDs := mr.nodeRenderer.GetChildNodeIDs(parentID)
 	for _, childID := range childNodeIDs {
 		childData := mr.getNodeData(childID)
@@ -147,13 +175,10 @@ func (mr *MarkdownRenderer) getBackgroundNodeFromParent(nodeID string) *renderin
 	return nil
 }
 
-// getContentChildren returns child node IDs excluding any from the parent that would be handled by flex layout
 func (mr *MarkdownRenderer) getContentChildren(nodeID string) []string {
-	// For markdown nodes, just return direct children since BgPane is handled separately
 	return mr.nodeRenderer.GetChildNodeIDs(nodeID)
 }
 
-// getSizeClasses returns responsive size classes for flex layout
 func (mr *MarkdownRenderer) getSizeClasses(size string, side string) string {
 	switch size {
 	case "narrow":
@@ -171,7 +196,6 @@ func (mr *MarkdownRenderer) getSizeClasses(size string, side string) string {
 	}
 }
 
-// getNodeData retrieves node data from context
 func (mr *MarkdownRenderer) getNodeData(nodeID string) *rendering.NodeRenderData {
 	if mr.ctx.AllNodes == nil {
 		return nil

@@ -13,24 +13,20 @@ func ExtractNodesFromPane(paneNode *content.PaneNode) (map[string]*rendering.Nod
 	nodesData := make(map[string]*rendering.NodeRenderData)
 	parentChildMap := make(map[string][]string)
 
-	// Check if optionsPayload exists and has nodes
 	if paneNode.OptionsPayload == nil {
 		return nodesData, parentChildMap, nil
 	}
 
-	// Extract nodes array from optionsPayload
 	nodesInterface, exists := paneNode.OptionsPayload["nodes"]
 	if !exists {
 		return nodesData, parentChildMap, nil
 	}
 
-	// Convert to array of maps
 	nodesArray, ok := nodesInterface.([]any)
 	if !ok {
 		return nodesData, parentChildMap, fmt.Errorf("nodes is not an array")
 	}
 
-	// Parse each node
 	for _, nodeInterface := range nodesArray {
 		nodeMap, ok := nodeInterface.(map[string]any)
 		if !ok {
@@ -39,13 +35,12 @@ func ExtractNodesFromPane(paneNode *content.PaneNode) (map[string]*rendering.Nod
 
 		nodeData, err := parseNodeFromMap(nodeMap)
 		if err != nil {
-			continue // Skip invalid nodes rather than failing entirely
+			continue
 		}
 
 		if nodeData.ID != "" {
 			nodesData[nodeData.ID] = nodeData
 
-			// Build parent-child relationships
 			if nodeData.ParentID != "" {
 				if parentChildMap[nodeData.ParentID] == nil {
 					parentChildMap[nodeData.ParentID] = make([]string, 0)
@@ -62,7 +57,6 @@ func ExtractNodesFromPane(paneNode *content.PaneNode) (map[string]*rendering.Nod
 func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error) {
 	nodeData := &rendering.NodeRenderData{}
 
-	// Extract required fields
 	if id, ok := nodeMap["id"].(string); ok {
 		nodeData.ID = id
 	} else {
@@ -75,7 +69,6 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		return nil, fmt.Errorf("missing or invalid nodeType")
 	}
 
-	// Extract optional fields
 	if tagName, ok := nodeMap["tagName"].(string); ok {
 		nodeData.TagName = &tagName
 	}
@@ -88,11 +81,14 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.ElementCSS = &elementCSS
 	}
 
+	if gridCSS, ok := nodeMap["gridCss"].(string); ok {
+		nodeData.GridCSS = gridCSS
+	}
+
 	if parentID, ok := nodeMap["parentId"].(string); ok {
 		nodeData.ParentID = parentID
 	}
 
-	// Handle ParentCSS array
 	if parentCSS, ok := nodeMap["parentCss"].([]any); ok {
 		cssStrings := make([]string, 0, len(parentCSS))
 		for _, css := range parentCSS {
@@ -103,7 +99,17 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.ParentCSS = cssStrings
 	}
 
-	// Handle buttonPayload for action buttons
+	// Parse responsive visibility flags for all applicable nodes
+	if hidden, ok := nodeMap["hiddenViewportMobile"].(bool); ok {
+		nodeData.HiddenViewportMobile = hidden
+	}
+	if hidden, ok := nodeMap["hiddenViewportTablet"].(bool); ok {
+		nodeData.HiddenViewportTablet = hidden
+	}
+	if hidden, ok := nodeMap["hiddenViewportDesktop"].(bool); ok {
+		nodeData.HiddenViewportDesktop = hidden
+	}
+
 	if buttonPayload, ok := nodeMap["buttonPayload"].(map[string]any); ok {
 		if callbackPayload, ok := buttonPayload["callbackPayload"].(string); ok && callbackPayload != "" {
 			if nodeData.CustomData == nil {
@@ -111,7 +117,6 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 			}
 			nodeData.CustomData["callbackPayload"] = callbackPayload
 		}
-		// Extract isExternalUrl flag from buttonPayload
 		if isExternalURL, ok := buttonPayload["isExternalUrl"].(bool); ok && isExternalURL {
 			if nodeData.CustomData == nil {
 				nodeData.CustomData = make(map[string]any)
@@ -120,7 +125,6 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		}
 	}
 
-	// Handle image-related fields
 	if src, ok := nodeMap["src"].(string); ok {
 		nodeData.ImageURL = &src
 	}
@@ -133,7 +137,6 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.AltText = &alt
 	}
 
-	// Handle link fields
 	if href, ok := nodeMap["href"].(string); ok {
 		nodeData.Href = &href
 	}
@@ -142,7 +145,6 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.Target = &target
 	}
 
-	// Handle codeHookParams array
 	if codeHookParams, ok := nodeMap["codeHookParams"].([]any); ok {
 		params := make([]string, 0, len(codeHookParams))
 		for _, param := range codeHookParams {
@@ -156,10 +158,8 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.CustomData["codeHookParams"] = params
 	}
 
-	// Handle BgPane specific fields
 	if nodeData.NodeType == "BgPane" {
 		if nodeType, ok := nodeMap["type"].(string); ok && nodeType == "visual-break" {
-			// Handle visual break data
 			visualBreakNode := &rendering.VisualBreakNode{}
 
 			if breakDesktop, ok := nodeMap["breakDesktop"].(map[string]any); ok {
@@ -185,20 +185,9 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 					SvgFill:    getStringValue(breakMobile, "svgFill"),
 				}
 			}
-
-			if hidden, ok := nodeMap["hiddenViewportMobile"].(bool); ok {
-				visualBreakNode.HiddenViewportMobile = hidden
-			}
-			if hidden, ok := nodeMap["hiddenViewportTablet"].(bool); ok {
-				visualBreakNode.HiddenViewportTablet = hidden
-			}
-			if hidden, ok := nodeMap["hiddenViewportDesktop"].(bool); ok {
-				visualBreakNode.HiddenViewportDesktop = hidden
-			}
-
+			// Note: hiddenViewport flags are parsed globally above now
 			nodeData.VisualBreakData = visualBreakNode
 		} else {
-			// Handle background image data
 			bgImageData := &rendering.BackgroundImageData{}
 
 			if nodeType, ok := nodeMap["type"].(string); ok {

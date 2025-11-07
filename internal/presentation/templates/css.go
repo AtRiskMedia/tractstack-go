@@ -2,6 +2,8 @@
 package templates
 
 import (
+	"strings"
+
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 )
 
@@ -62,6 +64,59 @@ func (cp *CSSProcessorImpl) ExtractParentCSSClasses(optionsPayload map[string]an
 	}
 
 	return parentCSSClasses
+}
+
+// GetNodeGridCSS extracts and joins responsive classes from the node's custom data
+func (cp *CSSProcessorImpl) GetNodeGridCSS(nodeID string) string {
+	nodeData := cp.getNodeRenderData(nodeID)
+	if nodeData == nil || nodeData.CustomData == nil {
+		return ""
+	}
+
+	gridClassesData, ok := nodeData.CustomData["gridClasses"]
+	if !ok {
+		return ""
+	}
+
+	// The frontend stores grid classes as a map with breakpoint keys
+	payload, ok := gridClassesData.(map[string]any)
+	if !ok {
+		return ""
+	}
+
+	// This logic duplicates the pattern from ExtractParentCSSClasses, but for a single map
+	mobileClasses := getClassesFromBreakpoint(payload, "mobile")
+	tabletClasses := getClassesFromBreakpoint(payload, "tablet")
+	desktopClasses := getClassesFromBreakpoint(payload, "desktop")
+
+	var allClassLists [][]string
+	if len(mobileClasses) > 0 {
+		allClassLists = append(allClassLists, mobileClasses)
+	}
+	if len(tabletClasses) > 0 {
+		allClassLists = append(allClassLists, tabletClasses)
+	}
+	if len(desktopClasses) > 0 {
+		allClassLists = append(allClassLists, desktopClasses)
+	}
+
+	var finalClasses []string
+	for _, classList := range allClassLists {
+		finalClasses = append(finalClasses, classList...)
+	}
+
+	return strings.Join(finalClasses, " ")
+}
+
+// getClassesFromBreakpoint safely extracts a list of class strings from a breakpoint map
+func getClassesFromBreakpoint(classes map[string]any, breakpoint string) []string {
+	var classList []string
+	if bpClasses, ok := classes[breakpoint].(map[string]any); ok {
+		for classStr := range bpClasses {
+			classList = append(classList, classStr)
+		}
+	}
+	return classList
 }
 
 // getNodeRenderData retrieves node data
