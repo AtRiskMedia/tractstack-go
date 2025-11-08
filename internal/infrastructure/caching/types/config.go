@@ -115,13 +115,14 @@ type StorageBgPane struct {
 }
 
 type StoragePane struct {
-	NodeType     string           `json:"nodeType"`
-	Title        string           `json:"title"`
-	Slug         string           `json:"slug,omitempty"`
-	BgColour     string           `json:"bgColour,omitempty"`
-	IsDecorative bool             `json:"isDecorative"`
-	Markdown     *StorageMarkdown `json:"markdown,omitempty"`
-	BgPane       *StorageBgPane   `json:"bgPane,omitempty"`
+	NodeType     string                 `json:"nodeType"`
+	Title        string                 `json:"title"`
+	Slug         string                 `json:"slug,omitempty"`
+	BgColour     string                 `json:"bgColour,omitempty"`
+	IsDecorative bool                   `json:"isDecorative"`
+	Markdowns    []*StorageMarkdown     `json:"markdowns,omitempty"`
+	GridLayout   *StorageGridLayoutNode `json:"gridLayout,omitempty"`
+	BgPane       *StorageBgPane         `json:"bgPane,omitempty"`
 }
 
 type DesignLibraryEntry struct {
