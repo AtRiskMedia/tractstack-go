@@ -127,9 +127,10 @@ type StoragePane struct {
 }
 
 type DesignLibraryEntry struct {
-	Category string      `json:"category"`
-	Title    string      `json:"title"`
-	Template StoragePane `json:"template"`
+	Category      string      `json:"category"`
+	Title         string      `json:"title"`
+	MarkdownCount int         `json:"markdownCount"`
+	Template      StoragePane `json:"template"`
 }
 
 type DesignLibraryConfig []DesignLibraryEntry
