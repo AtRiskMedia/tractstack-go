@@ -81,11 +81,12 @@ type GridColumns struct {
 }
 
 type StorageGridLayoutNode struct {
-	NodeType       string           `json:"nodeType"`
-	Type           string           `json:"type"`
-	DefaultClasses map[string]any   `json:"defaultClasses"`
-	ParentClasses  []map[string]any `json:"parentClasses"`
-	GridColumns    GridColumns      `json:"gridColumns"`
+	NodeType       string            `json:"nodeType"`
+	Type           string            `json:"type"`
+	DefaultClasses map[string]any    `json:"defaultClasses"`
+	ParentClasses  []map[string]any  `json:"parentClasses"`
+	GridColumns    GridColumns       `json:"gridColumns"`
+	Nodes          []StorageMarkdown `json:"nodes,omitempty"`
 }
 
 type VisualBreakData struct {
