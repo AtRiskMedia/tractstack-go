@@ -208,6 +208,17 @@ func (s *TailwindService) extractClassesFromOptionsPayload(optionsPayload map[st
 							}
 						}
 					}
+
+					// Extract from gridCss string
+					if gridCSS, exists := node["gridCss"]; exists {
+						if cssString, ok := gridCSS.(string); ok {
+							for _, class := range splitClasses(cssString) {
+								if class != "" {
+									classes = append(classes, class)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
