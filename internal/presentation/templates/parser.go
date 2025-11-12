@@ -158,6 +158,13 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.CustomData["codeHookParams"] = params
 	}
 
+	if wordCarouselPayload, ok := nodeMap["wordCarouselPayload"].(map[string]any); ok {
+		if nodeData.CustomData == nil {
+			nodeData.CustomData = make(map[string]any)
+		}
+		nodeData.CustomData["wordCarouselPayload"] = wordCarouselPayload
+	}
+
 	if nodeData.NodeType == "BgPane" {
 		if nodeType, ok := nodeMap["type"].(string); ok && nodeType == "visual-break" {
 			visualBreakNode := &rendering.VisualBreakNode{}

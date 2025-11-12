@@ -2,11 +2,13 @@
 package templates
 
 import (
+	"encoding/json"
 	"html/template"
 	"log"
 	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
+	widgets "github.com/AtRiskMedia/tractstack-go/internal/presentation/templates/elements/widgets"
 )
 
 var (
@@ -76,10 +78,48 @@ func (nbtr *NodeBasicTagRenderer) Render(nodeID string) string {
 		cssClasses = *nodeData.ElementCSS
 	}
 
+	// Handle Word Carousel Payload
+	var carouselScript string
+	var carouselWordsJSON string
+	var carouselSpeed float64
+	isCarousel := false
+
+	if nodeData.CustomData != nil {
+		if payload, ok := nodeData.CustomData["wordCarouselPayload"].(map[string]any); ok {
+			if words, ok := payload["words"].([]any); ok {
+				var strWords []string
+				for _, w := range words {
+					if s, ok := w.(string); ok {
+						strWords = append(strWords, s)
+					}
+				}
+				if len(strWords) > 0 {
+					// Serialize words for data attribute
+					if bytes, err := json.Marshal(strWords); err == nil {
+						carouselWordsJSON = string(bytes)
+						isCarousel = true
+					}
+				}
+			}
+			if speed, ok := payload["speed"].(float64); ok {
+				carouselSpeed = speed
+			} else {
+				carouselSpeed = 2.0 // default
+			}
+
+			if isCarousel {
+				// Generate the script to be appended later
+				carouselScript = widgets.RenderWordCarousel(nodeID, carouselSpeed)
+			}
+		}
+	}
+
 	var html strings.Builder
 
 	// Manually write the validated, safe opening tag.
 	html.WriteString("<" + safeTag)
+	// Ensure ID is present for carousel targeting
+	html.WriteString(` id="` + nodeID + `"`)
 
 	// If CSS classes exist, render them using the secure template.
 	// This replaces the insecure fmt.Sprintf() for the class attribute.
@@ -87,8 +127,12 @@ func (nbtr *NodeBasicTagRenderer) Render(nodeID string) string {
 		err := classAttrTmpl.Execute(&html, cssClasses)
 		if err != nil {
 			log.Printf("ERROR: Failed to execute classAttr template for nodeID %s: %v", nodeID, err)
-			// Don't return here, just log the error and continue rendering the tag without classes.
 		}
+	}
+
+	// Inject Carousel Data Attributes
+	if isCarousel {
+		html.WriteString(` data-word-carousel-words='` + carouselWordsJSON + `'`)
 	}
 
 	html.WriteString(">")
@@ -100,8 +144,12 @@ func (nbtr *NodeBasicTagRenderer) Render(nodeID string) string {
 	}
 
 	// Closing tag, using the same validated safe tag.
-	// This replaces the final insecure fmt.Sprintf().
 	html.WriteString("</" + safeTag + ">")
+
+	// Append the carousel script if active
+	if isCarousel {
+		html.WriteString(carouselScript)
+	}
 
 	return html.String()
 }
