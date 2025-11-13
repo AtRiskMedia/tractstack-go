@@ -17,6 +17,10 @@ var wordCarouselTmpl = template.Must(template.New("wordCarousel").Parse(
     var el = document.getElementById(nodeId);
     if (!el) return;
     
+    // Prevent multiple closures from initializing the same element
+    // This handles cases where listeners persist across navigations
+    if (el.dataset.carouselActive === 'true') return;
+
     var wordsRaw = el.getAttribute('data-word-carousel-words');
     if (!wordsRaw) return;
     
@@ -30,6 +34,9 @@ var wordCarouselTmpl = template.Must(template.New("wordCarousel").Parse(
     
     if (words.length < 2) return;
     
+    // Mark element as active so other listeners don't attach another interval
+    el.dataset.carouselActive = 'true';
+
     var currentIndex = 0;
     // Start matching what is currently visible if possible, otherwise 0
     var currentText = el.innerText;
@@ -49,8 +56,8 @@ var wordCarouselTmpl = template.Must(template.New("wordCarousel").Parse(
       clearInterval(intervalId);
       intervalId = null;
     }
-    document.removeEventListener('astro:page-load', initWordCarousel);
-    document.removeEventListener('astro:before-swap', cleanupWordCarousel);
+    // NOTE: Do NOT remove the astro listeners. They must persist for 
+    // history navigation (back/forward) where the script might not re-execute.
   }
 
   document.addEventListener('astro:page-load', initWordCarousel);
