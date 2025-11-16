@@ -13,9 +13,11 @@ import (
 // liteYouTubeTmpl renders a high-performance, lazy-loaded YouTube embed.
 var liteYouTubeTmpl = template.Must(template.New("liteYouTube").Parse(
 	`
+<div class="{{.ClassNames}}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.css" />
 <lite-youtube videoid="{{.Value1}}" playlabel="{{.Value2}}"></lite-youtube>
 <script type="module" src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.js"></script>
+</div>
 `))
 
 // widgetTmpl contains templates for other placeholder widgets.
@@ -55,7 +57,7 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 
 	switch hook.Hook {
 	case "youtube":
-		return wr.renderLiteYouTube(hook)
+		return wr.renderLiteYouTube(classNames, hook)
 	case "bunny":
 		return templates.RenderBunny(classNames, hook)
 	case "signup":
@@ -76,28 +78,32 @@ func (wr *WidgetRenderer) Render(nodeID string, hook *rendering.CodeHook) string
 			}
 			return templates.RenderInteractiveDisclosure(wr.ctx, classNames, beliefSlug, *hook.Value2)
 		}
-		return "<!-- interactiveDisclosure error: missing parameters -->"
+		return ""
 	default:
 		data := widgetData{ClassNames: classNames, Hook: hook.Hook}
 		var buf bytes.Buffer
 		err := widgetTmpl.ExecuteTemplate(&buf, "unknown", data)
 		if err != nil {
 			log.Printf("ERROR: Failed to execute unknown widget template: %v", err)
-			return "<!-- template error -->"
+			return ""
 		}
 		return buf.String()
 	}
 }
 
 // renderLiteYouTube renders a performant YouTube player.
-func (wr *WidgetRenderer) renderLiteYouTube(hook *rendering.CodeHook) string {
+func (wr *WidgetRenderer) renderLiteYouTube(classNames string, hook *rendering.CodeHook) string {
 	if hook.Value1 != nil && hook.Value2 != nil && *hook.Value1 != "" && *hook.Value2 != "" {
-		data := widgetData{Value1: *hook.Value1, Value2: *hook.Value2}
+		data := widgetData{
+			ClassNames: classNames,
+			Value1:     *hook.Value1,
+			Value2:     *hook.Value2,
+		}
 		var buf bytes.Buffer
 		err := liteYouTubeTmpl.Execute(&buf, data)
 		if err != nil {
 			log.Printf("ERROR: Failed to execute lite youtube template: %v", err)
-			return "<!-- template error -->"
+			return ""
 		}
 		return buf.String()
 	}
@@ -124,7 +130,7 @@ func (wr *WidgetRenderer) renderSignUp(classNames string, hook *rendering.CodeHo
 		err := widgetTmpl.ExecuteTemplate(&buf, "signup", data)
 		if err != nil {
 			log.Printf("ERROR: Failed to execute signup widget template: %v", err)
-			return "<!-- template error -->"
+			return ""
 		}
 		return buf.String()
 	}
@@ -143,7 +149,7 @@ func (wr *WidgetRenderer) renderResource(classNames string, hook *rendering.Code
 		err := widgetTmpl.ExecuteTemplate(&buf, "resource", data)
 		if err != nil {
 			log.Printf("ERROR: Failed to execute resource widget template: %v", err)
-			return "<!-- template error -->"
+			return ""
 		}
 		return buf.String()
 	}

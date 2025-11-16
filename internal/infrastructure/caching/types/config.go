@@ -130,6 +130,8 @@ type DesignLibraryEntry struct {
 	Category      string      `json:"category"`
 	Title         string      `json:"title"`
 	MarkdownCount int         `json:"markdownCount"`
+	Retain        bool        `json:"retain,omitempty"`
+	Locked        bool        `json:"locked,omitempty"`
 	Template      StoragePane `json:"template"`
 }
 
