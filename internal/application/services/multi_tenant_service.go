@@ -113,6 +113,11 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 		return "", err
 	}
 
+	if err := s.copyDefaultDesigns(req.TenantID); err != nil {
+		marker.SetError(err)
+		return "", err
+	}
+
 	if err := s.updateTenantRegistry(req.TenantID, "reserved", req.Domains); err != nil {
 		marker.SetError(err)
 		return "", err
@@ -421,4 +426,10 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 // HasEmailService returns whether email functionality is available
 func (s *MultiTenantService) HasEmailService() bool {
 	return s.emailService != nil
+}
+
+func (s *MultiTenantService) copyDefaultDesigns(tenantID string) error {
+	sourcePath := filepath.Join("pkg", "designs", "designLibrary.json")
+	targetPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "designLibrary.json")
+	return copyFile(sourcePath, targetPath)
 }

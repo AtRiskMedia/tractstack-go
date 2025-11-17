@@ -1,0 +1,1421 @@
+[
+  {
+    "category": "default",
+    "title": "One column hero",
+    "markdownCount": 1,
+    "retain": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "One column hero",
+      "bgColour": "#f8fafc",
+      "isDecorative": false,
+      "markdowns": [
+        {
+          "nodeType": "Markdown",
+          "type": "markdown",
+          "defaultClasses": {
+            "h2": {
+              "desktop": {
+                "textSIZE": "6xl"
+              },
+              "mobile": {
+                "fontWEIGHT": "bold",
+                "letterSPACING": "tight",
+                "mt": "4",
+                "textCOLOR": "slate-800",
+                "textSIZE": "3xl"
+              },
+              "tablet": {
+                "textSIZE": "5xl"
+              }
+            },
+            "p": {
+              "desktop": {
+                "textSIZE": "xl"
+              },
+              "mobile": {
+                "lineHEIGHT": "7",
+                "mt": "6",
+                "textCOLOR": "slate-600",
+                "textSIZE": "base"
+              },
+              "tablet": {
+                "lineHEIGHT": "8",
+                "textSIZE": "lg"
+              }
+            }
+          },
+          "parentClasses": [
+            {
+              "desktop": {},
+              "mobile": {
+                "maxW": "3xl",
+                "mx": "auto",
+                "textALIGN": "center"
+              },
+              "tablet": {
+                "maxW": "5xl"
+              }
+            },
+            {
+              "desktop": {
+                "py": "32"
+              },
+              "mobile": {
+                "px": "6",
+                "py": "20"
+              },
+              "tablet": {
+                "px": "8",
+                "py": "28"
+              }
+            }
+          ],
+          "nodes": [
+            {
+              "nodeType": "TagElement",
+              "tagName": "h2",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "Build Smarter with "
+                },
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "span",
+                  "overrideClasses": {
+                    "mobile": {
+                      "bgCLIP": "text",
+                      "bgGradientDIRECTION": "r",
+                      "gradientFrom": "blue-600",
+                      "gradientTo": "teal-500",
+                      "textCOLOR": "transparent"
+                    }
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "Tract Stack"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "The complete development platform that streamlines your workflow from concept to deployment. Experience faster builds, cleaner code, and seamless collaboration with tools designed for modern development teams."
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "a",
+                  "href": "#",
+                  "buttonPayload": {
+                    "buttonClasses": {
+                      "bgCOLOR": [
+                        "blue-600"
+                      ],
+                      "mt": [
+                        "8"
+                      ],
+                      "px": [
+                        "6"
+                      ],
+                      "py": [
+                        "3"
+                      ],
+                      "rounded": [
+                        "lg"
+                      ],
+                      "shadow": [
+                        "lg"
+                      ],
+                      "textCOLOR": [
+                        "white"
+                      ],
+                      "textSIZE": [
+                        "base"
+                      ],
+                      "transition": [
+                        "colors"
+                      ],
+                      "transitionDURATION": [
+                        "200"
+                      ]
+                    },
+                    "buttonHoverClasses": {
+                      "bgCOLOR": [
+                        "blue-700"
+                      ]
+                    },
+                    "callbackPayload": ""
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "Start Building Today"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "overrideClasses": {
+                "mobile": {
+                  "mt": "4",
+                  "textCOLOR": "slate-500",
+                  "textSIZE": "sm"
+                }
+              },
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "Explore our features "
+                },
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "span",
+                  "overrideClasses": {
+                    "mobile": {
+                      "textCOLOR": "blue-600"
+                    }
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "→"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "category": "default",
+    "title": "Two column hero",
+    "markdownCount": 2,
+    "retain": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "Two column hero",
+      "bgColour": "#f0f9ff",
+      "isDecorative": false,
+      "gridLayout": {
+        "nodeType": "GridLayoutNode",
+        "type": "grid-layout",
+        "defaultClasses": {
+          "button": {
+            "desktop": {},
+            "mobile": {
+              "alignITEMS": "center",
+              "bgCOLOR": "blue-600",
+              "borderCOLOR": "transparent",
+              "display": "inline-flex",
+              "px": "6",
+              "py": "3",
+              "rounded": "md",
+              "textCOLOR": "white",
+              "textSIZE": "base",
+              "transition": "colors",
+              "transitionDURATION": "200"
+            },
+            "tablet": {}
+          },
+          "h1": {
+            "desktop": {
+              "textSIZE": "6xl"
+            },
+            "mobile": {
+              "fontWEIGHT": "bold",
+              "letterSPACING": "tight",
+              "textCOLOR": "slate-900",
+              "textSIZE": "4xl"
+            },
+            "tablet": {
+              "textSIZE": "5xl"
+            }
+          },
+          "p": {
+            "desktop": {},
+            "mobile": {
+              "lineHEIGHT": "8",
+              "mt": "6",
+              "textCOLOR": "slate-700",
+              "textSIZE": "lg"
+            },
+            "tablet": {
+              "textSIZE": "xl"
+            }
+          }
+        },
+        "parentClasses": [
+          {
+            "desktop": {},
+            "mobile": {
+              "maxW": "7xl",
+              "mx": "auto"
+            },
+            "tablet": {}
+          },
+          {
+            "desktop": {
+              "py": "32"
+            },
+            "mobile": {
+              "px": "6",
+              "py": "20"
+            },
+            "tablet": {
+              "px": "8",
+              "py": "28"
+            }
+          }
+        ],
+        "gridColumns": {
+          "mobile": 1,
+          "tablet": 2,
+          "desktop": 2
+        },
+        "nodes": [
+          {
+            "nodeType": "Markdown",
+            "type": "markdown",
+            "defaultClasses": null,
+            "parentClasses": null,
+            "nodes": [
+              {
+                "nodeType": "TagElement",
+                "tagName": "h2",
+                "overrideClasses": {
+                  "desktop": {
+                    "textSIZE": "6xl"
+                  },
+                  "mobile": {
+                    "fontWEIGHT": "bold",
+                    "letterSPACING": "tight",
+                    "textCOLOR": "slate-900",
+                    "textSIZE": "4xl"
+                  },
+                  "tablet": {
+                    "textSIZE": "5xl"
+                  }
+                },
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": "Build Once."
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "span",
+                    "overrideClasses": {
+                      "mobile": {
+                        "bgCLIP": "text",
+                        "bgGradientDIRECTION": "r",
+                        "display": "block",
+                        "gradientFrom": "blue-600",
+                        "gradientTo": "sky-500",
+                        "textCOLOR": "transparent"
+                      },
+                      "tablet": {
+                        "mt": "2"
+                      }
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "Scale Everywhere."
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "nodeType": "Markdown",
+            "type": "markdown",
+            "defaultClasses": null,
+            "parentClasses": null,
+            "nodes": [
+              {
+                "nodeType": "TagElement",
+                "tagName": "h3",
+                "overrideClasses": {
+                  "mobile": {
+                    "fontWEIGHT": "bold",
+                    "textCOLOR": "slate-900",
+                    "textSIZE": "2xl"
+                  },
+                  "tablet": {
+                    "textSIZE": "3xl"
+                  }
+                },
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": "Ready to "
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "span",
+                    "overrideClasses": {
+                      "mobile": {
+                        "textCOLOR": "blue-600"
+                      }
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "Transform"
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": " Your Development?"
+                  }
+                ]
+              },
+              {
+                "nodeType": "TagElement",
+                "tagName": "p",
+                "overrideClasses": {
+                  "mobile": {
+                    "lineHEIGHT": "8",
+                    "mt": "4",
+                    "textCOLOR": "slate-700",
+                    "textSIZE": "lg"
+                  },
+                  "tablet": {
+                    "textSIZE": "xl"
+                  }
+                },
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": "Experience the power of streamlined development workflows and unlock your team's full "
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "em",
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "potential"
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": " with our comprehensive platform."
+                  }
+                ]
+              },
+              {
+                "nodeType": "TagElement",
+                "tagName": "p",
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "a",
+                    "href": "#",
+                    "buttonPayload": {
+                      "buttonClasses": {
+                        "alignITEMS": [
+                          "center"
+                        ],
+                        "bgCOLOR": [
+                          "blue-600"
+                        ],
+                        "borderCOLOR": [
+                          "transparent"
+                        ],
+                        "display": [
+                          "inline-flex"
+                        ],
+                        "justifyCONTENT": [
+                          "center"
+                        ],
+                        "mt": [
+                          "8"
+                        ],
+                        "px": [
+                          "6"
+                        ],
+                        "py": [
+                          "3"
+                        ],
+                        "rounded": [
+                          "md"
+                        ],
+                        "textCOLOR": [
+                          "white"
+                        ],
+                        "textSIZE": [
+                          "base"
+                        ],
+                        "transition": [
+                          "colors"
+                        ],
+                        "transitionDURATION": [
+                          "200"
+                        ],
+                        "w": [
+                          "full"
+                        ]
+                      },
+                      "buttonHoverClasses": {
+                        "bgCOLOR": [
+                          "blue-700"
+                        ]
+                      },
+                      "callbackPayload": ""
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "Start Free Trial"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "nodeType": "TagElement",
+                "tagName": "p",
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "a",
+                    "href": "#",
+                    "buttonPayload": {
+                      "buttonClasses": {
+                        "alignITEMS": [
+                          "center"
+                        ],
+                        "bgCOLOR": [
+                          "transparent"
+                        ],
+                        "borderCOLOR": [
+                          "blue-600"
+                        ],
+                        "borderWIDTH": [
+                          "2"
+                        ],
+                        "display": [
+                          "inline-flex"
+                        ],
+                        "justifyCONTENT": [
+                          "center"
+                        ],
+                        "mt": [
+                          "4"
+                        ],
+                        "px": [
+                          "6"
+                        ],
+                        "py": [
+                          "3"
+                        ],
+                        "rounded": [
+                          "md"
+                        ],
+                        "textCOLOR": [
+                          "blue-600"
+                        ],
+                        "textSIZE": [
+                          "base"
+                        ],
+                        "transition": [
+                          "colors"
+                        ],
+                        "transitionDURATION": [
+                          "200"
+                        ],
+                        "w": [
+                          "full"
+                        ]
+                      },
+                      "buttonHoverClasses": {
+                        "bgCOLOR": [
+                          "blue-50"
+                        ]
+                      },
+                      "callbackPayload": ""
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "Schedule Demo"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "category": "default",
+    "title": "Sign up form",
+    "markdownCount": 1,
+    "retain": true,
+    "locked": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "Sign up form",
+      "isDecorative": false,
+      "markdowns": [
+        {
+          "nodeType": "Markdown",
+          "type": "markdown",
+          "defaultClasses": {
+            "ul": {
+              "desktop": {},
+              "mobile": {
+                "m": "6"
+              },
+              "tablet": {
+                "m": "10"
+              }
+            }
+          },
+          "parentClasses": [],
+          "nodes": [
+            {
+              "nodeType": "TagElement",
+              "tagName": "ul",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "li",
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "code",
+                      "copy": "signup(major|Keep in touch!|false)",
+                      "codeHookParams": [
+                        "major",
+                        "Keep in touch!",
+                        "false"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "category": "default",
+    "title": "YouTube Video",
+    "markdownCount": 1,
+    "retain": true,
+    "locked": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "YouTube Video",
+      "isDecorative": false,
+      "markdowns": [
+        {
+          "nodeType": "Markdown",
+          "type": "markdown",
+          "defaultClasses": {
+            "code": {
+              "desktop": {},
+              "mobile": {
+                "maxW": "xl",
+                "mx": "auto"
+              },
+              "tablet": {}
+            },
+            "li": {
+              "desktop": {},
+              "mobile": {
+                "mx": "auto"
+              },
+              "tablet": {}
+            },
+            "ul": {
+              "desktop": {},
+              "mobile": {
+                "m": "6"
+              },
+              "tablet": {
+                "m": "10"
+              }
+            }
+          },
+          "parentClasses": [],
+          "nodes": [
+            {
+              "nodeType": "TagElement",
+              "tagName": "ul",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "li",
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "code",
+                      "copy": "youtube(kJI4XdqiiAI|The Free Web Press)",
+                      "codeHookParams": [
+                        "kJI4XdqiiAI",
+                        "The Free Web Press"
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "category": "default",
+    "title": "Catchy slogan hero",
+    "markdownCount": 2,
+    "retain": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "Catchy slogan hero",
+      "bgColour": "#111827",
+      "isDecorative": false,
+      "gridLayout": {
+        "nodeType": "GridLayoutNode",
+        "type": "grid-layout",
+        "defaultClasses": {
+          "h2": {
+            "desktop": {},
+            "mobile": {
+              "fontWEIGHT": "bold",
+              "letterSPACING": "tight",
+              "textCOLOR": "white",
+              "textSIZE": "5xl"
+            },
+            "tablet": {
+              "textSIZE": "6xl"
+            }
+          },
+          "li": {
+            "desktop": {},
+            "mobile": {
+              "alignITEMS": "start",
+              "display": "flex",
+              "textCOLOR": "gray-300"
+            },
+            "tablet": {}
+          },
+          "p": {
+            "desktop": {},
+            "mobile": {
+              "lineHEIGHT": "8",
+              "mt": "6",
+              "textCOLOR": "gray-300",
+              "textSIZE": "lg"
+            },
+            "tablet": {}
+          },
+          "ul": {
+            "desktop": {},
+            "mobile": {
+              "mt": "8",
+              "spaceY": "4"
+            },
+            "tablet": {}
+          }
+        },
+        "parentClasses": [
+          {
+            "desktop": {},
+            "mobile": {
+              "maxW": "7xl",
+              "mx": "auto"
+            },
+            "tablet": {}
+          },
+          {
+            "desktop": {},
+            "mobile": {
+              "px": "6",
+              "py": "24"
+            },
+            "tablet": {
+              "px": "8",
+              "py": "32"
+            }
+          }
+        ],
+        "gridColumns": {
+          "mobile": 1,
+          "tablet": 2,
+          "desktop": 2
+        },
+        "nodes": [
+          {
+            "nodeType": "Markdown",
+            "type": "markdown",
+            "defaultClasses": null,
+            "parentClasses": null,
+            "nodes": [
+              {
+                "nodeType": "TagElement",
+                "tagName": "h2",
+                "overrideClasses": {
+                  "mobile": {
+                    "fontWEIGHT": "bold",
+                    "letterSPACING": "tight",
+                    "textCOLOR": "white",
+                    "textSIZE": "5xl"
+                  }
+                },
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": "I am a "
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "span",
+                    "overrideClasses": {
+                      "mobile": {
+                        "textCOLOR": "indigo-400"
+                      }
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "catchy slogan"
+                      }
+                    ]
+                  },
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": " that catches eyes."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "nodeType": "Markdown",
+            "type": "markdown",
+            "defaultClasses": null,
+            "parentClasses": null,
+            "nodes": [
+              {
+                "nodeType": "TagElement",
+                "tagName": "h3",
+                "overrideClasses": {
+                  "mobile": {
+                    "fontWEIGHT": "bold",
+                    "textCOLOR": "white",
+                    "textSIZE": "xl"
+                  }
+                },
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": "Generic Sub-heading"
+                  }
+                ]
+              },
+              {
+                "nodeType": "TagElement",
+                "tagName": "p",
+                "overrideClasses": {
+                  "mobile": {
+                    "lineHEIGHT": "8",
+                    "mt": "4",
+                    "textCOLOR": "gray-300",
+                    "textSIZE": "lg"
+                  }
+                },
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "text",
+                    "copy": "This is a compelling paragraph of hook text that describes the value proposition in an engaging way."
+                  }
+                ]
+              },
+              {
+                "nodeType": "TagElement",
+                "tagName": "p",
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "a",
+                    "href": "#",
+                    "buttonPayload": {
+                      "buttonClasses": {
+                        "bgCOLOR": [
+                          "white"
+                        ],
+                        "mt": [
+                          "8"
+                        ],
+                        "px": [
+                          "4"
+                        ],
+                        "py": [
+                          "3"
+                        ],
+                        "rounded": [
+                          "md"
+                        ],
+                        "shadow": [
+                          "sm"
+                        ],
+                        "textCOLOR": [
+                          "gray-900"
+                        ],
+                        "textSIZE": [
+                          "base"
+                        ],
+                        "w": [
+                          "full"
+                        ]
+                      },
+                      "buttonHoverClasses": {
+                        "bgCOLOR": [
+                          "gray-100"
+                        ]
+                      },
+                      "callbackPayload": ""
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "Primary CTA"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "nodeType": "TagElement",
+                "tagName": "p",
+                "nodes": [
+                  {
+                    "nodeType": "TagElement",
+                    "tagName": "a",
+                    "href": "#",
+                    "buttonPayload": {
+                      "buttonClasses": {
+                        "alignITEMS": [
+                          "center"
+                        ],
+                        "bgCOLOR": [
+                          "transparent"
+                        ],
+                        "borderCOLOR": [
+                          "white"
+                        ],
+                        "borderWIDTH": [
+                          "2"
+                        ],
+                        "display": [
+                          "inline-flex"
+                        ],
+                        "justifyCONTENT": [
+                          "center"
+                        ],
+                        "mt": [
+                          "4"
+                        ],
+                        "px": [
+                          "6"
+                        ],
+                        "py": [
+                          "3"
+                        ],
+                        "rounded": [
+                          "md"
+                        ],
+                        "textCOLOR": [
+                          "white"
+                        ],
+                        "textSIZE": [
+                          "base"
+                        ],
+                        "transition": [
+                          "colors"
+                        ],
+                        "transitionDURATION": [
+                          "200"
+                        ],
+                        "w": [
+                          "full"
+                        ]
+                      },
+                      "buttonHoverClasses": {
+                        "bgCOLOR": [
+                          "blue-50"
+                        ]
+                      },
+                      "callbackPayload": ""
+                    },
+                    "nodes": [
+                      {
+                        "nodeType": "TagElement",
+                        "tagName": "text",
+                        "copy": "Secondary CTA"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "category": "default",
+    "title": "Boxed Light Hero",
+    "markdownCount": 0,
+    "retain": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "Boxed Light Hero",
+      "bgColour": "#111827",
+      "isDecorative": false,
+      "markdowns": [
+        {
+          "nodeType": "Markdown",
+          "type": "markdown",
+          "defaultClasses": {
+            "h2": {
+              "desktop": {
+                "textSIZE": "6xl"
+              },
+              "mobile": {
+                "fontWEIGHT": "bold",
+                "letterSPACING": "tight",
+                "lineHEIGHT": "tight",
+                "textALIGN": "center",
+                "textCOLOR": "gray-900",
+                "textSIZE": "3xl"
+              },
+              "tablet": {
+                "textSIZE": "4xl"
+              }
+            },
+            "p": {
+              "mobile": {
+                "lineHEIGHT": "8",
+                "maxW": "2xl",
+                "mt": "6",
+                "mx": "auto",
+                "textALIGN": "center",
+                "textCOLOR": "gray-600",
+                "textSIZE": "lg"
+              }
+            }
+          },
+          "parentClasses": [
+            {
+              "mobile": {
+                "p": "6"
+              }
+            },
+            {
+              "desktop": {
+                "px": "16",
+                "py": "24"
+              },
+              "mobile": {
+                "bgCOLOR": "white",
+                "minH": "96",
+                "px": "6",
+                "py": "16"
+              },
+              "tablet": {
+                "px": "12",
+                "py": "20"
+              }
+            }
+          ],
+          "nodes": [
+            {
+              "nodeType": "TagElement",
+              "tagName": "h2",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "Data to enrich your "
+                },
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "span",
+                  "overrideClasses": {
+                    "mobile": {
+                      "bgCLIP": "text",
+                      "bgGradientDIRECTION": "r",
+                      "gradientFrom": "indigo-600",
+                      "gradientTo": "violet-600",
+                      "textCOLOR": "transparent"
+                    }
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "online business"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "Anim aute id magna aliqua ad ad non deserunt sunt. Qui irure qui lorem cupidatat commodo. Elit sunt amet fugiat veniam occaecat fugiat aliqua."
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "overrideClasses": {
+                "mobile": {
+                  "alignITEMS": "center",
+                  "display": "flex",
+                  "gapX": "6",
+                  "justifyCONTENT": "center",
+                  "mt": "10"
+                }
+              },
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "a",
+                  "href": "#",
+                  "buttonPayload": {
+                    "buttonClasses": {
+                      "bgCOLOR": [
+                        "indigo-600"
+                      ],
+                      "fontWEIGHT": [
+                        "bold"
+                      ],
+                      "px": [
+                        "3.5"
+                      ],
+                      "py": [
+                        "2.5"
+                      ],
+                      "rounded": [
+                        "md"
+                      ],
+                      "shadow": [
+                        "sm"
+                      ],
+                      "textCOLOR": [
+                        "white"
+                      ],
+                      "textSIZE": [
+                        "sm"
+                      ],
+                      "transition": [
+                        "colors"
+                      ],
+                      "transitionDURATION": [
+                        "200"
+                      ]
+                    },
+                    "buttonHoverClasses": {
+                      "bgCOLOR": [
+                        "indigo-500"
+                      ]
+                    },
+                    "callbackPayload": ""
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "Get started"
+                    }
+                  ]
+                },
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "a",
+                  "href": "#",
+                  "buttonPayload": {
+                    "buttonClasses": {
+                      "fontWEIGHT": [
+                        "bold"
+                      ],
+                      "lineHEIGHT": [
+                        "6"
+                      ],
+                      "textCOLOR": [
+                        "gray-900"
+                      ],
+                      "textSIZE": [
+                        "sm"
+                      ]
+                    },
+                    "buttonHoverClasses": {},
+                    "callbackPayload": ""
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "Learn more →"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "category": "default",
+    "title": "Centered CTA with Image",
+    "markdownCount": 1,
+    "retain": true,
+    "template": {
+      "nodeType": "Pane",
+      "title": "Centered CTA with Image",
+      "bgColour": "#ffffff",
+      "isDecorative": false,
+      "markdowns": [
+        {
+          "nodeType": "Markdown",
+          "type": "markdown",
+          "defaultClasses": {
+            "h3": {
+              "desktop": {
+                "textSIZE": "5xl"
+              },
+              "mobile": {
+                "fontWEIGHT": "bold",
+                "letterSPACING": "tight",
+                "mt": "4",
+                "textCOLOR": "slate-900",
+                "textSIZE": "3xl"
+              },
+              "tablet": {
+                "textSIZE": "4xl"
+              }
+            },
+            "h4": {
+              "desktop": {},
+              "mobile": {
+                "fontWEIGHT": "bold",
+                "letterSPACING": "wide",
+                "textCOLOR": "slate-500",
+                "textSIZE": "sm",
+                "textTRANSFORM": "uppercase"
+              },
+              "tablet": {}
+            },
+            "p": {
+              "desktop": {
+                "textSIZE": "xl"
+              },
+              "mobile": {
+                "lineHEIGHT": "7",
+                "mt": "6",
+                "textCOLOR": "slate-600",
+                "textSIZE": "base"
+              },
+              "tablet": {
+                "lineHEIGHT": "8",
+                "textSIZE": "lg"
+              }
+            }
+          },
+          "parentClasses": [
+            {
+              "desktop": {},
+              "mobile": {
+                "maxW": "3xl",
+                "mx": "auto",
+                "textALIGN": "center"
+              },
+              "tablet": {
+                "maxW": "5xl"
+              }
+            },
+            {
+              "desktop": {
+                "py": "32"
+              },
+              "mobile": {
+                "px": "6",
+                "py": "20"
+              },
+              "tablet": {
+                "px": "8",
+                "py": "28"
+              }
+            }
+          ],
+          "nodes": [
+            {
+              "nodeType": "TagElement",
+              "tagName": "h4",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "COME JOIN US"
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "h3",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "Experience a Warm Welcome"
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "text",
+                  "copy": "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+                }
+              ]
+            },
+            {
+              "nodeType": "TagElement",
+              "tagName": "p",
+              "nodes": [
+                {
+                  "nodeType": "TagElement",
+                  "tagName": "a",
+                  "href": "#",
+                  "buttonPayload": {
+                    "buttonClasses": {
+                      "bgCOLOR": [
+                        "blue-600"
+                      ],
+                      "mt": [
+                        "8"
+                      ],
+                      "px": [
+                        "6"
+                      ],
+                      "py": [
+                        "3"
+                      ],
+                      "rounded": [
+                        "lg"
+                      ],
+                      "shadow": [
+                        "lg"
+                      ],
+                      "textCOLOR": [
+                        "white"
+                      ],
+                      "textSIZE": [
+                        "base"
+                      ],
+                      "transition": [
+                        "colors"
+                      ],
+                      "transitionDURATION": [
+                        "200"
+                      ]
+                    },
+                    "buttonHoverClasses": {
+                      "bgCOLOR": [
+                        "blue-700"
+                      ]
+                    },
+                    "callbackPayload": ""
+                  },
+                  "nodes": [
+                    {
+                      "nodeType": "TagElement",
+                      "tagName": "text",
+                      "copy": "Plan Your Visit"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "bgPane": {
+        "nodeType": "BgPane",
+        "type": "background-image",
+        "src": "/static.jpg",
+        "alt": "Image requiring description",
+        "objectFit": "cover",
+        "position": "leftBleed",
+        "size": "equal"
+      }
+    }
+  }
+]
