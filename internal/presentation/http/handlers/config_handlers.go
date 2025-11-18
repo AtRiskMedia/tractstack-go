@@ -136,8 +136,8 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 	status := AdvancedConfigStatusResponse{
 		TursoConfigured:   tenantCtx.Config.TursoDatabase != "",
 		TursoTokenSet:     tenantCtx.Config.TursoToken != "",
-		AdminPasswordSet:  tenantCtx.Config.AdminPassword != "",
-		EditorPasswordSet: tenantCtx.Config.EditorPassword != "",
+		AdminPasswordSet:  tenantCtx.Config.AdminPasswordHash != "",
+		EditorPasswordSet: tenantCtx.Config.EditorPasswordHash != "",
 		AAIAPIKeySet:      tenantCtx.Config.AAIAPIKey != "",
 		TursoEnabled:      tenantCtx.Config.TursoEnabled,
 	}

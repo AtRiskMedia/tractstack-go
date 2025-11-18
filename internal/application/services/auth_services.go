@@ -79,11 +79,23 @@ func (a *AuthService) DecodeProfileToken(tokenString string, tenantCtx *tenant.C
 func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Context) *AuthResult {
 	var role string
 
-	if tenantCtx.Config.AdminPassword != "" && password == tenantCtx.Config.AdminPassword {
-		role = "admin"
-	} else if tenantCtx.Config.EditorPassword != "" && password == tenantCtx.Config.EditorPassword {
-		role = "editor"
-	} else {
+	// Check Admin
+	if tenantCtx.Config.AdminPasswordHash != "" {
+		err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.AdminPasswordHash), []byte(password))
+		if err == nil {
+			role = "admin"
+		}
+	}
+
+	// Check Editor (if not already Admin)
+	if role == "" && tenantCtx.Config.EditorPasswordHash != "" {
+		err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.EditorPasswordHash), []byte(password))
+		if err == nil {
+			role = "editor"
+		}
+	}
+
+	if role == "" {
 		return &AuthResult{Success: false, Error: "Invalid credentials"}
 	}
 

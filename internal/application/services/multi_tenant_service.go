@@ -16,6 +16,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // MultiTenantService orchestrates tenant lifecycle operations.
@@ -85,16 +86,22 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 	aesKey, _ := security.GenerateSecureKey(64)
 	activationToken, _ := security.GenerateSecureToken(32)
 
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), bcrypt.DefaultCost)
+	if err != nil {
+		marker.SetError(err)
+		return "", fmt.Errorf("failed to hash password: %w", err)
+	}
+
 	// 3. Create Tenant Configuration
 	newConfig := &tenant.Config{
-		TenantID:        req.TenantID,
-		TursoDatabase:   req.TursoDatabaseURL,
-		TursoToken:      req.TursoAuthToken,
-		JWTSecret:       jwtSecret,
-		AESKey:          aesKey,
-		TursoEnabled:    req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
-		AdminPassword:   req.AdminPassword,
-		ActivationToken: activationToken,
+		TenantID:          req.TenantID,
+		TursoDatabase:     req.TursoDatabaseURL,
+		TursoToken:        req.TursoAuthToken,
+		JWTSecret:         jwtSecret,
+		AESKey:            aesKey,
+		TursoEnabled:      req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
+		AdminPasswordHash: string(hashedPassword),
+		ActivationToken:   activationToken,
 	}
 
 	// 4. Persist Configuration

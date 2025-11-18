@@ -19,6 +19,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ConfigService handles configuration management operations
@@ -202,10 +203,18 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 		tenantCtx.Config.TursoToken = request.TursoAuthToken
 	}
 	if request.AdminPassword != "" {
-		tenantCtx.Config.AdminPassword = request.AdminPassword
+		hash, err := bcrypt.GenerateFromPassword([]byte(request.AdminPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash admin password: %w", err)
+		}
+		tenantCtx.Config.AdminPasswordHash = string(hash)
 	}
 	if request.EditorPassword != "" {
-		tenantCtx.Config.EditorPassword = request.EditorPassword
+		hash, err := bcrypt.GenerateFromPassword([]byte(request.EditorPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("failed to hash editor password: %w", err)
+		}
+		tenantCtx.Config.EditorPasswordHash = string(hash)
 	}
 	if request.AAIAPIKey != "" {
 		tenantCtx.Config.AAIAPIKey = request.AAIAPIKey
@@ -295,14 +304,14 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 
 	// This matches the legacy pattern and prevents accidental exposure of computed fields
 	configData := map[string]any{
-		"TURSO_DATABASE_URL": tenantCtx.Config.TursoDatabase,
-		"TURSO_AUTH_TOKEN":   tenantCtx.Config.TursoToken,
-		"ADMIN_PASSWORD":     tenantCtx.Config.AdminPassword,
-		"EDITOR_PASSWORD":    tenantCtx.Config.EditorPassword,
-		"AAI_API_KEY":        tenantCtx.Config.AAIAPIKey,
-		"JWT_SECRET":         tenantCtx.Config.JWTSecret,
-		"AES_KEY":            tenantCtx.Config.AESKey,
-		"TURSO_ENABLED":      tenantCtx.Config.TursoEnabled,
+		"TURSO_DATABASE_URL":   tenantCtx.Config.TursoDatabase,
+		"TURSO_AUTH_TOKEN":     tenantCtx.Config.TursoToken,
+		"ADMIN_PASSWORD_HASH":  tenantCtx.Config.AdminPasswordHash,
+		"EDITOR_PASSWORD_HASH": tenantCtx.Config.EditorPasswordHash,
+		"AAI_API_KEY":          tenantCtx.Config.AAIAPIKey,
+		"JWT_SECRET":           tenantCtx.Config.JWTSecret,
+		"AES_KEY":              tenantCtx.Config.AESKey,
+		"TURSO_ENABLED":        tenantCtx.Config.TursoEnabled,
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")

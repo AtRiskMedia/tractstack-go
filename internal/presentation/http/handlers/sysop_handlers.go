@@ -17,6 +17,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // SysOpHandlers handles SysOp dashboard authentication and data streaming
@@ -31,124 +32,6 @@ func NewSysOpHandlers(container *container.Container) *SysOpHandlers {
 		container:        container,
 		sysOpBroadcaster: container.SysOpBroadcaster,
 	}
-}
-
-// AuthCheck checks if SysopPassword is set and validates session
-func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
-	sysopPassword := config.SysopPassword
-
-	// Get default tenant admin password as fallback
-	var fallbackPassword string
-	tenantCtx, err := h.container.TenantManager.NewContextFromID("default")
-	if err == nil {
-		fallbackPassword = tenantCtx.Config.AdminPassword
-		_ = tenantCtx.Close()
-	}
-
-	// Determine effective password and authentication requirements
-	var effectivePassword string
-	var passwordRequired bool
-	var message string
-	var docsLink string
-
-	if sysopPassword == "storykeep" {
-		// Reject the weak default
-		passwordRequired = true
-		message = "Default SYSOP_PASSWORD 'storykeep' is not secure. Please set SYSOP_PASSWORD or configure tenant admin password."
-	} else if sysopPassword != "" {
-		// Use SYSOP_PASSWORD if set and not default
-		effectivePassword = sysopPassword
-		passwordRequired = true
-	} else if fallbackPassword != "" {
-		// Use tenant admin password as fallback
-		effectivePassword = fallbackPassword
-		passwordRequired = true
-		message = "Using tenant admin password for SysOp access. Set SYSOP_PASSWORD to restrict SysOp authentication."
-	} else {
-		// No authentication required
-		passwordRequired = false
-		message = "Welcome to your story keep. Set SYSOP_PASSWORD to protect the system"
-		docsLink = "https://tractstack.org"
-	}
-
-	response := map[string]any{
-		"passwordRequired": passwordRequired,
-		"authenticated":    false,
-	}
-
-	if message != "" {
-		response["message"] = message
-	}
-	if docsLink != "" {
-		response["docsLink"] = docsLink
-	}
-
-	// Check authentication
-	auth := c.GetHeader("Authorization")
-	if passwordRequired && effectivePassword != "" && auth == "Bearer "+effectivePassword {
-		response["authenticated"] = true
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-// Login handles SysOp authentication
-func (h *SysOpHandlers) Login(c *gin.Context) {
-	var request struct {
-		Password string `json:"password"`
-	}
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
-		return
-	}
-
-	sysopPassword := config.SysopPassword
-
-	// Get default tenant admin password as fallback
-	var fallbackPassword string
-	tenantCtx, err := h.container.TenantManager.NewContextFromID("default")
-	if err == nil {
-		fallbackPassword = tenantCtx.Config.AdminPassword
-		_ = tenantCtx.Close()
-	}
-
-	// Determine effective password and handle authentication
-	if sysopPassword == "storykeep" {
-		// Reject the weak default password
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Default password 'storykeep' is not secure. Please set SYSOP_PASSWORD or configure tenant admin password."})
-		return
-	}
-
-	if sysopPassword == "" && fallbackPassword == "" {
-		// No authentication required
-		c.JSON(http.StatusOK, gin.H{"success": true, "token": "no-auth-required"})
-		return
-	}
-
-	// Determine which password to validate against
-	var effectivePassword string
-	var tokenToReturn string
-
-	if sysopPassword != "" && sysopPassword != "storykeep" {
-		// Use SYSOP_PASSWORD if set and not default
-		effectivePassword = sysopPassword
-		tokenToReturn = sysopPassword
-	} else if fallbackPassword != "" {
-		// Use tenant admin password as fallback
-		effectivePassword = fallbackPassword
-		tokenToReturn = fallbackPassword
-	}
-
-	// Validate password
-	if request.Password != effectivePassword {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
-		return
-	}
-
-	// Successful authentication
-	response := gin.H{"success": true, "token": tokenToReturn}
-
-	c.JSON(http.StatusOK, response)
 }
 
 // GetTenants returns available tenants
@@ -231,31 +114,130 @@ func (h *SysOpHandlers) GetTenantToken(c *gin.Context) {
 	})
 }
 
-// SysOpAuthMiddleware protects SysOp-specific endpoints.
+func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
+	sysopPassword := config.SysopPassword
+
+	var fallbackHash string
+	tenantCtx, err := h.container.TenantManager.NewContextFromID("default")
+	if err == nil {
+		fallbackHash = tenantCtx.Config.AdminPasswordHash
+		_ = tenantCtx.Close()
+	}
+
+	var effectivePassword string
+	var passwordRequired bool
+	var message string
+	var docsLink string
+
+	if sysopPassword == "storykeep" {
+		passwordRequired = true
+		message = "Default SYSOP_PASSWORD 'storykeep' is not secure. Please set SYSOP_PASSWORD or configure tenant admin password."
+	} else if sysopPassword != "" {
+		effectivePassword = sysopPassword
+		passwordRequired = true
+	} else if fallbackHash != "" {
+		passwordRequired = true
+		message = "Using tenant admin password for SysOp access. Set SYSOP_PASSWORD to restrict SysOp authentication."
+	} else {
+		passwordRequired = false
+		message = "Welcome to your story keep. Set SYSOP_PASSWORD to protect the system"
+		docsLink = "https://tractstack.org"
+	}
+
+	response := map[string]any{
+		"passwordRequired": passwordRequired,
+		"authenticated":    false,
+	}
+
+	if message != "" {
+		response["message"] = message
+	}
+	if docsLink != "" {
+		response["docsLink"] = docsLink
+	}
+
+	auth := c.GetHeader("Authorization")
+	token := strings.TrimPrefix(auth, "Bearer ")
+
+	if passwordRequired && token != "" {
+		if effectivePassword != "" {
+			if token == effectivePassword {
+				response["authenticated"] = true
+			}
+		} else if fallbackHash != "" {
+			if err := bcrypt.CompareHashAndPassword([]byte(fallbackHash), []byte(token)); err == nil {
+				response["authenticated"] = true
+			} else if token == fallbackHash {
+				response["authenticated"] = true
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *SysOpHandlers) Login(c *gin.Context) {
+	var request struct {
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	sysopPassword := config.SysopPassword
+
+	var fallbackHash string
+	tenantCtx, err := h.container.TenantManager.NewContextFromID("default")
+	if err == nil {
+		fallbackHash = tenantCtx.Config.AdminPasswordHash
+		_ = tenantCtx.Close()
+	}
+
+	if sysopPassword == "storykeep" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Default password 'storykeep' is not secure. Please set SYSOP_PASSWORD or configure tenant admin password."})
+		return
+	}
+
+	if sysopPassword == "" && fallbackHash == "" {
+		c.JSON(http.StatusOK, gin.H{"success": true, "token": "no-auth-required"})
+		return
+	}
+
+	if sysopPassword != "" && sysopPassword != "storykeep" {
+		if request.Password == sysopPassword {
+			c.JSON(http.StatusOK, gin.H{"success": true, "token": sysopPassword})
+			return
+		}
+	}
+
+	if fallbackHash != "" {
+		if err := bcrypt.CompareHashAndPassword([]byte(fallbackHash), []byte(request.Password)); err == nil {
+			c.JSON(http.StatusOK, gin.H{"success": true, "token": fallbackHash})
+			return
+		}
+	}
+
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
+}
+
 func (h *SysOpHandlers) SysOpAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sysopPassword := config.SysopPassword
 
-		// Get default tenant admin password as fallback
-		var fallbackPassword string
+		var fallbackHash string
 		tenantCtx, err := h.container.TenantManager.NewContextFromID("default")
 		if err == nil {
-			fallbackPassword = tenantCtx.Config.AdminPassword
+			fallbackHash = tenantCtx.Config.AdminPasswordHash
 			_ = tenantCtx.Close()
 		}
 
-		// Determine effective password
-		var effectivePassword string
-		if sysopPassword != "" && sysopPassword != "storykeep" {
-			effectivePassword = sysopPassword
-		} else if fallbackPassword != "" {
-			effectivePassword = fallbackPassword
-		} else if sysopPassword == "storykeep" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Default password 'storykeep' is not secure"})
-			c.Abort()
-			return
-		} else {
-			// No authentication required
+		if (sysopPassword == "" || sysopPassword == "storykeep") && fallbackHash == "" {
+			if sysopPassword == "storykeep" {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Default password 'storykeep' is not secure"})
+				c.Abort()
+				return
+			}
 			c.Next()
 			return
 		}
@@ -265,16 +247,25 @@ func (h *SysOpHandlers) SysOpAuthMiddleware() gin.HandlerFunc {
 		if len(authHeader) > 7 && strings.HasPrefix(authHeader, "Bearer ") {
 			token = authHeader[7:]
 		} else {
-			// Fallback for WebSocket authentication via query parameter
 			token = c.Query("token")
 		}
 
-		if token != effectivePassword {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-			c.Abort()
-			return
+		if sysopPassword != "" && sysopPassword != "storykeep" {
+			if token == sysopPassword {
+				c.Next()
+				return
+			}
 		}
-		c.Next()
+
+		if fallbackHash != "" {
+			if token == fallbackHash {
+				c.Next()
+				return
+			}
+		}
+
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		c.Abort()
 	}
 }
 
