@@ -147,3 +147,8 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 	return h.service.GetTenantManager()
 }
+
+// HandleHydrate acts as a stub for content ingestion.
+func (h *MultiTenantHandlers) HandleHydrate(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
