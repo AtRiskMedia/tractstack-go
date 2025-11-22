@@ -44,17 +44,13 @@ func NewMultiTenantService(
 
 // ProvisionRequest defines the input for creating a new tenant.
 type ProvisionRequest struct {
-	TenantID         string   `json:"tenantId"`
-	AdminEmail       string   `json:"adminEmail"`
-	AdminPassword    string   `json:"adminPassword"`
-	Domains          []string `json:"domains"`
-	TursoDatabaseURL string   `json:"tursoDatabaseURL"`
-	TursoAuthToken   string   `json:"tursoAuthToken"`
-}
-
-// ActivationRequest defines the input for activating a tenant.
-type ActivationRequest struct {
-	Token string `json:"token"`
+	TenantID          string   `json:"tenantId"`
+	AdminEmail        string   `json:"adminEmail"`
+	AdminPassword     string   `json:"adminPassword"`
+	AdminPasswordHash string   `json:"adminPasswordHash"`
+	Domains           []string `json:"domains"`
+	TursoDatabaseURL  string   `json:"tursoDatabaseURL"`
+	TursoAuthToken    string   `json:"tursoAuthToken"`
 }
 
 // CapacityResult defines the output for the capacity check.
@@ -66,33 +62,34 @@ type CapacityResult struct {
 }
 
 // ProvisionTenant handles the creation of a new, reserved tenant.
-func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, error) {
+func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 	marker := s.perfTracker.StartOperation("service_provision_tenant", req.TenantID)
 	defer marker.Complete()
 
-	// Auto-populate domains for sandbox if not provided
 	if len(req.Domains) == 0 {
 		req.Domains = []string{"*"}
 	}
 
-	// 1. Input Validation
 	if err := s.validateProvisionRequest(req); err != nil {
 		marker.SetError(err)
-		return "", err
+		return err
 	}
 
-	// 2. Generate Secrets
 	jwtSecret, _ := security.GenerateSecureKey(64)
 	aesKey, _ := security.GenerateSecureKey(64)
-	activationToken, _ := security.GenerateSecureToken(32)
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), bcrypt.DefaultCost)
-	if err != nil {
-		marker.SetError(err)
-		return "", fmt.Errorf("failed to hash password: %w", err)
+	var finalPasswordHash string
+	if req.AdminPasswordHash != "" {
+		finalPasswordHash = req.AdminPasswordHash
+	} else {
+		hashedBytes, err := bcrypt.GenerateFromPassword([]byte(req.AdminPassword), bcrypt.DefaultCost)
+		if err != nil {
+			marker.SetError(err)
+			return fmt.Errorf("failed to hash password: %w", err)
+		}
+		finalPasswordHash = string(hashedBytes)
 	}
 
-	// 3. Create Tenant Configuration
 	newConfig := &tenant.Config{
 		TenantID:          req.TenantID,
 		TursoDatabase:     req.TursoDatabaseURL,
@@ -100,53 +97,37 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) (string, erro
 		JWTSecret:         jwtSecret,
 		AESKey:            aesKey,
 		TursoEnabled:      req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
-		AdminPasswordHash: string(hashedPassword),
-		ActivationToken:   activationToken,
+		AdminPasswordHash: finalPasswordHash,
 	}
 
-	// 4. Persist Configuration
 	if err := s.saveTenantConfig(newConfig); err != nil {
 		marker.SetError(err)
-		return "", err
+		return err
 	}
 
 	if err := s.copyDefaultStyles(req.TenantID); err != nil {
 		marker.SetError(err)
-		return "", err
+		return err
 	}
 
 	if err := s.copyDefaultFonts(req.TenantID); err != nil {
 		marker.SetError(err)
-		return "", err
+		return err
 	}
 
 	if err := s.copyDefaultDesigns(req.TenantID); err != nil {
 		marker.SetError(err)
-		return "", err
+		return err
 	}
 
 	if err := s.updateTenantRegistry(req.TenantID, "reserved", req.Domains); err != nil {
 		marker.SetError(err)
-		return "", err
-	}
-
-	// 5. Send Activation Email (if avail)
-	if s.emailService != nil {
-		activationURL := fmt.Sprintf("https://%s/activate?token=%s", req.Domains[0], activationToken)
-		if err := s.emailService.SendTenantActivationEmail(req.AdminEmail, req.TenantID, activationURL); err != nil {
-			marker.SetError(err)
-			s.logger.System().Error("Failed to send activation email", "error", err, "tenantId", req.TenantID)
-		} else {
-			s.logger.System().Info("Activation email sent successfully", "tenantId", req.TenantID, "adminEmail", req.AdminEmail)
-		}
-	} else {
-		s.logger.System().Warn("Activation email not sent - email service not configured",
-			"tenantId", req.TenantID, "adminEmail", req.AdminEmail)
+		return err
 	}
 
 	marker.SetSuccess(true)
 	s.logger.Tenant().Info("Tenant successfully provisioned", "tenantId", req.TenantID)
-	return activationToken, nil
+	return nil
 }
 
 func (s *MultiTenantService) validateProvisionRequest(req ProvisionRequest) error {
@@ -154,23 +135,20 @@ func (s *MultiTenantService) validateProvisionRequest(req ProvisionRequest) erro
 	if !re.MatchString(req.TenantID) {
 		return fmt.Errorf("invalid tenant ID format: must be 3-12 lowercase alphanumeric characters or hyphens")
 	}
-	if len(req.AdminPassword) < 8 {
+	if req.AdminPasswordHash == "" && len(req.AdminPassword) < 8 {
 		return fmt.Errorf("password must be at least 8 characters")
 	}
 	if len(req.Domains) == 0 || req.Domains[0] == "" {
 		return fmt.Errorf("at least one domain is required")
 	}
 
-	// Use detector's in-memory registry instead of reading filesystem
 	detector := s.tenantManager.GetDetector()
 	registry := detector.GetRegistry()
 
 	if _, exists := registry.Tenants[req.TenantID]; exists {
-		// Special case: allow provisioning default tenant if it's inactive (fresh install)
 		if req.TenantID == "default" {
 			tenantInfo := registry.Tenants[req.TenantID]
 			if tenantInfo.Status == "inactive" {
-				// Allow provisioning - this is fresh install setup
 				return nil
 			}
 		}
@@ -180,27 +158,21 @@ func (s *MultiTenantService) validateProvisionRequest(req ProvisionRequest) erro
 }
 
 // ActivateTenant finalizes tenant setup by creating the database schema.
-func (s *MultiTenantService) ActivateTenant(token string) error {
-	marker := s.perfTracker.StartOperation("service_activate_tenant", "unknown")
+func (s *MultiTenantService) ActivateTenant(tenantID string) error {
+	marker := s.perfTracker.StartOperation("service_activate_tenant", tenantID)
 	defer marker.Complete()
 
-	// 1. Find Tenant by Activation Token
-	tenantID, err := s.findTenantByActivationToken(token)
-	if err != nil {
-		marker.SetError(err)
-		return err
-	}
-	marker.TenantID = tenantID // Update marker with found tenant
-
-	// 2. Create Tenant Context to establish DB connection
 	ctx, err := s.tenantManager.NewContextFromID(tenantID)
 	if err != nil {
 		marker.SetError(err)
 		return fmt.Errorf("failed to create context for activation: %w", err)
 	}
-	defer ctx.Close()
+	defer func() {
+		if closeErr := ctx.Close(); closeErr != nil {
+			s.logger.System().Warn("Failed to close activation context", "error", closeErr)
+		}
+	}()
 
-	// 3. Create Database Schema
 	tableCreator := database.NewTableCreator()
 	if err := tableCreator.CreateSchema(ctx.Database.Conn); err != nil {
 		marker.SetError(err)
@@ -211,26 +183,17 @@ func (s *MultiTenantService) ActivateTenant(token string) error {
 		return fmt.Errorf("database seeding failed: %w", err)
 	}
 
-	// 4. Update Status
 	if err := s.updateTenantRegistry(tenantID, "active", nil); err != nil {
 		marker.SetError(err)
 		return err
 	}
 
-	// Refresh detector registry to sync with updated file
 	detector := s.tenantManager.GetDetector()
 	if err := detector.RefreshRegistry(); err != nil {
 		marker.SetError(err)
 		return fmt.Errorf("failed to refresh tenant registry: %w", err)
 	}
-	// Invalidate cached tenant context to force recreation with new status
 	s.tenantManager.InvalidateTenantContext(tenantID)
-
-	// 5. Clear Activation Token
-	ctx.Config.ActivationToken = ""
-	if err := s.saveTenantConfig(ctx.Config); err != nil {
-		s.logger.Tenant().Warn("Failed to clear activation token after activation", "error", err, "tenantId", tenantID)
-	}
 
 	marker.SetSuccess(true)
 	s.logger.Tenant().Info("Tenant successfully activated", "tenantId", tenantID)
@@ -239,7 +202,6 @@ func (s *MultiTenantService) ActivateTenant(token string) error {
 
 // GetCapacity checks the system's capacity for new tenants.
 func (s *MultiTenantService) GetCapacity() (*CapacityResult, error) {
-	// Use detector's in-memory registry instead of reading filesystem
 	detector := s.tenantManager.GetDetector()
 	registry := detector.GetRegistry()
 
@@ -274,11 +236,9 @@ func (s *MultiTenantService) saveTenantConfig(config *tenant.Config) error {
 func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domains []string) error {
 	registryPath := filepath.Join(pkgconfig.BackendPath, "config", "t8k", "tenants.json")
 
-	// Use detector's in-memory registry as base instead of reading filesystem
 	detector := s.tenantManager.GetDetector()
 	registry := detector.GetRegistry()
 
-	// Make a copy to avoid modifying the detector's registry directly
 	registryCopy := &tenant.TenantRegistry{
 		Tenants: make(map[string]tenant.TenantInfo),
 	}
@@ -301,34 +261,11 @@ func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domai
 		return fmt.Errorf("failed to marshal registry: %w", err)
 	}
 
-	// Write to filesystem
 	if err := os.WriteFile(registryPath, registryData, 0o644); err != nil {
 		return fmt.Errorf("failed to write registry: %w", err)
 	}
 
-	// Refresh detector's in-memory cache to sync with file
 	return detector.RefreshRegistry()
-}
-
-func (s *MultiTenantService) findTenantByActivationToken(token string) (string, error) {
-	// Use detector's in-memory registry instead of reading filesystem
-	detector := s.tenantManager.GetDetector()
-	registry := detector.GetRegistry()
-
-	for tenantID, info := range registry.Tenants {
-		if info.Status == "reserved" {
-			config, err := tenant.LoadTenantConfig(tenantID, s.logger)
-			if err != nil {
-				s.logger.System().Warn("Could not load config for reserved tenant during activation check", "tenantId", tenantID)
-				continue
-			}
-			if config.ActivationToken == token {
-				return tenantID, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("invalid or expired activation token")
 }
 
 // GetTenantManager returns the tenant manager instance
@@ -336,25 +273,31 @@ func (s *MultiTenantService) GetTenantManager() *tenant.Manager {
 	return s.tenantManager
 }
 
-func copyFile(src, dst string) error {
+func copyFile(src, dst string) (err error) {
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return err
 	}
-	defer sourceFile.Close()
+	defer func() {
+		if cerr := sourceFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	destFile, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer destFile.Close()
+	defer func() {
+		if cerr := destFile.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
-	_, err = io.Copy(destFile, sourceFile)
-	if err != nil {
+	if _, err = io.Copy(destFile, sourceFile); err != nil {
 		return err
 	}
 
-	// Sync to ensure the file is written to disk
 	return destFile.Sync()
 }
 
@@ -362,12 +305,10 @@ func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
 	sourceDir := filepath.Join("pkg", "styles")
 	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "media", "css")
 
-	// Create target directory
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create CSS directory: %w", err)
 	}
 
-	// Copy frontend.css
 	if err := copyFile(
 		filepath.Join(sourceDir, "frontend.css"),
 		filepath.Join(targetDir, "frontend.css"),
@@ -375,7 +316,6 @@ func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
 		return fmt.Errorf("failed to copy frontend.css: %w", err)
 	}
 
-	// Copy custom.css
 	if err := copyFile(
 		filepath.Join(sourceDir, "custom.css"),
 		filepath.Join(targetDir, "custom.css"),
@@ -383,7 +323,6 @@ func (s *MultiTenantService) copyDefaultStyles(tenantID string) error {
 		return fmt.Errorf("failed to copy custom.css: %w", err)
 	}
 
-	// Copy storykeep.css
 	if err := copyFile(
 		filepath.Join(sourceDir, "storykeep.css"),
 		filepath.Join(targetDir, "storykeep.css"),
@@ -398,12 +337,10 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 	sourceDir := filepath.Join("pkg", "fonts")
 	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "media", "fonts")
 
-	// Create target directory
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create fonts directory: %w", err)
 	}
 
-	// Copy Inter-Regular.woff2
 	if err := copyFile(
 		filepath.Join(sourceDir, "Inter-Regular.woff2"),
 		filepath.Join(targetDir, "Inter-Regular.woff2"),
@@ -411,7 +348,6 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 		return fmt.Errorf("failed to copy Inter-Regular.woff2: %w", err)
 	}
 
-	// Copy Inter-Bold.woff2
 	if err := copyFile(
 		filepath.Join(sourceDir, "Inter-Bold.woff2"),
 		filepath.Join(targetDir, "Inter-Bold.woff2"),
@@ -419,7 +355,6 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 		return fmt.Errorf("failed to copy Inter-Bold.woff2: %w", err)
 	}
 
-	// Copy Inter-Black.woff2
 	if err := copyFile(
 		filepath.Join(sourceDir, "Inter-Black.woff2"),
 		filepath.Join(targetDir, "Inter-Black.woff2"),
@@ -430,7 +365,6 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 	return nil
 }
 
-// HasEmailService returns whether email functionality is available
 func (s *MultiTenantService) HasEmailService() bool {
 	return s.emailService != nil
 }

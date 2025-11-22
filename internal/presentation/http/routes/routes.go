@@ -77,8 +77,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	if config.EnableMultiTenant {
 		tenantAPI := r.Group("/api/v1/tenant")
 		{
-			tenantAPI.POST("/provision", multiTenantHandlers.HandleProvisionTenant)
-			tenantAPI.POST("/activation", multiTenantHandlers.HandleActivateTenant)
 			tenantAPI.GET("/capacity", multiTenantHandlers.HandleGetCapacity)
 		}
 	}

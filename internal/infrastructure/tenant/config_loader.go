@@ -26,7 +26,7 @@ type Config struct {
 	TursoEnabled       bool               `json:"TURSO_ENABLED"`
 	AdminPasswordHash  string             `json:"ADMIN_PASSWORD_HASH,omitempty"`
 	EditorPasswordHash string             `json:"EDITOR_PASSWORD_HASH,omitempty"`
-	ActivationToken    string             `json:"ACTIVATION_TOKEN,omitempty"`
+	HydrationToken     string             `json:"HYDRATION_TOKEN,omitempty"`
 	SQLitePath         string             `json:"-"`
 	BrandConfig        *types.BrandConfig `json:"-"`
 }
