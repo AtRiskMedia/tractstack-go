@@ -512,7 +512,7 @@ EOF
   fi
 
   echo -e "${BLUE}Building Go backend...${RESET}"
-  sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
+  sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -tags sqlite_fts5 -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
 
   echo -e "${BLUE}Deploying operational scripts...${RESET}"
   sudo -i -u t8k bash -c "cp -r '${src_dir}/tractstack-go/pkg/scripts/'* /home/t8k/scripts/"
