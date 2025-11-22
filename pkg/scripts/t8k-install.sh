@@ -515,10 +515,10 @@ EOF
   sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -tags sqlite_fts5 -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
 
   echo -e "${BLUE}Deploying operational scripts...${RESET}"
-  rm -rf /home/t8k/scripts/*
-  cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
-  chown -R root:root /home/t8k/scripts
-  chmod 755 /home/t8k/scripts/*.sh
+  sudo rm -rf /home/t8k/scripts/*
+  sudo cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
+  sudo chown -R root:root /home/t8k/scripts
+  sudo chmod 755 /home/t8k/scripts/*.sh
 
   echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
 }
