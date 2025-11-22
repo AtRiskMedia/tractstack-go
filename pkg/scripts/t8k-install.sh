@@ -515,8 +515,10 @@ EOF
   sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -tags sqlite_fts5 -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
 
   echo -e "${BLUE}Deploying operational scripts...${RESET}"
-  sudo -i -u t8k bash -c "cp -r '${src_dir}/tractstack-go/pkg/scripts/'* /home/t8k/scripts/"
-  sudo -i -u t8k bash -c "chmod +x /home/t8k/scripts/*.sh"
+  rm -rf /home/t8k/scripts/*
+  cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
+  chown -R root:root /home/t8k/scripts
+  chmod 755 /home/t8k/scripts/*.sh
 
   echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
 }
@@ -558,8 +560,19 @@ EOF
     echo "PUBLIC_ENABLE_MULTI_TENANT=false" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
   fi
 
+  # Only suppress the Bunny prompt if we are running non-interactively (e.g. via Worker)
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    echo "PUBLIC_ENABLE_BUNNY=true" | sudo -u t8k tee -a "${src_dir}/my-tractstack/.env" >/dev/null
+  fi
+
   echo -e "${BLUE}Running TractStack setup...${RESET}"
-  sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && npx create-tractstack" </dev/tty
+  if [[ "${NON_INTERACTIVE}" == true ]]; then
+    # We pipe 'y' to force non-TTY mode.
+    # The script detects no TTY and falls back to the --examples flag (True).
+    sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && echo 'y' | npx create-tractstack --examples"
+  else
+    sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && npx create-tractstack" </dev/tty
+  fi
 
   echo -e "${BLUE}Building Astro frontend for production...${RESET}"
   sudo -i -u t8k bash -c "cd '${src_dir}/my-tractstack' && pnpm build"
@@ -1105,9 +1118,7 @@ EOF
   echo "PRIVATE_GO_BACKEND_PATH=/home/$USER/t8k/t8k-go-server/" >.env
   echo "PUBLIC_GO_BACKEND=http://localhost:8080" >>.env
   echo "PUBLIC_TENANTID=default" >>.env
-  # --- FIX #1: Corrected variable name to prevent multi-tenant prompt ---
   echo "PUBLIC_ENABLE_MULTI_TENANT=false" >>.env
-  # --- FIX #2: Added Bunny variable (enabled by default) to prevent prompt ---
   echo "PUBLIC_ENABLE_BUNNY=true" >>.env
 
   # This if/else handles non-interactive mode for Docker
@@ -1130,7 +1141,6 @@ EOF
     "/home/$USER/t8k/t8k-go-server/config/default/tailwindWhitelist.json" \
     "$INSTALL_DIR/src/tractstack-go/internal/presentation/templates"
 
-  # --- FIX #3: Remove default index page that conflicts with TractStack routing ---
   echo -e "${BLUE}Removing default Astro index page...${RESET}"
   rm -f "$INSTALL_DIR/src/my-tractstack/src/pages/index.astro"
 
