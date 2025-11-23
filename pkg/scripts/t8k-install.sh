@@ -326,6 +326,7 @@ check_existing_installation() {
 }
 
 # Detect Cloudflare secrets
+# Detect Cloudflare secrets
 detect_cloudflare_secrets() {
   echo -e "${BLUE}Detecting SSL configuration...${RESET}"
 
@@ -339,15 +340,20 @@ detect_cloudflare_secrets() {
   if sudo test -f "/root/.secrets/certbot/cloudflare.ini"; then
     echo -e "${YELLOW}⚠️ Cloudflare DNS secrets found in root account${RESET}"
 
-    if [[ "${NON_INTERACTIVE}" == true ]]; then
-      echo -e "${RED}⛌ Cannot copy credentials in non-interactive mode${RESET}"
+    if [[ "${NON_INTERACTIVE}" == true ]] && [[ "$(id -u)" != "0" ]]; then
+      echo -e "${RED}⛌ Cannot copy credentials in non-interactive mode unless running as root${RESET}"
       cleanup_lock
       exit 1
     fi
 
-    echo -e "${YELLOW}[SECURITY CONSIDERATION]${RESET}"
-    echo "Cloudflare private secrets found in root account."
-    read -p "Share securely with t8k account? [y/N]: " share_secrets </dev/tty
+    local share_secrets="n"
+    if [[ "${NON_INTERACTIVE}" == true ]]; then
+      share_secrets="y"
+    else
+      echo -e "${YELLOW}[SECURITY CONSIDERATION]${RESET}"
+      echo "Cloudflare private secrets found in root account."
+      read -p "Share securely with t8k account? [y/N]: " share_secrets </dev/tty
+    fi
 
     if [[ "$share_secrets" =~ ^[Yy] ]]; then
       sudo -u t8k mkdir -p /home/t8k/.secrets/certbot
@@ -587,6 +593,7 @@ EOF
 }
 
 # Create t8k user if needed
+# Create t8k user if needed
 create_t8k_user() {
   echo -e "${BLUE}Setting up t8k user...${RESET}"
 
@@ -595,7 +602,7 @@ create_t8k_user() {
     return 0
   fi
 
-  if [[ "${NON_INTERACTIVE}" == true ]]; then
+  if [[ "${NON_INTERACTIVE}" == true ]] && [[ "$(id -u)" != "0" ]]; then
     echo -e "${RED}❌ User 't8k' does not exist and cannot create in non-interactive mode${RESET}"
     cleanup_lock
     exit 1
@@ -613,8 +620,10 @@ create_t8k_user() {
     ;;
   esac
 
-  echo -e "${YELLOW}Please set a password for the 't8k' user for maintenance.${RESET}"
-  sudo passwd t8k </dev/tty
+  if [[ "${NON_INTERACTIVE}" != true ]]; then
+    echo -e "${YELLOW}Please set a password for the 't8k' user for maintenance.${RESET}"
+    sudo passwd t8k </dev/tty
+  fi
 
   systemctl_path=$(which systemctl)
   sudo bash -c "cat > /etc/sudoers.d/t8k-services << EOF
@@ -1284,6 +1293,7 @@ extract_initial_whitelist() {
 }
 
 # Main execution logic
+# Main execution logic
 main() {
   # Self-download logic for curl | bash execution
   if [[ ! -t 0 ]] && [[ ! -f "$0" || "$0" == "bash" ]]; then
@@ -1323,7 +1333,7 @@ main() {
       check_essential_prerequisites
       quick_install
     else
-      if [[ "$(whoami)" == "root" ]]; then
+      if [[ "$(whoami)" == "root" ]] && [[ "${NON_INTERACTIVE}" != true ]]; then
         echo -e "${RED}❌ For safety, please run production installs as a regular user with sudo access, not as root.${RESET}"
         cleanup_lock
         exit 1
