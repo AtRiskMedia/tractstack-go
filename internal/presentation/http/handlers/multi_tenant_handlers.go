@@ -1,4 +1,3 @@
-// Package handlers provides HTTP handlers for tenant lifecycle management.
 package handlers
 
 import (
@@ -22,14 +21,12 @@ type SetupRequest struct {
 	TursoAuthToken    string `json:"tursoAuthToken,omitempty"`
 }
 
-// MultiTenantHandlers handles HTTP requests for tenant lifecycle management.
 type MultiTenantHandlers struct {
 	service     *services.MultiTenantService
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
-// NewMultiTenantHandlers creates a new MultiTenantHandlers instance.
 func NewMultiTenantHandlers(
 	service *services.MultiTenantService,
 	logger *logging.ChanneledLogger,
@@ -42,7 +39,6 @@ func NewMultiTenantHandlers(
 	}
 }
 
-// HandleGetCapacity handles GET /api/v1/tenant/capacity
 func (h *MultiTenantHandlers) HandleGetCapacity(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("handler_get_capacity", "system")
 	defer marker.Complete()
@@ -58,7 +54,6 @@ func (h *MultiTenantHandlers) HandleGetCapacity(c *gin.Context) {
 	c.JSON(http.StatusOK, capacity)
 }
 
-// HandleSetupInitialize handles POST /api/v1/setup/initialize
 func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 	var req SetupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -80,31 +75,12 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 		registry := tenantManager.GetDetector().GetRegistry()
 		defaultInfo, exists := registry.Tenants["default"]
 
-		if !exists || defaultInfo.Status != "inactive" {
+		if exists && defaultInfo.Status == "active" {
 			marker.SetError(fmt.Errorf("setup not available - tenant status: %s", defaultInfo.Status))
 			c.JSON(http.StatusConflict, gin.H{
 				"error":   "Setup not available",
 				"details": "System is already configured or not in fresh install state",
 			})
-			return
-		}
-	} else {
-		config, err := tenant.LoadTenantConfig(targetID, h.logger)
-		if err != nil {
-			marker.SetError(fmt.Errorf("failed to load tenant config for auth: %w", err))
-			c.JSON(http.StatusForbidden, gin.H{"error": "Authorization failed", "details": "Tenant not pre-allocated"})
-			return
-		}
-
-		if config.HydrationToken == "" {
-			marker.SetError(fmt.Errorf("tenant %s has no hydration token configured", targetID))
-			c.JSON(http.StatusForbidden, gin.H{"error": "Authorization failed", "details": "Invalid tenant configuration"})
-			return
-		}
-
-		if req.HydrationToken == "" || req.HydrationToken != config.HydrationToken {
-			marker.SetError(fmt.Errorf("hydration token mismatch for tenant %s", targetID))
-			c.JSON(http.StatusForbidden, gin.H{"error": "Authorization failed", "details": "Invalid provisioning token"})
 			return
 		}
 	}
@@ -119,6 +95,7 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 		Domains:           []string{"*"},
 		TursoDatabaseURL:  req.TursoDatabaseURL,
 		TursoAuthToken:    req.TursoAuthToken,
+		HydrationToken:    req.HydrationToken,
 	}
 
 	if err := h.service.ProvisionTenant(provisionReq); err != nil {
@@ -148,7 +125,6 @@ func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 	return h.service.GetTenantManager()
 }
 
-// HandleHydrate acts as a stub for content ingestion.
 func (h *MultiTenantHandlers) HandleHydrate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

@@ -49,6 +49,7 @@ type ProvisionRequest struct {
 	AdminPassword     string   `json:"adminPassword"`
 	AdminPasswordHash string   `json:"adminPasswordHash"`
 	Domains           []string `json:"domains"`
+	HydrationToken    string   `json:"hydrationToken"`
 	TursoDatabaseURL  string   `json:"tursoDatabaseURL"`
 	TursoAuthToken    string   `json:"tursoAuthToken"`
 }
@@ -97,6 +98,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 		JWTSecret:         jwtSecret,
 		AESKey:            aesKey,
 		TursoEnabled:      req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
+		HydrationToken:    req.HydrationToken,
 		AdminPasswordHash: finalPasswordHash,
 	}
 
