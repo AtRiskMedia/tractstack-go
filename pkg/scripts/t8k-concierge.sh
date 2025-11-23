@@ -213,12 +213,12 @@ process_build_command() {
   }
 
   # Update scripts after pulling
-  log "Updating scripts from tractstack-go..."
-  cp -r "$BUILD_SRC_DIR/tractstack-go/pkg/scripts/"* /home/t8k/scripts/ || {
-    log_error "Failed to update scripts from tractstack-go"
-    return 1
-  }
-  chmod +x /home/t8k/scripts/*.sh
+  #log "Updating scripts from tractstack-go..."
+  #cp -r "$BUILD_SRC_DIR/tractstack-go/pkg/scripts/"* /home/t8k/scripts/ || {
+  #  log_error "Failed to update scripts from tractstack-go"
+  #  return 1
+  #}
+  #chmod +x /home/t8k/scripts/*.sh
 
   log "Code pull and script update successful."
 
