@@ -53,6 +53,10 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 	searchHandlers := handlers.NewSearchHandlers(container.SearchService, container.Logger, container.PerfTracker)
 
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"status": "alive"})
+	})
+
 	sysopAPI := r.Group("/api/sysop")
 	{
 		sysopAPI.GET("/auth", sysopHandlers.AuthCheck)
