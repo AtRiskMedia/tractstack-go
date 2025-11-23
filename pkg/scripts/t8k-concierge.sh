@@ -95,7 +95,7 @@ build_go_backend() {
 
   # Build Go binary
   cd "$go_src_dir"
-  if ! go build -o "$go_binary" ./cmd/tractstack-go; then
+  if ! go build -tags sqlite_fts5 -o "$go_binary" ./cmd/tractstack-go; then
     log_error "Go build failed"
     return 1
   fi
