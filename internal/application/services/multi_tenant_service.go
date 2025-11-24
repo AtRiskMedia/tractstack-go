@@ -107,6 +107,12 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 		return err
 	}
 
+	// Create initial brand.json with SITE_URL
+	if err := s.saveInitialBrandConfig(req.TenantID, req.Domains[0]); err != nil {
+		marker.SetError(err)
+		return err
+	}
+
 	if err := s.copyDefaultStyles(req.TenantID); err != nil {
 		marker.SetError(err)
 		return err
@@ -375,4 +381,25 @@ func (s *MultiTenantService) copyDefaultDesigns(tenantID string) error {
 	sourcePath := filepath.Join("pkg", "designs", "designLibrary.json")
 	targetPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "designLibrary.json")
 	return copyFile(sourcePath, targetPath)
+}
+
+func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) error {
+	siteURL := ""
+	if domain != "*" {
+		siteURL = fmt.Sprintf("https://%s", domain)
+	}
+
+	// Minimal brand config with just the SITE_URL
+	brandConfig := map[string]any{
+		"SITE_URL": siteURL,
+	}
+
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "brand.json")
+
+	data, err := json.MarshalIndent(brandConfig, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal initial brand config: %w", err)
+	}
+
+	return os.WriteFile(configPath, data, 0o644)
 }

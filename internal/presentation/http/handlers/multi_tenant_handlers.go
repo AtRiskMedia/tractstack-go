@@ -19,6 +19,7 @@ type SetupRequest struct {
 	HydrationToken    string `json:"hydrationToken"`
 	TursoDatabaseURL  string `json:"tursoDatabaseURL,omitempty"`
 	TursoAuthToken    string `json:"tursoAuthToken,omitempty"`
+	Domain            string `json:"domain"`
 }
 
 type MultiTenantHandlers struct {
@@ -87,12 +88,17 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 
 	h.logger.System().Info("Starting tenant initialization", "tenantId", targetID)
 
+	domains := []string{"*"}
+	if req.Domain != "" {
+		domains = []string{req.Domain}
+	}
+
 	provisionReq := services.ProvisionRequest{
 		TenantID:          targetID,
 		AdminEmail:        req.AdminEmail,
 		AdminPassword:     req.AdminPassword,
 		AdminPasswordHash: req.AdminPasswordHash,
-		Domains:           []string{"*"},
+		Domains:           domains,
 		TursoDatabaseURL:  req.TursoDatabaseURL,
 		TursoAuthToken:    req.TursoAuthToken,
 		HydrationToken:    req.HydrationToken,
@@ -127,4 +133,21 @@ func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 
 func (h *MultiTenantHandlers) HandleHydrate(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+func (h *MultiTenantHandlers) HandleResolveDomain(c *gin.Context) {
+	host := c.Query("host")
+	if host == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "host query parameter is required"})
+		return
+	}
+
+	tenantManager := h.getTenantManager()
+	tenantID, err := tenantManager.GetDetector().ResolveTenantByDomain(host)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "domain not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"tenantId": tenantID})
 }

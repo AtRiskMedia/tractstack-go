@@ -164,3 +164,15 @@ func (d *Detector) RefreshRegistry() error {
 func (d *Detector) GetRegistry() *TenantRegistry {
 	return d.registry
 }
+
+// ResolveTenantByDomain finds a tenant ID that claims the given domain
+func (d *Detector) ResolveTenantByDomain(domain string) (string, error) {
+	for tenantID, info := range d.registry.Tenants {
+		for _, allowedDomain := range info.Domains {
+			if strings.EqualFold(allowedDomain, domain) {
+				return tenantID, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("domain not found: %s", domain)
+}

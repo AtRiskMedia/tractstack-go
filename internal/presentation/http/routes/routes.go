@@ -92,6 +92,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		setupAPI.POST("/hydrate", multiTenantHandlers.HandleHydrate) // <--- ADD THIS LINE
 	}
 
+	// Public domain resolution endpoint (no tenant context required)
+	r.GET("/api/v1/resolve-domain", multiTenantHandlers.HandleResolveDomain)
+
 	// API routes with tenant middleware
 	api := r.Group("/api/v1")
 	api.Use(middleware.TenantMiddleware(container.TenantManager, container.PerfTracker))
