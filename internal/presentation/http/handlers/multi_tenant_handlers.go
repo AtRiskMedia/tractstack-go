@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
@@ -91,6 +92,10 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 	domains := []string{"*"}
 	if req.Domain != "" {
 		domains = []string{req.Domain}
+		if parts := strings.Split(req.Domain, "."); len(parts) >= 3 {
+			baseDomain := strings.Join(parts[1:], ".")
+			domains = append(domains, baseDomain)
+		}
 	}
 
 	provisionReq := services.ProvisionRequest{
@@ -127,14 +132,6 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 	})
 }
 
-func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
-	return h.service.GetTenantManager()
-}
-
-func (h *MultiTenantHandlers) HandleHydrate(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
-}
-
 func (h *MultiTenantHandlers) HandleResolveDomain(c *gin.Context) {
 	host := c.Query("host")
 	if host == "" {
@@ -150,4 +147,12 @@ func (h *MultiTenantHandlers) HandleResolveDomain(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"tenantId": tenantID})
+}
+
+func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
+	return h.service.GetTenantManager()
+}
+
+func (h *MultiTenantHandlers) HandleHydrate(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
