@@ -21,6 +21,7 @@ type SetupRequest struct {
 	TursoDatabaseURL  string `json:"tursoDatabaseURL,omitempty"`
 	TursoAuthToken    string `json:"tursoAuthToken,omitempty"`
 	Domain            string `json:"domain"`
+	AAIAPIKey         string `json:"aaiApiKey"`
 }
 
 type MultiTenantHandlers struct {
@@ -107,6 +108,7 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 		TursoDatabaseURL:  req.TursoDatabaseURL,
 		TursoAuthToken:    req.TursoAuthToken,
 		HydrationToken:    req.HydrationToken,
+		AAIAPIKey:         req.AAIAPIKey,
 	}
 
 	if err := h.service.ProvisionTenant(provisionReq); err != nil {

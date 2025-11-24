@@ -52,6 +52,7 @@ type ProvisionRequest struct {
 	HydrationToken    string   `json:"hydrationToken"`
 	TursoDatabaseURL  string   `json:"tursoDatabaseURL"`
 	TursoAuthToken    string   `json:"tursoAuthToken"`
+	AAIAPIKey         string   `json:"aaiApiKey"`
 }
 
 // CapacityResult defines the output for the capacity check.
@@ -100,6 +101,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 		TursoEnabled:      req.TursoDatabaseURL != "" && req.TursoAuthToken != "",
 		HydrationToken:    req.HydrationToken,
 		AdminPasswordHash: finalPasswordHash,
+		AAIAPIKey:         req.AAIAPIKey,
 	}
 
 	if err := s.saveTenantConfig(newConfig); err != nil {
@@ -107,7 +109,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 		return err
 	}
 
-	// Create initial brand.json with SITE_URL
+	// Create initial brand.json with SITE_URL from the first domain in the list
 	if err := s.saveInitialBrandConfig(req.TenantID, req.Domains[0]); err != nil {
 		marker.SetError(err)
 		return err
@@ -389,8 +391,7 @@ func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) err
 		siteURL = fmt.Sprintf("https://%s", domain)
 	}
 
-	// Minimal brand config with just the SITE_URL
-	brandConfig := map[string]any{
+	brandConfig := map[string]interface{}{
 		"SITE_URL": siteURL,
 	}
 
