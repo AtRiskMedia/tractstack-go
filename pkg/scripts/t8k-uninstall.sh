@@ -238,13 +238,18 @@ choose_uninstall_target() {
   esac
 }
 
-# Confirmation prompt
 confirm_uninstall() {
   if [[ "$NON_INTERACTIVE" == true ]]; then
     return 0
   fi
 
   local target_desc=""
+  local saas_detected=false
+
+  if systemctl list-unit-files | grep -q "tractstack-saas.service"; then
+    saas_detected=true
+  fi
+
   case "$UNINSTALL_TARGET" in
   "main")
     target_desc="main TractStack installation (prod/multi)"
@@ -254,6 +259,12 @@ confirm_uninstall() {
     ;;
   "all")
     target_desc="ALL TractStack installations and the t8k user"
+    if [[ "$saas_detected" == true ]]; then
+      echo -e "${RED}ERROR: SaaS Orchestrator detected.${RESET}"
+      echo -e "${YELLOW}You cannot run a full system uninstall while the SaaS infrastructure is present.${RESET}"
+      echo -e "Please run: ${BLUE}sudo ./t8k-saas-uninstall.sh${RESET} first."
+      exit 1
+    fi
     ;;
   esac
 
@@ -264,6 +275,47 @@ confirm_uninstall() {
     echo "Uninstall cancelled"
     exit 0
   fi
+}
+
+remove_directories() {
+  local target="$1"
+  local site_id="${2:-}"
+
+  case "$target" in
+  "main")
+    log "Removing main installation directories"
+
+    if [[ -d "/home/t8k/src/tractstack-go" ]]; then
+      rm -rf /home/t8k/src/tractstack-go
+    fi
+
+    if [[ -d "/home/t8k/src/my-tractstack" ]]; then
+      rm -rf /home/t8k/src/my-tractstack
+    fi
+
+    if [[ -f "/home/t8k/bin/tractstack-go" ]]; then
+      rm -f /home/t8k/bin/tractstack-go
+    fi
+
+    rm -rf /home/t8k/t8k-go-server/
+
+    if [[ ! -d "/home/t8k/sites" ]] || [[ -z "$(ls -A /home/t8k/sites 2>/dev/null)" ]]; then
+      rm -rf /home/t8k/state/
+    fi
+    ;;
+  "site")
+    log "Removing dedicated site directories: $site_id"
+    rm -rf "/home/t8k/sites/${site_id}/"
+
+    if [[ -d "/home/t8k/sites" ]] && [[ -z "$(ls -A /home/t8k/sites 2>/dev/null)" ]]; then
+      rmdir /home/t8k/sites/
+    fi
+    ;;
+  "all")
+    log "Removing ALL TractStack directories"
+    rm -rf /home/t8k/
+    ;;
+  esac
 }
 
 # Improved remove_systemd_services function with better error handling
@@ -443,39 +495,6 @@ update_ports_config() {
     log "Regenerating PM2 ecosystem configuration"
     sudo -u t8k pm2 startOrReload /home/t8k/etc/pm2/ecosystem.config.js || true
   fi
-}
-
-# Remove directories
-remove_directories() {
-  local target="$1"
-  local site_id="${2:-}"
-
-  case "$target" in
-  "main")
-    log "Removing main installation directories"
-    rm -rf /home/t8k/src/
-    rm -rf /home/t8k/bin/
-    rm -rf /home/t8k/t8k-go-server/
-
-    # Only remove state directory if no dedicated sites exist
-    if [[ ! -d "/home/t8k/sites" ]] || [[ -z "$(ls -A /home/t8k/sites 2>/dev/null)" ]]; then
-      rm -rf /home/t8k/state/
-    fi
-    ;;
-  "site")
-    log "Removing dedicated site directories: $site_id"
-    rm -rf "/home/t8k/sites/${site_id}/"
-
-    # Remove sites directory if empty
-    if [[ -d "/home/t8k/sites" ]] && [[ -z "$(ls -A /home/t8k/sites 2>/dev/null)" ]]; then
-      rmdir /home/t8k/sites/
-    fi
-    ;;
-  "all")
-    log "Removing all TractStack directories"
-    rm -rf /home/t8k/
-    ;;
-  esac
 }
 
 # Check if any installations remain
