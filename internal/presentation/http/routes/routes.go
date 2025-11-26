@@ -89,7 +89,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	setupAPI.Use(middleware.CORSMiddleware(container.TenantManager))
 	{
 		setupAPI.POST("/initialize", multiTenantHandlers.HandleSetupInitialize)
-		setupAPI.POST("/hydrate", multiTenantHandlers.HandleHydrate) // <--- ADD THIS LINE
+		setupAPI.GET("/suitcase", multiTenantHandlers.HandleFetchSuitcase)
 	}
 
 	// Public domain resolution endpoint (no tenant context required)

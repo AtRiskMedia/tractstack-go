@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
@@ -155,6 +156,65 @@ func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 	return h.service.GetTenantManager()
 }
 
-func (h *MultiTenantHandlers) HandleHydrate(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
+	token := c.GetHeader("X-Hydration-Token")
+
+	tenantManager := h.getTenantManager()
+	registry := tenantManager.GetDetector().GetRegistry()
+
+	info, ok := registry.Tenants["default"]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
+		return
+	}
+
+	// Security Logic:
+	// 1. If a token is provided, it MUST match.
+	// 2. If NO token is provided, we check if we are in a safe "Bootstrap" state.
+	//    Bootstrap State = Tenant is Active (files exist) AND Site is NOT Initialized (BrandConfig.SiteInit == false).
+	if token != "" {
+		if info.HydrationToken != token {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			return
+		}
+	} else {
+		// Tokenless Access (Server-Side Bootstrap)
+		if info.Status != "active" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Tenant must be active to bootstrap"})
+			return
+		}
+
+		// Load Brand Config to check initialization state
+		brandConfig, err := tenant.LoadBrandConfig("default")
+		if err != nil {
+			h.logger.System().Error("Failed to load brand config during bootstrap check", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Configuration error"})
+			return
+		}
+
+		if brandConfig.SiteInit {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Site is already initialized. Token required."})
+			return
+		}
+
+		// Allowed! Use the internal token.
+		token = info.HydrationToken
+	}
+
+	if token == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No suitcase available"})
+		return
+	}
+
+	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:8081/api/local/suitcase/%s", token))
+	if err != nil {
+		h.logger.System().Error("Failed to fetch suitcase from agent", "error", err)
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to connect to local agent"})
+		return
+	}
+	if closeErr := resp.Body.Close(); closeErr != nil {
+		log.Printf("Fetch Suitcase fail.")
+	}
+
+	c.DataFromReader(resp.StatusCode, resp.ContentLength, resp.Header.Get("Content-Type"), resp.Body, nil)
 }
