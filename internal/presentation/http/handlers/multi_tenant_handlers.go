@@ -10,6 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -157,40 +158,32 @@ func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 }
 
 func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
-	tenantManager := h.getTenantManager()
-	registry := tenantManager.GetDetector().GetRegistry()
-
-	info, ok := registry.Tenants["default"]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
+	// Context is now provided by TenantMiddleware
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Tenant context not found"})
 		return
 	}
+	tenantID := tenantCtx.TenantID
 
-	// Load Brand Config to check initialization state
-	brandConfig, err := tenant.LoadBrandConfig("default")
-	if err != nil {
-		h.logger.System().Error("Failed to load brand config during bootstrap check", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Configuration error"})
-		return
-	}
-
-	// Security Guard: Only allow access if the site is NOT yet initialized.
-	if brandConfig.SiteInit {
+	// 1. Security Guard: Only allow access if the site is NOT yet initialized.
+	if tenantCtx.Config.BrandConfig.SiteInit {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Site is already initialized."})
 		return
 	}
 
-	// Resolve the token internally from the registry
-	token := info.HydrationToken
+	// 2. Retrieve the token directly from the already-loaded tenant configuration
+	token := tenantCtx.Config.HydrationToken
 
 	if token == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No suitcase available"})
 		return
 	}
 
+	// 3. Fetch the suitcase using the resolved token from the local agent
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:8081/api/local/suitcase/%s", token))
 	if err != nil {
-		h.logger.System().Error("Failed to fetch suitcase from agent", "error", err)
+		h.logger.System().Error("Failed to fetch suitcase from agent", "error", err, "tenantId", tenantID)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to connect to local agent"})
 		return
 	}
@@ -202,40 +195,27 @@ func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
 }
 
 func (h *MultiTenantHandlers) HandleSetupComplete(c *gin.Context) {
-	tenantID := c.GetHeader("X-Tenant-Id")
-	if tenantID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-Id header is required"})
+	// Context is now provided by TenantMiddleware
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Tenant context not found"})
 		return
 	}
+	tenantID := tenantCtx.TenantID
 
-	// Resolve token internally since frontend does not have it
-	tenantManager := h.getTenantManager()
-	registry := tenantManager.GetDetector().GetRegistry()
-
-	info, ok := registry.Tenants["default"]
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
-		return
-	}
-
-	// Security Guard: Only allow completion if site is NOT initialized
-	brandConfig, err := tenant.LoadBrandConfig("default")
-	if err != nil {
-		h.logger.System().Error("Failed to load brand config for setup complete", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Configuration error"})
-		return
-	}
-
-	if brandConfig.SiteInit {
+	// 1. Security Guard: Only allow completion if site is NOT initialized
+	if tenantCtx.Config.BrandConfig.SiteInit {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Site is already initialized"})
 		return
 	}
 
-	token := info.HydrationToken
+	// 2. Use the internal token for authorization
+	token := tenantCtx.Config.HydrationToken
 
 	marker := h.perfTracker.StartOperation("handler_setup_complete", tenantID)
 	defer marker.Complete()
 
+	// 3. CompleteSetup handles token verification (if any) and final removal from disk
 	if err := h.service.CompleteSetup(tenantID, token); err != nil {
 		marker.SetError(err)
 		h.logger.System().Error("Failed to complete setup", "error", err, "tenantId", tenantID)

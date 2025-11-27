@@ -89,8 +89,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	setupAPI.Use(middleware.CORSMiddleware(container.TenantManager))
 	{
 		setupAPI.POST("/initialize", multiTenantHandlers.HandleSetupInitialize)
-		setupAPI.GET("/suitcase", multiTenantHandlers.HandleFetchSuitcase)
-		setupAPI.POST("/complete", multiTenantHandlers.HandleSetupComplete)
 	}
 
 	// Public domain resolution endpoint (no tenant context required)
@@ -104,6 +102,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		// Config endpoints
 		configGroup := api.Group("/config")
 		{
+			api.GET("/setup/suitcase", multiTenantHandlers.HandleFetchSuitcase)
+			api.POST("/setup/complete", multiTenantHandlers.HandleSetupComplete)
+
 			// Public brand config endpoint
 			configGroup.GET("/brand", configHandlers.GetBrandConfig)
 

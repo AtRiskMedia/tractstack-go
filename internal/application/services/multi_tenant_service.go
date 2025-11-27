@@ -409,51 +409,40 @@ func (s *MultiTenantService) CompleteSetup(tenantID, hydrationToken string) erro
 	marker := s.perfTracker.StartOperation("service_complete_setup", tenantID)
 	defer marker.Complete()
 
-	registryPath := filepath.Join(pkgconfig.BackendPath, "config", "t8k", "tenants.json")
-	detector := s.tenantManager.GetDetector()
-	registry := detector.GetRegistry()
+	// 1. Clear from env.json (The Source of Truth)
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "env.json")
 
-	registryCopy := &tenant.TenantRegistry{
-		Tenants: make(map[string]tenant.TenantInfo),
-	}
-	for k, v := range registry.Tenants {
-		registryCopy.Tenants[k] = v
+	configData, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read tenant config: %w", err)
 	}
 
-	info, exists := registryCopy.Tenants[tenantID]
-	if !exists {
-		return fmt.Errorf("tenant %s not found", tenantID)
+	var cfg tenant.Config
+	if err := json.Unmarshal(configData, &cfg); err != nil {
+		return fmt.Errorf("failed to parse tenant config: %w", err)
 	}
 
-	if info.HydrationToken != "" && hydrationToken != "" && info.HydrationToken != hydrationToken {
+	// Validation: If a token was passed (internal lookup), match it.
+	if cfg.HydrationToken != "" && hydrationToken != "" && cfg.HydrationToken != hydrationToken {
 		return fmt.Errorf("invalid hydration token provided")
 	}
 
-	info.HydrationToken = ""
-	registryCopy.Tenants[tenantID] = info
+	// Clear it
+	cfg.HydrationToken = ""
 
-	registryData, err := json.MarshalIndent(registryCopy, "", "  ")
+	newData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal registry: %w", err)
+		return fmt.Errorf("failed to marshal updated config: %w", err)
 	}
 
-	if err := os.WriteFile(registryPath, registryData, 0o644); err != nil {
-		return fmt.Errorf("failed to write registry: %w", err)
+	if err := os.WriteFile(configPath, newData, 0o600); err != nil {
+		return fmt.Errorf("failed to save updated config: %w", err)
 	}
 
+	// 2. Refresh Registry (to ensure status/domains are current, though token is gone)
+	detector := s.tenantManager.GetDetector()
 	if err := detector.RefreshRegistry(); err != nil {
 		return fmt.Errorf("failed to refresh registry: %w", err)
-	}
-
-	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "env.json")
-	if configData, err := os.ReadFile(configPath); err == nil {
-		var cfg tenant.Config
-		if err := json.Unmarshal(configData, &cfg); err == nil {
-			cfg.HydrationToken = ""
-			if newData, err := json.MarshalIndent(cfg, "", "  "); err == nil {
-				_ = os.WriteFile(configPath, newData, 0o600)
-			}
-		}
 	}
 
 	marker.SetSuccess(true)
