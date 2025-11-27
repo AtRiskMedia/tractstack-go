@@ -50,6 +50,7 @@ func CORSMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
 		},
 		AllowHeaders: []string{
 			"Origin", "Content-Type", "Accept", "Authorization",
+			"X-Hydration-Token",
 			"X-Tenant-ID", "X-Requested-With", "X-TractStack-Session-ID", "X-StoryFragment-ID",
 			"hx-current-url", "hx-request", "hx-target", "hx-trigger", "hx-boosted",
 			"Cache-Control",
