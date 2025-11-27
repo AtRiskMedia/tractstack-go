@@ -187,10 +187,14 @@ func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to connect to local agent"})
 		return
 	}
-	if closeErr := resp.Body.Close(); closeErr != nil {
-		log.Printf("Fetch Suitcase fail.")
-	}
 
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("ERROR: Failed to close suitcase response body for token %s: %v", token, closeErr)
+		}
+	}()
+
+	// 4. Stream the data back to the original request.
 	c.DataFromReader(resp.StatusCode, resp.ContentLength, resp.Header.Get("Content-Type"), resp.Body, nil)
 }
 

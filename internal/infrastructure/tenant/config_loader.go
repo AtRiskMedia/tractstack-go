@@ -187,11 +187,10 @@ type TenantRegistry struct {
 
 // TenantInfo holds tenant metadata
 type TenantInfo struct {
-	TenantID       string   `json:"tenantId"`
-	Domains        []string `json:"domains"`
-	Status         string   `json:"status"`       // "unknown", "inactive", "active"
-	DatabaseType   string   `json:"databaseType"` // "turso", "sqlite3"
-	HydrationToken string   `json:"hydrationToken"`
+	TenantID     string   `json:"tenantId"`
+	Domains      []string `json:"domains"`
+	Status       string   `json:"status"`       // "unknown", "inactive", "active"
+	DatabaseType string   `json:"databaseType"` // "turso", "sqlite3"
 }
 
 // LoadTenantRegistry loads the global tenant registry
