@@ -117,10 +117,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 		// Tailwind
 		tailwindGroup := api.Group("/tailwind")
-		tailwindGroup.Use(authHandlers.AuthMiddleware())
 		{
-			tailwindGroup.POST("/classes", tailwindHandlers.GetTailwindClasses)
-			tailwindGroup.POST("/update", tailwindHandlers.UpdateTailwindCSS)
+			tailwindGroup.POST("/classes", authHandlers.AuthMiddleware(), tailwindHandlers.GetTailwindClasses)
+			tailwindGroup.POST("/update", authHandlers.AuthMiddleware(), tailwindHandlers.UpdateTailwindCSS)
 		}
 
 		// Authentication and system routes
