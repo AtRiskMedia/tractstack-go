@@ -99,12 +99,12 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	api.Use(middleware.TenantMiddleware(container.TenantManager, container.PerfTracker))
 	api.Use(middleware.DomainValidationMiddleware(container.TenantManager))
 	{
+		api.GET("/setup/suitcase", multiTenantHandlers.HandleFetchSuitcase)
+		api.POST("/setup/complete", multiTenantHandlers.HandleSetupComplete)
+
 		// Config endpoints
 		configGroup := api.Group("/config")
 		{
-			api.GET("/setup/suitcase", multiTenantHandlers.HandleFetchSuitcase)
-			api.POST("/setup/complete", multiTenantHandlers.HandleSetupComplete)
-
 			// Public brand config endpoint
 			configGroup.GET("/brand", configHandlers.GetBrandConfig)
 
