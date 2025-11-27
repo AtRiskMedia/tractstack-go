@@ -404,3 +404,59 @@ func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) err
 
 	return os.WriteFile(configPath, data, 0o644)
 }
+
+func (s *MultiTenantService) CompleteSetup(tenantID, hydrationToken string) error {
+	marker := s.perfTracker.StartOperation("service_complete_setup", tenantID)
+	defer marker.Complete()
+
+	registryPath := filepath.Join(pkgconfig.BackendPath, "config", "t8k", "tenants.json")
+	detector := s.tenantManager.GetDetector()
+	registry := detector.GetRegistry()
+
+	registryCopy := &tenant.TenantRegistry{
+		Tenants: make(map[string]tenant.TenantInfo),
+	}
+	for k, v := range registry.Tenants {
+		registryCopy.Tenants[k] = v
+	}
+
+	info, exists := registryCopy.Tenants[tenantID]
+	if !exists {
+		return fmt.Errorf("tenant %s not found", tenantID)
+	}
+
+	if info.HydrationToken != "" && hydrationToken != "" && info.HydrationToken != hydrationToken {
+		return fmt.Errorf("invalid hydration token provided")
+	}
+
+	info.HydrationToken = ""
+	registryCopy.Tenants[tenantID] = info
+
+	registryData, err := json.MarshalIndent(registryCopy, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal registry: %w", err)
+	}
+
+	if err := os.WriteFile(registryPath, registryData, 0o644); err != nil {
+		return fmt.Errorf("failed to write registry: %w", err)
+	}
+
+	if err := detector.RefreshRegistry(); err != nil {
+		return fmt.Errorf("failed to refresh registry: %w", err)
+	}
+
+	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "env.json")
+	if configData, err := os.ReadFile(configPath); err == nil {
+		var cfg tenant.Config
+		if err := json.Unmarshal(configData, &cfg); err == nil {
+			cfg.HydrationToken = ""
+			if newData, err := json.MarshalIndent(cfg, "", "  "); err == nil {
+				_ = os.WriteFile(configPath, newData, 0o600)
+			}
+		}
+	}
+
+	marker.SetSuccess(true)
+	s.logger.Tenant().Info("Setup completed and hydration token cleared", "tenantId", tenantID)
+	return nil
+}

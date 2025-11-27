@@ -218,3 +218,26 @@ func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
 
 	c.DataFromReader(resp.StatusCode, resp.ContentLength, resp.Header.Get("Content-Type"), resp.Body, nil)
 }
+
+func (h *MultiTenantHandlers) HandleSetupComplete(c *gin.Context) {
+	tenantID := c.GetHeader("X-Tenant-Id")
+	if tenantID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "X-Tenant-Id header is required"})
+		return
+	}
+
+	token := c.GetHeader("X-Hydration-Token")
+
+	marker := h.perfTracker.StartOperation("handler_setup_complete", tenantID)
+	defer marker.Complete()
+
+	if err := h.service.CompleteSetup(tenantID, token); err != nil {
+		marker.SetError(err)
+		h.logger.System().Error("Failed to complete setup", "error", err, "tenantId", tenantID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to complete setup", "details": err.Error()})
+		return
+	}
+
+	marker.SetSuccess(true)
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}

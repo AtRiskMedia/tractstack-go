@@ -90,6 +90,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	{
 		setupAPI.POST("/initialize", multiTenantHandlers.HandleSetupInitialize)
 		setupAPI.GET("/suitcase", multiTenantHandlers.HandleFetchSuitcase)
+		setupAPI.POST("/complete", multiTenantHandlers.HandleSetupComplete)
 	}
 
 	// Public domain resolution endpoint (no tenant context required)
