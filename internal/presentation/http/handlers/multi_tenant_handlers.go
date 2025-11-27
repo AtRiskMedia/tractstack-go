@@ -157,8 +157,6 @@ func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 }
 
 func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
-	token := c.GetHeader("X-Hydration-Token")
-
 	tenantManager := h.getTenantManager()
 	registry := tenantManager.GetDetector().GetRegistry()
 
@@ -168,38 +166,22 @@ func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
 		return
 	}
 
-	// Security Logic:
-	// 1. If a token is provided, it MUST match.
-	// 2. If NO token is provided, we check if we are in a safe "Bootstrap" state.
-	//    Bootstrap State = Tenant is Active (files exist) AND Site is NOT Initialized (BrandConfig.SiteInit == false).
-	if token != "" {
-		if info.HydrationToken != token {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
-			return
-		}
-	} else {
-		// Tokenless Access (Server-Side Bootstrap)
-		if info.Status != "active" {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Tenant must be active to bootstrap"})
-			return
-		}
-
-		// Load Brand Config to check initialization state
-		brandConfig, err := tenant.LoadBrandConfig("default")
-		if err != nil {
-			h.logger.System().Error("Failed to load brand config during bootstrap check", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Configuration error"})
-			return
-		}
-
-		if brandConfig.SiteInit {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Site is already initialized. Token required."})
-			return
-		}
-
-		// Allowed! Use the internal token.
-		token = info.HydrationToken
+	// Load Brand Config to check initialization state
+	brandConfig, err := tenant.LoadBrandConfig("default")
+	if err != nil {
+		h.logger.System().Error("Failed to load brand config during bootstrap check", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Configuration error"})
+		return
 	}
+
+	// Security Guard: Only allow access if the site is NOT yet initialized.
+	if brandConfig.SiteInit {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Site is already initialized."})
+		return
+	}
+
+	// Resolve the token internally from the registry
+	token := info.HydrationToken
 
 	if token == "" {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No suitcase available"})
@@ -226,7 +208,30 @@ func (h *MultiTenantHandlers) HandleSetupComplete(c *gin.Context) {
 		return
 	}
 
-	token := c.GetHeader("X-Hydration-Token")
+	// Resolve token internally since frontend does not have it
+	tenantManager := h.getTenantManager()
+	registry := tenantManager.GetDetector().GetRegistry()
+
+	info, ok := registry.Tenants["default"]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found"})
+		return
+	}
+
+	// Security Guard: Only allow completion if site is NOT initialized
+	brandConfig, err := tenant.LoadBrandConfig("default")
+	if err != nil {
+		h.logger.System().Error("Failed to load brand config for setup complete", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Configuration error"})
+		return
+	}
+
+	if brandConfig.SiteInit {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Site is already initialized"})
+		return
+	}
+
+	token := info.HydrationToken
 
 	marker := h.perfTracker.StartOperation("handler_setup_complete", tenantID)
 	defer marker.Complete()
