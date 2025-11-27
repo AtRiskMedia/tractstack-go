@@ -180,13 +180,15 @@ type BrandConfig struct {
 	FaviconBase64      string                `json:"FAVICON_BASE64,omitempty"`
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 	HasAAI             bool                  `json:"HAS_AAI"`
+	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go
 type AdvancedConfig struct {
 	// Multi-tenant settings
-	MultiTenant bool `json:"multiTenant"`
+	MultiTenant    bool   `json:"multiTenant"`
+	HydrationToken string `json:"hydrationToken,omitempty"`
 
 	// Database settings
 	DatabaseMode string `json:"databaseMode"` // "sqlite" or "turso"

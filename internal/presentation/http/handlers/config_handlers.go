@@ -64,6 +64,7 @@ func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 
 	brandConfig := *tenantCtx.Config.BrandConfig
 	brandConfig.HasAAI = tenantCtx.Config.AAIAPIKey != ""
+	brandConfig.HasHydrationToken = tenantCtx.Config.HydrationToken != ""
 	c.JSON(http.StatusOK, brandConfig)
 }
 
