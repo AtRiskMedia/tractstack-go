@@ -24,6 +24,7 @@ type Context struct {
 	CacheManager *manager.Manager
 	Logger       *logging.ChanneledLogger
 	ftsService   *fts.FTSService
+	Domains      []string
 }
 
 // Close cleans up the tenant context

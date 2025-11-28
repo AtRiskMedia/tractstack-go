@@ -15,7 +15,6 @@ import (
 // Config represents the structure of a single tenant's configuration
 type Config struct {
 	TenantID           string             `json:"tenantId"`
-	Domains            []string           `json:"domains"`
 	Status             string             `json:"status"`
 	DatabaseType       string             `json:"databaseType"`
 	TursoDatabase      string             `json:"TURSO_DATABASE_URL"`

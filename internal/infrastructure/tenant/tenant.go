@@ -98,8 +98,16 @@ func (m *Manager) createContext(tenantID string) (*Context, error) {
 
 	status := m.detector.GetTenantStatus(tenantID)
 
+	var domains []string
+	if registry := m.detector.GetRegistry(); registry != nil {
+		if info, ok := registry.Tenants[tenantID]; ok {
+			domains = info.Domains
+		}
+	}
+
 	ctx := &Context{
 		TenantID:     tenantID,
+		Domains:      domains,
 		Config:       config,
 		Database:     db,
 		Status:       status,

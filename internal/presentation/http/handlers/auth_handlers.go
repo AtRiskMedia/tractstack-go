@@ -307,7 +307,6 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received login request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	// Parse login request
 	var loginReq struct {
 		Password string `json:"password" binding:"required"`
 	}
@@ -318,7 +317,6 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 		return
 	}
 
-	// Use auth service to authenticate
 	result := h.authService.AuthenticateAdmin(loginReq.Password, tenantCtx)
 
 	if !result.Success {
@@ -330,35 +328,32 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 		return
 	}
 
-	// Set role-specific HTTP-only cookie
 	cookieName := "admin_auth"
 	if result.Role == "editor" {
 		cookieName = "editor_auth"
 	}
 
-	// Determine cookie domain from tenant config (use root domain to allow sharing)
 	cookieDomain := ""
-	if tenantCtx.Config != nil && len(tenantCtx.Config.Domains) > 0 {
-		shortest := tenantCtx.Config.Domains[0]
-		for _, d := range tenantCtx.Config.Domains {
+	if len(tenantCtx.Domains) > 0 {
+		shortest := tenantCtx.Domains[0]
+		for _, d := range tenantCtx.Domains {
 			if len(d) < len(shortest) {
 				shortest = d
 			}
 		}
-		// Don't set domain for localhost/IPs to preserve port isolation behaviors
 		if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
 			cookieDomain = shortest
 		}
 	}
 
 	c.SetCookie(
-		cookieName,   // name
-		result.Token, // value
-		86400,        // maxAge
-		"/",          // path
-		cookieDomain, // domain (Tenant Scoped)
-		false,        // secure
-		true,         // httpOnly
+		cookieName,
+		result.Token,
+		86400,
+		"/",
+		cookieDomain,
+		false,
+		true,
 	)
 
 	h.logger.Auth().Info("Login successful", "tenantId", tenantCtx.TenantID, "role", result.Role, "domain", cookieDomain, "duration", time.Since(start))
@@ -385,11 +380,10 @@ func (h *AuthHandlers) PostLogout(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received logout request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	// Determine cookie domain to clear cookies correctly
 	cookieDomain := ""
-	if tenantCtx.Config != nil && len(tenantCtx.Config.Domains) > 0 {
-		shortest := tenantCtx.Config.Domains[0]
-		for _, d := range tenantCtx.Config.Domains {
+	if len(tenantCtx.Domains) > 0 {
+		shortest := tenantCtx.Domains[0]
+		for _, d := range tenantCtx.Domains {
 			if len(d) < len(shortest) {
 				shortest = d
 			}
@@ -399,7 +393,6 @@ func (h *AuthHandlers) PostLogout(c *gin.Context) {
 		}
 	}
 
-	// Clear both admin and editor auth cookies
 	c.SetCookie("admin_auth", "", -1, "/", cookieDomain, false, true)
 	c.SetCookie("editor_auth", "", -1, "/", cookieDomain, false, true)
 
@@ -426,7 +419,6 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received refresh token request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	// Get current token from Authorization header or cookies
 	var currentToken string
 	var tokenSource string
 
@@ -450,7 +442,6 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Validate current token
 	tokenInfo := h.authService.GetTokenInfo(currentToken, tenantCtx)
 	if !tokenInfo.Valid {
 		h.logger.Auth().Warn("Refresh token request with invalid current token", "tenantId", tenantCtx.TenantID, "source", tokenSource)
@@ -458,26 +449,23 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Generate new token
-	newResult := h.authService.AuthenticateAdmin("", tenantCtx) // Note: This assumes internal auth logic handles refresh via empty password or similar, otherwise needs specific Refresh logic
+	newResult := h.authService.AuthenticateAdmin("", tenantCtx)
 	if !newResult.Success {
 		h.logger.Auth().Error("Token refresh failed", "tenantId", tenantCtx.TenantID, "error", newResult.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token refresh failed"})
 		return
 	}
 
-	// Update cookie if token came from cookie
 	if tokenSource == "admin_cookie" || tokenSource == "editor_cookie" {
 		cookieName := "admin_auth"
 		if tokenInfo.Role == "editor" {
 			cookieName = "editor_auth"
 		}
 
-		// Determine cookie domain
 		cookieDomain := ""
-		if tenantCtx.Config != nil && len(tenantCtx.Config.Domains) > 0 {
-			shortest := tenantCtx.Config.Domains[0]
-			for _, d := range tenantCtx.Config.Domains {
+		if len(tenantCtx.Domains) > 0 {
+			shortest := tenantCtx.Domains[0]
+			for _, d := range tenantCtx.Domains {
 				if len(d) < len(shortest) {
 					shortest = d
 				}
