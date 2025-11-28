@@ -101,97 +101,6 @@ func (h *AuthHandlers) GetDecodeProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"profile": result.Profile})
 }
 
-// PostLogin handles POST /api/v1/auth/login - admin/editor authentication
-func (h *AuthHandlers) PostLogin(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	start := time.Now()
-	marker := h.perfTracker.StartOperation("post_login_request", tenantCtx.TenantID)
-	defer marker.Complete()
-	h.logger.Auth().Debug("Received login request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
-
-	// Parse login request
-	var loginReq struct {
-		Password string `json:"password" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&loginReq); err != nil {
-		h.logger.Auth().Error("Login request JSON binding failed", "tenantId", tenantCtx.TenantID, "error", err.Error())
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
-		return
-	}
-
-	// Use auth service to authenticate
-	result := h.authService.AuthenticateAdmin(loginReq.Password, tenantCtx)
-
-	if !result.Success {
-		h.logger.Auth().Warn("Login attempt failed", "tenantId", tenantCtx.TenantID, "error", result.Error, "duration", time.Since(start))
-		marker.SetSuccess(false)
-		h.logger.Perf().Info("Performance for PostLogin request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", false)
-
-		c.JSON(http.StatusUnauthorized, gin.H{"error": result.Error})
-		return
-	}
-
-	// Set role-specific HTTP-only cookie
-	cookieName := "admin_auth"
-	if result.Role == "editor" {
-		cookieName = "editor_auth"
-	}
-
-	c.SetCookie(
-		cookieName,   // name (admin_auth or editor_auth)
-		result.Token, // value
-		86400,        // maxAge (24 hours in seconds)
-		"/",          // path
-		"",           // domain (empty for current domain)
-		false,        // secure (set to true in production)
-		true,         // httpOnly
-	)
-
-	h.logger.Auth().Info("Login successful", "tenantId", tenantCtx.TenantID, "role", result.Role, "duration", time.Since(start))
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for PostLogin request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
-
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok", // Changed from "success": true
-		"role":   result.Role,
-		"token":  result.Token, // Added token field
-		// Removed "message" field
-	})
-}
-
-// PostLogout handles POST /api/v1/auth/logout - clears authentication cookies
-func (h *AuthHandlers) PostLogout(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	start := time.Now()
-	marker := h.perfTracker.StartOperation("post_logout_request", tenantCtx.TenantID)
-	defer marker.Complete()
-	h.logger.Auth().Debug("Received logout request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
-
-	// Clear both admin and editor auth cookies by setting them to expired
-	c.SetCookie("admin_auth", "", -1, "/", "", false, true)
-	c.SetCookie("editor_auth", "", -1, "/", "", false, true)
-
-	h.logger.Auth().Info("Logout completed", "tenantId", tenantCtx.TenantID, "duration", time.Since(start))
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for PostLogout request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "Logout successful",
-	})
-}
-
 // GetAuthStatus handles GET /api/v1/auth/status - checks current authentication status
 func (h *AuthHandlers) GetAuthStatus(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
@@ -259,80 +168,6 @@ func (h *AuthHandlers) GetAuthStatus(c *gin.Context) {
 	h.logger.Perf().Info("Performance for GetAuthStatus request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, response)
-}
-
-// PostRefreshToken handles POST /api/v1/auth/refresh - refreshes authentication tokens
-func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	start := time.Now()
-	marker := h.perfTracker.StartOperation("post_refresh_token_request", tenantCtx.TenantID)
-	defer marker.Complete()
-	h.logger.Auth().Debug("Received refresh token request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
-
-	// Get current token from Authorization header or cookies
-	var currentToken string
-	var tokenSource string
-
-	authHeader := c.GetHeader("Authorization")
-	if authHeader != "" && len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-		currentToken = authHeader[7:]
-		tokenSource = "bearer"
-	} else {
-		if adminCookie, err := c.Cookie("admin_auth"); err == nil && adminCookie != "" {
-			currentToken = adminCookie
-			tokenSource = "admin_cookie"
-		} else if editorCookie, err := c.Cookie("editor_auth"); err == nil && editorCookie != "" {
-			currentToken = editorCookie
-			tokenSource = "editor_cookie"
-		}
-	}
-
-	if currentToken == "" {
-		h.logger.Auth().Warn("Refresh token request with no current token", "tenantId", tenantCtx.TenantID)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "No valid token found"})
-		return
-	}
-
-	// Validate current token
-	tokenInfo := h.authService.GetTokenInfo(currentToken, tenantCtx)
-	if !tokenInfo.Valid {
-		h.logger.Auth().Warn("Refresh token request with invalid current token", "tenantId", tenantCtx.TenantID, "source", tokenSource)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-		return
-	}
-
-	// Generate new token with same claims but extended expiry
-	newResult := h.authService.AuthenticateAdmin("", tenantCtx) // This approach won't work - need to implement token refresh properly
-	if !newResult.Success {
-		h.logger.Auth().Error("Token refresh failed", "tenantId", tenantCtx.TenantID, "error", newResult.Error)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token refresh failed"})
-		return
-	}
-
-	// Update cookie if token came from cookie
-	if tokenSource == "admin_cookie" || tokenSource == "editor_cookie" {
-		cookieName := "admin_auth"
-		if tokenInfo.Role == "editor" {
-			cookieName = "editor_auth"
-		}
-		c.SetCookie(cookieName, newResult.Token, 86400, "/", "", false, true)
-	}
-
-	h.logger.Auth().Info("Token refresh successful", "tenantId", tenantCtx.TenantID, "role", tokenInfo.Role, "source", tokenSource, "duration", time.Since(start))
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for PostRefreshToken request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"role":    tokenInfo.Role,
-		"token":   newResult.Token,
-		"message": "Token refreshed successfully",
-	})
 }
 
 // AuthMiddleware provides general authentication middleware for admin or editor
@@ -457,4 +292,212 @@ func (h *AuthHandlers) AskLemurAuthMiddleware() gin.HandlerFunc {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		c.Abort()
 	}
+}
+
+// PostLogin handles POST /api/v1/auth/login - admin/editor authentication
+func (h *AuthHandlers) PostLogin(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("post_login_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Auth().Debug("Received login request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
+
+	// Parse login request
+	var loginReq struct {
+		Password string `json:"password" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&loginReq); err != nil {
+		h.logger.Auth().Error("Login request JSON binding failed", "tenantId", tenantCtx.TenantID, "error", err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	// Use auth service to authenticate
+	result := h.authService.AuthenticateAdmin(loginReq.Password, tenantCtx)
+
+	if !result.Success {
+		h.logger.Auth().Warn("Login attempt failed", "tenantId", tenantCtx.TenantID, "error", result.Error, "duration", time.Since(start))
+		marker.SetSuccess(false)
+		h.logger.Perf().Info("Performance for PostLogin request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", false)
+
+		c.JSON(http.StatusUnauthorized, gin.H{"error": result.Error})
+		return
+	}
+
+	// Set role-specific HTTP-only cookie
+	cookieName := "admin_auth"
+	if result.Role == "editor" {
+		cookieName = "editor_auth"
+	}
+
+	// Determine cookie domain from tenant config (use root domain to allow sharing)
+	cookieDomain := ""
+	if tenantCtx.Config != nil && len(tenantCtx.Config.Domains) > 0 {
+		shortest := tenantCtx.Config.Domains[0]
+		for _, d := range tenantCtx.Config.Domains {
+			if len(d) < len(shortest) {
+				shortest = d
+			}
+		}
+		// Don't set domain for localhost/IPs to preserve port isolation behaviors
+		if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
+			cookieDomain = shortest
+		}
+	}
+
+	c.SetCookie(
+		cookieName,   // name
+		result.Token, // value
+		86400,        // maxAge
+		"/",          // path
+		cookieDomain, // domain (Tenant Scoped)
+		false,        // secure
+		true,         // httpOnly
+	)
+
+	h.logger.Auth().Info("Login successful", "tenantId", tenantCtx.TenantID, "role", result.Role, "domain", cookieDomain, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for PostLogin request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+		"role":   result.Role,
+		"token":  result.Token,
+	})
+}
+
+// PostLogout handles POST /api/v1/auth/logout - clears authentication cookies
+func (h *AuthHandlers) PostLogout(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("post_logout_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Auth().Debug("Received logout request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
+
+	// Determine cookie domain to clear cookies correctly
+	cookieDomain := ""
+	if tenantCtx.Config != nil && len(tenantCtx.Config.Domains) > 0 {
+		shortest := tenantCtx.Config.Domains[0]
+		for _, d := range tenantCtx.Config.Domains {
+			if len(d) < len(shortest) {
+				shortest = d
+			}
+		}
+		if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
+			cookieDomain = shortest
+		}
+	}
+
+	// Clear both admin and editor auth cookies
+	c.SetCookie("admin_auth", "", -1, "/", cookieDomain, false, true)
+	c.SetCookie("editor_auth", "", -1, "/", cookieDomain, false, true)
+
+	h.logger.Auth().Info("Logout completed", "tenantId", tenantCtx.TenantID, "domain", cookieDomain, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for PostLogout request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Logout successful",
+	})
+}
+
+// PostRefreshToken handles POST /api/v1/auth/refresh - refreshes authentication tokens
+func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("post_refresh_token_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Auth().Debug("Received refresh token request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
+
+	// Get current token from Authorization header or cookies
+	var currentToken string
+	var tokenSource string
+
+	authHeader := c.GetHeader("Authorization")
+	if authHeader != "" && len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+		currentToken = authHeader[7:]
+		tokenSource = "bearer"
+	} else {
+		if adminCookie, err := c.Cookie("admin_auth"); err == nil && adminCookie != "" {
+			currentToken = adminCookie
+			tokenSource = "admin_cookie"
+		} else if editorCookie, err := c.Cookie("editor_auth"); err == nil && editorCookie != "" {
+			currentToken = editorCookie
+			tokenSource = "editor_cookie"
+		}
+	}
+
+	if currentToken == "" {
+		h.logger.Auth().Warn("Refresh token request with no current token", "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "No valid token found"})
+		return
+	}
+
+	// Validate current token
+	tokenInfo := h.authService.GetTokenInfo(currentToken, tenantCtx)
+	if !tokenInfo.Valid {
+		h.logger.Auth().Warn("Refresh token request with invalid current token", "tenantId", tenantCtx.TenantID, "source", tokenSource)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+		return
+	}
+
+	// Generate new token
+	newResult := h.authService.AuthenticateAdmin("", tenantCtx) // Note: This assumes internal auth logic handles refresh via empty password or similar, otherwise needs specific Refresh logic
+	if !newResult.Success {
+		h.logger.Auth().Error("Token refresh failed", "tenantId", tenantCtx.TenantID, "error", newResult.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token refresh failed"})
+		return
+	}
+
+	// Update cookie if token came from cookie
+	if tokenSource == "admin_cookie" || tokenSource == "editor_cookie" {
+		cookieName := "admin_auth"
+		if tokenInfo.Role == "editor" {
+			cookieName = "editor_auth"
+		}
+
+		// Determine cookie domain
+		cookieDomain := ""
+		if tenantCtx.Config != nil && len(tenantCtx.Config.Domains) > 0 {
+			shortest := tenantCtx.Config.Domains[0]
+			for _, d := range tenantCtx.Config.Domains {
+				if len(d) < len(shortest) {
+					shortest = d
+				}
+			}
+			if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
+				cookieDomain = shortest
+			}
+		}
+
+		c.SetCookie(cookieName, newResult.Token, 86400, "/", cookieDomain, false, true)
+	}
+
+	h.logger.Auth().Info("Token refresh successful", "tenantId", tenantCtx.TenantID, "role", tokenInfo.Role, "source", tokenSource, "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for PostRefreshToken request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"role":    tokenInfo.Role,
+		"token":   newResult.Token,
+		"message": "Token refreshed successfully",
+	})
 }

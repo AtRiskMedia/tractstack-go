@@ -183,41 +183,30 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			search.GET("/retrieve", searchHandlers.HandleRetrieval)
 		}
 
-		// Content nodes - ALL PUBLIC for API access
+		// Content nodes - Read operations (Public)
 		nodes := api.Group("/nodes")
 		{
-			// Menu endpoints
+			// Menu endpoints - Read
 			nodes.GET("/menus", menuHandlers.GetAllMenuIDs)
 			nodes.POST("/menus", menuHandlers.GetMenusByIDs)
 			nodes.GET("/menus/:id", menuHandlers.GetMenuByID)
-			nodes.POST("/menus/create", menuHandlers.CreateMenu)
-			nodes.PUT("/menus/:id", menuHandlers.UpdateMenu)
-			nodes.DELETE("/menus/:id", menuHandlers.DeleteMenu)
 
-			// Pane endpoints
+			// Pane endpoints - Read
 			nodes.GET("/panes", paneHandlers.GetAllPaneIDs)
 			nodes.POST("/panes", paneHandlers.GetPanesByIDs)
-			nodes.POST("/panes/bulk", paneHandlers.BulkProcessPanes)
 			nodes.GET("/panes/:id", paneHandlers.GetPaneByID)
 			nodes.GET("/panes/:id/template", paneHandlers.GetPaneTemplate)
 			nodes.GET("/panes/slug/:slug", paneHandlers.GetPaneBySlug)
 			nodes.GET("/panes/context", paneHandlers.GetContextPanes)
-			nodes.POST("/panes/create", paneHandlers.CreatePane)
-			nodes.PUT("/panes/:id", paneHandlers.UpdatePane)
-			nodes.DELETE("/panes/:id", paneHandlers.DeletePane)
-			nodes.POST("/panes/files/bulk", paneHandlers.BulkUpdateFilePaneRelationships)
 			nodes.GET("/panes/slug/:slug/full-payload", paneHandlers.GetContextPaneFullPayload)
 
-			// Resource endpoints
+			// Resource endpoints - Read
 			nodes.GET("/resources", resourceHandlers.GetAllResourceIDs)
 			nodes.POST("/resources", resourceHandlers.GetResourcesByIDs)
 			nodes.GET("/resources/:id", resourceHandlers.GetResourceByID)
 			nodes.GET("/resources/slug/:slug", resourceHandlers.GetResourceBySlug)
-			nodes.POST("/resources/create", resourceHandlers.CreateResource)
-			nodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
-			nodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
 
-			// Story fragment endpoints
+			// Story fragment endpoints - Read
 			nodes.GET("/storyfragments", storyFragmentHandlers.GetAllStoryFragmentIDs)
 			nodes.GET("/storyfragments/slug/:slug/full-payload", storyFragmentHandlers.GetStoryFragmentFullPayloadBySlug)
 			nodes.GET("/storyfragments/slug/:slug/personalized-payload", storyFragmentHandlers.GetStoryFragmentPersonalizedPayloadBySlug)
@@ -226,48 +215,80 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			nodes.GET("/storyfragments/:id", storyFragmentHandlers.GetStoryFragmentByID)
 			nodes.GET("/storyfragments/slug/:slug", storyFragmentHandlers.GetStoryFragmentBySlug)
 			nodes.GET("/storyfragments/home", storyFragmentHandlers.GetHomeStoryFragment)
-			nodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
-			nodes.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
-			nodes.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
-			nodes.PUT("/storyfragments/:id/complete", storyFragmentHandlers.UpdateStoryFragmentComplete)
 
-			// TractStack endpoints
+			// TractStack endpoints - Read
 			nodes.GET("/tractstacks", tractStackHandlers.GetAllTractStackIDs)
 			nodes.POST("/tractstacks", tractStackHandlers.GetTractStacksByIDs)
 			nodes.GET("/tractstacks/:id", tractStackHandlers.GetTractStackByID)
 			nodes.GET("/tractstacks/slug/:slug", tractStackHandlers.GetTractStackBySlug)
-			nodes.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
-			nodes.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
-			nodes.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
 
-			// Belief endpoints
+			// Belief endpoints - Read
 			nodes.GET("/beliefs", beliefHandlers.GetAllBeliefIDs)
 			nodes.POST("/beliefs", beliefHandlers.GetBeliefsByIDs)
 			nodes.GET("/beliefs/:id", beliefHandlers.GetBeliefByID)
 			nodes.GET("/beliefs/slug/:slug", beliefHandlers.GetBeliefBySlug)
-			nodes.POST("/beliefs/create", beliefHandlers.CreateBelief)
-			nodes.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
-			nodes.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
 
-			// File endpoints
+			// File endpoints - Read
 			nodes.GET("/files", imageFileHandlers.GetAllFileIDs)
 			nodes.POST("/files", imageFileHandlers.GetFilesByIDs)
 			nodes.GET("/files/:id", imageFileHandlers.GetFileByID)
-			nodes.POST("/files/create", imageFileHandlers.CreateFile)
-			nodes.PUT("/files/:id", imageFileHandlers.UpdateFile)
-			nodes.DELETE("/files/:id", imageFileHandlers.DeleteFile)
 
-			// og images
-			nodes.POST("/images/og", authHandlers.AuthMiddleware(), imageFileHandlers.UploadOGImage)
-			nodes.DELETE("/images/og", authHandlers.AuthMiddleware(), imageFileHandlers.DeleteOGImage)
-
-			// Epinet endpoints
+			// Epinet endpoints - Read
 			nodes.GET("/epinets", epinetHandlers.GetAllEpinetIDs)
 			nodes.POST("/epinets", epinetHandlers.GetEpinetsByIDs)
 			nodes.GET("/epinets/:id", epinetHandlers.GetEpinetByID)
-			nodes.POST("/epinets/create", epinetHandlers.CreateEpinet)
-			nodes.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
-			nodes.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+
+			// Protected Nodes - Write operations (Authenticated)
+			protectedNodes := nodes.Group("")
+			protectedNodes.Use(authHandlers.AuthMiddleware())
+			{
+				// Menu - Write
+				protectedNodes.POST("/menus/create", menuHandlers.CreateMenu)
+				protectedNodes.PUT("/menus/:id", menuHandlers.UpdateMenu)
+				protectedNodes.DELETE("/menus/:id", menuHandlers.DeleteMenu)
+
+				// Pane - Write
+				protectedNodes.POST("/panes/bulk", paneHandlers.BulkProcessPanes)
+				protectedNodes.POST("/panes/create", paneHandlers.CreatePane)
+				protectedNodes.PUT("/panes/:id", paneHandlers.UpdatePane)
+				protectedNodes.DELETE("/panes/:id", paneHandlers.DeletePane)
+				protectedNodes.POST("/panes/files/bulk", paneHandlers.BulkUpdateFilePaneRelationships)
+
+				// Resource - Write
+				protectedNodes.POST("/resources/create", resourceHandlers.CreateResource)
+				protectedNodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
+				protectedNodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
+
+				// Story fragment - Write
+				protectedNodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)
+				protectedNodes.PUT("/storyfragments/:id", storyFragmentHandlers.UpdateStoryFragment)
+				protectedNodes.DELETE("/storyfragments/:id", storyFragmentHandlers.DeleteStoryFragment)
+				protectedNodes.PUT("/storyfragments/:id/complete", storyFragmentHandlers.UpdateStoryFragmentComplete)
+
+				// TractStack - Write
+				protectedNodes.POST("/tractstacks/create", tractStackHandlers.CreateTractStack)
+				protectedNodes.PUT("/tractstacks/:id", tractStackHandlers.UpdateTractStack)
+				protectedNodes.DELETE("/tractstacks/:id", tractStackHandlers.DeleteTractStack)
+
+				// Belief - Write
+				protectedNodes.POST("/beliefs/create", beliefHandlers.CreateBelief)
+				protectedNodes.PUT("/beliefs/:id", beliefHandlers.UpdateBelief)
+				protectedNodes.DELETE("/beliefs/:id", beliefHandlers.DeleteBelief)
+
+				// File - Write
+				protectedNodes.POST("/files/create", imageFileHandlers.CreateFile)
+				protectedNodes.PUT("/files/:id", imageFileHandlers.UpdateFile)
+				protectedNodes.DELETE("/files/:id", imageFileHandlers.DeleteFile)
+
+				// OG Images - Write
+				protectedNodes.POST("/images/og", imageFileHandlers.UploadOGImage)
+				protectedNodes.DELETE("/images/og", imageFileHandlers.DeleteOGImage)
+
+				// Epinet - Write
+				protectedNodes.POST("/epinets/create", epinetHandlers.CreateEpinet)
+				protectedNodes.PUT("/epinets/:id", epinetHandlers.UpdateEpinet)
+				protectedNodes.DELETE("/epinets/:id", epinetHandlers.DeleteEpinet)
+			}
 		}
 	}
 
