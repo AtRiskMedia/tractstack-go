@@ -391,8 +391,11 @@ func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) err
 		siteURL = fmt.Sprintf("https://%s", domain)
 	}
 
-	brandConfig := map[string]interface{}{
-		"SITE_URL": siteURL,
+	brandConfig := map[string]any{
+		"SITE_URL":             siteURL,
+		"HOME_SLUG":            "hello",
+		"TRACTSTACK_HOME_SLUG": "HELLO",
+		"THEME":                "light-bold",
 	}
 
 	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "brand.json")

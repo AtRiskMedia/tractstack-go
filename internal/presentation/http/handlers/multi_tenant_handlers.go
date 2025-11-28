@@ -227,6 +227,10 @@ func (h *MultiTenantHandlers) HandleSetupComplete(c *gin.Context) {
 		return
 	}
 
+	if tenantCtx.Config != nil {
+		tenantCtx.Config.HydrationToken = ""
+	}
+
 	marker.SetSuccess(true)
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
