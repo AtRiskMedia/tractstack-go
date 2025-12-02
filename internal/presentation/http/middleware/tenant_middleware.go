@@ -11,6 +11,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GetTenantContext retrieves the tenant context from gin context.
+func GetTenantContext(c *gin.Context) (*tenant.Context, bool) {
+	tenantCtx, exists := c.Get("tenant")
+	if !exists {
+		return nil, false
+	}
+
+	ctx, ok := tenantCtx.(*tenant.Context)
+	return ctx, ok
+}
+
 // TenantMiddleware creates middleware that extracts tenant information and creates a full tenant context.
 func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tracker) gin.HandlerFunc {
 	logger := tenantManager.GetLogger()
@@ -35,7 +46,7 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 			errMsg := "X-Tenant-ID header or tenantId query param is required"
 			logger.Tenant().Warn(errMsg, "path", c.Request.URL.Path)
 			marker.SetSuccess(false)
-			marker.SetError(fmt.Errorf(errMsg))
+			marker.SetError(fmt.Errorf("%s", errMsg))
 			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
 			c.Abort()
 			return
@@ -47,6 +58,25 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 			if tenantID == "default" {
 				detector := tenantManager.GetDetector()
 				if detector.GetTenantStatus("default") == "inactive" {
+					// explicitly leave the Database as nil to prevent unsafe access.
+					brandConfig, _ := tenant.LoadBrandConfig("default")
+
+					safeConfig := &tenant.Config{
+						TenantID:    "default",
+						Status:      "inactive",
+						BrandConfig: brandConfig,
+					}
+
+					safeCtx := &tenant.Context{
+						TenantID: "default",
+						Status:   "inactive",
+						Config:   safeConfig,
+						Logger:   logger,
+						// Database: nil, // Implicitly nil to prevent unsafe queries
+					}
+
+					c.Set("tenant", safeCtx)
+
 					// Set flags for health handler and continue
 					c.Set("setupNeeded", true)
 					c.Set("tenantId", "default")
@@ -76,15 +106,4 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 
 		c.Next()
 	}
-}
-
-// GetTenantContext retrieves the tenant context from gin context.
-func GetTenantContext(c *gin.Context) (*tenant.Context, bool) {
-	tenantCtx, exists := c.Get("tenant")
-	if !exists {
-		return nil, false
-	}
-
-	ctx, ok := tenantCtx.(*tenant.Context)
-	return ctx, ok
 }
