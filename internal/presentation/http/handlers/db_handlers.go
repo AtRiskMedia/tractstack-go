@@ -202,28 +202,37 @@ type TestResponse struct {
 }
 
 func (h *DatabaseHandlers) GetGeneralHealth(c *gin.Context) {
-	// First, try to get tenant context using existing middleware pattern
 	tenantCtx, exists := middleware.GetTenantContext(c)
 
-	// If tenant context exists and tenant is active, return healthy status
-	if exists && tenantCtx.Status == "active" {
-		// Return healthy status in exact legacy format
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "ok",
-			"healthy":   true,
-			"timestamp": time.Now().UTC().Unix(),
-			"tenantId":  tenantCtx.TenantID,
-		})
-		return
+	// If tenant context exists
+	if exists {
+		// Case 1: Active Tenant -> Return Healthy
+		if tenantCtx.Status == "active" {
+			c.JSON(http.StatusOK, gin.H{
+				"status":    "ok",
+				"healthy":   true,
+				"timestamp": time.Now().UTC().Unix(),
+				"tenantId":  tenantCtx.TenantID,
+			})
+			return
+		}
+
+		// Case 2: Inactive Default Tenant (Safe Mode) -> Return Needs Setup
+		if tenantCtx.Status == "inactive" && tenantCtx.TenantID == "default" {
+			c.JSON(http.StatusOK, gin.H{
+				"needsSetup": true,
+			})
+			return
+		}
 	}
 
-	// If tenant context failed, check if this is a setup detection scenario
+	// If tenant context failed (and wasn't injected), check if this is a raw setup detection scenario
 	if !exists {
 		// Determine which tenant was being requested
 		detector := h.tenantManager.GetDetector()
 		tenantID, err := detector.DetectTenant(c)
 
-		// CRITICAL: Only check for setup if the requested tenant is "default"
+		// Only check for setup if the requested tenant is "default"
 		if err == nil && tenantID == "default" {
 			defaultTenantStatus := detector.GetTenantStatus("default")
 
@@ -237,7 +246,7 @@ func (h *DatabaseHandlers) GetGeneralHealth(c *gin.Context) {
 		}
 	}
 
-	// Fallback for other error cases
+	// Fallback for other error cases (System actually broken)
 	c.JSON(http.StatusServiceUnavailable, gin.H{
 		"status":  "error",
 		"healthy": false,
