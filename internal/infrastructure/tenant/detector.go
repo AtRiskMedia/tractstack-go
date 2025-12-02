@@ -167,12 +167,48 @@ func (d *Detector) GetRegistry() *TenantRegistry {
 
 // ResolveTenantByDomain finds a tenant ID that claims the given domain
 func (d *Detector) ResolveTenantByDomain(domain string) (string, error) {
+	// Normalize domain for consistent comparison
+	targetDomain := strings.ToLower(domain)
+
 	for tenantID, info := range d.registry.Tenants {
+		// 1. Check if this tenant explicitly claims the domain
+		claimsDomain := false
 		for _, allowedDomain := range info.Domains {
-			if strings.EqualFold(allowedDomain, domain) {
-				return tenantID, nil
+			if strings.EqualFold(allowedDomain, targetDomain) {
+				claimsDomain = true
+				break
 			}
 		}
+
+		if !claimsDomain {
+			continue
+		}
+
+		// 2. Specificity Rule (Suffix Exclusion)
+		// If a tenant owns "sandbox.freewebpress.com" AND "freewebpress.com",
+		// and the request is for "freewebpress.com", we assume the latter is
+		// just for infrastructure/CORS. We detect this by checking if the
+		// requested domain is a suffix (preceded by a dot) of any other
+		// domain owned by this tenant.
+		isInfrastructureParent := false
+		suffixCheck := "." + targetDomain
+
+		for _, otherDomain := range info.Domains {
+			other := strings.ToLower(otherDomain)
+			if strings.HasSuffix(other, suffixCheck) {
+				isInfrastructureParent = true
+				break
+			}
+		}
+
+		if isInfrastructureParent {
+			d.logger.System().Debug("Skipping infrastructure domain match",
+				"tenantId", tenantID,
+				"domain", domain)
+			continue
+		}
+
+		return tenantID, nil
 	}
 	return "", fmt.Errorf("domain not found: %s", domain)
 }
