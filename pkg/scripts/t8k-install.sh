@@ -374,30 +374,6 @@ detect_cloudflare_secrets() {
   fi
 }
 
-# Setup directories
-setup_directories() {
-  echo -e "${BLUE}Setting up directories...${RESET}"
-
-  case "${INSTALL_TYPE}" in
-  "prod" | "multi")
-    sudo -u t8k mkdir -p /home/t8k/{src,t8k-go-server,etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state,bin,scripts}
-    sudo -u t8k mkdir -p /home/t8k/etc/pm2
-    echo -e "${GREEN}✅ Production directories created at /home/t8k/${RESET}"
-    ;;
-  "dedicated")
-    sudo -u t8k mkdir -p "/home/t8k/sites/${SITE_ID}"/{src,t8k-go-server,bin}
-    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt,scripts,state}
-    sudo -u t8k mkdir -p /home/t8k/etc/pm2
-    echo -e "${GREEN}✅ Dedicated site directories created at /home/t8k/sites/${SITE_ID}/${RESET}"
-    ;;
-  *)
-    echo -e "${RED}❌ Unknown install type: ${INSTALL_TYPE}${RESET}"
-    cleanup_lock
-    exit 1
-    ;;
-  esac
-}
-
 # Allocate ports
 allocate_ports() {
   echo -e "${BLUE}Allocating ports for production instance...${RESET}"
@@ -477,7 +453,39 @@ allocate_ports() {
   echo -e "${GREEN}✅ Ports configuration updated in ${PORTS_CONFIG_FILE}${RESET}"
 }
 
-# Deploy Go backend
+setup_directories() {
+  echo -e "${BLUE}Setting up directories...${RESET}"
+
+  case "${INSTALL_TYPE}" in
+  "prod" | "multi")
+    sudo -u t8k mkdir -p /home/t8k/{src,t8k-go-server,etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state,bin}
+    sudo -u t8k mkdir -p /home/t8k/etc/pm2
+
+    sudo mkdir -p /home/t8k/scripts
+    sudo chown root:root /home/t8k/scripts
+    sudo chmod 755 /home/t8k/scripts
+
+    echo -e "${GREEN}✅ Production directories created at /home/t8k/${RESET}"
+    ;;
+  "dedicated")
+    sudo -u t8k mkdir -p "/home/t8k/sites/${SITE_ID}"/{src,t8k-go-server,bin}
+    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state}
+    sudo -u t8k mkdir -p /home/t8k/etc/pm2
+
+    sudo mkdir -p /home/t8k/scripts
+    sudo chown root:root /home/t8k/scripts
+    sudo chmod 755 /home/t8k/scripts
+
+    echo -e "${GREEN}✅ Dedicated site directories created at /home/t8k/sites/${SITE_ID}/${RESET}"
+    ;;
+  *)
+    echo -e "${RED}❌ Unknown install type: ${INSTALL_TYPE}${RESET}"
+    cleanup_lock
+    exit 1
+    ;;
+  esac
+}
+
 deploy_go_backend() {
   echo -e "${BLUE}Deploying Go backend...${RESET}"
 
@@ -523,7 +531,7 @@ EOF
   echo -e "${BLUE}Deploying operational scripts...${RESET}"
   sudo rm -rf /home/t8k/scripts/*
   sudo cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
-  sudo chown -R root:root /home/t8k/scripts
+  sudo chown root:root /home/t8k/scripts/*
   sudo chmod 755 /home/t8k/scripts/*.sh
 
   echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
