@@ -694,6 +694,9 @@ setup_ssl_certificates() {
 
   local ACME_HOME="/home/t8k/.acme.sh"
   local DOMAIN_CERT_DIR="/home/t8k/etc/letsencrypt/live/${DOMAIN}"
+  local ROOT_SECRETS_FILE="/root/.secrets/acme/cloudflare.ini"
+  local T8K_SECRETS_DIR="/home/t8k/.secrets/acme"
+  local T8K_SECRETS_FILE="${T8K_SECRETS_DIR}/cloudflare.ini"
   local CF_Token=""
   local CF_Account_ID=""
 
@@ -712,6 +715,16 @@ setup_ssl_certificates() {
   detect_cloudflare_secrets
 
   if [[ -n "${CF_Token:-}" ]]; then
+    if [[ ! -d "$T8K_SECRETS_DIR" ]]; then
+      sudo -u t8k mkdir -p "$T8K_SECRETS_DIR"
+    fi
+    sudo -u t8k chmod 700 "/home/t8k/.secrets"
+    sudo -u t8k chmod 700 "$T8K_SECRETS_DIR"
+
+    sudo cp "$ROOT_SECRETS_FILE" "$T8K_SECRETS_FILE"
+    sudo chown t8k:t8k "$T8K_SECRETS_FILE"
+    sudo chmod 600 "$T8K_SECRETS_FILE"
+
     local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
     local INSTALL_DOMAINS="-d "${DOMAIN}""
 
