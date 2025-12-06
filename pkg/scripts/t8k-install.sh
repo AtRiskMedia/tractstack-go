@@ -606,6 +606,26 @@ create_t8k_user() {
     fi
   fi
 
+  local NGINX_GROUP=""
+
+  if command -v nginx &>/dev/null && [ -f /etc/nginx/nginx.conf ]; then
+    NGINX_GROUP=$(grep -E '^\s*user\s+([^;]+)' /etc/nginx/nginx.conf | awk '{print $2}' | tr -d ';' | cut -d: -f2 | xargs)
+    if [ -z "$NGINX_GROUP" ]; then
+      NGINX_GROUP="www-data"
+    fi
+  else
+    NGINX_GROUP="www-data"
+  fi
+
+  if ! id -g "$NGINX_GROUP" &>/dev/null; then
+    echo -e "${YELLOW}Group '$NGINX_GROUP' not found. Skipping user group addition.${RESET}"
+  elif ! id -nG t8k | grep -q "$NGINX_GROUP"; then
+    echo -e "${BLUE}Adding 't8k' user to '$NGINX_GROUP' group for Nginx media access.${RESET}"
+    sudo usermod -aG "$NGINX_GROUP" t8k
+  fi
+
+  sudo chmod 750 /home/t8k
+
   local sysctl_path=$(which systemctl)
 
   sudo bash -c "cat > /etc/sudoers.d/t8k-services << EOF
@@ -648,8 +668,8 @@ detect_cloudflare_secrets() {
   if sudo test -f "$SECRETS_FILE"; then
     echo -e "${GREEN}✅ Found secrets at $SECRETS_FILE${RESET}"
 
-    export CF_Token=$(sudo grep 'dns_cloudflare_api_token' "$SECRETS_FILE" | cut -d'=' -f2 | xargs)
-    export CF_Account_ID=$(sudo grep 'dns_cloudflare_account_id' "$SECRETS_FILE" | cut -d'=' -f2 | xargs)
+    CF_Token=$(sudo grep 'dns_cloudflare_api_token' "$SECRETS_FILE" | cut -d'=' -f2 | xargs)
+    CF_Account_ID=$(sudo grep 'dns_cloudflare_account_id' "$SECRETS_FILE" | cut -d'=' -f2 | xargs)
 
     if [[ -n "$CF_Token" ]] && [[ -n "$CF_Account_ID" ]]; then
       return 0
@@ -674,6 +694,8 @@ setup_ssl_certificates() {
 
   local ACME_HOME="/home/t8k/.acme.sh"
   local DOMAIN_CERT_DIR="/home/t8k/etc/letsencrypt/live/${DOMAIN}"
+  local CF_Token=""
+  local CF_Account_ID=""
 
   if ! sudo test -f "${ACME_HOME}/acme.sh"; then
     echo -e "${BLUE}Installing acme.sh...${RESET}"
@@ -690,34 +712,59 @@ setup_ssl_certificates() {
   detect_cloudflare_secrets
 
   if [[ -n "${CF_Token:-}" ]]; then
-    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
+    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
+    local INSTALL_DOMAINS="-d "${DOMAIN}""
 
     if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
+    elif [[ "${INSTALL_TYPE}" == "prod" ]] || [[ "${INSTALL_TYPE}" == "multi" ]]; then
+      ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
+      INSTALL_DOMAINS="-d "${DOMAIN}" -d *."${DOMAIN}""
     fi
 
-    if sudo -H -u t8k CF_Token="$CF_Token" CF_Account_ID="$CF_Account_ID" $ISSUE_CMD; then
+    if sudo -H -u t8k $ISSUE_CMD; then
       echo -e "${GREEN}✅ Certificate issued.${RESET}"
     else
-      echo -e "${RED}❌ Certificate issuance failed.${RESET}"
+      echo -e "${RED}❌ Certificate issuance failed. Falling back to Manual DNS challenge.${RESET}"
+      CF_Token=""
+    fi
+  fi
+
+  if [[ -z "${CF_Token:-}" ]]; then
+    if [[ "${NON_INTERACTIVE}" == true ]]; then
+      echo -e "${RED}❌ Cannot issue certificate: Missing DNS credentials and non-interactive mode enabled.${RESET}"
       cleanup_lock
       exit 1
     fi
 
+    echo -e "${YELLOW}⚠️ DNS credentials failed or not found. Initiating Manual DNS challenge.${RESET}"
+
+    local MANUAL_ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_manual --server letsencrypt"
+    local INSTALL_DOMAINS="-d "${DOMAIN}""
+
+    if [[ "${INSTALL_TYPE}" == "prod" ]] || [[ "${INSTALL_TYPE}" == "multi" ]]; then
+      MANUAL_ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"
+      INSTALL_DOMAINS="-d "${DOMAIN}" -d *."${DOMAIN}""
+    fi
+
+    if sudo -H -u t8k $MANUAL_ISSUE_CMD; then
+      echo -e "${GREEN}✅ Certificate issuance initiated. Please complete the Manual DNS challenge.${RESET}"
+    else
+      echo -e "${RED}❌ Manual DNS challenge initiation failed.${RESET}"
+      cleanup_lock
+      exit 1
+    fi
+  fi
+
+  if ! [[ -z "${CF_Token:-}" ]]; then
     sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
-    sudo -H -u t8k CF_Token="$CF_Token" CF_Account_ID="$CF_Account_ID" \
-      "${ACME_HOME}/acme.sh" --install-cert -d "${DOMAIN}" -d *."${DOMAIN}" \
+    sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert ${INSTALL_DOMAINS} \
       --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
       --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
       --reloadcmd "sudo systemctl reload nginx"
 
     echo -e "${GREEN}✅ SSL certificate deployed.${RESET}"
-  else
-    echo -e "${RED}❌ Cannot issue certificate: Missing Cloudflare credentials.${RESET}"
-    echo -e "${YELLOW}Ensure /root/.secrets/acme/cloudflare.ini exists or variables are exported.${RESET}"
-    cleanup_lock
-    exit 1
   fi
 }
 
