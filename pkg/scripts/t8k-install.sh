@@ -690,7 +690,7 @@ setup_ssl_certificates() {
   detect_cloudflare_secrets
 
   if [[ -n "${CF_Token:-}" ]]; then
-    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_cf --server letsencrypt"
+    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
 
     if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
