@@ -93,6 +93,70 @@ detect_os_and_package_manager() {
   fi
 }
 
+# Show installation instructions based on detected OS
+show_install_instructions() {
+  local dep=$1
+  echo -e "${YELLOW}To install ${dep}, you can try:${RESET}"
+  case $dep in
+  nginx)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install nginx${RESET}" ;;
+    dnf) echo -e "  ${BLUE}sudo dnf install nginx${RESET}" ;;
+    pacman) echo -e "  ${BLUE}sudo pacman -S nginx${RESET}" ;;
+    zypper) echo -e "  ${BLUE}sudo zypper install nginx${RESET}" ;;
+    apk) echo -e "  ${BLUE}sudo apk add nginx${RESET}" ;;
+    brew) echo -e "  ${BLUE}brew install nginx${RESET}" ;;
+    *) echo -e "  ${YELLOW}Please install nginx using your system's package manager.${RESET}" ;;
+    esac
+    ;;
+  pm2)
+    echo -e "  ${BLUE}sudo npm install -g pm2${RESET}"
+    ;;
+  pnpm)
+    echo -e "  ${BLUE}sudo npm install -g pnpm${RESET}"
+    ;;
+  sqlite3)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install sqlite3${RESET}" ;;
+    dnf) echo -e "  ${BLUE}sudo dnf install sqlite3${RESET}" ;;
+    pacman) echo -e "  ${BLUE}sudo pacman -S sqlite${RESET}" ;;
+    zypper) echo -e "  ${BLUE}sudo zypper install sqlite3${RESET}" ;;
+    apk) echo -e "  ${BLUE}sudo apk add sqlite${RESET}" ;;
+    *) echo -e "  ${YELLOW}Please install sqlite3 using your system's package manager.${RESET}" ;;
+    esac
+    ;;
+  systemd)
+    if [[ "$OS" == "macos" ]]; then
+      echo -e "  ${YELLOW}systemd is not available on macOS. Production installs are not supported.${RESET}"
+    else
+      echo -e "  ${YELLOW}systemd should be included with your Linux distribution.${RESET}"
+    fi
+    ;;
+  python3)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install python3${RESET}" ;;
+    dnf) echo -e "  ${BLUE}sudo dnf install python3${RESET}" ;;
+    pacman) echo -e "  ${BLUE}sudo pacman -S python${RESET}" ;;
+    zypper) echo -e "  ${BLUE}sudo zypper install python3${RESET}" ;;
+    apk) echo -e "  ${BLUE}sudo apk add python3${RESET}" ;;
+    brew) echo -e "  ${BLUE}brew install python@3.12${RESET}" ;;
+    *) echo -e "  ${YELLOW}Please install python3 using your system's package manager.${RESET}" ;;
+    esac
+    ;;
+  python3-bs4)
+    case $PACKAGE_MANAGER in
+    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install python3-bs4${RESET}" ;;
+    dnf) echo -e "  ${BLUE}sudo dnf install python3-beautifulsoup4${RESET}" ;;
+    pacman) echo -e "  ${BLUE}sudo pacman -S python-beautifulsoup4${RESET}" ;;
+    zypper) echo -e "  ${BLUE}sudo zypper install python3-beautifulsoup4${RESET}" ;;
+    apk) echo -e "  ${BLUE}sudo apk add py3-beautifulsoup4${RESET}" ;;
+    brew) echo -e "  ${BLUE}pip3 install beautifulsoup4${RESET}" ;;
+    *) echo -e "  ${YELLOW}Please install python3-beautifulsoup4 using your system's package manager.${RESET}" ;;
+    esac
+    ;;
+  esac
+}
+
 # Check if user has sudo privileges
 has_sudo() {
   if sudo -v 2>/dev/null; then
@@ -259,6 +323,55 @@ check_existing_installation() {
     fi
     ;;
   esac
+}
+
+# Detect Cloudflare secrets
+# Detect Cloudflare secrets
+detect_cloudflare_secrets() {
+  echo -e "${BLUE}Detecting SSL configuration...${RESET}"
+
+  # Check if t8k already has secrets first
+  if sudo test -f "/home/t8k/.secrets/certbot/cloudflare.ini"; then
+    echo "✅ Cloudflare DNS secrets already configured for t8k user"
+    return 0
+  fi
+
+  # This check requires sudo because it's looking in /root
+  if sudo test -f "/root/.secrets/certbot/cloudflare.ini"; then
+    echo -e "${YELLOW}⚠️ Cloudflare DNS secrets found in root account${RESET}"
+
+    if [[ "${NON_INTERACTIVE}" == true ]] && [[ "$(id -u)" != "0" ]]; then
+      echo -e "${RED}⛌ Cannot copy credentials in non-interactive mode unless running as root${RESET}"
+      cleanup_lock
+      exit 1
+    fi
+
+    local share_secrets="n"
+    if [[ "${NON_INTERACTIVE}" == true ]]; then
+      share_secrets="y"
+    else
+      echo -e "${YELLOW}[SECURITY CONSIDERATION]${RESET}"
+      echo "Cloudflare private secrets found in root account."
+      read -p "Share securely with t8k account? [y/N]: " share_secrets </dev/tty
+    fi
+
+    if [[ "$share_secrets" =~ ^[Yy] ]]; then
+      sudo -u t8k mkdir -p /home/t8k/.secrets/certbot
+      sudo cp /root/.secrets/certbot/cloudflare.ini /home/t8k/.secrets/certbot/
+      sudo chown t8k:t8k /home/t8k/.secrets/certbot/cloudflare.ini
+      sudo chmod 600 /home/t8k/.secrets/certbot/cloudflare.ini
+      echo -e "${GREEN}✅ Cloudflare DNS secrets copied - automated SSL enabled${RESET}"
+    else
+      echo -e "${YELLOW}⚠️ Manual DNS verification will be used${RESET}"
+    fi
+  else
+    echo -e "${YELLOW}⚠️ No Cloudflare secrets found - manual verification will be used${RESET}"
+    if [[ "${NON_INTERACTIVE}" == true ]]; then
+      echo -e "${RED}⛌ Cannot proceed with manual verification in non-interactive mode${RESET}"
+      cleanup_lock
+      exit 1
+    fi
+  fi
 }
 
 # Allocate ports
@@ -487,135 +600,49 @@ EOF
   echo -e "${GREEN}✅ Astro frontend deployed and built at ${src_dir}/my-tractstack${RESET}"
 }
 
-show_install_instructions() {
-  local dep=$1
-  echo -e "${YELLOW}To install ${dep}, you can try:${RESET}"
-  case $dep in
-  nginx)
-    case $PACKAGE_MANAGER in
-    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install nginx${RESET}" ;;
-    dnf) echo -e "  ${BLUE}sudo dnf install nginx${RESET}" ;;
-    pacman) echo -e "  ${BLUE}sudo pacman -S nginx${RESET}" ;;
-    zypper) echo -e "  ${BLUE}sudo zypper install nginx${RESET}" ;;
-    apk) echo -e "  ${BLUE}sudo apk add nginx${RESET}" ;;
-    brew) echo -e "  ${BLUE}brew install nginx${RESET}" ;;
-    *) echo -e "  ${YELLOW}Please install nginx using your system's package manager.${RESET}" ;;
-    esac
-    ;;
-  pm2)
-    echo -e "  ${BLUE}sudo npm install -g pm2${RESET}"
-    ;;
-  pnpm)
-    echo -e "  ${BLUE}sudo npm install -g pnpm${RESET}"
-    ;;
-  sqlite3)
-    case $PACKAGE_MANAGER in
-    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install sqlite3${RESET}" ;;
-    dnf) echo -e "  ${BLUE}sudo dnf install sqlite3${RESET}" ;;
-    pacman) echo -e "  ${BLUE}sudo pacman -S sqlite${RESET}" ;;
-    zypper) echo -e "  ${BLUE}sudo zypper install sqlite3${RESET}" ;;
-    apk) echo -e "  ${BLUE}sudo apk add sqlite${RESET}" ;;
-    *) echo -e "  ${YELLOW}Please install sqlite3 using your system's package manager.${RESET}" ;;
-    esac
-    ;;
-  systemd)
-    if [[ "$OS" == "macos" ]]; then
-      echo -e "  ${YELLOW}systemd is not available on macOS. Production installs are not supported.${RESET}"
-    else
-      echo -e "  ${YELLOW}systemd should be included with your Linux distribution.${RESET}"
-    fi
-    ;;
-  python3)
-    case $PACKAGE_MANAGER in
-    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install python3${RESET}" ;;
-    dnf) echo -e "  ${BLUE}sudo dnf install python3${RESET}" ;;
-    pacman) echo -e "  ${BLUE}sudo pacman -S python${RESET}" ;;
-    zypper) echo -e "  ${BLUE}sudo zypper install python3${RESET}" ;;
-    apk) echo -e "  ${BLUE}sudo apk add python3${RESET}" ;;
-    brew) echo -e "  ${BLUE}brew install python@3.12${RESET}" ;;
-    *) echo -e "  ${YELLOW}Please install python3 using your system's package manager.${RESET}" ;;
-    esac
-    ;;
-  python3-bs4)
-    case $PACKAGE_MANAGER in
-    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install python3-bs4${RESET}" ;;
-    dnf) echo -e "  ${BLUE}sudo dnf install python3-beautifulsoup4${RESET}" ;;
-    pacman) echo -e "  ${BLUE}sudo pacman -S python-beautifulsoup4${RESET}" ;;
-    zypper) echo -e "  ${BLUE}sudo zypper install python3-beautifulsoup4${RESET}" ;;
-    apk) echo -e "  ${BLUE}sudo apk add py3-beautifulsoup4${RESET}" ;;
-    brew) echo -e "  ${BLUE}pip3 install beautifulsoup4${RESET}" ;;
-    *) echo -e "  ${YELLOW}Please install python3-beautifulsoup4 using your system's package manager.${RESET}" ;;
-    esac
-    ;;
-  socat)
-    case $PACKAGE_MANAGER in
-    apt) echo -e "  ${BLUE}sudo apt update && sudo apt install socat${RESET}" ;;
-    dnf) echo -e "  ${BLUE}sudo dnf install socat${RESET}" ;;
-    pacman) echo -e "  ${BLUE}sudo pacman -S socat${RESET}" ;;
-    apk) echo -e "  ${BLUE}sudo apk add socat${RESET}" ;;
-    *) echo -e "  ${YELLOW}Please install socat using your system's package manager.${RESET}" ;;
-    esac
-    ;;
-  esac
-}
-
-check_essential_prerequisites() {
-  echo -e "${BLUE}Checking essential prerequisites...${RESET}"
-  local MISSING_DEPS=()
-  if ! command -v go &>/dev/null; then MISSING_DEPS+=("Go"); elif ! check_go_version; then MISSING_DEPS+=("Go 1.22+"); fi
-  if ! command -v node &>/dev/null; then MISSING_DEPS+=("Node.js"); fi
-  if ! command -v git &>/dev/null; then MISSING_DEPS+=("Git"); fi
-  if ! command -v npm &>/dev/null; then MISSING_DEPS+=("npm"); fi
-  if ! command -v pnpm &>/dev/null; then MISSING_DEPS+=("pnpm"); fi
-  if ! command -v python3 &>/dev/null; then MISSING_DEPS+=("python3"); fi
-  if ! python3 -c "import bs4" &>/dev/null 2>&1; then MISSING_DEPS+=("python3-bs4"); fi
-  if ! command -v socat &>/dev/null; then MISSING_DEPS+=("socat"); fi
-
-  if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
-    echo -e "${RED}Error: Missing essential developer dependencies:${RESET}"
-    for dep in "${MISSING_DEPS[@]}"; do
-      echo -e "  ${RED}⌘ ${dep}${RESET}"
-      show_install_instructions "$dep"
-    done
-    cleanup_lock
-    exit 1
-  fi
-
-  echo -e "${GREEN}✅ All essential prerequisites found.${RESET}"
-}
-
+# Create t8k user if needed
+# Create t8k user if needed
 create_t8k_user() {
   echo -e "${BLUE}Setting up t8k user...${RESET}"
 
   if id "t8k" &>/dev/null; then
     echo -e "${GREEN}✅ User 't8k' already exists${RESET}"
-  else
-    echo -e "${BLUE}Creating system user 't8k'...${RESET}"
-    case $PACKAGE_MANAGER in
-    apt)
-      sudo adduser --system --group --shell /bin/bash --home /home/t8k t8k
-      ;;
-    dnf | pacman | zypper | apk | *)
-      sudo useradd --system --create-home --shell /bin/bash -m t8k
-      ;;
-    esac
-
-    if [[ "${NON_INTERACTIVE}" != true ]]; then
-      echo -e "${YELLOW}Please set a password for the 't8k' user for maintenance.${RESET}"
-      sudo passwd t8k </dev/tty
-    fi
+    return 0
   fi
 
-  local sysctl_path=$(which systemctl)
+  if [[ "${NON_INTERACTIVE}" == true ]] && [[ "$(id -u)" != "0" ]]; then
+    echo -e "${RED}❌ User 't8k' does not exist and cannot create in non-interactive mode${RESET}"
+    cleanup_lock
+    exit 1
+  fi
 
+  echo -e "${BLUE}Creating system user 't8k'...${RESET}"
+  case $PACKAGE_MANAGER in
+  apt)
+    # Use the more feature-rich adduser on Debian-based systems
+    sudo adduser --system --group --shell /bin/bash --home /home/t8k t8k
+    ;;
+  dnf | pacman | zypper | apk | *)
+    # Use the more standard useradd on other systems
+    sudo useradd --system --create-home --shell /bin/bash -m t8k
+    ;;
+  esac
+
+  if [[ "${NON_INTERACTIVE}" != true ]]; then
+    echo -e "${YELLOW}Please set a password for the 't8k' user for maintenance.${RESET}"
+    sudo passwd t8k </dev/tty
+  fi
+
+  systemctl_path=$(which systemctl)
   sudo bash -c "cat > /etc/sudoers.d/t8k-services << EOF
-t8k ALL=(root) NOPASSWD: ${sysctl_path} restart tractstack-go*, ${sysctl_path} reload tractstack-go*, ${sysctl_path} reload nginx
+t8k ALL=(root) NOPASSWD: ${systemctl_path} restart tractstack-go*, ${systemctl_path} reload tractstack-go*, /bin/systemctl restart tractstack-go*, /bin/systemctl reload tractstack-go*, /usr/bin/systemctl restart tractstack-go*, /usr/bin/systemctl reload tractstack-go*
 EOF"
   sudo chmod 440 /etc/sudoers.d/t8k-services
 
-  echo -e "${GREEN}✅ User 't8k' configured successfully${RESET}"
+  echo -e "${GREEN}✅ User 't8k' created successfully${RESET}"
 }
 
+# Sets up the build environment for the t8k user by creating a .profile
 setup_t8k_environment() {
   echo -e "${BLUE}Configuring build environment for t8k user...${RESET}"
 
@@ -625,99 +652,115 @@ setup_t8k_environment() {
   pnpm_path=$(dirname "$(command -v pnpm)")
   npm_path=$(dirname "$(command -v npm)")
 
+  # Deduplicate and form the augmented PATH.
   augmented_path=$(echo "${go_path}:${node_path}:${pnpm_path}:${npm_path}:${PATH}" | awk -v RS=: '{ if (!seen[$0]++) { if (NR > 1) printf(":"); printf("%s", $0) } }')
 
-  if ! sudo -u t8k grep -q "automatically generated by the TractStack installer" /home/t8k/.profile 2>/dev/null; then
-    sudo -u t8k tee -a /home/t8k/.profile >/dev/null <<EOF
-
+  # Create /home/t8k/.profile
+  sudo -u t8k tee /home/t8k/.profile >/dev/null <<EOF
 # This file is automatically generated by the TractStack installer.
 export PATH="${augmented_path}"
 export PM2_HOME="/home/t8k/.pm2"
 EOF
-  fi
 
   sudo chown t8k:t8k /home/t8k/.profile
   echo -e "${GREEN}✅ t8k user environment configured.${RESET}"
 }
 
-detect_cloudflare_secrets() {
-  echo -e "${BLUE}Detecting SSL configuration...${RESET}"
-
-  local SECRETS_FILE="/root/.secrets/acme/cloudflare.ini"
-
-  if sudo test -f "$SECRETS_FILE"; then
-    echo -e "${GREEN}✅ Found secrets at $SECRETS_FILE${RESET}"
-
-    export CF_Token=$(sudo grep 'dns_cloudflare_api_token' "$SECRETS_FILE" | cut -d'=' -f2 | xargs)
-    export CF_Account_ID=$(sudo grep 'dns_cloudflare_account_id' "$SECRETS_FILE" | cut -d'=' -f2 | xargs)
-
-    if [[ -n "$CF_Token" ]] && [[ -n "$CF_Account_ID" ]]; then
-      return 0
-    fi
-  fi
-
-  if [[ -n "${CF_Token:-}" ]] && [[ -n "${CF_Account_ID:-}" ]]; then
-    echo -e "${GREEN}✅ Cloudflare credentials found in environment${RESET}"
-    return 0
-  fi
-
-  echo -e "${YELLOW}⚠️ Secrets not found or invalid. SSL issuance may fail if not pre-provisioned.${RESET}"
-}
-
+# Setup SSL certificates
 setup_ssl_certificates() {
+  dry_run_flag=""
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo -e "${BLUE}[SIMULATION] SSL Setup${RESET}"
-    return 0
+    echo -e "${BLUE}Setting up SSL certificates...${RESET} [SIMULATION]"
+    dry_run_flag="--dry-run"
+  else
+    echo -e "${BLUE}Setting up SSL certificates...${RESET}"
   fi
 
-  echo -e "${BLUE}Setting up SSL certificates...${RESET}"
+  # Install python3-venv if needed, then create venv and install certbot
+  if ! sudo test -f /home/t8k/certbot_venv/bin/certbot; then
+    echo -e "${BLUE}Installing certbot in virtual environment...${RESET}"
 
-  local ACME_HOME="/home/t8k/.acme.sh"
-  local DOMAIN_CERT_DIR="/home/t8k/etc/letsencrypt/live/${DOMAIN}"
+    # Install venv package based on OS
+    case $PACKAGE_MANAGER in
+    apt)
+      sudo apt update && sudo apt install -y python3-venv python3-pip
+      ;;
+    dnf)
+      sudo dnf install -y python3-venv python3-pip
+      ;;
+    pacman)
+      sudo pacman -S --noconfirm python python-pip
+      ;;
+    *)
+      echo -e "${YELLOW}Cannot auto-install python3-venv. Please install it manually.${RESET}"
+      return 1
+      ;;
+    esac
 
-  if ! sudo test -f "${ACME_HOME}/acme.sh"; then
-    echo -e "${BLUE}Installing acme.sh...${RESET}"
-    sudo -i -u t8k curl https://get.acme.sh | sudo -i -u t8k sh
-  fi
+    # Create venv and install certbot
+    sudo -i -u t8k bash -c "
+     python3 -m venv /home/t8k/certbot_venv && \
+     source /home/t8k/certbot_venv/bin/activate && \
+     pip install certbot certbot-dns-cloudflare
+   "
 
-  if sudo test -f "${DOMAIN_CERT_DIR}/fullchain.pem"; then
-    echo -e "${GREEN}✅ SSL certificates already exist. Skipping issuance.${RESET}"
-    return 0
-  fi
-
-  echo -e "${BLUE}Requesting certificate for ${DOMAIN}...${RESET}"
-
-  detect_cloudflare_secrets
-
-  if [[ -n "${CF_Token:-}" ]]; then
-    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_cf --server letsencrypt"
-
-    if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
-      ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
-    fi
-
-    if sudo -u t8k -E ${ISSUE_CMD}; then
-      echo -e "${GREEN}✅ Certificate issued.${RESET}"
-    else
-      echo -e "${RED}❌ Certificate issuance failed.${RESET}"
+    # Verify installation worked
+    if ! sudo test -f /home/t8k/certbot_venv/bin/certbot; then
+      echo -e "${RED}❌ Certbot venv installation failed${RESET}"
       cleanup_lock
       exit 1
     fi
 
-    sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
-
-    sudo -u t8k -E "${ACME_HOME}/acme.sh" --install-cert -d "${DOMAIN}" \
-      --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
-      --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
-      --reloadcmd "sudo systemctl reload nginx"
-
-    echo -e "${GREEN}✅ SSL certificate deployed.${RESET}"
-  else
-    echo -e "${RED}❌ Cannot issue certificate: Missing Cloudflare credentials.${RESET}"
-    echo -e "${YELLOW}Ensure /root/.secrets/acme/cloudflare.ini exists or variables are exported.${RESET}"
-    cleanup_lock
-    exit 1
+    echo -e "${GREEN}✅ Certbot installed in /home/t8k/certbot_venv${RESET}"
   fi
+
+  sudo -u t8k mkdir -p /home/t8k/etc/letsencrypt /home/t8k/lib/letsencrypt /home/t8k/log/letsencrypt
+
+  local primary_cert_domains="-d ${DOMAIN} -d *.${DOMAIN}"
+  local primary_cert_path="/home/t8k/etc/letsencrypt/live/${DOMAIN}"
+
+  if sudo test -f "${primary_cert_path}/fullchain.pem"; then
+    echo -e "${GREEN}✅ SSL certificates already exist, skipping request.${RESET}"
+    return 0
+  fi
+
+  echo -e "${BLUE}Requesting SSL certificates for: ${primary_cert_domains}${RESET}"
+
+  if sudo test -f "/home/t8k/.secrets/certbot/cloudflare.ini"; then
+    echo -e "${GREEN}Using Cloudflare DNS automation${RESET}"
+    sudo -i -u t8k bash -c "
+     source /home/t8k/certbot_venv/bin/activate && \
+     certbot certonly --dns-cloudflare \
+       --dns-cloudflare-credentials /home/t8k/.secrets/certbot/cloudflare.ini \
+       --dns-cloudflare-propagation-seconds 15 \
+       --config-dir /home/t8k/etc/letsencrypt \
+       --work-dir /home/t8k/lib/letsencrypt \
+       --logs-dir /home/t8k/log/letsencrypt \
+       --non-interactive --agree-tos \
+       --email admin@${DOMAIN} \
+       $dry_run_flag \
+       ${primary_cert_domains}
+   "
+  else
+    echo -e "${YELLOW}Using manual DNS verification${RESET}"
+    echo -e "${BLUE}Certbot will show you TXT records to add to your DNS...${RESET}"
+    if [[ "${NON_INTERACTIVE}" == true ]]; then
+      echo -e "${RED}⛌ Manual verification required but running in non-interactive mode${RESET}"
+      cleanup_lock
+      exit 1
+    fi
+    sudo -i -u t8k bash -c "
+     source /home/t8k/certbot_venv/bin/activate && \
+     certbot certonly --manual --preferred-challenges dns \
+       --config-dir /home/t8k/etc/letsencrypt \
+       --work-dir /home/t8k/lib/letsencrypt \
+       --logs-dir /home/t8k/log/letsencrypt \
+       --agree-tos --email admin@${DOMAIN} \
+       $dry_run_flag \
+       ${primary_cert_domains}
+   " </dev/tty
+  fi
+  echo -e "${GREEN}✅ SSL certificate request completed${RESET}"
 }
 
 # Configure nginx
@@ -1176,6 +1219,31 @@ check_go_version() {
   fi
   echo -e "${GREEN}✅ Go $full_version found${RESET}"
   return 0
+}
+
+# Checks for essential developer dependencies
+check_essential_prerequisites() {
+  echo -e "${BLUE}Checking essential prerequisites...${RESET}"
+  local MISSING_DEPS=()
+  if ! command -v go &>/dev/null; then MISSING_DEPS+=("Go"); elif ! check_go_version; then MISSING_DEPS+=("Go 1.22+"); fi
+  if ! command -v node &>/dev/null; then MISSING_DEPS+=("Node.js"); fi
+  if ! command -v git &>/dev/null; then MISSING_DEPS+=("Git"); fi
+  if ! command -v npm &>/dev/null; then MISSING_DEPS+=("npm"); fi
+  if ! command -v pnpm &>/dev/null; then MISSING_DEPS+=("pnpm"); fi
+  if ! command -v python3 &>/dev/null; then MISSING_DEPS+=("python3"); fi
+  if ! python3 -c "import bs4" &>/dev/null 2>&1; then MISSING_DEPS+=("python3-bs4"); fi
+
+  if [[ ${#MISSING_DEPS[@]} -gt 0 ]]; then
+    echo -e "${RED}Error: Missing essential developer dependencies:${RESET}"
+    for dep in "${MISSING_DEPS[@]}"; do
+      echo -e "  ${RED}⌘ ${dep}${RESET}"
+      show_install_instructions "$dep"
+    done
+    cleanup_lock
+    exit 1
+  fi
+
+  echo -e "${GREEN}✅ All essential prerequisites found.${RESET}"
 }
 
 # Checks for production system dependencies
