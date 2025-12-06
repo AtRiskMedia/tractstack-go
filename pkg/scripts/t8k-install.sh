@@ -674,12 +674,6 @@ detect_cloudflare_secrets() {
     fi
   fi
 
-  # Check environment as a secondary fallback if not found in root file
-  if [[ -n "${CF_Token:-}" ]] && [[ -n "${CF_Account_ID:-}" ]]; then
-    echo -e "${GREEN}✅ Cloudflare credentials found in environment${RESET}"
-    return 0
-  fi
-
   echo -e "${YELLOW}⚠️ Secrets not found or invalid. SSL issuance will use manual challenge.${RESET}"
   return 1
 }
@@ -731,7 +725,15 @@ setup_ssl_certificates() {
       INSTALL_DOMAINS="-d "${DOMAIN}" -d *."${DOMAIN}""
     fi
 
-    if sudo -H -u t8k CF_CONFIG="$T8K_SECRETS_FILE" $ISSUE_CMD; then
+    if sudo -H -u t8k bash -c "
+      export CF_Token=\$(grep 'dns_cloudflare_api_token' '${T8K_SECRETS_FILE}' | cut -d'=' -f2 | xargs)
+      export CF_Account_ID=\$(grep 'dns_cloudflare_account_id' '${T8K_SECRETS_FILE}' | cut -d'=' -f2 | xargs)
+
+      if [[ -z \"\$CF_Token\" ]] || [[ -z \"\$CF_Account_ID\" ]]; then
+        exit 1
+      fi
+
+      $ISSUE_CMD"; then
       echo -e "${GREEN}✅ Certificate issued.${RESET}"
     else
       echo -e "${RED}❌ Certificate issuance failed. Falling back to Manual DNS challenge.${RESET}"
@@ -741,7 +743,7 @@ setup_ssl_certificates() {
     if [[ -z "${goto_manual_challenge:-}" ]]; then
       sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
-      sudo -H -u t8k CF_CONFIG="$T8K_SECRETS_FILE" "${ACME_HOME}/acme.sh" --install-cert ${INSTALL_DOMAINS} \
+      sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert ${INSTALL_DOMAINS} \
         --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
         --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
         --reloadcmd "sudo systemctl reload nginx"
@@ -751,7 +753,6 @@ setup_ssl_certificates() {
     fi
   fi
 
-  # Fallback Path
   if [[ -n "${goto_manual_challenge:-}" ]] || ! detect_cloudflare_secrets; then
     if [[ "${NON_INTERACTIVE}" == true ]]; then
       echo -e "${RED}❌ Cannot issue certificate: Missing DNS credentials and non-interactive mode enabled.${RESET}"
