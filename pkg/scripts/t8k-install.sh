@@ -345,7 +345,7 @@ setup_directories() {
 
   case "${INSTALL_TYPE}" in
   "prod" | "multi")
-    sudo -u t8k mkdir -p /home/t8k/{src,t8k-go-server,etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state,bin}
+    sudo -u t8k mkdir -p /home/t8k/{src,t8k-go-server,etc/letsencrypt,state,bin}
     sudo -u t8k mkdir -p /home/t8k/etc/pm2
 
     sudo mkdir -p /home/t8k/scripts
@@ -356,7 +356,7 @@ setup_directories() {
     ;;
   "dedicated")
     sudo -u t8k mkdir -p "/home/t8k/sites/${SITE_ID}"/{src,t8k-go-server,bin}
-    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,lib/letsencrypt,log/letsencrypt,state}
+    sudo -u t8k mkdir -p /home/t8k/{etc/letsencrypt,log/letsencrypt,state}
     sudo -u t8k mkdir -p /home/t8k/etc/pm2
 
     sudo mkdir -p /home/t8k/scripts
