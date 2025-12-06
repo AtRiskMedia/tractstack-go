@@ -697,8 +697,6 @@ setup_ssl_certificates() {
   local ROOT_SECRETS_FILE="/root/.secrets/acme/cloudflare.ini"
   local T8K_SECRETS_DIR="/home/t8k/.secrets/acme"
   local T8K_SECRETS_FILE="${T8K_SECRETS_DIR}/cloudflare.ini"
-  local CF_Token=""
-  local CF_Account_ID=""
 
   if ! sudo test -f "${ACME_HOME}/acme.sh"; then
     echo -e "${BLUE}Installing acme.sh...${RESET}"
