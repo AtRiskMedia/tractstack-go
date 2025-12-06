@@ -696,7 +696,7 @@ setup_ssl_certificates() {
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
     fi
 
-    if sudo -u t8k -E ${ISSUE_CMD}; then
+    if sudo -H -u t8k CF_Token="$CF_Token" CF_Account_ID="$CF_Account_ID" $ISSUE_CMD; then
       echo -e "${GREEN}✅ Certificate issued.${RESET}"
     else
       echo -e "${RED}❌ Certificate issuance failed.${RESET}"
@@ -706,7 +706,8 @@ setup_ssl_certificates() {
 
     sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
-    sudo -u t8k -E "${ACME_HOME}/acme.sh" --install-cert -d "${DOMAIN}" \
+    sudo -H -u t8k CF_Token="$CF_Token" CF_Account_ID="$CF_Account_ID" \
+      "${ACME_HOME}/acme.sh" --install-cert -d "${DOMAIN}" \
       --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
       --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
       --reloadcmd "sudo systemctl reload nginx"
@@ -720,7 +721,6 @@ setup_ssl_certificates() {
   fi
 }
 
-# Configure nginx
 configure_nginx() {
   echo -e "${BLUE}Configuring nginx...${RESET}"
 
