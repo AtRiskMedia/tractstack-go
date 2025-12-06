@@ -690,7 +690,7 @@ setup_ssl_certificates() {
   detect_cloudflare_secrets
 
   if [[ -n "${CF_Token:-}" ]]; then
-    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_cf --server letsencrypt"
+    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_cf --server letsencrypt"
 
     if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
@@ -707,7 +707,7 @@ setup_ssl_certificates() {
     sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
     sudo -H -u t8k CF_Token="$CF_Token" CF_Account_ID="$CF_Account_ID" \
-      "${ACME_HOME}/acme.sh" --install-cert -d "${DOMAIN}" \
+      "${ACME_HOME}/acme.sh" --install-cert -d "${DOMAIN}" -d *."${DOMAIN}" \
       --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
       --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
       --reloadcmd "sudo systemctl reload nginx"
