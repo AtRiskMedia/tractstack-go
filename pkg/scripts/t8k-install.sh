@@ -680,11 +680,8 @@ detect_cloudflare_secrets() {
 
 setup_ssl_certificates() {
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo -e "${BLUE}[SIMULATION] SSL Setup${RESET}"
     return 0
   fi
-
-  echo -e "${BLUE}Setting up SSL certificates...${RESET}"
 
   local ACME_HOME="/home/t8k/.acme.sh"
   local DOMAIN_CERT_DIR="/home/t8k/etc/letsencrypt/live/${DOMAIN}"
@@ -693,16 +690,12 @@ setup_ssl_certificates() {
   local T8K_SECRETS_FILE="${T8K_SECRETS_DIR}/cloudflare.ini"
 
   if ! sudo test -f "${ACME_HOME}/acme.sh"; then
-    echo -e "${BLUE}Installing acme.sh...${RESET}"
     sudo -i -u t8k curl https://get.acme.sh | sudo -i -u t8k sh
   fi
 
   if sudo test -f "${DOMAIN_CERT_DIR}/fullchain.pem"; then
-    echo -e "${GREEN}✅ SSL certificates already exist. Skipping issuance.${RESET}"
     return 0
   fi
-
-  echo -e "${BLUE}Requesting certificate for ${DOMAIN}...${RESET}"
 
   if detect_cloudflare_secrets; then
     if [[ ! -d "$T8K_SECRETS_DIR" ]]; then
@@ -715,14 +708,11 @@ setup_ssl_certificates() {
     sudo chown t8k:t8k "$T8K_SECRETS_FILE"
     sudo chmod 600 "$T8K_SECRETS_FILE"
 
-    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
-    local INSTALL_DOMAINS="-d "${DOMAIN}""
+    local INSTALL_DOMAINS="-d ${DOMAIN} -d *.${DOMAIN}"
+    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue ${INSTALL_DOMAINS} --dns dns_cf --server letsencrypt --dnssleep 30"
 
     if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
-    elif [[ "${INSTALL_TYPE}" == "prod" ]] || [[ "${INSTALL_TYPE}" == "multi" ]]; then
-      ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_cf --server letsencrypt --dnssleep 30"
-      INSTALL_DOMAINS="-d "${DOMAIN}" -d *."${DOMAIN}""
     fi
 
     if sudo -H -u t8k bash -c "
@@ -734,9 +724,8 @@ setup_ssl_certificates() {
       fi
 
       $ISSUE_CMD"; then
-      echo -e "${GREEN}✅ Certificate issued.${RESET}"
+      :
     else
-      echo -e "${RED}❌ Certificate issuance failed. Falling back to Manual DNS challenge.${RESET}"
       goto_manual_challenge="true"
     fi
 
@@ -748,32 +737,21 @@ setup_ssl_certificates() {
         --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
         --reloadcmd "sudo systemctl reload nginx"
 
-      echo -e "${GREEN}✅ SSL certificate deployed.${RESET}"
       return 0
     fi
   fi
 
   if [[ -n "${goto_manual_challenge:-}" ]] || ! detect_cloudflare_secrets; then
     if [[ "${NON_INTERACTIVE}" == true ]]; then
-      echo -e "${RED}❌ Cannot issue certificate: Missing DNS credentials and non-interactive mode enabled.${RESET}"
       cleanup_lock
       exit 1
     fi
 
-    echo -e "${YELLOW}⚠️ DNS credentials failed or not found. Initiating Manual DNS challenge.${RESET}"
-
-    local MANUAL_ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} --dns dns_manual --server letsencrypt"
-    local INSTALL_DOMAINS="-d "${DOMAIN}""
-
-    if [[ "${INSTALL_TYPE}" == "prod" ]] || [[ "${INSTALL_TYPE}" == "multi" ]]; then
-      MANUAL_ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"
-      INSTALL_DOMAINS="-d "${DOMAIN}" -d *."${DOMAIN}""
-    fi
+    local MANUAL_ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"
 
     if sudo -H -u t8k $MANUAL_ISSUE_CMD; then
-      echo -e "${GREEN}✅ Certificate issuance initiated. Please complete the Manual DNS challenge.${RESET}"
+      :
     else
-      echo -e "${RED}❌ Manual DNS challenge initiation failed.${RESET}"
       cleanup_lock
       exit 1
     fi
