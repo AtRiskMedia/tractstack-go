@@ -685,15 +685,22 @@ setup_ssl_certificates() {
   local ROOT_SECRETS_FILE="/root/.secrets/acme/cloudflare.ini"
   local T8K_SECRETS_DIR="/home/t8k/.secrets/acme"
   local T8K_SECRETS_FILE="${T8K_SECRETS_DIR}/cloudflare.ini"
+  local install_success=false
 
   if ! sudo test -f "${ACME_HOME}/acme.sh"; then
     sudo -i -u t8k curl https://get.acme.sh | sudo -i -u t8k sh
   fi
 
   if sudo test -f "${DOMAIN_CERT_DIR}/fullchain.pem"; then
+    echo -e "${GREEN}✅ SSL certificates already installed.${RESET}"
     return 0
   fi
 
+  if command -v systemctl &>/dev/null; then
+    sudo systemctl start nginx 2>/dev/null || true
+  fi
+
+  # --- SCENARIO 1: Automated / Cloudflare Secrets ---
   if detect_cloudflare_secrets; then
     if [[ ! -d "$T8K_SECRETS_DIR" ]]; then
       sudo -u t8k mkdir -p "$T8K_SECRETS_DIR"
@@ -712,46 +719,56 @@ setup_ssl_certificates() {
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
     fi
 
-    if sudo -H -u t8k bash -c "
+    sudo -H -u t8k bash -c "
       export CF_Token=\$(grep 'dns_cloudflare_api_token' '${T8K_SECRETS_FILE}' | cut -d'=' -f2 | xargs)
       export CF_Account_ID=\$(grep 'dns_cloudflare_account_id' '${T8K_SECRETS_FILE}' | cut -d'=' -f2 | xargs)
-
-      if [[ -z \"\$CF_Token\" ]] || [[ -z \"\$CF_Account_ID\" ]]; then
-        exit 1
+      
+      if [[ -n \"\$CF_Token\" ]] && [[ -n \"\$CF_Account_ID\" ]]; then
+        $ISSUE_CMD
       fi
+    " || true
 
-      $ISSUE_CMD"; then
-      :
-    else
-      goto_manual_challenge="true"
-    fi
+    # Prepare destination
+    sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
-    if [[ -z "${goto_manual_challenge:-}" ]]; then
-      sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
-
-      sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert ${INSTALL_DOMAINS} \
-        --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
-        --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
-        --reloadcmd "sudo systemctl reload nginx"
-
-      return 0
+    if sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert ${INSTALL_DOMAINS} \
+      --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
+      --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
+      --reloadcmd "sudo systemctl reload nginx"; then
+      install_success=true
     fi
   fi
 
-  if [[ -n "${goto_manual_challenge:-}" ]] || ! detect_cloudflare_secrets; then
+  # --- SCENARIO 2: Manual Fallback (If CF failed or no secrets) ---
+  if [[ "$install_success" == "false" ]]; then
+
+    # 1. Fail hard if Non-Interactive (Requirement: Must have working secrets)
     if [[ "${NON_INTERACTIVE}" == true ]]; then
+      echo -e "${RED}❌ SSL generation failed (or secrets missing) and non-interactive mode prevents manual input.${RESET}"
       cleanup_lock
       exit 1
     fi
 
-    local MANUAL_ISSUE_CMD="${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"
+    echo -e "${YELLOW}⚠️ Falling back to manual DNS challenge...${RESET}"
 
-    if sudo -H -u t8k $MANUAL_ISSUE_CMD; then
-      :
-    else
-      cleanup_lock
-      exit 1
+    sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
+
+    # Run Manual Issue interactively
+    if sudo -i -u t8k bash -c "${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"; then
+
+      # If manual issue succeeds, install the certs
+      if sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert -d ${DOMAIN} -d *.${DOMAIN} \
+        --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
+        --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
+        --reloadcmd "sudo systemctl reload nginx"; then
+        return 0
+      fi
     fi
+
+    # Final Catch-all Failure
+    echo -e "${RED}❌ Failed to issue/install SSL certificates.${RESET}"
+    cleanup_lock
+    exit 1
   fi
 }
 
