@@ -700,7 +700,6 @@ setup_ssl_certificates() {
     sudo systemctl start nginx 2>/dev/null || true
   fi
 
-  # --- SCENARIO 1: Automated / Cloudflare Secrets ---
   if detect_cloudflare_secrets; then
     if [[ ! -d "$T8K_SECRETS_DIR" ]]; then
       sudo -u t8k mkdir -p "$T8K_SECRETS_DIR"
@@ -713,7 +712,8 @@ setup_ssl_certificates() {
     sudo chmod 600 "$T8K_SECRETS_FILE"
 
     local INSTALL_DOMAINS="-d ${DOMAIN} -d *.${DOMAIN}"
-    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue ${INSTALL_DOMAINS} --dns dns_cf --server letsencrypt --dnssleep 30"
+    # Added --force here
+    local ISSUE_CMD="${ACME_HOME}/acme.sh --issue --force ${INSTALL_DOMAINS} --dns dns_cf --server letsencrypt --dnssleep 30"
 
     if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
       ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
@@ -728,10 +728,10 @@ setup_ssl_certificates() {
       fi
     " || true
 
-    # Prepare destination
     sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
-    if sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert ${INSTALL_DOMAINS} \
+    # Added --force here
+    if sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert --force ${INSTALL_DOMAINS} \
       --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
       --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
       --reloadcmd "sudo systemctl reload nginx"; then
@@ -739,10 +739,7 @@ setup_ssl_certificates() {
     fi
   fi
 
-  # --- SCENARIO 2: Manual Fallback (If CF failed or no secrets) ---
   if [[ "$install_success" == "false" ]]; then
-
-    # 1. Fail hard if Non-Interactive (Requirement: Must have working secrets)
     if [[ "${NON_INTERACTIVE}" == true ]]; then
       echo -e "${RED}❌ SSL generation failed (or secrets missing) and non-interactive mode prevents manual input.${RESET}"
       cleanup_lock
@@ -753,11 +750,10 @@ setup_ssl_certificates() {
 
     sudo -u t8k mkdir -p "$DOMAIN_CERT_DIR"
 
-    # Run Manual Issue interactively
-    if sudo -i -u t8k bash -c "${ACME_HOME}/acme.sh --issue -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"; then
-
-      # If manual issue succeeds, install the certs
-      if sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert -d ${DOMAIN} -d *.${DOMAIN} \
+    # Manual Issue (Already had --force, kept it)
+    if sudo -i -u t8k bash -c "${ACME_HOME}/acme.sh --issue --force -d ${DOMAIN} -d *.${DOMAIN} --dns dns_manual --server letsencrypt"; then
+      # Added --force here (THIS WAS THE FAILURE POINT IN YOUR LOGS)
+      if sudo -H -u t8k "${ACME_HOME}/acme.sh" --install-cert --force -d ${DOMAIN} -d *.${DOMAIN} \
         --key-file "${DOMAIN_CERT_DIR}/privkey.pem" \
         --fullchain-file "${DOMAIN_CERT_DIR}/fullchain.pem" \
         --reloadcmd "sudo systemctl reload nginx"; then
@@ -765,7 +761,6 @@ setup_ssl_certificates() {
       fi
     fi
 
-    # Final Catch-all Failure
     echo -e "${RED}❌ Failed to issue/install SSL certificates.${RESET}"
     cleanup_lock
     exit 1
