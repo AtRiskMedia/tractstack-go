@@ -416,7 +416,6 @@ EOF
   sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -tags sqlite_fts5 -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
 
   echo -e "${BLUE}Deploying operational scripts...${RESET}"
-  sudo rm -rf /home/t8k/scripts/*
   sudo cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
   sudo chown root:root /home/t8k/scripts/*
   sudo chmod 755 /home/t8k/scripts/*.sh
@@ -617,11 +616,9 @@ create_t8k_user() {
     NGINX_GROUP="www-data"
   fi
 
-  if ! id -g "$NGINX_GROUP" &>/dev/null; then
-    echo -e "${YELLOW}Group '$NGINX_GROUP' not found. Skipping user group addition.${RESET}"
-  elif ! id -nG t8k | grep -q "$NGINX_GROUP"; then
-    echo -e "${BLUE}Adding 't8k' user to '$NGINX_GROUP' group for Nginx media access.${RESET}"
-    sudo usermod -aG "$NGINX_GROUP" t8k
+  if ! id -nG "www-data" | grep -q "t8k"; then
+    log "Adding 'www-data' user to 't8k' group for Nginx media access."
+    usermod -aG t8k www-data
   fi
 
   sudo chmod 750 /home/t8k
