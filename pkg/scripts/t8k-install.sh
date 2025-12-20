@@ -387,7 +387,16 @@ deploy_go_backend() {
   local data_dir="${base_dir}/t8k-go-server"
 
   echo -e "${BLUE}Cloning TractStack Go backend...${RESET}"
-  sudo -i -u t8k git clone https://github.com/AtRiskMedia/tractstack-go.git "${src_dir}/tractstack-go"
+  if sudo test -d "${src_dir}/tractstack-go/.git"; then
+    echo -e "${YELLOW}Source exists. Pulling latest changes...${RESET}"
+    sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && git pull"
+  else
+    # Clean incomplete downloads if any
+    if sudo test -d "${src_dir}/tractstack-go"; then
+      sudo rm -rf "${src_dir}/tractstack-go"
+    fi
+    sudo -i -u t8k git clone https://github.com/AtRiskMedia/tractstack-go.git "${src_dir}/tractstack-go"
+  fi
 
   echo -e "${BLUE}Creating Go backend configuration...${RESET}"
   sudo -u t8k tee "${src_dir}/tractstack-go/.env" >/dev/null <<EOF
@@ -416,9 +425,9 @@ EOF
   sudo -i -u t8k bash -c "cd '${src_dir}/tractstack-go' && go build -tags sqlite_fts5 -o '${bin_dir}/tractstack-go' ./cmd/tractstack-go"
 
   echo -e "${BLUE}Deploying operational scripts...${RESET}"
-  sudo cp -r "${src_dir}/tractstack-go/pkg/scripts/"* /home/t8k/scripts/
-  sudo chown root:root /home/t8k/scripts/*
-  sudo chmod 755 /home/t8k/scripts/*.sh
+  sudo bash -c "cp -r ${src_dir}/tractstack-go/pkg/scripts/* /home/t8k/scripts/"
+  sudo chown -R root:root /home/t8k/scripts
+  sudo bash -c "chmod 755 /home/t8k/scripts/*.sh"
 
   echo -e "${GREEN}✅ Go backend deployed to ${bin_dir}/tractstack-go${RESET}"
 }
