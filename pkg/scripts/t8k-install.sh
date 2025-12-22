@@ -161,6 +161,10 @@ parse_cli_args() {
       INSTALL_TYPE="prod"
       shift
       ;;
+    --challenge)
+      CHALLENGE_ALIAS="$2"
+      shift 2
+      ;;
     --multi)
       INSTALL_TYPE="multi"
       shift
@@ -228,7 +232,7 @@ show_usage() {
   echo "  --multi                    Production multi-tenant"
   echo "  --dedicated <tenant-id>    Dedicated tenant instance"
   echo "  --domain <domain>          Base domain (required for production)"
-  echo "  --custom-domain <domain>   Custom domain for dedicated instances"
+  echo "  --challenge <domain>   Custom domain for DNS challenge"
   echo "  --non-interactive          Fail if manual verification needed"
   echo "  --help, -h                 Show this help message"
   echo
@@ -236,7 +240,7 @@ show_usage() {
   echo "  $0 --quick"
   echo "  $0 --prod --domain=tractstack.com"
   echo "  $0 --multi --domain=tractstack.com"
-  echo "  $0 --dedicated mytenant --domain=tractstack.com --custom-domain=example.com"
+  echo "  $0 --dedicated mytenant --domain=tractstack.com"
 }
 
 # Check if TractStack is already installed
@@ -724,8 +728,8 @@ setup_ssl_certificates() {
     # Added --force here
     local ISSUE_CMD="${ACME_HOME}/acme.sh --issue --force ${INSTALL_DOMAINS} --dns dns_cf --server letsencrypt --dnssleep 30"
 
-    if [[ "${INSTALL_TYPE}" == "dedicated" ]]; then
-      ISSUE_CMD="${ISSUE_CMD} --challenge-alias tractstack.com"
+    if [[ -n "${CHALLENGE_ALIAS}" ]]; then
+      ISSUE_CMD="${ISSUE_CMD} --challenge-alias ${CHALLENGE_ALIAS}"
     fi
 
     sudo -H -u t8k bash -c "
