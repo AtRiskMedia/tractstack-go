@@ -26,6 +26,7 @@ PACKAGE_MANAGER=""
 ALLOCATED_GO_PORT=""
 ALLOCATED_ASTRO_PORT=""
 PORTS_CONFIG_FILE="/home/t8k/etc/t8k-ports.conf"
+CHALLENGE_ALIAS=""
 
 cleanup_lock() {
   if [[ -n "${LOCK_FILE:-}" ]]; then

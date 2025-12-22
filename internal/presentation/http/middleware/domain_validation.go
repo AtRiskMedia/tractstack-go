@@ -58,7 +58,7 @@ func DomainValidationMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
 				domain = originURL.Hostname()
 			}
 		} else {
-			domain = host
+			domain = strings.Split(host, ":")[0]
 		}
 
 		// Validate domain against tenant's allowed domains
