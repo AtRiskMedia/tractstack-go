@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 )
 
@@ -239,6 +240,53 @@ func (s *FTSService) IndexPaneContent(tx *sql.Tx, paneID, content string) error 
 		}
 	}
 	return nil
+}
+
+// IndexHTMLAST extracts text from the AST and indexes it using the standard pane indexer.
+func (s *FTSService) IndexHTMLAST(tx *sql.Tx, paneID string, ast *rendering.HTMLAST) error {
+	if ast == nil {
+		return s.DeletePaneContent(tx, paneID)
+	}
+
+	var sb strings.Builder
+	for _, node := range ast.Tree {
+		s.extractTextFromHTMLAST(&sb, node)
+	}
+
+	// Pass the raw text to IndexPaneContent, which handles sanitization and DB upsert
+	return s.IndexPaneContent(tx, paneID, sb.String())
+}
+
+// extractTextFromHTMLAST walks the AST and extracts text nodes, adding spacing for blocks.
+func (s *FTSService) extractTextFromHTMLAST(sb *strings.Builder, node rendering.HTMLASTNode) {
+	if node.Tag == "text" {
+		sb.WriteString(node.Text)
+		sb.WriteString(" ")
+		return
+	}
+
+	// Add space before block elements to ensure word separation (e.g. </div><div>)
+	if isBlockElement(node.Tag) {
+		sb.WriteString(" ")
+	}
+
+	for _, child := range node.Children {
+		s.extractTextFromHTMLAST(sb, child)
+	}
+
+	// Add space after block elements
+	if isBlockElement(node.Tag) {
+		sb.WriteString(" ")
+	}
+}
+
+func isBlockElement(tag string) bool {
+	switch tag {
+	case "div", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "section", "article", "blockquote", "main", "aside", "header", "footer", "nav":
+		return true
+	default:
+		return false
+	}
 }
 
 // IndexStoryFragmentMetadata sanitizes and indexes the title and description of a story fragment.

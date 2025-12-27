@@ -140,6 +140,14 @@ func (nr *NodeRendererImpl) GetChildNodeIDs(parentID string) []string {
 
 // Core rendering methods
 func (nr *NodeRendererImpl) renderPane(nodeID string) string {
+	nodeData := nr.getNodeRenderData(nodeID)
+
+	// BIFURCATION: If an HTML AST exists, render...
+	if nodeData != nil && nodeData.PaneData != nil && nodeData.PaneData.HTMLAST != nil {
+		hastRenderer := &HastRenderer{ctx: nr.ctx}
+		return hastRenderer.Render(nodeData.PaneData.HTMLAST)
+	}
+
 	paneRenderer := &PaneRenderer{
 		ctx:          nr.ctx,
 		cssProcessor: nr.cssProcessor,

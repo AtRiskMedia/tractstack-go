@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
@@ -494,6 +495,13 @@ func (r *PaneRepository) extractPaneDataFromOptions(pane *content.PaneNode) {
 			if str, ok := v.(string); ok {
 				pane.CodeHookPayload[k] = str
 			}
+		}
+	}
+	if astData, ok := pane.OptionsPayload["htmlAst"]; ok {
+		bytes, _ := json.Marshal(astData)
+		var htmlAst rendering.HTMLAST
+		if err := json.Unmarshal(bytes, &htmlAst); err == nil {
+			pane.HTMLAST = &htmlAst
 		}
 	}
 	if decorative, ok := pane.OptionsPayload["isDecorative"].(bool); ok {

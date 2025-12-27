@@ -224,7 +224,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 			continue
 		}
 
-		// Extract child nodes from this pane's OptionsPayload
+		// Extract child nodes for the separate 'childNodes' array
 		if pane.OptionsPayload != nil {
 			if nodes, exists := pane.OptionsPayload["nodes"]; exists {
 				if nodesArray, ok := nodes.([]any); ok {
@@ -233,19 +233,9 @@ func (h *StoryFragmentHandlers) GetStoryFragmentFullPayloadBySlug(c *gin.Context
 			}
 		}
 
-		// Create cleaned pane (without embedded nodes)
+		// Create a true cleaned copy
 		cleanedPane := *pane
-		cleanedPane.OptionsPayload = make(map[string]any)
-
-		// Copy all fields except "nodes"
-		if pane.OptionsPayload != nil {
-			for k, v := range pane.OptionsPayload {
-				if k != "nodes" {
-					cleanedPane.OptionsPayload[k] = v
-				}
-			}
-		}
-
+		cleanedPane.OptionsPayload = nil
 		cleanedPanes[i] = &cleanedPane
 	}
 

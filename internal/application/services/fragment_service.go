@@ -3,6 +3,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/beliefs"
@@ -291,88 +292,6 @@ func (s *FragmentService) generateFreshHTML(
 	return s.generateFreshHTMLWithWidgets(tenantCtx, pane, sessionID, storyfragmentID, widgetCtx), nil
 }
 
-// generateFreshHTMLWithWidgets generates HTML with pre-built widget context
-func (s *FragmentService) generateFreshHTMLWithWidgets(
-	tenantCtx *tenant.Context,
-	pane *content.PaneNode,
-	sessionID, storyfragmentID string,
-	widgetCtx *widgets.WidgetContext,
-) string {
-	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(pane)
-	if err != nil {
-		s.logger.Content().Error("Failed to extract nodes", "error", err.Error(), "paneId", pane.ID)
-		return fmt.Sprintf(`<div>Error extracting nodes for pane %s</div>`, pane.ID)
-	}
-
-	paneNodeData := &rendering.NodeRenderData{
-		ID:       pane.ID,
-		NodeType: "Pane",
-		PaneData: &rendering.PaneRenderData{
-			Title:           pane.Title,
-			Slug:            pane.Slug,
-			IsDecorative:    pane.IsDecorative,
-			BgColour:        pane.BgColour,
-			HeldBeliefs:     s.convertStringMapToInterface(pane.HeldBeliefs),
-			WithheldBeliefs: s.convertStringMapToInterface(pane.WithheldBeliefs),
-			CodeHookTarget:  pane.CodeHookTarget,
-			CodeHookPayload: s.convertStringMapToInterfaceMap(pane.CodeHookPayload),
-		},
-	}
-	nodesData[pane.ID] = paneNodeData
-
-	renderCtx := &rendering.RenderContext{
-		AllNodes:         nodesData,
-		ParentNodes:      parentChildMap,
-		TenantID:         tenantCtx.TenantID,
-		SessionID:        sessionID,
-		StoryfragmentID:  storyfragmentID,
-		ContainingPaneID: pane.ID,
-		WidgetContext:    widgetCtx,
-		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
-	}
-
-	generator := templates.NewGenerator(renderCtx)
-	return generator.RenderPaneFragment(pane.ID)
-}
-
-// generateBaseHTML creates non-personalized HTML for caching
-func (s *FragmentService) generateBaseHTML(tenantCtx *tenant.Context, pane *content.PaneNode) (string, error) {
-	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(pane)
-	if err != nil {
-		return "", fmt.Errorf("failed to extract nodes: %w", err)
-	}
-
-	paneNodeData := &rendering.NodeRenderData{
-		ID:       pane.ID,
-		NodeType: "Pane",
-		PaneData: &rendering.PaneRenderData{
-			Title:           pane.Title,
-			Slug:            pane.Slug,
-			IsDecorative:    pane.IsDecorative,
-			BgColour:        pane.BgColour,
-			HeldBeliefs:     s.convertStringMapToInterface(pane.HeldBeliefs),
-			WithheldBeliefs: s.convertStringMapToInterface(pane.WithheldBeliefs),
-			CodeHookTarget:  pane.CodeHookTarget,
-			CodeHookPayload: s.convertStringMapToInterfaceMap(pane.CodeHookPayload),
-		},
-	}
-	nodesData[pane.ID] = paneNodeData
-
-	renderCtx := &rendering.RenderContext{
-		AllNodes:         nodesData,
-		ParentNodes:      parentChildMap,
-		TenantID:         tenantCtx.TenantID,
-		SessionID:        "",
-		StoryfragmentID:  "",
-		ContainingPaneID: pane.ID,
-		WidgetContext:    nil,
-		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
-	}
-
-	generator := templates.NewGenerator(renderCtx)
-	return generator.RenderPaneFragment(pane.ID), nil
-}
-
 // applyBeliefVisibility applies belief-based visibility wrapper to HTML content
 func (s *FragmentService) applyBeliefVisibility(
 	tenantCtx *tenant.Context,
@@ -479,27 +398,15 @@ func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string
 	return result
 }
 
-// GenerateHTMLFromPayload generates HTML directly from OptionsPayload without database persistence
+// GenerateHTMLFromPayload generates HTML directly from a provided AST without database persistence
 // This bypasses all belief-based visibility and personalization for preview purposes
-func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, paneID string, optionsPayload map[string]any) (string, error) {
-	var bgColour *string
-	var isDecorative bool
-
-	if bg, ok := optionsPayload["bgColour"].(string); ok {
-		bgColour = &bg
-	}
-
-	if deco, ok := optionsPayload["isDecorative"].(bool); ok {
-		isDecorative = deco
-	}
-
+func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, paneID string, htmlAst *rendering.HTMLAST, isEditorPreview bool) (string, error) {
 	tempPane := &content.PaneNode{
-		ID:             paneID,
-		Title:          "Preview Pane",
-		Slug:           "preview",
-		IsDecorative:   isDecorative,
-		BgColour:       bgColour,
-		OptionsPayload: optionsPayload,
+		ID:           paneID,
+		Title:        "Preview Pane",
+		Slug:         "preview",
+		IsDecorative: false,
+		HTMLAST:      htmlAst,
 	}
 
 	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(tempPane)
@@ -515,6 +422,7 @@ func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, pan
 			Slug:         tempPane.Slug,
 			IsDecorative: tempPane.IsDecorative,
 			BgColour:     tempPane.BgColour,
+			HTMLAST:      htmlAst,
 		},
 	}
 	nodesData[paneID] = paneNodeData
@@ -528,8 +436,121 @@ func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, pan
 		ContainingPaneID: paneID,
 		WidgetContext:    nil,
 		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
+		IsEditorPreview:  isEditorPreview,
 	}
 
 	generator := templates.NewGenerator(renderCtx)
+
 	return generator.RenderPaneFragment(paneID), nil
+}
+
+// extractHTMLAST safely extracts and type-casts the HTMLAST from the options payload
+func (s *FragmentService) extractHTMLAST(options map[string]any) *rendering.HTMLAST {
+	if options == nil {
+		return nil
+	}
+
+	astData, exists := options["htmlAst"]
+	if !exists || astData == nil {
+		return nil
+	}
+
+	// Round-trip marshal to safely convert map[string]any to the struct
+	bytes, err := json.Marshal(astData)
+	if err != nil {
+		s.logger.Content().Error("Failed to marshal htmlAst data", "error", err)
+		return nil
+	}
+
+	var htmlAst rendering.HTMLAST
+	if err := json.Unmarshal(bytes, &htmlAst); err != nil {
+		s.logger.Content().Error("Failed to unmarshal htmlAst into struct", "error", err)
+		return nil
+	}
+
+	return &htmlAst
+}
+
+// generateFreshHTMLWithWidgets generates HTML with pre-built widget context
+func (s *FragmentService) generateFreshHTMLWithWidgets(
+	tenantCtx *tenant.Context,
+	pane *content.PaneNode,
+	sessionID, storyfragmentID string,
+	widgetCtx *widgets.WidgetContext,
+) string {
+	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(pane)
+	if err != nil {
+		s.logger.Content().Error("Failed to extract nodes", "error", err.Error(), "paneId", pane.ID)
+		return fmt.Sprintf(`<div>Error extracting nodes for pane %s</div>`, pane.ID)
+	}
+
+	paneNodeData := &rendering.NodeRenderData{
+		ID:       pane.ID,
+		NodeType: "Pane",
+		PaneData: &rendering.PaneRenderData{
+			Title:           pane.Title,
+			Slug:            pane.Slug,
+			IsDecorative:    pane.IsDecorative,
+			BgColour:        pane.BgColour,
+			HeldBeliefs:     s.convertStringMapToInterface(pane.HeldBeliefs),
+			WithheldBeliefs: s.convertStringMapToInterface(pane.WithheldBeliefs),
+			CodeHookTarget:  pane.CodeHookTarget,
+			CodeHookPayload: s.convertStringMapToInterfaceMap(pane.CodeHookPayload),
+			HTMLAST:         s.extractHTMLAST(pane.OptionsPayload),
+		},
+	}
+	nodesData[pane.ID] = paneNodeData
+
+	renderCtx := &rendering.RenderContext{
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         tenantCtx.TenantID,
+		SessionID:        sessionID,
+		StoryfragmentID:  storyfragmentID,
+		ContainingPaneID: pane.ID,
+		WidgetContext:    widgetCtx,
+		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
+	}
+
+	generator := templates.NewGenerator(renderCtx)
+	return generator.RenderPaneFragment(pane.ID)
+}
+
+// generateBaseHTML creates non-personalized HTML for caching
+func (s *FragmentService) generateBaseHTML(tenantCtx *tenant.Context, pane *content.PaneNode) (string, error) {
+	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(pane)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract nodes: %w", err)
+	}
+
+	paneNodeData := &rendering.NodeRenderData{
+		ID:       pane.ID,
+		NodeType: "Pane",
+		PaneData: &rendering.PaneRenderData{
+			Title:           pane.Title,
+			Slug:            pane.Slug,
+			IsDecorative:    pane.IsDecorative,
+			BgColour:        pane.BgColour,
+			HeldBeliefs:     s.convertStringMapToInterface(pane.HeldBeliefs),
+			WithheldBeliefs: s.convertStringMapToInterface(pane.WithheldBeliefs),
+			CodeHookTarget:  pane.CodeHookTarget,
+			CodeHookPayload: s.convertStringMapToInterfaceMap(pane.CodeHookPayload),
+			HTMLAST:         s.extractHTMLAST(pane.OptionsPayload),
+		},
+	}
+	nodesData[pane.ID] = paneNodeData
+
+	renderCtx := &rendering.RenderContext{
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         tenantCtx.TenantID,
+		SessionID:        "",
+		StoryfragmentID:  "",
+		ContainingPaneID: pane.ID,
+		WidgetContext:    nil,
+		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
+	}
+
+	generator := templates.NewGenerator(renderCtx)
+	return generator.RenderPaneFragment(pane.ID), nil
 }

@@ -1,7 +1,11 @@
 // Package content defines the application's core content-related domain entities.
 package content
 
-import "time"
+import (
+	"time"
+
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
+)
 
 type TractStackNode struct {
 	ID              string  `json:"id"`
@@ -45,6 +49,7 @@ type PaneNode struct {
 	BgColour        *string             `json:"bgColour,omitempty"`
 	CodeHookTarget  *string             `json:"codeHookTarget,omitempty"`
 	CodeHookPayload map[string]string   `json:"codeHookPayload,omitempty"`
+	HTMLAST         *rendering.HTMLAST  `json:"htmlAst,omitempty"`
 	HeldBeliefs     map[string][]string `json:"heldBeliefs,omitempty"`
 	WithheldBeliefs map[string][]string `json:"withheldBeliefs,omitempty"`
 	MarkdownBody    *string             `json:"markdownBody,omitempty"`

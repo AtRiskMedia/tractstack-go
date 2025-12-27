@@ -174,6 +174,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			fragments.GET("/panes/:id/static", fragmentHandlers.GetPaneFragmentStatic)
 			fragments.POST("/panes", fragmentHandlers.GetPaneFragmentBatch)
 			fragments.POST("/preview", fragmentHandlers.GeneratePreviewFromPayload)
+			fragments.POST("/ast-preview", fragmentHandlers.GenerateASTPreview)
 		}
 
 		// Search endpoints

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
@@ -34,9 +35,9 @@ type PreviewFromPayloadRequest struct {
 }
 
 type PreviewPaneData struct {
-	ID             string         `json:"id"`
-	Title          string         `json:"title"`
-	OptionsPayload map[string]any `json:"optionsPayload"`
+	ID    string                  `json:"id"`
+	Title string                  `json:"title"`
+	Tree  []rendering.HTMLASTNode `json:"tree,omitempty"`
 }
 
 // GetPaneFragment handles GET /api/v1/fragments/panes/:id
@@ -161,13 +162,15 @@ func (h *FragmentHandlers) GeneratePreviewFromPayload(c *gin.Context) {
 		return
 	}
 
-	// Generate HTML from payloads without database persistence
 	results := make(map[string]string)
 	errors := make(map[string]string)
 
 	for _, paneData := range req.Panes {
-		// Pass the pane ID from the request to maintain parent-child relationships
-		html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, paneData.ID, paneData.OptionsPayload)
+		astPayload := &rendering.HTMLAST{
+			Tree: paneData.Tree,
+		}
+
+		html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, paneData.ID, astPayload, false)
 		if err != nil {
 			errors[paneData.ID] = err.Error()
 			continue
@@ -224,5 +227,41 @@ func (h *FragmentHandlers) GetPaneFragmentStatic(c *gin.Context) {
 
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for GetPaneFragmentStatic request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", paneID)
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+}
+
+// GenerateASTPreview handles POST /api/v1/fragments/ast-preview
+// It generates editor-friendly HTML (with contenteditable and data-ast-id) for the Creative Track editor.
+func (h *FragmentHandlers) GenerateASTPreview(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("generate_ast_preview_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	var req PreviewPaneData
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	// Create a minimal AST container for the service layer
+	astPayload := &rendering.HTMLAST{
+		Tree: req.Tree,
+	}
+
+	html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, req.ID, astPayload, true)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GenerateASTPreview request",
+		"duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneId", req.ID)
+
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }

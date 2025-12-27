@@ -13,4 +13,5 @@ type RenderContext struct {
 	ContainingPaneID string                     `json:"containingPaneId,omitempty"`
 	WidgetContext    *widgets.WidgetContext     `json:"widgetContext,omitempty"`
 	HomeSlug         string                     `json:"homeSlug,omitempty"`
+	IsEditorPreview  bool                       `json:"isEditorPreview,omitempty"`
 }
