@@ -34,10 +34,20 @@ type PreviewFromPayloadRequest struct {
 	Panes []PreviewPaneData `json:"panes"`
 }
 
+// PreviewPaneData represents the request body for standard preview generation
+// Used by GeneratePreviewFromPayload (Standard Editor)
 type PreviewPaneData struct {
+	ID             string         `json:"id"`
+	Title          string         `json:"title"`
+	OptionsPayload map[string]any `json:"optionsPayload"`
+}
+
+// PreviewCreativePaneData represents the request body for AST-based preview generation
+// Used by GenerateASTPreview (Creative Editor)
+type PreviewCreativePaneData struct {
 	ID    string                  `json:"id"`
 	Title string                  `json:"title"`
-	Tree  []rendering.HTMLASTNode `json:"tree,omitempty"`
+	Tree  []rendering.HTMLASTNode `json:"tree"`
 }
 
 // GetPaneFragment handles GET /api/v1/fragments/panes/:id
@@ -140,56 +150,6 @@ func (h *FragmentHandlers) GetPaneFragmentBatch(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// GeneratePreviewFromPayload handles POST /api/v1/fragments/preview
-func (h *FragmentHandlers) GeneratePreviewFromPayload(c *gin.Context) {
-	tenantCtx, exists := middleware.GetTenantContext(c)
-	if !exists {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
-		return
-	}
-
-	marker := h.perfTracker.StartOperation("generate_preview_from_payload_request", tenantCtx.TenantID)
-	defer marker.Complete()
-
-	var req PreviewFromPayloadRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
-		return
-	}
-
-	if len(req.Panes) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one pane is required"})
-		return
-	}
-
-	results := make(map[string]string)
-	errors := make(map[string]string)
-
-	for _, paneData := range req.Panes {
-		astPayload := &rendering.HTMLAST{
-			Tree: paneData.Tree,
-		}
-
-		html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, paneData.ID, astPayload, false)
-		if err != nil {
-			errors[paneData.ID] = err.Error()
-			continue
-		}
-		results[paneData.ID] = html
-	}
-
-	response := gin.H{"fragments": results}
-	if len(errors) > 0 {
-		response["errors"] = errors
-	}
-
-	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for GeneratePreviewFromPayload request",
-		"duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.Panes))
-
-	c.JSON(http.StatusOK, response)
-}
-
 // GetPaneFragmentStatic handles GET /api/v1/fragments/panes/:id/static
 // Cache-first, non-personalized fragment generation for context panes
 func (h *FragmentHandlers) GetPaneFragmentStatic(c *gin.Context) {
@@ -230,8 +190,56 @@ func (h *FragmentHandlers) GetPaneFragmentStatic(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
 }
 
+// GeneratePreviewFromPayload handles POST /api/v1/fragments/preview
+// Uses PreviewPaneData with OptionsPayload (Map)
+func (h *FragmentHandlers) GeneratePreviewFromPayload(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("generate_preview_from_payload_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	var req PreviewFromPayloadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if len(req.Panes) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one pane is required"})
+		return
+	}
+
+	results := make(map[string]string)
+	errors := make(map[string]string)
+
+	for _, paneData := range req.Panes {
+		// Pass the options map directly to the service
+		html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, paneData.ID, paneData.OptionsPayload)
+		if err != nil {
+			errors[paneData.ID] = err.Error()
+			continue
+		}
+		results[paneData.ID] = html
+	}
+
+	response := gin.H{"fragments": results}
+	if len(errors) > 0 {
+		response["errors"] = errors
+	}
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for GeneratePreviewFromPayload request",
+		"duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "paneCount", len(req.Panes))
+
+	c.JSON(http.StatusOK, response)
+}
+
 // GenerateASTPreview handles POST /api/v1/fragments/ast-preview
-// It generates editor-friendly HTML (with contenteditable and data-ast-id) for the Creative Track editor.
+// Uses PreviewCreativePaneData with Tree (AST)
 func (h *FragmentHandlers) GenerateASTPreview(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -242,7 +250,8 @@ func (h *FragmentHandlers) GenerateASTPreview(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("generate_ast_preview_request", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	var req PreviewPaneData
+	// Use the new struct that expects "tree"
+	var req PreviewCreativePaneData
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
 		return
@@ -253,7 +262,8 @@ func (h *FragmentHandlers) GenerateASTPreview(c *gin.Context) {
 		Tree: req.Tree,
 	}
 
-	html, err := h.fragmentService.GenerateHTMLFromPayload(tenantCtx, req.ID, astPayload, true)
+	// Call the new AST-specific service method
+	html, err := h.fragmentService.GenerateHTMLFromAST(tenantCtx, req.ID, astPayload, true)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

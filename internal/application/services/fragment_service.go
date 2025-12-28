@@ -398,15 +398,27 @@ func (s *FragmentService) convertStringMapToInterfaceMap(input map[string]string
 	return result
 }
 
-// GenerateHTMLFromPayload generates HTML directly from a provided AST without database persistence
+// GenerateHTMLFromPayload generates HTML directly from OptionsPayload without database persistence
 // This bypasses all belief-based visibility and personalization for preview purposes
-func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, paneID string, htmlAst *rendering.HTMLAST, isEditorPreview bool) (string, error) {
+func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, paneID string, optionsPayload map[string]any) (string, error) {
+	var bgColour *string
+	var isDecorative bool
+
+	if bg, ok := optionsPayload["bgColour"].(string); ok {
+		bgColour = &bg
+	}
+
+	if deco, ok := optionsPayload["isDecorative"].(bool); ok {
+		isDecorative = deco
+	}
+
 	tempPane := &content.PaneNode{
-		ID:           paneID,
-		Title:        "Preview Pane",
-		Slug:         "preview",
-		IsDecorative: false,
-		HTMLAST:      htmlAst,
+		ID:             paneID,
+		Title:          "Preview Pane",
+		Slug:           "preview",
+		IsDecorative:   isDecorative,
+		BgColour:       bgColour,
+		OptionsPayload: optionsPayload,
 	}
 
 	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(tempPane)
@@ -422,7 +434,6 @@ func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, pan
 			Slug:         tempPane.Slug,
 			IsDecorative: tempPane.IsDecorative,
 			BgColour:     tempPane.BgColour,
-			HTMLAST:      htmlAst,
 		},
 	}
 	nodesData[paneID] = paneNodeData
@@ -436,11 +447,9 @@ func (s *FragmentService) GenerateHTMLFromPayload(tenantCtx *tenant.Context, pan
 		ContainingPaneID: paneID,
 		WidgetContext:    nil,
 		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
-		IsEditorPreview:  isEditorPreview,
 	}
 
 	generator := templates.NewGenerator(renderCtx)
-
 	return generator.RenderPaneFragment(paneID), nil
 }
 
@@ -553,4 +562,50 @@ func (s *FragmentService) generateBaseHTML(tenantCtx *tenant.Context, pane *cont
 
 	generator := templates.NewGenerator(renderCtx)
 	return generator.RenderPaneFragment(pane.ID), nil
+}
+
+// GenerateHTMLFromAST generates HTML directly from a provided AST without database persistence
+// Used by the Creative Track editor for ast-preview
+func (s *FragmentService) GenerateHTMLFromAST(tenantCtx *tenant.Context, paneID string, htmlAst *rendering.HTMLAST, isEditorPreview bool) (string, error) {
+	tempPane := &content.PaneNode{
+		ID:           paneID,
+		Title:        "Preview Pane",
+		Slug:         "preview",
+		IsDecorative: false,
+		HTMLAST:      htmlAst,
+	}
+
+	nodesData, parentChildMap, err := templates.ExtractNodesFromPane(tempPane)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract nodes from payload: %w", err)
+	}
+
+	paneNodeData := &rendering.NodeRenderData{
+		ID:       paneID,
+		NodeType: "Pane",
+		PaneData: &rendering.PaneRenderData{
+			Title:        tempPane.Title,
+			Slug:         tempPane.Slug,
+			IsDecorative: tempPane.IsDecorative,
+			BgColour:     tempPane.BgColour,
+			HTMLAST:      htmlAst,
+		},
+	}
+	nodesData[paneID] = paneNodeData
+
+	renderCtx := &rendering.RenderContext{
+		AllNodes:         nodesData,
+		ParentNodes:      parentChildMap,
+		TenantID:         tenantCtx.TenantID,
+		SessionID:        "preview-session",
+		StoryfragmentID:  "preview-fragment",
+		ContainingPaneID: paneID,
+		WidgetContext:    nil,
+		HomeSlug:         tenantCtx.Config.BrandConfig.HomeSlug,
+		IsEditorPreview:  isEditorPreview,
+	}
+
+	generator := templates.NewGenerator(renderCtx)
+
+	return generator.RenderPaneFragment(paneID), nil
 }
