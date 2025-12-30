@@ -507,3 +507,41 @@ func (h *PaneHandlers) GetContextPaneFullPayload(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+// BulkDeletePanes handles the deletion of multiple panes
+func (h *PaneHandlers) BulkDeletePanes(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("bulk_delete_panes_request", tenantCtx.TenantID)
+	defer marker.Complete()
+	h.logger.Content().Debug("Received bulk delete panes request", "method", c.Request.Method, "path", c.Request.URL.Path)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var req PaneIDsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	if len(req.PaneIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "paneIds array cannot be empty"})
+		return
+	}
+
+	if err := h.paneService.BulkDelete(tenantCtx, req.PaneIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Bulk delete panes request completed", "deletedCount", len(req.PaneIDs), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for BulkDeletePanes request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "deletedCount", len(req.PaneIDs))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "panes deleted successfully",
+		"deletedCount": len(req.PaneIDs),
+	})
+}

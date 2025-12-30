@@ -15,31 +15,24 @@ type HastRenderer struct {
 func (hr *HastRenderer) Render(ast *rendering.HTMLAST) string {
 	var sb strings.Builder
 
-	// 1. Render CSS (Unsanitized - trusted from compiler)
-	// Skip style injection in Editor Mode so the frontend can control viewport-scoped CSS.
 	if ast.CSS != "" && (hr.ctx == nil || !hr.ctx.IsEditorPreview) {
 		sb.WriteString("<style>")
 		sb.WriteString(ast.CSS)
 		sb.WriteString("</style>")
 	}
 
-	// 2. Render Body content into a temporary buffer
 	var bodySb strings.Builder
 	for _, node := range ast.Tree {
 		hr.renderNode(&bodySb, node)
 	}
 
-	// 3. Define Sanitization Policy
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("class", "style", "id").Globally()
 
-	// If in Editor Mode, allow the interactive hooks
 	if hr.ctx != nil && hr.ctx.IsEditorPreview {
 		p.AllowAttrs("data-ast-id", "contenteditable").Globally()
 	}
 
-	// 4. Sanitize and append body
-	// Note: We use SanitizeBytes to avoid extra string allocations, but Sanitize works too.
 	sanitizedBody := p.Sanitize(bodySb.String())
 	sb.WriteString(sanitizedBody)
 
@@ -48,9 +41,16 @@ func (hr *HastRenderer) Render(ast *rendering.HTMLAST) string {
 
 func isEditableTag(tag string) bool {
 	switch tag {
-	case "h1", "h2", "h3", "h4", "h5", "h6",
-		"p", "li", "span", "strong", "em",
-		"a", "button", "img":
+	case "h1", "h2", "h3", "h4", "h5", "h6", "p", "li":
+		return true
+	default:
+		return false
+	}
+}
+
+func isIdentifiableElement(tag string) bool {
+	switch tag {
+	case "a", "button", "img":
 		return true
 	default:
 		return false
@@ -74,11 +74,16 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 		sb.WriteString("\"")
 	}
 
-	// Inject editor hooks if applicable
-	if hr.ctx != nil && hr.ctx.IsEditorPreview && node.ID != "" && isEditableTag(node.Tag) {
-		sb.WriteString(" data-ast-id=\"")
-		sb.WriteString(node.ID)
-		sb.WriteString("\" contenteditable=\"true\"")
+	if hr.ctx != nil && hr.ctx.IsEditorPreview && node.ID != "" {
+		if isEditableTag(node.Tag) {
+			sb.WriteString(" data-ast-id=\"")
+			sb.WriteString(node.ID)
+			sb.WriteString("\" contenteditable=\"true\"")
+		} else if isIdentifiableElement(node.Tag) {
+			sb.WriteString(" data-ast-id=\"")
+			sb.WriteString(node.ID)
+			sb.WriteString("\"")
+		}
 	}
 
 	sb.WriteString(">")

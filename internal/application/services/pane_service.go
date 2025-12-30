@@ -768,3 +768,57 @@ func (s *PaneService) FindPaneContextStatus(tenantCtx *tenant.Context, paneIDs [
 	repo := tenantCtx.PaneRepo()
 	return repo.FindPaneContextStatus(tenantCtx.TenantID, paneIDs)
 }
+
+// BulkDelete deletes multiple panes efficiently by deduplicating side effects
+func (s *PaneService) BulkDelete(tenantCtx *tenant.Context, ids []string) error {
+	start := time.Now()
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// 1. Gather all unique parent StoryFragments (to trigger rebuilds later)
+	storyFragmentRepo := tenantCtx.StoryFragmentRepo()
+	uniqueParentSFIDs := make(map[string]bool)
+
+	for _, paneID := range ids {
+		parentSFIDs, err := storyFragmentRepo.FindIDsByPaneID(paneID)
+		if err != nil {
+			s.logger.Content().Error("Failed to find parent storyfragments during bulk delete", "error", err, "paneId", paneID)
+			continue
+		}
+		for _, sfID := range parentSFIDs {
+			uniqueParentSFIDs[sfID] = true
+		}
+	}
+
+	// 2. Perform Bulk Delete in Repository
+	paneRepo := tenantCtx.PaneRepo()
+	if err := paneRepo.DeleteMany(tenantCtx.TenantID, ids); err != nil {
+		return fmt.Errorf("failed to bulk delete panes: %w", err)
+	}
+
+	// 3. Invalidate Cache for each pane
+	for _, id := range ids {
+		tenantCtx.CacheManager.InvalidatePane(tenantCtx.TenantID, id)
+		tenantCtx.CacheManager.RemovePaneID(tenantCtx.TenantID, id)
+	}
+
+	// 4. Refresh Content Map (Once)
+	if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+		s.logger.Content().Error("Failed to refresh content map after bulk pane deletion",
+			"error", err, "tenantId", tenantCtx.TenantID)
+	}
+
+	// 5. Trigger Registry Rebuilds for unique parents
+	if len(uniqueParentSFIDs) > 0 {
+		s.logger.Cache().Info("Bulk delete affecting parents, enqueuing registry rebuilds", "count", len(uniqueParentSFIDs))
+		for sfID := range uniqueParentSFIDs {
+			s.registryOrchestrator.EnqueueRebuild(tenantCtx.TenantID, sfID)
+		}
+	}
+
+	s.logger.Content().Info("Successfully bulk deleted panes", "tenantId", tenantCtx.TenantID, "count", len(ids), "duration", time.Since(start))
+	s.logger.Perf().Info("Performance for BulkDeletePanes", "duration", time.Since(start), "tenantId", tenantCtx.TenantID, "success", true, "count", len(ids))
+
+	return nil
+}

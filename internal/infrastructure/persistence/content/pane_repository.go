@@ -711,3 +711,48 @@ func (r *PaneRepository) FindPaneContextStatus(tenantID string, paneIDs []string
 	}
 	return statusMap, rows.Err()
 }
+
+// DeleteMany removes multiple panes and their associated markdown records within a single transaction.
+func (r *PaneRepository) DeleteMany(tenantID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("Failed to rollback DeleteMany transaction", "error", err)
+		}
+	}()
+
+	for _, id := range ids {
+		var markdownID sql.NullString
+		// We query to get the markdown ID before deleting the pane
+		if err := tx.QueryRow(`SELECT markdown_id FROM panes WHERE id = ?`, id).Scan(&markdownID); err != nil {
+			if err == sql.ErrNoRows {
+				continue // Skip if pane doesn't exist
+			}
+			return fmt.Errorf("failed to query markdown_id for deletion of pane %s: %w", id, err)
+		}
+
+		if _, err := tx.Exec(`DELETE FROM panes WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("failed to delete pane %s: %w", id, err)
+		}
+
+		if markdownID.Valid {
+			if _, err := tx.Exec(`DELETE FROM markdowns WHERE id = ?`, markdownID.String); err != nil {
+				return fmt.Errorf("failed to delete associated markdown for pane %s: %w", id, err)
+			}
+		}
+
+		// Delete from FTS index
+		if err := r.ftsService.DeletePaneContent(tx, id); err != nil {
+			r.logger.System().Warn("Failed to delete pane content from index on delete", "error", err, "paneId", id)
+		}
+	}
+
+	return tx.Commit()
+}
