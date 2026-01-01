@@ -48,15 +48,6 @@ func isEditableTag(tag string) bool {
 	}
 }
 
-func isIdentifiableElement(tag string) bool {
-	switch tag {
-	case "a", "button", "img":
-		return true
-	default:
-		return false
-	}
-}
-
 func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNode) {
 	if node.Tag == "text" {
 		sb.WriteString(template.HTMLEscapeString(node.Text))
