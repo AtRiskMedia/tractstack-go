@@ -75,14 +75,12 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 	}
 
 	if hr.ctx != nil && hr.ctx.IsEditorPreview && node.ID != "" {
+		sb.WriteString(" data-ast-id=\"")
+		sb.WriteString(node.ID)
+		sb.WriteString("\"")
+
 		if isEditableTag(node.Tag) {
-			sb.WriteString(" data-ast-id=\"")
-			sb.WriteString(node.ID)
-			sb.WriteString("\" contenteditable=\"true\"")
-		} else if isIdentifiableElement(node.Tag) {
-			sb.WriteString(" data-ast-id=\"")
-			sb.WriteString(node.ID)
-			sb.WriteString("\"")
+			sb.WriteString(" contenteditable=\"true\"")
 		}
 	}
 
