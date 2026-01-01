@@ -28,6 +28,7 @@ func (hr *HastRenderer) Render(ast *rendering.HTMLAST) string {
 
 	p := bluemonday.UGCPolicy()
 	p.AllowAttrs("class", "style", "id").Globally()
+	p.AllowElements("button")
 
 	if hr.ctx != nil && hr.ctx.IsEditorPreview {
 		p.AllowAttrs("data-ast-id", "contenteditable").Globally()
