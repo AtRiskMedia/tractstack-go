@@ -74,6 +74,13 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 		if isEditableTag(node.Tag) {
 			sb.WriteString(" contenteditable=\"true\"")
 		}
+		if node.Tag == "button" {
+			sb.WriteString(" disabled=\"true\"")
+		}
+		if node.Tag == "a" {
+			sb.WriteString(" onclick=\"return false;\"")
+			sb.WriteString(" style=\"pointer-events: none;\"")
+		}
 	}
 
 	sb.WriteString(">")
