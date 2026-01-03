@@ -53,6 +53,7 @@ type VisitRequest struct {
 	EncryptedEmail      *string `json:"encryptedEmail,omitempty"`
 	EncryptedCode       *string `json:"encryptedCode,omitempty"`
 	TractStackSessionID *string `json:"tractstack_session_id,omitempty"`
+	FingerprintID       *string `json:"fingerprintId,omitempty"`
 	Consent             *string `json:"consent,omitempty"`
 }
 

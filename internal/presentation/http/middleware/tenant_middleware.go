@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,7 @@ func GetTenantContext(c *gin.Context) (*tenant.Context, bool) {
 	return ctx, ok
 }
 
+// TenantMiddleware creates middleware that extracts tenant information and creates a full tenant context.
 // TenantMiddleware creates middleware that extracts tenant information and creates a full tenant context.
 func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tracker) gin.HandlerFunc {
 	logger := tenantManager.GetLogger()
@@ -93,6 +95,53 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 			c.JSON(http.StatusNotFound, gin.H{"error": "tenant not found"})
 			c.Abort()
 			return
+		}
+
+		// Hybrid Restoration: Check for persistence cookie if memory is empty
+		cookieSessionID, _ := c.Cookie("tractstack_session_id")
+		cookieFingerprintID, _ := c.Cookie("tractstack_fingerprint")
+
+		if cookieFingerprintID != "" && tenantCtx.Database != nil {
+			_, sessionExists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, cookieSessionID)
+
+			if !sessionExists && cookieSessionID != "" {
+				var dbFingerprintID string
+				var latestVisitID string
+
+				// We need a valid VisitID to reconstruct the session.
+				// Query: Verify fingerprint exists AND fetch its most recent visit ID
+				query := `
+					SELECT f.id, v.id 
+					FROM fingerprints f 
+					JOIN visits v ON f.id = v.fingerprint_id 
+					WHERE f.id = ? 
+					ORDER BY v.created_at DESC 
+					LIMIT 1`
+
+				err := tenantCtx.Database.Conn.QueryRowContext(c.Request.Context(), query, cookieFingerprintID).Scan(&dbFingerprintID, &latestVisitID)
+
+				if err == nil && dbFingerprintID == cookieFingerprintID {
+					restoredSession := &types.SessionData{
+						SessionID:     cookieSessionID,
+						FingerprintID: cookieFingerprintID,
+						VisitID:       latestVisitID,
+						CreatedAt:     time.Now().UTC(),
+						LastActivity:  time.Now().UTC(),
+						ExpiresAt:     time.Now().UTC().Add(24 * time.Hour),
+						IsExpired:     false,
+					}
+					tenantCtx.CacheManager.SetSession(tenantCtx.TenantID, restoredSession)
+
+					logger.Tenant().Info("Restored session from fingerprint cookie",
+						"sessionId", cookieSessionID,
+						"fingerprintId", cookieFingerprintID,
+						"visitId", latestVisitID,
+						"tenantId", tenantCtx.TenantID)
+				}
+			}
+
+			// Store fingerprint in context for handlers to access even if session restoration failed
+			c.Set("fingerprint_id", cookieFingerprintID)
 		}
 
 		logger.Tenant().Debug("Tenant context resolved successfully",
