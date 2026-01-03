@@ -18,9 +18,10 @@ type ViewportCSS struct {
 }
 
 type HTMLAST struct {
-	CSS         string        `json:"css"`
-	ViewportCSS ViewportCSS   `json:"viewportCss"`
-	Tree        []HTMLASTNode `json:"tree"`
+	CSS              string         `json:"css"`
+	ViewportCSS      ViewportCSS    `json:"viewportCss"`
+	Tree             []HTMLASTNode  `json:"tree"`
+	EditableElements map[string]any `json:"editableElements,omitempty"`
 }
 
 // PaneVariant represents different cache variants for belief-based rendering
