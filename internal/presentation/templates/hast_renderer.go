@@ -27,11 +27,11 @@ func (hr *HastRenderer) Render(ast *rendering.HTMLAST) string {
 	}
 
 	p := bluemonday.UGCPolicy()
-	p.AllowAttrs("class", "style", "id").Globally()
+	p.AllowAttrs("class", "style", "id", "data-callback", "data-bunny-payload", "data-external").Globally()
 	p.AllowElements("button")
 
 	if hr.ctx != nil && hr.ctx.IsEditorPreview {
-		p.AllowAttrs("data-ast-id", "contenteditable").Globally()
+		p.AllowAttrs("data-ast-id", "contenteditable", "data-file-id", "data-collection", "data-image").Globally()
 	}
 
 	sanitizedBody := p.Sanitize(bodySb.String())
