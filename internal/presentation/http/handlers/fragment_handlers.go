@@ -45,9 +45,10 @@ type PreviewPaneData struct {
 // PreviewCreativePaneData represents the request body for AST-based preview generation
 // Used by GenerateASTPreview (Creative Editor)
 type PreviewCreativePaneData struct {
-	ID    string                  `json:"id"`
-	Title string                  `json:"title"`
-	Tree  []rendering.HTMLASTNode `json:"tree"`
+	ID               string                  `json:"id"`
+	Title            string                  `json:"title"`
+	Tree             []rendering.HTMLASTNode `json:"tree"`
+	SimulateFrontend bool                    `json:"simulateFrontend"`
 }
 
 // GetPaneFragment handles GET /api/v1/fragments/panes/:id
@@ -263,7 +264,8 @@ func (h *FragmentHandlers) GenerateASTPreview(c *gin.Context) {
 	}
 
 	// Call the new AST-specific service method
-	html, err := h.fragmentService.GenerateHTMLFromAST(tenantCtx, req.ID, astPayload, true)
+	// If SimulateFrontend is true, we want 'isEditorPreview' to be false (render like live site)
+	html, err := h.fragmentService.GenerateHTMLFromAST(tenantCtx, req.ID, astPayload, !req.SimulateFrontend)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
