@@ -15,7 +15,7 @@ var liteYouTubeTmpl = template.Must(template.New("liteYouTube").Parse(
 	`
 <div class="{{.ClassNames}}">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.css" />
-<lite-youtube videoid="{{.Value1}}" playlabel="{{.Value2}}"></lite-youtube>
+<lite-youtube videoid="{{.Value1}}" playlabel="{{.Value2}}" style="max-width: 100% !important;"></lite-youtube>
 <script type="module" src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.2/src/lite-yt-embed.js"></script>
 </div>
 `))

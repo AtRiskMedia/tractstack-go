@@ -174,6 +174,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			fragments.GET("/panes/:id/static", fragmentHandlers.GetPaneFragmentStatic)
 			fragments.POST("/panes", fragmentHandlers.GetPaneFragmentBatch)
 			fragments.POST("/preview", fragmentHandlers.GeneratePreviewFromPayload)
+			fragments.POST("/ast-preview", fragmentHandlers.GenerateASTPreview)
 		}
 
 		// Search endpoints
@@ -252,6 +253,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 				protectedNodes.POST("/panes/create", paneHandlers.CreatePane)
 				protectedNodes.PUT("/panes/:id", paneHandlers.UpdatePane)
 				protectedNodes.DELETE("/panes/:id", paneHandlers.DeletePane)
+				protectedNodes.DELETE("/panes/bulk", paneHandlers.BulkDeletePanes)
 				protectedNodes.POST("/panes/files/bulk", paneHandlers.BulkUpdateFilePaneRelationships)
 
 				// Resource - Write

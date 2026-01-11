@@ -3,6 +3,27 @@ package rendering
 
 import "time"
 
+type HTMLASTNode struct {
+	Tag      string            `json:"tag"`
+	Attrs    map[string]string `json:"attrs,omitempty"`
+	Children []HTMLASTNode     `json:"children,omitempty"`
+	Text     string            `json:"text,omitempty"`
+	ID       string            `json:"id,omitempty"`
+}
+
+type ViewportCSS struct {
+	XS string `json:"xs"`
+	MD string `json:"md"`
+	XL string `json:"xl"`
+}
+
+type HTMLAST struct {
+	CSS              string         `json:"css"`
+	ViewportCSS      ViewportCSS    `json:"viewportCss"`
+	Tree             []HTMLASTNode  `json:"tree"`
+	EditableElements map[string]any `json:"editableElements,omitempty"`
+}
+
 // PaneVariant represents different cache variants for belief-based rendering
 type PaneVariant struct {
 	BeliefMode      string   `json:"beliefMode"`      // "default", "hidden", "personalized"
@@ -47,6 +68,7 @@ type PaneRenderData struct {
 	WithheldBeliefs map[string]any `json:"withheldBeliefs,omitempty"`
 	CodeHookTarget  *string        `json:"codeHookTarget,omitempty"`
 	CodeHookPayload map[string]any `json:"codeHookPayload,omitempty"`
+	HTMLAST         *HTMLAST       `json:"htmlAst,omitempty"`
 	Created         time.Time      `json:"created"`
 	Changed         *time.Time     `json:"changed,omitempty"`
 }

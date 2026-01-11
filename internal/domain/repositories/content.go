@@ -42,6 +42,7 @@ type PaneRepository interface {
 	Store(tenantID string, pane *content.PaneNode, markdownBody string) error
 	Update(tenantID string, pane *content.PaneNode, markdownBody string) error
 	Delete(tenantID, id string) error
+	DeleteMany(tenantID string, ids []string) error
 	UpdateFilePaneRelationships(tenantID string, relationships map[string][]string) error
 	SearchMarkdownContent(tenantID, searchTerm string) ([]string, error)
 	FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs []string) ([]string, error)

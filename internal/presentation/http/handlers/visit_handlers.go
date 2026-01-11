@@ -97,6 +97,7 @@ func (sc *safeSSEConnection) SafeClose() bool {
 	return false
 }
 
+// PostVisit handles POST /api/v1/visit - processes session initialization, restoration, and handshakes
 func (h *VisitHandlers) PostVisit(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -118,6 +119,18 @@ func (h *VisitHandlers) PostVisit(c *gin.Context) {
 		}
 	}
 
+	// Hybrid Restoration: Inject fingerprint from cookie if available
+	// This ensures that if the middleware found a valid fingerprint (persistence)
+	// but no valid session (memory), we try to bind the new session to that
+	// existing fingerprint instead of generating a random one (Warming).
+	if cookieFingerprint, ok := c.Get("fingerprint_id"); ok {
+		fpStr := cookieFingerprint.(string)
+		// Only suggest the cookie fingerprint if the client isn't explicitly claiming one
+		if req.FingerprintID == nil {
+			req.FingerprintID = &fpStr
+		}
+	}
+
 	storyfragmentID := "unknown"
 	if req.StoryfragmentID != nil {
 		storyfragmentID = *req.StoryfragmentID
@@ -136,7 +149,8 @@ func (h *VisitHandlers) PostVisit(c *gin.Context) {
 		"hasEncryptedEmail", req.EncryptedEmail != nil,
 		"hasEncryptedCode", req.EncryptedCode != nil,
 		"hasCloneRequest", req.TractStackSessionID != nil,
-		"hasConsent", req.Consent != nil)
+		"hasConsent", req.Consent != nil,
+		"hasFingerprintId", req.FingerprintID != nil)
 
 	result := h.sessionService.ProcessVisitRequest(&req, storyfragmentID, tenantCtx)
 
