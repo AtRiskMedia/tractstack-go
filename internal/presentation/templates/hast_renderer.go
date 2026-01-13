@@ -32,6 +32,7 @@ func (hr *HastRenderer) Render(ast *rendering.HTMLAST) string {
 	}
 
 	p := bluemonday.UGCPolicy()
+	p.AllowDataURIImages()
 	p.AllowRelativeURLs(true)
 	p.AllowAttrs("class", "style", "id", "data-callback", "data-bunny-payload", "data-external").Globally()
 
