@@ -10,6 +10,7 @@ import (
 	"strings"
 )
 
+// ButtonProps defines the properties for rendering an email button.
 type ButtonProps struct {
 	Text            string
 	URL             string
@@ -103,6 +104,7 @@ var allowedAttributes = map[string]map[string]bool{
 	},
 }
 
+// GetButton generates the HTML for a styled email button.
 func GetButton(props ButtonProps) string {
 	// Set defaults exactly as before
 	backgroundColor := props.BackgroundColor
@@ -464,7 +466,7 @@ func sanitizeColor(color string) string {
 
 	// Check if all characters are valid hex digits
 	for _, char := range hex {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
 			return "#000000"
 		}
 	}

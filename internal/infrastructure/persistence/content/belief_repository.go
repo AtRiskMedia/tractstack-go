@@ -14,12 +14,14 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// BeliefRepository handles the persistence and retrieval of belief nodes from the database.
 type BeliefRepository struct {
 	db     *sql.DB
 	cache  interfaces.ContentCache
 	logger *logging.ChanneledLogger
 }
 
+// NewBeliefRepository creates a new instance of the BeliefRepository.
 func NewBeliefRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *BeliefRepository {
 	return &BeliefRepository{
 		db:     db,
@@ -28,6 +30,7 @@ func NewBeliefRepository(db *sql.DB, cache interfaces.ContentCache, logger *logg
 	}
 }
 
+// FindByID retrieves a single belief node by its unique identifier.
 func (r *BeliefRepository) FindByID(tenantID, id string) (*content.BeliefNode, error) {
 	if belief, found := r.cache.GetBelief(tenantID, id); found {
 		return belief, nil
@@ -45,6 +48,7 @@ func (r *BeliefRepository) FindByID(tenantID, id string) (*content.BeliefNode, e
 	return belief, nil
 }
 
+// FindBySlug retrieves a single belief node by its URL-friendly slug.
 func (r *BeliefRepository) FindBySlug(tenantID, slug string) (*content.BeliefNode, error) {
 	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
@@ -81,6 +85,7 @@ func (r *BeliefRepository) FindAll(tenantID string) ([]*content.BeliefNode, erro
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves multiple belief nodes for a tenant using a slice of IDs.
 func (r *BeliefRepository) FindByIDs(tenantID string, ids []string) ([]*content.BeliefNode, error) {
 	var result []*content.BeliefNode
 	var missingIDs []string
@@ -108,6 +113,7 @@ func (r *BeliefRepository) FindByIDs(tenantID string, ids []string) ([]*content.
 	return result, nil
 }
 
+// FindIDBySlug resolves a belief slug to its corresponding unique identifier.
 func (r *BeliefRepository) FindIDBySlug(tenantID, slug string) (string, error) {
 	if id, found := r.cache.GetContentBySlug(tenantID, "belief:"+slug); found {
 		return id, nil
@@ -124,6 +130,7 @@ func (r *BeliefRepository) FindIDBySlug(tenantID, slug string) (string, error) {
 	return id, nil
 }
 
+// Store saves a new belief node into the persistence layer.
 func (r *BeliefRepository) Store(tenantID string, belief *content.BeliefNode) error {
 	customValuesJSON, _ := json.Marshal(belief.CustomValues)
 
@@ -147,6 +154,7 @@ func (r *BeliefRepository) Store(tenantID string, belief *content.BeliefNode) er
 	return nil
 }
 
+// Update modifies an existing belief node in the persistence layer.
 func (r *BeliefRepository) Update(tenantID string, belief *content.BeliefNode) error {
 	customValuesJSON, _ := json.Marshal(belief.CustomValues)
 
@@ -170,6 +178,7 @@ func (r *BeliefRepository) Update(tenantID string, belief *content.BeliefNode) e
 	return nil
 }
 
+// Delete removes a belief node from the persistence layer and invalidates its presence in the cache.
 func (r *BeliefRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM beliefs WHERE id = ?`
 

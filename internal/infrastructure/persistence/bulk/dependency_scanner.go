@@ -13,11 +13,13 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 )
 
+// DependencyScanner analyzes content to build dependency graphs for cache invalidation.
 type DependencyScanner struct {
 	db     *database.DB
 	logger *logging.ChanneledLogger
 }
 
+// NewDependencyScanner creates a new instance of DependencyScanner.
 func NewDependencyScanner(db *database.DB, logger *logging.ChanneledLogger) *DependencyScanner {
 	return &DependencyScanner{
 		db:     db,
@@ -30,10 +32,12 @@ type BrandConfigAdapter struct {
 	homeSlug string
 }
 
+// GetHomeSlug returns the configured home page slug for the brand.
 func (b *BrandConfigAdapter) GetHomeSlug() string {
 	return b.homeSlug
 }
 
+// ScanAllContentIDs retrieves all content identifiers for a specific tenant.
 func (ds *DependencyScanner) ScanAllContentIDs(tenantID string) (*admin.ContentIDMap, error) {
 	start := time.Now()
 	ds.logger.Database().Debug("Starting content IDs scan", "tenantID", tenantID)
@@ -87,6 +91,7 @@ func (ds *DependencyScanner) ScanAllContentIDs(tenantID string) (*admin.ContentI
 	return contentMap, nil
 }
 
+// ScanStoryFragmentDependencies identifies dependencies between StoryFragments and other content items.
 func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map[string][]string, error) {
 	start := time.Now()
 	ds.logger.Database().Debug("Starting story fragment dependencies scan", "tenantID", tenantID)
@@ -157,7 +162,7 @@ func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map
 				for _, option := range options {
 					if actionLisp, ok := option["actionLisp"].(string); ok && actionLisp != "" {
 						// Parse ActionLisp using full legacy logic
-						tokens, _, err := lisp.LispLexer(actionLisp, false)
+						tokens, _, err := lisp.Lexer(actionLisp, false)
 						if err != nil {
 							continue
 						}
@@ -189,6 +194,7 @@ func (ds *DependencyScanner) ScanStoryFragmentDependencies(tenantID string) (map
 	return dependencies, nil
 }
 
+// ScanPaneDependencies identifies dependencies between Panes and other content.
 func (ds *DependencyScanner) ScanPaneDependencies(tenantID string) (map[string][]string, error) {
 	start := time.Now()
 	ds.logger.Database().Debug("Starting pane dependencies scan", "tenantID", tenantID)
@@ -251,6 +257,7 @@ func (ds *DependencyScanner) ScanPaneDependencies(tenantID string) (map[string][
 	return dependencies, nil
 }
 
+// ScanMenuDependencies identifies dependencies within Menus.
 func (ds *DependencyScanner) ScanMenuDependencies(tenantID string) (map[string][]string, error) {
 	start := time.Now()
 	ds.logger.Database().Debug("Starting menu dependencies scan", "tenantID", tenantID)
@@ -313,6 +320,7 @@ func (ds *DependencyScanner) ScanMenuDependencies(tenantID string) (map[string][
 	return dependencies, nil
 }
 
+// ScanFileDependencies identifies where specific files are used across the content.
 func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][]string, error) {
 	start := time.Now()
 	ds.logger.Database().Debug("Starting file dependencies scan", "tenantID", tenantID)
@@ -441,6 +449,7 @@ func (ds *DependencyScanner) ScanFileDependencies(tenantID string) (map[string][
 	return dependencies, nil
 }
 
+// ScanBeliefDependencies identifies which content items rely on specific beliefs.
 func (ds *DependencyScanner) ScanBeliefDependencies(tenantID string) (map[string][]string, error) {
 	start := time.Now()
 	ds.logger.Database().Debug("Starting belief dependencies scan", "tenantID", tenantID)
@@ -591,13 +600,13 @@ func (ds *DependencyScanner) scanMapForBeliefWidgets(data any, beliefs *[]string
 	case map[string]any:
 		// Check if this is a code TagElement with belief widget
 		if tagName, ok := v["tagName"].(string); ok && tagName == "code" {
-			if copy, ok := v["copy"].(string); ok {
+			if copyVal, ok := v["copy"].(string); ok {
 				if params, ok := v["codeHookParams"].([]any); ok && len(params) > 0 {
 					// Use a slice for extensible widget detection
 					beliefWidgetPrefixes := []string{"belief(", "toggle(", "identifyAs(", "interactiveDisclosure("}
 
 					for _, prefix := range beliefWidgetPrefixes {
-						if strings.HasPrefix(copy, prefix) {
+						if strings.HasPrefix(copyVal, prefix) {
 							if beliefSlug, ok := params[0].(string); ok && beliefSlug != "" {
 								// Prevent duplicates
 								if !slices.Contains(*beliefs, beliefSlug) {

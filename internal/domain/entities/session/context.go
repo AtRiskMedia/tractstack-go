@@ -5,8 +5,8 @@ package session
 
 import "time"
 
-// SessionBeliefContext represents cached session belief state for a storyfragment
-type SessionBeliefContext struct {
+// BeliefContext represents cached session belief state for a storyfragment
+type BeliefContext struct {
 	SessionID       string                  `json:"sessionId"`
 	StoryfragmentID string                  `json:"storyfragmentId"`
 	UserBeliefs     map[string][]string     `json:"userBeliefs"`
@@ -14,8 +14,8 @@ type SessionBeliefContext struct {
 	LastEvaluation  time.Time               `json:"lastEvaluation"`
 }
 
-// SessionData represents the core session information
-type SessionData struct {
+// Data represents the core session information
+type Data struct {
 	SessionID     string            `json:"sessionId"`
 	FingerprintID string            `json:"fingerprintId"`
 	TenantID      string            `json:"tenantId"`
@@ -34,17 +34,17 @@ type FingerprintState struct {
 
 // BeliefState represents a structured belief with metadata
 type BeliefState struct {
-	BeliefKey    string      `json:"beliefKey"`
-	BeliefValue  interface{} `json:"beliefValue"`
-	IsHeld       bool        `json:"isHeld"`
-	Source       string      `json:"source"`     // "widget", "api", "import"
-	Confidence   float64     `json:"confidence"` // 0.0-1.0
-	LastModified time.Time   `json:"lastModified"`
+	BeliefKey    string    `json:"beliefKey"`
+	BeliefValue  any       `json:"beliefValue"`
+	IsHeld       bool      `json:"isHeld"`
+	Source       string    `json:"source"`     // "widget", "api", "import"
+	Confidence   float64   `json:"confidence"` // 0.0-1.0
+	LastModified time.Time `json:"lastModified"`
 }
 
-// NewSessionBeliefContext creates a new session belief context
-func NewSessionBeliefContext(sessionID, storyfragmentID string) *SessionBeliefContext {
-	return &SessionBeliefContext{
+// NewBeliefContext creates a new session belief context
+func NewBeliefContext(sessionID, storyfragmentID string) *BeliefContext {
+	return &BeliefContext{
 		SessionID:       sessionID,
 		StoryfragmentID: storyfragmentID,
 		UserBeliefs:     make(map[string][]string),
@@ -53,9 +53,9 @@ func NewSessionBeliefContext(sessionID, storyfragmentID string) *SessionBeliefCo
 	}
 }
 
-// NewSessionData creates a new session data record
-func NewSessionData(sessionID, fingerprintID, tenantID string) *SessionData {
-	return &SessionData{
+// NewData creates a new session data record
+func NewData(sessionID, fingerprintID, tenantID string) *Data {
+	return &Data{
 		SessionID:     sessionID,
 		FingerprintID: fingerprintID,
 		TenantID:      tenantID,
@@ -76,47 +76,47 @@ func NewFingerprintState(fingerprintID string) *FingerprintState {
 }
 
 // UpdateUserBeliefs updates the belief map for this session context
-func (sbc *SessionBeliefContext) UpdateUserBeliefs(beliefs map[string][]string) {
-	sbc.UserBeliefs = beliefs
-	sbc.LastEvaluation = time.Now()
+func (bc *BeliefContext) UpdateUserBeliefs(beliefs map[string][]string) {
+	bc.UserBeliefs = beliefs
+	bc.LastEvaluation = time.Now()
 }
 
 // AddBeliefState adds a structured belief state
-func (sbc *SessionBeliefContext) AddBeliefState(key string, state *BeliefState) {
-	sbc.BeliefStates[key] = state
-	sbc.LastEvaluation = time.Now()
+func (bc *BeliefContext) AddBeliefState(key string, state *BeliefState) {
+	bc.BeliefStates[key] = state
+	bc.LastEvaluation = time.Now()
 }
 
 // GetBeliefState retrieves a belief state by key
-func (sbc *SessionBeliefContext) GetBeliefState(key string) (*BeliefState, bool) {
-	state, exists := sbc.BeliefStates[key]
+func (bc *BeliefContext) GetBeliefState(key string) (*BeliefState, bool) {
+	state, exists := bc.BeliefStates[key]
 	return state, exists
 }
 
 // HasBelief checks if a belief key exists in user beliefs
-func (sbc *SessionBeliefContext) HasBelief(key string) bool {
-	_, exists := sbc.UserBeliefs[key]
+func (bc *BeliefContext) HasBelief(key string) bool {
+	_, exists := bc.UserBeliefs[key]
 	return exists
 }
 
 // GetBeliefValues retrieves all values for a belief key
-func (sbc *SessionBeliefContext) GetBeliefValues(key string) []string {
-	return sbc.UserBeliefs[key]
+func (bc *BeliefContext) GetBeliefValues(key string) []string {
+	return bc.UserBeliefs[key]
 }
 
 // UpdateLastAccessed updates session access time
-func (sd *SessionData) UpdateLastAccessed() {
-	sd.LastAccessed = time.Now()
+func (d *Data) UpdateLastAccessed() {
+	d.LastAccessed = time.Now()
 }
 
 // AddProperty adds a metadata property to the session
-func (sd *SessionData) AddProperty(key, value string) {
-	sd.Properties[key] = value
+func (d *Data) AddProperty(key, value string) {
+	d.Properties[key] = value
 }
 
 // GetProperty retrieves a metadata property from the session
-func (sd *SessionData) GetProperty(key string) (string, bool) {
-	value, exists := sd.Properties[key]
+func (d *Data) GetProperty(key string) (string, bool) {
+	value, exists := d.Properties[key]
 	return value, exists
 }
 

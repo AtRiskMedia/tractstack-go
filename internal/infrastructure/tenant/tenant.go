@@ -23,7 +23,7 @@ type Manager struct {
 	contextMutexes sync.Map // Per-tenant mutexes for fine-grained locking
 	globalMutex    sync.RWMutex
 	logger         *logging.ChanneledLogger
-	ftsService     *fts.FTSService
+	ftsService     *fts.Service
 }
 
 // NewManager creates and initializes a new tenant manager.
@@ -278,8 +278,8 @@ func (m *Manager) SetLogger(logger *logging.ChanneledLogger) {
 	}
 }
 
-// SetFTSService sets the FTS service for the manager to pass to tenant contexts.
-func (m *Manager) SetFTSService(ftsService *fts.FTSService) {
+// SetService sets the FTS service for the manager to pass to tenant contexts.
+func (m *Manager) SetService(ftsService *fts.Service) {
 	m.ftsService = ftsService
 }
 

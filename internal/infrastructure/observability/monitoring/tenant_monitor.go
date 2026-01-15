@@ -77,6 +77,7 @@ type RecentMetrics struct {
 // HealthStatus represents the health state of a tenant
 type HealthStatus string
 
+// HealthHealthy indicates that all tenant metrics are within normal operational ranges.
 const (
 	HealthHealthy   HealthStatus = "healthy"   // All metrics within normal ranges
 	HealthDegraded  HealthStatus = "degraded"  // Some metrics showing issues
@@ -156,6 +157,7 @@ type TenantAlert struct {
 // AlertSeverity represents the severity of an alert
 type AlertSeverity string
 
+// AlertInfo represents an informational alert severity level.
 const (
 	AlertInfo     AlertSeverity = "info"
 	AlertWarning  AlertSeverity = "warning"
@@ -166,6 +168,7 @@ const (
 // AlertCategory represents the category of an alert
 type AlertCategory string
 
+// AlertCategoryPerformance groups alerts related to general system performance.
 const (
 	AlertCategoryPerformance  AlertCategory = "performance"
 	AlertCategoryMemory       AlertCategory = "memory"

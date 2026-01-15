@@ -22,11 +22,13 @@ type nodeActionButtonData struct {
 	HxVals template.HTML
 }
 
+// NodeButtonRenderer handles the rendering of interactive button nodes, including Lisp action parsing.
 type NodeButtonRenderer struct {
 	ctx          *rendering.RenderContext
 	nodeRenderer NodeRenderer
 }
 
+// NewNodeButtonRenderer creates a new renderer for button nodes.
 func NewNodeButtonRenderer(ctx *rendering.RenderContext, nodeRenderer NodeRenderer) *NodeButtonRenderer {
 	return &NodeButtonRenderer{
 		ctx:          ctx,
@@ -34,6 +36,7 @@ func NewNodeButtonRenderer(ctx *rendering.RenderContext, nodeRenderer NodeRender
 	}
 }
 
+// Render generates the HTML for a button node, handling client-side events or HTMX attributes.
 func (nbr *NodeButtonRenderer) Render(nodeID string) string {
 	nodeData := nbr.getNodeData(nodeID)
 	if nodeData == nil {

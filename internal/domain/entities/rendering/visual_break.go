@@ -1,11 +1,13 @@
 package rendering
 
+// VisualBreakData contains the configuration for a specific visual break shape, including the collection source and fill color.
 type VisualBreakData struct {
 	Collection string `json:"collection"`
 	Image      string `json:"image"`
 	SvgFill    string `json:"svgFill"`
 }
 
+// VisualBreakNode defines the responsive configuration for visual breaks across mobile, tablet, and desktop viewports.
 type VisualBreakNode struct {
 	BreakDesktop          *VisualBreakData `json:"breakDesktop,omitempty"`
 	BreakTablet           *VisualBreakData `json:"breakTablet,omitempty"`
@@ -15,6 +17,7 @@ type VisualBreakNode struct {
 	HiddenViewportDesktop bool             `json:"hiddenViewportDesktop,omitempty"`
 }
 
+// GetViewportData retrieves the specific visual break configuration for the requested viewport size.
 func (vbn *VisualBreakNode) GetViewportData(viewport string) *VisualBreakData {
 	if vbn == nil {
 		return nil

@@ -62,14 +62,14 @@ func (c *Converter) ConvertNodesToMarkdown(nodesData []any) (string, error) {
 		}
 
 		id, _ := nodeDataMap["id"].(string)
-		parentId, _ := nodeDataMap["parentId"].(string)
+		parentID, _ := nodeDataMap["parentId"].(string)
 
 		node, exists := nodeMap[id]
 		if !exists {
 			continue
 		}
 
-		parent, parentExists := nodeMap[parentId]
+		parent, parentExists := nodeMap[parentID]
 		if parentExists {
 			parent.Children = append(parent.Children, node)
 		} else {

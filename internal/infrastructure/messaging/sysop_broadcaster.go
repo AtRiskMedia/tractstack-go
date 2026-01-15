@@ -148,7 +148,11 @@ func (b *SysOpBroadcaster) getSessionStatesForTenant(tenantID string) []SessionS
 		log.Printf("SysOp broadcaster could not create context for tenant %s: %v", tenantID, err)
 		return []SessionState{}
 	}
-	defer ctx.Close()
+	defer func() {
+		if err := ctx.Close(); err != nil {
+			log.Printf("Failed to close tenant context in getSessionStatesForTenant: %v", err)
+		}
+	}()
 
 	userCache, err := ctx.CacheManager.GetTenantUserStateCache(tenantID)
 	if err != nil {
@@ -244,24 +248,26 @@ func (b *SysOpBroadcaster) calculateProportionalStates(fullStateList []SessionSt
 		minutesSince := now.Sub(s.LastActivity).Minutes()
 
 		var tier string
-		if minutesSince < 1 {
+		switch {
+		case minutesSince < 1:
 			tier = "ultra"
-		} else if minutesSince <= 15 {
+		case minutesSince <= 15:
 			tier = "bright"
-		} else if minutesSince <= 30 {
+		case minutesSince <= 30:
 			tier = "medium"
-		} else if minutesSince <= 45 {
+		case minutesSince <= 45:
 			tier = "light"
-		} else {
+		default:
 			tier = "dormant"
 		}
 
 		var categoryPrefix string
-		if s.IsLead {
+		switch {
+		case s.IsLead:
 			categoryPrefix = "lead"
-		} else if s.HasBeliefs {
+		case s.HasBeliefs:
 			categoryPrefix = "anonBeliefs"
-		} else {
+		default:
 			categoryPrefix = "anon"
 		}
 		counts[categoryPrefix+"_"+tier]++

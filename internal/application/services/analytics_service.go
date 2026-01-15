@@ -13,17 +13,20 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
+// UserCount represents a count of users grouped by a specific dimension.
 type UserCount struct {
 	ID      string `json:"id"`
 	Count   int    `json:"count"`
 	IsKnown bool   `json:"isKnown"`
 }
 
+// AppliedFilter represents a filter applied to an analytics query.
 type AppliedFilter struct {
 	BeliefSlug string `json:"beliefSlug"`
 	Value      string `json:"value"`
 }
 
+// SankeyFilters contains specific filters for generating Sankey diagrams.
 type SankeyFilters struct {
 	VisitorType    string          `json:"visitorType"`
 	SelectedUserID *string         `json:"selectedUserID,omitempty"`
@@ -32,11 +35,13 @@ type SankeyFilters struct {
 	AppliedFilters []AppliedFilter `json:"appliedFilters,omitempty"`
 }
 
+// AnalyticsService handles retrieval and processing of visitor analytics data.
 type AnalyticsService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
+// NewAnalyticsService creates a new instance of AnalyticsService.
 func NewAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AnalyticsService {
 	return &AnalyticsService{
 		logger:      logger,
@@ -44,6 +49,7 @@ func NewAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performan
 	}
 }
 
+// GetFilteredVisitorCounts retrieves visitor counts filtered by time range and other criteria.
 func (s *AnalyticsService) GetFilteredVisitorCounts(tenantCtx *tenant.Context, epinetID string, visitorType string, startHour, endHour *int) ([]UserCount, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("get_filtered_visitor_counts", tenantCtx.TenantID)

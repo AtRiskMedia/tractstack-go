@@ -405,6 +405,7 @@ func (h *StoryFragmentHandlers) DeleteStoryFragment(c *gin.Context) {
 	})
 }
 
+// GetStoryFragmentPersonalizedPayloadBySlug returns content tailored to the visitor's current belief state.
 func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	start := time.Now()

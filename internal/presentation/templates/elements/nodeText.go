@@ -11,14 +11,17 @@ import (
 
 var textEscaper = template.Must(template.New("textEscaper").Parse("{{.}}"))
 
+// NodeTextRenderer handles the rendering and escaping of text content nodes.
 type NodeTextRenderer struct {
 	ctx *rendering.RenderContext
 }
 
+// NewNodeTextRenderer creates a new renderer for text nodes.
 func NewNodeTextRenderer(ctx *rendering.RenderContext) *NodeTextRenderer {
 	return &NodeTextRenderer{ctx: ctx}
 }
 
+// Render generates the safe HTML content for a text node.
 func (ntr *NodeTextRenderer) Render(nodeID string) string {
 	nodeData := ntr.getNodeData(nodeID)
 	if nodeData == nil {

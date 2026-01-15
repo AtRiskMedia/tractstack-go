@@ -249,8 +249,8 @@ func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domai
 	detector := s.tenantManager.GetDetector()
 	registry := detector.GetRegistry()
 
-	registryCopy := &tenant.TenantRegistry{
-		Tenants: make(map[string]tenant.TenantInfo),
+	registryCopy := &tenant.Registry{
+		Tenants: make(map[string]tenant.Info),
 	}
 	for k, v := range registry.Tenants {
 		registryCopy.Tenants[k] = v
@@ -258,7 +258,7 @@ func (s *MultiTenantService) updateTenantRegistry(tenantID, status string, domai
 
 	info, exists := registryCopy.Tenants[tenantID]
 	if !exists {
-		info = tenant.TenantInfo{TenantID: tenantID}
+		info = tenant.Info{TenantID: tenantID}
 	}
 	info.Status = status
 	if domains != nil {
@@ -375,6 +375,7 @@ func (s *MultiTenantService) copyDefaultFonts(tenantID string) error {
 	return nil
 }
 
+// HasEmailService checks if the email service is configured and available.
 func (s *MultiTenantService) HasEmailService() bool {
 	return s.emailService != nil
 }
@@ -408,6 +409,7 @@ func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) err
 	return os.WriteFile(configPath, data, 0o644)
 }
 
+// CompleteSetup finalizes the setup process for a tenant.
 func (s *MultiTenantService) CompleteSetup(tenantID, hydrationToken string) error {
 	marker := s.perfTracker.StartOperation("service_complete_setup", tenantID)
 	defer marker.Complete()

@@ -73,6 +73,7 @@ type wordCarouselData struct {
 	Speed  float64
 }
 
+// RenderWordCarousel generates the HTML and JavaScript for a rotating word carousel widget.
 func RenderWordCarousel(nodeID string, speed float64) string {
 	data := wordCarouselData{
 		NodeID: nodeID,

@@ -637,6 +637,7 @@ func (cs *ContentStore) InvalidateContentCache(tenantID string) {
 	}
 }
 
+// InvalidateResource removes a specific resource from the cache.
 func (cs *ContentStore) InvalidateResource(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -650,6 +651,7 @@ func (cs *ContentStore) InvalidateResource(tenantID, id string) {
 	delete(cache.Resources, id)
 }
 
+// AddResourceID adds a resource ID to the tenant's cached list of resources.
 func (cs *ContentStore) AddResourceID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -662,6 +664,7 @@ func (cs *ContentStore) AddResourceID(tenantID, id string) {
 	}
 }
 
+// RemoveResourceID removes a resource ID from the tenant's cached list of resources.
 func (cs *ContentStore) RemoveResourceID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -674,6 +677,7 @@ func (cs *ContentStore) RemoveResourceID(tenantID, id string) {
 	})
 }
 
+// InvalidateTractStack removes a specific TractStack from the cache.
 func (cs *ContentStore) InvalidateTractStack(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -687,6 +691,7 @@ func (cs *ContentStore) InvalidateTractStack(tenantID, id string) {
 	delete(cache.TractStacks, id)
 }
 
+// AddTractStackID adds a TractStack ID to the tenant's cached list.
 func (cs *ContentStore) AddTractStackID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -699,6 +704,7 @@ func (cs *ContentStore) AddTractStackID(tenantID, id string) {
 	}
 }
 
+// RemoveTractStackID removes a TractStack ID from the tenant's cached list.
 func (cs *ContentStore) RemoveTractStackID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -711,6 +717,7 @@ func (cs *ContentStore) RemoveTractStackID(tenantID, id string) {
 	})
 }
 
+// InvalidateStoryFragment removes a specific StoryFragment from the cache.
 func (cs *ContentStore) InvalidateStoryFragment(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -724,6 +731,7 @@ func (cs *ContentStore) InvalidateStoryFragment(tenantID, id string) {
 	delete(cache.StoryFragments, id)
 }
 
+// AddStoryFragmentID adds a StoryFragment ID to the tenant's cached list.
 func (cs *ContentStore) AddStoryFragmentID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -736,6 +744,7 @@ func (cs *ContentStore) AddStoryFragmentID(tenantID, id string) {
 	}
 }
 
+// RemoveStoryFragmentID removes a StoryFragment ID from the tenant's cached list.
 func (cs *ContentStore) RemoveStoryFragmentID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -748,6 +757,7 @@ func (cs *ContentStore) RemoveStoryFragmentID(tenantID, id string) {
 	})
 }
 
+// InvalidatePane removes a specific Pane from the cache.
 func (cs *ContentStore) InvalidatePane(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -761,6 +771,7 @@ func (cs *ContentStore) InvalidatePane(tenantID, id string) {
 	delete(cache.Panes, id)
 }
 
+// AddPaneID adds a Pane ID to the tenant's cached list.
 func (cs *ContentStore) AddPaneID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -773,6 +784,7 @@ func (cs *ContentStore) AddPaneID(tenantID, id string) {
 	}
 }
 
+// RemovePaneID removes a Pane ID from the tenant's cached list.
 func (cs *ContentStore) RemovePaneID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -785,6 +797,7 @@ func (cs *ContentStore) RemovePaneID(tenantID, id string) {
 	})
 }
 
+// InvalidateMenu removes a specific Menu from the cache.
 func (cs *ContentStore) InvalidateMenu(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -795,6 +808,7 @@ func (cs *ContentStore) InvalidateMenu(tenantID, id string) {
 	delete(cache.Menus, id)
 }
 
+// AddMenuID adds a Menu ID to the tenant's cached list.
 func (cs *ContentStore) AddMenuID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -807,6 +821,7 @@ func (cs *ContentStore) AddMenuID(tenantID, id string) {
 	}
 }
 
+// RemoveMenuID removes a Menu ID from the tenant's cached list.
 func (cs *ContentStore) RemoveMenuID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -819,6 +834,7 @@ func (cs *ContentStore) RemoveMenuID(tenantID, id string) {
 	})
 }
 
+// InvalidateBelief removes a specific Belief from the cache.
 func (cs *ContentStore) InvalidateBelief(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -832,6 +848,7 @@ func (cs *ContentStore) InvalidateBelief(tenantID, id string) {
 	delete(cache.Beliefs, id)
 }
 
+// AddBeliefID adds a Belief ID to the tenant's cached list.
 func (cs *ContentStore) AddBeliefID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -844,6 +861,7 @@ func (cs *ContentStore) AddBeliefID(tenantID, id string) {
 	}
 }
 
+// RemoveBeliefID removes a Belief ID from the tenant's cached list.
 func (cs *ContentStore) RemoveBeliefID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -856,6 +874,7 @@ func (cs *ContentStore) RemoveBeliefID(tenantID, id string) {
 	})
 }
 
+// InvalidateEpinet removes a specific Epinet from the cache.
 func (cs *ContentStore) InvalidateEpinet(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -866,6 +885,7 @@ func (cs *ContentStore) InvalidateEpinet(tenantID, id string) {
 	delete(cache.Epinets, id)
 }
 
+// AddEpinetID adds an Epinet ID to the tenant's cached list.
 func (cs *ContentStore) AddEpinetID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -878,6 +898,7 @@ func (cs *ContentStore) AddEpinetID(tenantID, id string) {
 	}
 }
 
+// RemoveEpinetID removes an Epinet ID from the tenant's cached list.
 func (cs *ContentStore) RemoveEpinetID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -890,6 +911,7 @@ func (cs *ContentStore) RemoveEpinetID(tenantID, id string) {
 	})
 }
 
+// InvalidateFile removes a specific File from the cache.
 func (cs *ContentStore) InvalidateFile(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -900,6 +922,7 @@ func (cs *ContentStore) InvalidateFile(tenantID, id string) {
 	delete(cache.Files, id)
 }
 
+// AddFileID adds a File ID to the tenant's cached list.
 func (cs *ContentStore) AddFileID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {
@@ -912,6 +935,7 @@ func (cs *ContentStore) AddFileID(tenantID, id string) {
 	}
 }
 
+// RemoveFileID removes a File ID from the tenant's cached list.
 func (cs *ContentStore) RemoveFileID(tenantID, id string) {
 	cache, exists := cs.GetTenantCache(tenantID)
 	if !exists {

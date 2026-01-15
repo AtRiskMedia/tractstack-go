@@ -1,7 +1,8 @@
 // Package content defines the content map
 package content
 
-type ContentMapItem struct {
+// MapItem represents a single item in the content map, containing metadata and hierarchy information.
+type MapItem struct {
 	ID              string   `json:"id"`
 	Title           string   `json:"title"`
 	Slug            string   `json:"slug"`

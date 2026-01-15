@@ -16,14 +16,16 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// StoryFragmentRepository handles the persistence, retrieval, and indexing of story fragments.
 type StoryFragmentRepository struct {
 	db         *sql.DB
 	cache      interfaces.ContentCache
 	logger     *logging.ChanneledLogger
-	ftsService *fts.FTSService
+	ftsService *fts.Service
 }
 
-func NewStoryFragmentRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.FTSService) *StoryFragmentRepository {
+// NewStoryFragmentRepository creates a new instance of the StoryFragmentRepository.
+func NewStoryFragmentRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.Service) *StoryFragmentRepository {
 	return &StoryFragmentRepository{
 		db:         db,
 		cache:      cache,
@@ -32,6 +34,7 @@ func NewStoryFragmentRepository(db *sql.DB, cache interfaces.ContentCache, logge
 	}
 }
 
+// FindByID retrieves a story fragment by its unique identifier.
 func (r *StoryFragmentRepository) FindByID(tenantID, id string) (*content.StoryFragmentNode, error) {
 	if storyFragment, found := r.cache.GetStoryFragment(tenantID, id); found {
 		return storyFragment, nil
@@ -49,6 +52,7 @@ func (r *StoryFragmentRepository) FindByID(tenantID, id string) (*content.StoryF
 	return storyFragment, nil
 }
 
+// FindBySlug retrieves a story fragment by its URL-friendly slug.
 func (r *StoryFragmentRepository) FindBySlug(tenantID, slug string) (*content.StoryFragmentNode, error) {
 	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
@@ -61,6 +65,7 @@ func (r *StoryFragmentRepository) FindBySlug(tenantID, slug string) (*content.St
 	return r.FindByID(tenantID, id)
 }
 
+// FindByTractStackID retrieves all story fragments associated with a specific TractStack.
 func (r *StoryFragmentRepository) FindByTractStackID(tenantID, tractStackID string) ([]*content.StoryFragmentNode, error) {
 	ids, err := r.getIDsByTractStackFromDB(tractStackID)
 	if err != nil {
@@ -96,6 +101,7 @@ func (r *StoryFragmentRepository) FindAll(tenantID string) ([]*content.StoryFrag
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves multiple story fragments using a slice of IDs.
 func (r *StoryFragmentRepository) FindByIDs(tenantID string, ids []string) ([]*content.StoryFragmentNode, error) {
 	var result []*content.StoryFragmentNode
 	var missingIDs []string
@@ -123,6 +129,7 @@ func (r *StoryFragmentRepository) FindByIDs(tenantID string, ids []string) ([]*c
 	return result, nil
 }
 
+// Store saves a new story fragment and updates the search index.
 func (r *StoryFragmentRepository) Store(tenantID string, storyFragment *content.StoryFragmentNode) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -152,6 +159,7 @@ func (r *StoryFragmentRepository) Store(tenantID string, storyFragment *content.
 	return nil
 }
 
+// Update modifies an existing story fragment and refreshes the search index.
 func (r *StoryFragmentRepository) Update(tenantID string, storyFragment *content.StoryFragmentNode) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -187,6 +195,7 @@ func (r *StoryFragmentRepository) Update(tenantID string, storyFragment *content
 	return nil
 }
 
+// Delete removes a story fragment and its associated data from the persistence layer.
 func (r *StoryFragmentRepository) Delete(tenantID, id string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -260,7 +269,11 @@ func (r *StoryFragmentRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query storyfragment IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query storyfragments: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var storyFragmentIDs []string
 	for rows.Next() {
@@ -367,7 +380,11 @@ func (r *StoryFragmentRepository) loadMultipleFromDB(ids []string) ([]*content.S
 		r.logger.Database().Error("Failed to query multiple storyfragments", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query storyfragments: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var storyFragments []*content.StoryFragmentNode
 	var sfIDs []string
@@ -472,7 +489,11 @@ func (r *StoryFragmentRepository) getIDsByTractStackFromDB(tractStackID string) 
 		r.logger.Database().Error("Failed to query storyfragments by tractstack", "error", err.Error(), "tractStackID", tractStackID)
 		return nil, fmt.Errorf("failed to query storyfragments by tractstack: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in getIDsByTractStackFromDB", "error", err)
+		}
+	}()
 
 	var ids []string
 	for rows.Next() {
@@ -502,7 +523,11 @@ func (r *StoryFragmentRepository) getPaneIDsForStoryFragment(storyFragmentID str
 		r.logger.Database().Error("Failed to query pane relationships", "error", err.Error(), "storyFragmentID", storyFragmentID)
 		return nil, fmt.Errorf("failed to query pane relationships: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in getPaneIDsForStoryFragment", "error", err)
+		}
+	}()
 
 	paneIDs := make([]string, 0)
 	for rows.Next() {
@@ -544,7 +569,11 @@ func (r *StoryFragmentRepository) getAllPaneRelationships(storyFragmentIDs []str
 		r.logger.Database().Error("Failed to query all pane relationships", "error", err.Error(), "storyFragmentCount", len(storyFragmentIDs))
 		return nil, fmt.Errorf("failed to query pane relationships: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in getAllPaneRelationships", "error", err)
+		}
+	}()
 
 	relationships := make(map[string][]string)
 	for rows.Next() {
@@ -564,7 +593,7 @@ func (r *StoryFragmentRepository) getAllPaneRelationships(storyFragmentIDs []str
 }
 
 // UpdatePaneRelationships updates the storyfragment_panes relationships
-func (r *StoryFragmentRepository) UpdatePaneRelationships(tenantID, storyFragmentID string, paneIDs []string) error {
+func (r *StoryFragmentRepository) UpdatePaneRelationships(_, storyFragmentID string, paneIDs []string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -613,7 +642,7 @@ func (r *StoryFragmentRepository) UpdatePaneRelationships(tenantID, storyFragmen
 }
 
 // UpdateTopics updates the topics for a storyfragment
-func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string, topics []string) error {
+func (r *StoryFragmentRepository) UpdateTopics(_, storyFragmentID string, topics []string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -675,7 +704,7 @@ func (r *StoryFragmentRepository) UpdateTopics(tenantID, storyFragmentID string,
 }
 
 // UpdateDescription updates the description for a storyfragment
-func (r *StoryFragmentRepository) UpdateDescription(tenantID, storyFragmentID string, description *string) error {
+func (r *StoryFragmentRepository) UpdateDescription(_, storyFragmentID string, description *string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction for description update: %w", err)
@@ -725,7 +754,11 @@ func (r *StoryFragmentRepository) FindIDsByPaneID(paneID string) ([]string, erro
 		r.logger.Database().Error("Failed to query storyfragment IDs by pane ID", "error", err.Error(), "paneId", paneID)
 		return nil, fmt.Errorf("failed to query storyfragments by pane ID: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in FindIDsByPaneID", "error", err)
+		}
+	}()
 
 	var storyFragmentIDs []string
 	for rows.Next() {
@@ -749,14 +782,18 @@ func (r *StoryFragmentRepository) FindIDsByPaneID(paneID string) ([]string, erro
 }
 
 // SearchMetadata performs a prefix search on the storyfragment_metadata_fts table.
-func (r *StoryFragmentRepository) SearchMetadata(tenantID, term string) ([]repositories.FTSResult, error) {
+func (r *StoryFragmentRepository) SearchMetadata(_, term string) ([]repositories.FTSResult, error) {
 	query := `SELECT storyfragment_id, rank, snippet(storyfragment_metadata_fts, 1, '>>>', '<<<', '...', 1) FROM storyfragment_metadata_fts WHERE content MATCH ? ORDER BY rank LIMIT 10`
 	searchTerm := term + "*"
 	rows, err := r.db.Query(query, searchTerm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search storyfragment metadata: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in SearchMetadata", "error", err)
+		}
+	}()
 
 	var results []repositories.FTSResult
 	for rows.Next() {

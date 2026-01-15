@@ -62,11 +62,12 @@ func (s *SearchService) GetDiscoverSuggestions(tenantCtx *tenant.Context, query 
 
 		// Prioritize better match types (TITLE > COLLECTION > TOPIC > CONTENT)
 		if existingType, exists := suggestions[cleanedTerm]; exists {
-			if existingType == "CONTENT" && (termType == "TITLE" || termType == "COLLECTION" || termType == "TOPIC") {
+			switch {
+			case existingType == "CONTENT" && (termType == "TITLE" || termType == "COLLECTION" || termType == "TOPIC"):
 				suggestions[cleanedTerm] = termType
-			} else if existingType == "TOPIC" && (termType == "TITLE" || termType == "COLLECTION") {
+			case existingType == "TOPIC" && (termType == "TITLE" || termType == "COLLECTION"):
 				suggestions[cleanedTerm] = termType
-			} else if existingType == "COLLECTION" && termType == "TITLE" {
+			case existingType == "COLLECTION" && termType == "TITLE":
 				suggestions[cleanedTerm] = termType
 			}
 		} else {

@@ -96,6 +96,7 @@ func (b *BeliefBroadcastService) computeScrollTarget(
 	return &firstRevealed
 }
 
+// BroadcastBeliefChange notifies relevant listeners about changes in belief state.
 func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, storyfragmentID string, changedBeliefs []string, visibilitySnapshot map[string]map[string]bool, currentPaneID, gotoPaneID string, broadcaster messaging.Broadcaster) {
 	sessionData, exists := b.cacheManager.GetSession(tenantID, sessionID)
 	if !exists {
@@ -191,6 +192,7 @@ func (b *BeliefBroadcastService) calculateSSECodeHookVisibility(tenantID, sessio
 	return codeHookVisibility
 }
 
+// FindAffectedStoryfragments identifies story fragments affected by the given belief changes.
 func (b *BeliefBroadcastService) FindAffectedStoryfragments(tenantID string, changedBeliefs []string) map[string][]string {
 	result := make(map[string][]string)
 	beliefSet := make(map[string]bool)

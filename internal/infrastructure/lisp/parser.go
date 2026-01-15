@@ -12,15 +12,15 @@ type BrandConfig interface {
 }
 
 // PreParseAction processes parsed lisp tokens and returns target URL
-func PreParseAction(payload []LispToken, slug string, isContext bool, brandConfig BrandConfig) string {
+func PreParseAction(payload []Token, slug string, isContext bool, brandConfig BrandConfig) string {
 	// Handle the nested structure: (goto (storyFragment gallery))
 	if len(payload) == 0 {
 		return ""
 	}
 
 	// Get the first token which should be an array representing the full expression
-	var mainExpression []LispToken
-	if tokens, ok := payload[0].([]LispToken); ok {
+	var mainExpression []Token
+	if tokens, ok := payload[0].([]Token); ok {
 		mainExpression = tokens
 	} else {
 		mainExpression = payload
@@ -42,8 +42,8 @@ func PreParseAction(payload []LispToken, slug string, isContext bool, brandConfi
 	}
 
 	// Second element should be the nested expression like (storyFragment gallery)
-	var nestedExpression []LispToken
-	if tokens, ok := mainExpression[1].([]LispToken); ok {
+	var nestedExpression []Token
+	if tokens, ok := mainExpression[1].([]Token); ok {
 		nestedExpression = tokens
 	} else {
 		// Handle flat structure like (goto storyFragment "gallery")
@@ -144,8 +144,7 @@ func handleGotoCommand(command, parameterOne, parameterTwo, slug string, isConte
 
 	case "sandbox":
 		if parameterOne != "" {
-			switch parameterOne {
-			case "claim":
+			if parameterOne == "claim" {
 				return "/sandbox/claim"
 			}
 		}
@@ -159,7 +158,7 @@ func handleGotoCommand(command, parameterOne, parameterTwo, slug string, isConte
 }
 
 // getParameterString safely gets a parameter by index as string
-func getParameterString(tokens []LispToken, index int) string {
+func getParameterString(tokens []Token, index int) string {
 	if index >= len(tokens) {
 		return ""
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// SetupRequest defines the payload required to initialize a new tenant environment.
 type SetupRequest struct {
 	TenantID          string `json:"tenantId"`
 	AdminEmail        string `json:"adminEmail" binding:"required"`
@@ -26,12 +27,14 @@ type SetupRequest struct {
 	AAIAPIKey         string `json:"aaiApiKey"`
 }
 
+// MultiTenantHandlers contains the logic for managing multi-tenant lifecycle and routing.
 type MultiTenantHandlers struct {
 	service     *services.MultiTenantService
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
+// NewMultiTenantHandlers creates a new instance of MultiTenantHandlers with required dependencies.
 func NewMultiTenantHandlers(
 	service *services.MultiTenantService,
 	logger *logging.ChanneledLogger,
@@ -44,6 +47,7 @@ func NewMultiTenantHandlers(
 	}
 }
 
+// HandleGetCapacity returns the current system load and tenant capacity metrics.
 func (h *MultiTenantHandlers) HandleGetCapacity(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("handler_get_capacity", "system")
 	defer marker.Complete()
@@ -59,6 +63,7 @@ func (h *MultiTenantHandlers) HandleGetCapacity(c *gin.Context) {
 	c.JSON(http.StatusOK, capacity)
 }
 
+// HandleSetupInitialize starts the multi-step initialization process for a new tenant.
 func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 	var req SetupRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -136,6 +141,7 @@ func (h *MultiTenantHandlers) HandleSetupInitialize(c *gin.Context) {
 	})
 }
 
+// HandleResolveDomain identifies a tenant based on the incoming request's host or domain.
 func (h *MultiTenantHandlers) HandleResolveDomain(c *gin.Context) {
 	host := c.Query("host")
 	if host == "" {
@@ -157,6 +163,7 @@ func (h *MultiTenantHandlers) getTenantManager() *tenant.Manager {
 	return h.service.GetTenantManager()
 }
 
+// HandleFetchSuitcase retrieves the initial configuration bundle for a tenant's frontend.
 func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
 	// Context is now provided by TenantMiddleware
 	tenantCtx, exists := middleware.GetTenantContext(c)
@@ -198,6 +205,7 @@ func (h *MultiTenantHandlers) HandleFetchSuitcase(c *gin.Context) {
 	c.DataFromReader(resp.StatusCode, resp.ContentLength, resp.Header.Get("Content-Type"), resp.Body, nil)
 }
 
+// HandleSetupComplete finalizes the setup and activates a newly initialized tenant.
 func (h *MultiTenantHandlers) HandleSetupComplete(c *gin.Context) {
 	// Context is now provided by TenantMiddleware
 	tenantCtx, exists := middleware.GetTenantContext(c)

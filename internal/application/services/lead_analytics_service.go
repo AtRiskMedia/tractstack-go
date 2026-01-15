@@ -11,6 +11,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
+// LeadMetrics contains aggregated metrics regarding leads.
 type LeadMetrics struct {
 	TotalLeads       int            `json:"totalLeads"`
 	NewLeads         int            `json:"newLeads"`
@@ -20,11 +21,13 @@ type LeadMetrics struct {
 	Attribution      map[string]any `json:"attribution"`
 }
 
+// LeadAnalyticsService handles analysis of lead generation and behavior.
 type LeadAnalyticsService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
+// NewLeadAnalyticsService creates a new instance of LeadAnalyticsService.
 func NewLeadAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *LeadAnalyticsService {
 	return &LeadAnalyticsService{
 		logger:      logger,
@@ -32,6 +35,7 @@ func NewLeadAnalyticsService(logger *logging.ChanneledLogger, perfTracker *perfo
 	}
 }
 
+// ComputeLeadMetrics calculates lead-related metrics for a given time range.
 func (s *LeadAnalyticsService) ComputeLeadMetrics(tenantCtx *tenant.Context, startHour, endHour int) (*LeadMetrics, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("compute_lead_metrics", tenantCtx.TenantID)
@@ -272,6 +276,7 @@ func (s *LeadAnalyticsService) getAttribution(tenantCtx *tenant.Context) map[str
 	return attribution
 }
 
+// GenerateLeadsCSV exports lead data in CSV format.
 func (s *LeadAnalyticsService) GenerateLeadsCSV(tenantCtx *tenant.Context) ([]byte, error) {
 	query := `
 		SELECT l.id, l.first_name, l.email, l.created_at,

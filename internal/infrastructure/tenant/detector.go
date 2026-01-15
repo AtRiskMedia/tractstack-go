@@ -15,7 +15,7 @@ import (
 
 // Detector handles tenant detection from HTTP requests
 type Detector struct {
-	registry    *TenantRegistry
+	registry    *Registry
 	multiTenant bool
 	logger      *logging.ChanneledLogger
 }
@@ -95,7 +95,7 @@ func (d *Detector) registerTenant(tenantID string) error {
 	// For now, we'll assume the tenant directory exists and just add to registry
 
 	// Create basic tenant info
-	tenantInfo := TenantInfo{
+	tenantInfo := Info{
 		TenantID:     tenantID,
 		Domains:      []string{"*"}, // Default to allow all domains
 		Status:       "inactive",
@@ -161,7 +161,7 @@ func (d *Detector) RefreshRegistry() error {
 }
 
 // GetRegistry returns the current registry (for external access)
-func (d *Detector) GetRegistry() *TenantRegistry {
+func (d *Detector) GetRegistry() *Registry {
 	return d.registry
 }
 

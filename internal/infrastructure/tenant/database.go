@@ -12,16 +12,16 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
-	_ "github.com/mattn/go-sqlite3"
-	_ "github.com/tursodatabase/libsql-client-go/libsql"
+	_ "github.com/mattn/go-sqlite3"                      // we got Turso
+	_ "github.com/tursodatabase/libsql-client-go/libsql" // we got Turso
 )
 
 var (
 	connectionPools = make(map[string]*sql.DB)
 	poolMutex       = &sync.RWMutex{}
-	poolStats       = make(map[string]int)
 )
 
+// Database represents a tenant-specific database connection and configuration.
 type Database struct {
 	Conn     *sql.DB
 	TenantID string
@@ -30,6 +30,7 @@ type Database struct {
 	logger   *logging.ChanneledLogger
 }
 
+// NewDatabase initializes a new tenant database connection using the provided configuration.
 func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error) {
 	start := time.Now()
 	logger.Database().Debug("Creating new database connection", "tenantID", cfg.TenantID, "tursoEnabled", cfg.TursoEnabled)
@@ -66,7 +67,9 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 
 		poolMutex.Lock()
 		logger.Database().Warn("Existing pooled connection failed ping, removing from pool", "poolKey", poolKey, "tenantID", cfg.TenantID)
-		pooledConn.Close()
+		if err := pooledConn.Close(); err != nil {
+			logger.Database().Error("Failed to close stale pooled connection", "error", err)
+		}
 		delete(connectionPools, poolKey)
 		poolMutex.Unlock()
 	} else {
@@ -92,7 +95,13 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 
 		if err := conn.PingContext(ctx); err != nil {
 			logger.Database().Error("Turso ping failed", "error", err.Error(), "tenantID", cfg.TenantID)
-			conn.Close()
+			if err := conn.PingContext(ctx); err != nil {
+				logger.Database().Error("Turso ping failed", "error", err.Error(), "tenantID", cfg.TenantID)
+				if closeErr := conn.Close(); closeErr != nil {
+					logger.Database().Error("Failed to close Turso connection after ping failure", "error", closeErr)
+				}
+				return nil, fmt.Errorf("turso ping failed for tenant %s: %w", cfg.TenantID, err)
+			}
 			return nil, fmt.Errorf("turso ping failed for tenant %s: %w", cfg.TenantID, err)
 		}
 		logger.Database().Info("Turso connection established", "tenantID", cfg.TenantID, "database", cfg.TursoDatabase)
@@ -101,7 +110,7 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 		logger.Database().Debug("Using SQLite fallback", "tenantID", cfg.TenantID, "path", cfg.SQLitePath)
 
 		dbDir := filepath.Dir(cfg.SQLitePath)
-		if err := os.MkdirAll(dbDir, 0755); err != nil {
+		if err := os.MkdirAll(dbDir, 0o755); err != nil {
 			logger.Database().Error("Failed to create database directory", "error", err.Error(), "dir", dbDir, "tenantID", cfg.TenantID)
 			return nil, fmt.Errorf("failed to create database directory for tenant %s: %w", cfg.TenantID, err)
 		}
@@ -117,7 +126,9 @@ func NewDatabase(cfg *Config, logger *logging.ChanneledLogger) (*Database, error
 
 		if err := conn.PingContext(ctx); err != nil {
 			logger.Database().Error("SQLite fallback ping failed", "error", err.Error(), "tenantID", cfg.TenantID)
-			conn.Close()
+			if closeErr := conn.Close(); closeErr != nil {
+				logger.Database().Error("Failed to close SQLite connection after ping failure", "error", closeErr)
+			}
 			return nil, fmt.Errorf("sqlite ping failed for tenant %s: %w", cfg.TenantID, err)
 		}
 		logger.Database().Info("SQLite fallback connection established", "tenantID", cfg.TenantID, "path", cfg.SQLitePath)
@@ -169,6 +180,7 @@ func getPoolKey(config *Config) string {
 	return fmt.Sprintf("sqlite:%s", config.SQLitePath)
 }
 
+// Close terminates the underlying database connection.
 func (db *Database) Close() error {
 	if db.isPooled {
 		db.logger.Database().Debug("Skipping close for pooled connection", "tenantID", db.TenantID)
@@ -181,6 +193,7 @@ func (db *Database) Close() error {
 	return nil
 }
 
+// GetConnectionInfo returns a string describing the current database connection status.
 func (db *Database) GetConnectionInfo() string {
 	poolStatus := ""
 	if db.isPooled {
@@ -192,6 +205,7 @@ func (db *Database) GetConnectionInfo() string {
 	return fmt.Sprintf("SQLite (tenant: %s)%s", db.TenantID, poolStatus)
 }
 
+// GetPoolStats returns a map of current connection pool metrics.
 func GetPoolStats() map[string]int {
 	poolMutex.RLock()
 	defer poolMutex.RUnlock()
@@ -211,6 +225,7 @@ func GetPoolStats() map[string]int {
 	return stats
 }
 
+// CleanupPools closes and removes all idle or expired database connections from the global pool.
 func CleanupPools(logger *logging.ChanneledLogger) {
 	start := time.Now()
 	logger.Database().Debug("Starting database pool cleanup")
@@ -223,7 +238,9 @@ func CleanupPools(logger *logging.ChanneledLogger) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		if err := conn.PingContext(ctx); err != nil {
 			logger.Database().Warn("Removing stale connection from pool", "poolKey", poolKey, "error", err.Error())
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				logger.Database().Error("Failed to close stale connection during cleanup", "error", err)
+			}
 			delete(connectionPools, poolKey)
 			removedCount++
 		}

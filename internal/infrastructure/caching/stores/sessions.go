@@ -245,10 +245,8 @@ func (ss *SessionsStore) RemoveSession(tenantID, sessionID string) {
 		if ss.logger != nil {
 			ss.logger.Cache().Debug("Cache operation", "operation", "remove", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "fingerprintId", sessionData.FingerprintID, "duration", time.Since(start))
 		}
-	} else {
-		if ss.logger != nil {
-			ss.logger.Cache().Debug("Cache operation", "operation", "remove", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "hit", false, "reason", "not_found", "duration", time.Since(start))
-		}
+	} else if ss.logger != nil {
+		ss.logger.Cache().Debug("Cache operation", "operation", "remove", "type", "session", "tenantId", tenantID, "sessionId", sessionID, "hit", false, "reason", "not_found", "duration", time.Since(start))
 	}
 }
 
@@ -837,6 +835,7 @@ func (ss *SessionsStore) ValidateFingerprintIndex(tenantID string) bool {
 	return isValid
 }
 
+// BatchInvalidateSessionBeliefContexts invalidates multiple session belief contexts efficiently.
 func (ss *SessionsStore) BatchInvalidateSessionBeliefContexts(tenantID string, targets []types.SessionBeliefTarget) {
 	start := time.Now()
 	cache, exists := ss.GetTenantCache(tenantID)

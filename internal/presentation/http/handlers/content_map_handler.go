@@ -28,6 +28,7 @@ func NewContentMapHandlers(contentMapService *services.ContentMapService, logger
 	}
 }
 
+// GetContentMap serves the complete site hierarchical structure as a JSON response.
 func (h *ContentMapHandlers) GetContentMap(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {

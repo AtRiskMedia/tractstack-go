@@ -18,14 +18,16 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// PaneRepository handles the persistence, retrieval, and full-text search of Pane nodes and their markdown content.
 type PaneRepository struct {
 	db         *sql.DB
 	cache      interfaces.ContentCache
 	logger     *logging.ChanneledLogger
-	ftsService *fts.FTSService
+	ftsService *fts.Service
 }
 
-func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.FTSService) *PaneRepository {
+// NewPaneRepository creates a new instance of the PaneRepository.
+func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.Service) *PaneRepository {
 	return &PaneRepository{
 		db:         db,
 		cache:      cache,
@@ -34,6 +36,7 @@ func NewPaneRepository(db *sql.DB, cache interfaces.ContentCache, logger *loggin
 	}
 }
 
+// FindByID retrieves a single pane node by its unique identifier.
 func (r *PaneRepository) FindByID(tenantID, id string) (*content.PaneNode, error) {
 	if pane, found := r.cache.GetPane(tenantID, id); found {
 		return pane, nil
@@ -51,6 +54,7 @@ func (r *PaneRepository) FindByID(tenantID, id string) (*content.PaneNode, error
 	return pane, nil
 }
 
+// FindBySlug retrieves a single pane node by its URL-friendly slug.
 func (r *PaneRepository) FindBySlug(tenantID, slug string) (*content.PaneNode, error) {
 	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
@@ -82,6 +86,7 @@ func (r *PaneRepository) FindAll(tenantID string) ([]*content.PaneNode, error) {
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves multiple pane nodes for a tenant using a slice of IDs.
 func (r *PaneRepository) FindByIDs(tenantID string, ids []string) ([]*content.PaneNode, error) {
 	var result []*content.PaneNode
 	var missingIDs []string
@@ -226,39 +231,37 @@ func (r *PaneRepository) Delete(tenantID, id string) error {
 	}
 	defer func() {
 		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
-			r.logger.Database().Error("Failed to rollback Delete transaction", "error", err)
+			r.logger.Database().Error("failed to rollback transaction", "error", err)
 		}
 	}()
 
-	// 1. Delete file-pane relationships first to satisfy foreign key constraints
-	if _, err := tx.Exec(`DELETE FROM file_panes WHERE pane_id = ?`, id); err != nil {
-		return fmt.Errorf("failed to delete file-pane relationships: %w", err)
+	// Delete file relationships
+	if _, err := tx.Exec("DELETE FROM file_panes WHERE pane_id = ?", id); err != nil {
+		return fmt.Errorf("failed to delete file relationships: %w", err)
 	}
 
-	// 2. Query for markdown_id before deleting the pane
-	var markdownID sql.NullString
-	if err := tx.QueryRow(`SELECT markdown_id FROM panes WHERE id = ?`, id).Scan(&markdownID); err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("failed to query markdown_id for deletion: %w", err)
+	// Delete from markdowns table
+	if _, err := tx.Exec("DELETE FROM markdowns WHERE id = (SELECT markdown_id FROM panes WHERE id = ?)", id); err != nil {
+		return fmt.Errorf("failed to delete markdown content: %w", err)
 	}
 
-	// 3. Delete the pane record
-	if _, err := tx.Exec(`DELETE FROM panes WHERE id = ?`, id); err != nil {
+	// Delete from panes table
+	if _, err := tx.Exec("DELETE FROM panes WHERE id = ?", id); err != nil {
 		return fmt.Errorf("failed to delete pane: %w", err)
 	}
 
-	// 4. Delete the associated markdown if it exists
-	if markdownID.Valid {
-		if _, err := tx.Exec(`DELETE FROM markdowns WHERE id = ?`, markdownID.String); err != nil {
-			return fmt.Errorf("failed to delete associated markdown: %w", err)
-		}
-	}
-
-	// 5. Delete from FTS index
+	// Clean up FTS index
 	if err := r.ftsService.DeletePaneContent(tx, id); err != nil {
-		r.logger.System().Warn("Failed to delete pane content from index on delete", "error", err, "paneId", id)
+		r.logger.System().Warn("Failed to delete pane FTS content", "error", err, "paneId", id)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	r.cache.InvalidatePane(tenantID, id)
+
+	return nil
 }
 
 func (r *PaneRepository) loadAllIDsFromDB() ([]string, error) {
@@ -268,7 +271,11 @@ func (r *PaneRepository) loadAllIDsFromDB() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query panes: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var paneIDs []string
 	for rows.Next() {
@@ -356,7 +363,11 @@ func (r *PaneRepository) loadMultipleFromDB(ids []string) ([]*content.PaneNode, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query panes: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var panes []*content.PaneNode
 	var markdownIDs []string
@@ -470,7 +481,11 @@ func (r *PaneRepository) loadMultipleMarkdownFromDB(ids []string) (map[string]st
 	if err != nil {
 		return nil, fmt.Errorf("failed to query markdowns: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleMarkdownFromDB", "error", err)
+		}
+	}()
 
 	markdownMap := make(map[string]string)
 	for rows.Next() {
@@ -545,6 +560,7 @@ func (r *PaneRepository) extractPaneDataFromOptions(pane *content.PaneNode) {
 	}
 }
 
+// FindContext retrieves all panes marked as context panes for a specific tenant.
 func (r *PaneRepository) FindContext(tenantID string) ([]*content.PaneNode, error) {
 	allPanes, err := r.FindAll(tenantID)
 	if err != nil {
@@ -602,6 +618,7 @@ func (r *PaneRepository) UpdateFilePaneRelationships(tenantID string, relationsh
 	return nil
 }
 
+// SearchMarkdownContent performs a full-text search across all markdown nodes and returns the IDs of matching content.
 func (r *PaneRepository) SearchMarkdownContent(tenantID, searchTerm string) ([]string, error) {
 	query := `SELECT id FROM markdowns WHERE body LIKE ?`
 	start := time.Now()
@@ -609,7 +626,11 @@ func (r *PaneRepository) SearchMarkdownContent(tenantID, searchTerm string) ([]s
 	if err != nil {
 		return nil, fmt.Errorf("failed to search markdown content: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in SearchMarkdownContent", "error", err)
+		}
+	}()
 
 	var markdownIDs []string
 	for rows.Next() {
@@ -630,6 +651,7 @@ func (r *PaneRepository) SearchMarkdownContent(tenantID, searchTerm string) ([]s
 	return markdownIDs, nil
 }
 
+// FindPaneIDsByMarkdownIDs resolves a list of markdown node IDs to the IDs of the panes that contain them.
 func (r *PaneRepository) FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs []string) ([]string, error) {
 	if len(markdownIDs) == 0 {
 		return []string{}, nil
@@ -646,7 +668,11 @@ func (r *PaneRepository) FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs [
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pane IDs by markdown IDs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in FindPaneIDsByMarkdownIDs", "error", err)
+		}
+	}()
 
 	var paneIDs []string
 	for rows.Next() {
@@ -668,14 +694,18 @@ func (r *PaneRepository) FindPaneIDsByMarkdownIDs(tenantID string, markdownIDs [
 }
 
 // SearchContent performs a prefix search on the pane_content_fts table.
-func (r *PaneRepository) SearchContent(tenantID, term string) ([]repositories.FTSResult, error) {
+func (r *PaneRepository) SearchContent(_, term string) ([]repositories.FTSResult, error) {
 	query := `SELECT pane_id, rank, snippet(pane_content_fts, 1, '>>>', '<<<', '...', 1) FROM pane_content_fts WHERE content MATCH ? ORDER BY rank LIMIT 10`
 	searchTerm := term + "*"
 	rows, err := r.db.Query(query, searchTerm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search pane content: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in SearchContent", "error", err)
+		}
+	}()
 
 	var results []repositories.FTSResult
 	for rows.Next() {
@@ -689,13 +719,13 @@ func (r *PaneRepository) SearchContent(tenantID, term string) ([]repositories.FT
 }
 
 // FindPaneContextStatus checks a list of pane IDs and returns a map indicating which are context panes.
-func (r *PaneRepository) FindPaneContextStatus(tenantID string, paneIDs []string) (map[string]bool, error) {
+func (r *PaneRepository) FindPaneContextStatus(_ string, paneIDs []string) (map[string]bool, error) {
 	if len(paneIDs) == 0 {
 		return make(map[string]bool), nil
 	}
 
 	placeholders := make([]string, len(paneIDs))
-	args := make([]interface{}, len(paneIDs))
+	args := make([]any, len(paneIDs))
 	for i, id := range paneIDs {
 		placeholders[i] = "?"
 		args[i] = id
@@ -706,7 +736,11 @@ func (r *PaneRepository) FindPaneContextStatus(tenantID string, paneIDs []string
 	if err != nil {
 		return nil, fmt.Errorf("failed to query pane context status: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in FindPaneContextStatus", "error", err)
+		}
+	}()
 
 	statusMap := make(map[string]bool)
 	for rows.Next() {
@@ -732,42 +766,51 @@ func (r *PaneRepository) DeleteMany(tenantID string, ids []string) error {
 	}
 	defer func() {
 		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
-			r.logger.Database().Error("Failed to rollback DeleteMany transaction", "error", err)
+			r.logger.Database().Error("failed to rollback transaction", "error", err)
 		}
 	}()
 
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	// Delete file relationships
+	query := fmt.Sprintf("DELETE FROM file_panes WHERE pane_id IN (%s)", inClause)
+	if _, err := tx.Exec(query, args...); err != nil {
+		return fmt.Errorf("failed to delete file relationships: %w", err)
+	}
+
+	// Delete markdowns
+	// Note: SQLite doesn't support JOIN in DELETE, so we use subquery
+	query = fmt.Sprintf("DELETE FROM markdowns WHERE id IN (SELECT markdown_id FROM panes WHERE id IN (%s))", inClause)
+	if _, err := tx.Exec(query, args...); err != nil {
+		return fmt.Errorf("failed to delete markdowns: %w", err)
+	}
+
+	// Delete panes
+	query = fmt.Sprintf("DELETE FROM panes WHERE id IN (%s)", inClause)
+	if _, err := tx.Exec(query, args...); err != nil {
+		return fmt.Errorf("failed to delete panes: %w", err)
+	}
+
+	// Cleanup FTS for each pane
 	for _, id := range ids {
-		// 1. Delete file-pane relationships first
-		if _, err := tx.Exec(`DELETE FROM file_panes WHERE pane_id = ?`, id); err != nil {
-			return fmt.Errorf("failed to delete file-pane relationships for pane %s: %w", id, err)
-		}
-
-		// 2. Query to get the markdown ID before deleting the pane
-		var markdownID sql.NullString
-		if err := tx.QueryRow(`SELECT markdown_id FROM panes WHERE id = ?`, id).Scan(&markdownID); err != nil {
-			if err == sql.ErrNoRows {
-				continue // Skip if pane doesn't exist
-			}
-			return fmt.Errorf("failed to query markdown_id for deletion of pane %s: %w", id, err)
-		}
-
-		// 3. Delete the pane record
-		if _, err := tx.Exec(`DELETE FROM panes WHERE id = ?`, id); err != nil {
-			return fmt.Errorf("failed to delete pane %s: %w", id, err)
-		}
-
-		// 4. Delete the associated markdown if it exists
-		if markdownID.Valid {
-			if _, err := tx.Exec(`DELETE FROM markdowns WHERE id = ?`, markdownID.String); err != nil {
-				return fmt.Errorf("failed to delete associated markdown for pane %s: %w", id, err)
-			}
-		}
-
-		// 5. Delete from FTS index
 		if err := r.ftsService.DeletePaneContent(tx, id); err != nil {
-			r.logger.System().Warn("Failed to delete pane content from index on delete", "error", err, "paneId", id)
+			r.logger.System().Warn("Failed to delete pane FTS content", "error", err, "paneId", id)
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	for _, id := range ids {
+		r.cache.InvalidatePane(tenantID, id)
+	}
+
+	return nil
 }

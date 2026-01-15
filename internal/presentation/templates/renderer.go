@@ -207,12 +207,14 @@ func (nr *NodeRendererImpl) getNodeRenderData(nodeID string) *rendering.NodeRend
 	return nr.ctx.AllNodes[nodeID]
 }
 
+// PaneRenderer handles the layout and rendering of a Pane, including its background and child nodes.
 type PaneRenderer struct {
 	ctx          *rendering.RenderContext
 	cssProcessor *CSSProcessorImpl
 	nodeRenderer NodeRenderer
 }
 
+// Render generates the complete HTML structure for a Pane, managing flex layouts and background elements.
 func (pr *PaneRenderer) Render(nodeID string) string {
 	nodeData := pr.getNodeData(nodeID)
 	if nodeData == nil || nodeData.PaneData == nil {
@@ -244,13 +246,8 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 	}
 	pr.executeTemplate(&html, "paneWrapper", wrapperData)
 
-	// pane level code hooks are rendered in frontend
-	//codeHookPayload := pr.getCodeHookPayload(nodeID)
-	//if codeHookPayload != nil {
-	//	pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Style: template.CSS(contentStyles)})
-	//	html.WriteString(`Missing Code Hook here !!<!-- CodeHook component placeholder --></div>`)
-	//} else
-	if useFlexLayout {
+	switch {
+	case useFlexLayout:
 		flexDirection := "flex-col md:flex-row"
 		if bgNode.Position == "rightBleed" {
 			flexDirection = "flex-col md:flex-row-reverse"
@@ -285,7 +282,8 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 		html.WriteString(`</div>`)
 
 		html.WriteString(`</div>`)
-	} else if deferFlexLayout {
+
+	case deferFlexLayout:
 		pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Class: wrapperClasses})
 		pr.executeTemplate(&html, "contentDiv", contentDivData{Class: contentClasses, Style: template.CSS(contentStyles)})
 
@@ -295,7 +293,8 @@ func (pr *PaneRenderer) Render(nodeID string) string {
 		}
 		html.WriteString(`</div>`)
 		html.WriteString(`</div>`)
-	} else {
+
+	default:
 		pr.executeTemplate(&html, "contentDiv", contentDivData{ID: slug, Class: wrapperClasses})
 		pr.executeTemplate(&html, "contentDiv", contentDivData{Class: contentClasses, Style: template.CSS(contentStyles)})
 
@@ -388,10 +387,6 @@ func (pr *PaneRenderer) getNonBgPaneChildren(nodeID string) []string {
 	}
 	return contentChildren
 }
-
-//func (pr *PaneRenderer) getCodeHookPayload(nodeID string) map[string]any {
-//	return nil
-//}
 
 func (pr *PaneRenderer) getNodeData(nodeID string) *rendering.NodeRenderData {
 	if pr.ctx.AllNodes == nil {

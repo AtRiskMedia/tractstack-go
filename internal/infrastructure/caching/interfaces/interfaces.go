@@ -1,5 +1,5 @@
 // Package interfaces defines cache operation contracts for multi-tenant content management.
-package interfaces
+package interfaces //nolint:revive
 
 import (
 	"time"
@@ -139,7 +139,6 @@ type Cache interface {
 	HTMLChunkCache
 	AnalyticsCache
 	InvalidateTenant(tenantID string)
-	GetTenantStats(tenantID string) CacheStats
 	GetMemoryStats() map[string]any
 	InvalidateAll()
 	Health() map[string]any
@@ -167,14 +166,10 @@ type WriteOnlyAnalyticsCache interface {
 	UpdateLastFullHour(tenantID, hourKey string)
 }
 
-type CacheStats struct {
-	Hits   int   `json:"hits"`
-	Misses int   `json:"misses"`
-	Size   int64 `json:"size"`
-}
-
+// CacheTTL represents a time-to-live duration for cache entries.
 type CacheTTL time.Duration
 
+// TTLNever indicates that a cache item should never expire.
 const (
 	TTLNever    CacheTTL = CacheTTL(0)
 	TTL1Minute  CacheTTL = CacheTTL(time.Minute)

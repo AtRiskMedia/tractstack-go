@@ -12,10 +12,12 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/shapes"
 )
 
+// BgPaneWrapperRenderer handles the rendering of background pane wrappers, including images and visual breaks.
 type BgPaneWrapperRenderer struct {
 	ctx *rendering.RenderContext
 }
 
+// NewBgPaneWrapperRenderer creates a new renderer for background panes with the given context.
 func NewBgPaneWrapperRenderer(ctx *rendering.RenderContext) *BgPaneWrapperRenderer {
 	return &BgPaneWrapperRenderer{ctx: ctx}
 }
@@ -66,6 +68,7 @@ var (
 </div>{{else}}<div class="visual-break-placeholder">Shape not found: {{.ShapeName}}</div>{{end}}`))
 )
 
+// Render generates the HTML for a background pane wrapper based on the provided node ID.
 func (bpwr *BgPaneWrapperRenderer) Render(nodeID string) string {
 	nodeData := bpwr.getNodeData(nodeID)
 	if nodeData == nil {
@@ -74,9 +77,8 @@ func (bpwr *BgPaneWrapperRenderer) Render(nodeID string) string {
 
 	if bpwr.isBgImageNode(nodeData) || bpwr.isArtpackImageNode(nodeData) {
 		return bpwr.renderBgImage(nodeData)
-	} else {
-		return bpwr.renderBgVisualBreak(nodeData)
 	}
+	return bpwr.renderBgVisualBreak(nodeData)
 }
 
 func (bpwr *BgPaneWrapperRenderer) isBgImageNode(nodeData *rendering.NodeRenderData) bool {
@@ -128,28 +130,27 @@ func (bpwr *BgPaneWrapperRenderer) renderBgImage(nodeData *rendering.NodeRenderD
 			return `<div class="bg-error">Template error</div>`
 		}
 		return buf.String()
-	} else {
-		backgroundCSS := ""
-		if src != "" {
-			if sanitizedURL := bpwr.sanitizeBackgroundURL(src); sanitizedURL != "" {
-				backgroundCSS = fmt.Sprintf("background-image:url(%s);", sanitizedURL)
-			}
-		}
-
-		templateData := bgDivTemplateData{
-			ResponsiveClass: responsiveClass,
-			BackgroundURL:   template.CSS(backgroundCSS),
-			ObjectFit:       objectFit,
-			AltText:         altText,
-		}
-
-		var buf bytes.Buffer
-		if err := bgDivTemplate.Execute(&buf, templateData); err != nil {
-			log.Printf("Error executing bg div template: %v", err)
-			return `<div class="bg-error">Template error</div>`
-		}
-		return buf.String()
 	}
+	backgroundCSS := ""
+	if src != "" {
+		if sanitizedURL := bpwr.sanitizeBackgroundURL(src); sanitizedURL != "" {
+			backgroundCSS = fmt.Sprintf("background-image:url(%s);", sanitizedURL)
+		}
+	}
+
+	templateData := bgDivTemplateData{
+		ResponsiveClass: responsiveClass,
+		BackgroundURL:   template.CSS(backgroundCSS),
+		ObjectFit:       objectFit,
+		AltText:         altText,
+	}
+
+	var buf bytes.Buffer
+	if err := bgDivTemplate.Execute(&buf, templateData); err != nil {
+		log.Printf("Error executing bg div template: %v", err)
+		return `<div class="bg-error">Template error</div>`
+	}
+	return buf.String()
 }
 
 func (bpwr *BgPaneWrapperRenderer) sanitizeBackgroundURL(rawURL string) string {

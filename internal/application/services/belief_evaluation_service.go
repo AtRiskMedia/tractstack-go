@@ -202,10 +202,7 @@ func (s *BeliefEvaluationService) CalculateCodeHookVisibilityState(
 		beliefsToUnset := s.ExtractBeliefsToUnset(effectiveFilter)
 		if len(beliefsToUnset) > 0 {
 			return beliefsToUnset
-		} else {
-			return true
 		}
-	} else {
-		return true
 	}
+	return true
 }

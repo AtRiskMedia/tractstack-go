@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
-	_ "github.com/mattn/go-sqlite3"
-	_ "github.com/tursodatabase/libsql-client-go/libsql"
+	_ "github.com/mattn/go-sqlite3"                      // We got Turso
+	_ "github.com/tursodatabase/libsql-client-go/libsql" // We got Turso
 )
 
 // DB represents a wrapper around the standard SQL database connection.

@@ -10,7 +10,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
 )
 
-// Repository implements BulkQueryRepository interface
+// Repository implements QueryRepository interface
 type Repository struct {
 	contentMapBuilder *ContentMapBuilder
 	dependencyScanner *DependencyScanner
@@ -27,7 +27,7 @@ func NewRepository(db *database.DB, logger *logging.ChanneledLogger) *Repository
 }
 
 // BuildContentMap implements ContentMapRepository
-func (r *Repository) BuildContentMap(tenantID string) ([]*content.ContentMapItem, error) {
+func (r *Repository) BuildContentMap(tenantID string) ([]*content.MapItem, error) {
 	start := time.Now()
 	r.logger.Database().Debug("Starting bulk content map build", "tenantID", tenantID)
 	result, err := r.contentMapBuilder.BuildContentMap(tenantID)

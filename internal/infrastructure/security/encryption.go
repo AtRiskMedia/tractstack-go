@@ -120,7 +120,7 @@ func Decrypt(encrypted, key string) (string, error) {
 }
 
 // EncryptEmail encrypts an email using a shared ULID and the provided AES key
-func EncryptEmail(email, aesKey string) string {
+func EncryptEmail(_, aesKey string) string {
 	sharedULID := GenerateULID()
 	encrypted, err := Encrypt(sharedULID, aesKey)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/rendering"
 )
 
+// TractStackNode represents the core structure of a TractStack content node, containing metadata like ID, title, and type.
 type TractStackNode struct {
 	ID              string  `json:"id"`
 	Title           string  `json:"title"`
@@ -15,6 +16,7 @@ type TractStackNode struct {
 	SocialImagePath *string `json:"socialImagePath,omitempty"`
 }
 
+// StoryFragmentNode represents a story fragment content node, linking menus and panes.
 type StoryFragmentNode struct {
 	ID               string            `json:"id"`
 	Title            string            `json:"title"`
@@ -32,12 +34,14 @@ type StoryFragmentNode struct {
 	Changed          *time.Time        `json:"changed,omitempty"`
 }
 
+// StoryFragmentCompletePayload represents the full payload for a story fragment, including associated topics and descriptions.
 type StoryFragmentCompletePayload struct {
 	StoryFragmentNode
 	Topics      []string `json:"topics,omitempty"`
 	Description *string  `json:"description,omitempty"`
 }
 
+// PaneNode represents a reusable content pane, containing HTML AST, styles, and belief logic.
 type PaneNode struct {
 	ID              string              `json:"id"`
 	Title           string              `json:"title"`
@@ -58,6 +62,7 @@ type PaneNode struct {
 	Changed         *time.Time          `json:"changed,omitempty"`
 }
 
+// MenuNode represents a navigation menu structure.
 type MenuNode struct {
 	ID             string      `json:"id"`
 	Title          string      `json:"title"`
@@ -66,6 +71,7 @@ type MenuNode struct {
 	OptionsPayload []*MenuLink `json:"optionsPayload,omitempty"`
 }
 
+// MenuLink represents a single link item within a menu.
 type MenuLink struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
@@ -73,6 +79,7 @@ type MenuLink struct {
 	ActionLisp  string `json:"actionLisp"`
 }
 
+// ResourceNode represents an external or internal resource reference.
 type ResourceNode struct {
 	ID             string         `json:"id"`
 	Title          string         `json:"title"`
@@ -84,6 +91,7 @@ type ResourceNode struct {
 	OptionsPayload map[string]any `json:"optionsPayload"`
 }
 
+// BeliefNode represents a belief entity used for personalization logic.
 type BeliefNode struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
@@ -93,6 +101,7 @@ type BeliefNode struct {
 	CustomValues []string `json:"customValues,omitempty"`
 }
 
+// EpinetNode represents an Epinet structure for interactive storytelling steps.
 type EpinetNode struct {
 	ID       string        `json:"id"`
 	NodeType string        `json:"nodeType"`
@@ -101,6 +110,7 @@ type EpinetNode struct {
 	Steps    []*EpinetStep `json:"steps"`
 }
 
+// EpinetStep represents a single decision or logic step within an Epinet.
 type EpinetStep struct {
 	GateType   string   `json:"gateType"`
 	Title      string   `json:"title"`
@@ -110,6 +120,7 @@ type EpinetStep struct {
 	BeliefSlug *string  `json:"beliefSlug,omitempty"`
 }
 
+// ImageFileNode represents an uploaded image file with metadata and source sets.
 type ImageFileNode struct {
 	ID             string  `json:"id"`
 	Filename       string  `json:"filename"`
@@ -120,6 +131,7 @@ type ImageFileNode struct {
 	Base64Data     *string `json:"base64Data,omitempty"`
 }
 
+// ImpressionNode represents a tracked impression or interaction point.
 type ImpressionNode struct {
 	ID          string `json:"id"`
 	NodeType    string `json:"nodeType"`

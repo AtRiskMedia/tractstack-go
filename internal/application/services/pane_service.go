@@ -277,7 +277,7 @@ func (s *PaneService) ensureUniqueSlug(tenantCtx *tenant.Context, desiredSlug st
 
 // BulkProcessPanes handles the efficient processing of multiple panes,
 // including batch AI title/slug generation for system-generated panes.
-func (s *PaneService) BulkProcessPanes(tenantCtx *tenant.Context, panePayloads []map[string]any, originalReq *http.Request) ([]string, error) {
+func (s *PaneService) BulkProcessPanes(tenantCtx *tenant.Context, panePayloads []map[string]any, _ *http.Request) ([]string, error) {
 	start := time.Now()
 	var panesNeedingAI []paneNeedingAI
 

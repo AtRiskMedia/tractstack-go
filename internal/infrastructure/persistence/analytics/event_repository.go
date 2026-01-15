@@ -40,36 +40,43 @@ func NewSQLEventRepository(db *database.DB, logger *logging.ChanneledLogger) *SQ
 }
 
 // generateUniqueActionID creates a truly unique action ID safe for concurrent use
-func (r *SQLEventRepository) generateUniqueActionID() string {
+func (r *SQLEventRepository) generateUniqueActionID() (string, error) {
 	// Use atomic counter + nanosecond timestamp + random component for uniqueness
 	counter := atomic.AddUint64(&idCounter, 1)
 	timestamp := time.Now().UnixNano()
 
 	// Add 4 random bytes for extra uniqueness under extreme concurrency
 	randomBytes := make([]byte, 4)
-	rand.Read(randomBytes)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
 	randomHex := fmt.Sprintf("%x", randomBytes)
 
-	return fmt.Sprintf("action_%d_%d_%s", timestamp, counter, randomHex)
+	return fmt.Sprintf("action_%d_%d_%s", timestamp, counter, randomHex), nil
 }
 
 // generateUniqueBeliefID creates a truly unique belief ID safe for concurrent use
-func (r *SQLEventRepository) generateUniqueBeliefID() string {
+func (r *SQLEventRepository) generateUniqueBeliefID() (string, error) {
 	// Same strategy for belief events
 	counter := atomic.AddUint64(&idCounter, 1)
 	timestamp := time.Now().UnixNano()
 
 	randomBytes := make([]byte, 4)
-	rand.Read(randomBytes)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
 	randomHex := fmt.Sprintf("%x", randomBytes)
 
-	return fmt.Sprintf("belief_%d_%d_%s", timestamp, counter, randomHex)
+	return fmt.Sprintf("belief_%d_%d_%s", timestamp, counter, randomHex), nil
 }
 
 // StoreActionEvent saves a user action event to the database with duplicate protection.
 func (r *SQLEventRepository) StoreActionEvent(event *analytics.ActionEvent) error {
 	// Generate truly unique ID
-	actionID := r.generateUniqueActionID()
+	actionID, err := r.generateUniqueActionID()
+	if err != nil {
+		return fmt.Errorf("failed to generate action ID: %w", err)
+	}
 
 	const query = `
 		INSERT INTO actions (id, object_id, object_type, duration, visit_id, fingerprint_id, verb, created_at)
@@ -120,7 +127,11 @@ func (r *SQLEventRepository) StoreActionEvent(event *analytics.ActionEvent) erro
 			if attempt < maxRetries {
 				// Generate new ID and retry
 				oldActionID := actionID
-				actionID = r.generateUniqueActionID()
+				var err error
+				actionID, err = r.generateUniqueActionID()
+				if err != nil {
+					return fmt.Errorf("failed to generate new action ID during retry: %w", err)
+				}
 				r.logger.Database().Warn("Action ID collision detected, retrying with new ID",
 					"oldActionId", oldActionID,
 					"newActionId", actionID,
@@ -128,27 +139,25 @@ func (r *SQLEventRepository) StoreActionEvent(event *analytics.ActionEvent) erro
 					"objectId", event.ObjectID,
 					"verb", event.Verb)
 				continue
-			} else {
-				// Max retries exceeded - this should be extremely rare
-				r.logger.Database().Error("Action event insert failed after max retries",
-					"error", err.Error(),
-					"actionId", actionID,
-					"objectId", event.ObjectID,
-					"verb", event.Verb,
-					"fingerprintId", event.FingerprintID,
-					"attempts", attempt)
-				return fmt.Errorf("failed to store action event after %d attempts: %w", maxRetries, err)
 			}
-		} else {
-			// Non-unique constraint error - fail immediately
-			r.logger.Database().Error("Action event insert failed",
+			// Max retries exceeded - this should be extremely rare
+			r.logger.Database().Error("Action event insert failed after max retries",
 				"error", err.Error(),
 				"actionId", actionID,
 				"objectId", event.ObjectID,
 				"verb", event.Verb,
-				"fingerprintId", event.FingerprintID)
-			return fmt.Errorf("failed to store action event: %w", err)
+				"fingerprintId", event.FingerprintID,
+				"attempts", attempt)
+			return fmt.Errorf("failed to store action event after %d attempts: %w", maxRetries, err)
 		}
+		// Non-unique constraint error - fail immediately
+		r.logger.Database().Error("Action event insert failed",
+			"error", err.Error(),
+			"actionId", actionID,
+			"objectId", event.ObjectID,
+			"verb", event.Verb,
+			"fingerprintId", event.FingerprintID)
+		return fmt.Errorf("failed to store action event: %w", err)
 	}
 
 	// Should never reach here
@@ -158,7 +167,10 @@ func (r *SQLEventRepository) StoreActionEvent(event *analytics.ActionEvent) erro
 // StoreBeliefEvent saves a user belief event to the database with duplicate protection.
 func (r *SQLEventRepository) StoreBeliefEvent(event *analytics.BeliefEvent) error {
 	// Generate truly unique ID
-	beliefID := r.generateUniqueBeliefID()
+	beliefID, err := r.generateUniqueBeliefID()
+	if err != nil {
+		return fmt.Errorf("failed to generate belief ID: %w", err)
+	}
 
 	const query = `
 		INSERT INTO heldbeliefs (id, belief_id, fingerprint_id, verb, object, updated_at)
@@ -205,7 +217,11 @@ func (r *SQLEventRepository) StoreBeliefEvent(event *analytics.BeliefEvent) erro
 			if attempt < maxRetries {
 				// Generate new ID and retry
 				oldBeliefID := beliefID
-				beliefID = r.generateUniqueBeliefID()
+				var err error
+				beliefID, err = r.generateUniqueBeliefID()
+				if err != nil {
+					return fmt.Errorf("failed to generate new belief ID during retry: %w", err)
+				}
 				r.logger.Database().Warn("Belief ID collision detected, retrying with new ID",
 					"oldBeliefId", oldBeliefID,
 					"newBeliefId", beliefID,
@@ -213,27 +229,25 @@ func (r *SQLEventRepository) StoreBeliefEvent(event *analytics.BeliefEvent) erro
 					"beliefId", event.BeliefID,
 					"verb", event.Verb)
 				continue
-			} else {
-				// Max retries exceeded - this should be extremely rare
-				r.logger.Database().Error("Belief event insert failed after max retries",
-					"error", err.Error(),
-					"beliefEventId", beliefID,
-					"beliefId", event.BeliefID,
-					"verb", event.Verb,
-					"fingerprintId", event.FingerprintID,
-					"attempts", attempt)
-				return fmt.Errorf("failed to store belief event after %d attempts: %w", maxRetries, err)
 			}
-		} else {
-			// Non-unique constraint error - fail immediately
-			r.logger.Database().Error("Belief event insert failed",
+			// Max retries exceeded - this should be extremely rare
+			r.logger.Database().Error("Belief event insert failed after max retries",
 				"error", err.Error(),
 				"beliefEventId", beliefID,
 				"beliefId", event.BeliefID,
 				"verb", event.Verb,
-				"fingerprintId", event.FingerprintID)
-			return fmt.Errorf("failed to store belief event: %w", err)
+				"fingerprintId", event.FingerprintID,
+				"attempts", attempt)
+			return fmt.Errorf("failed to store belief event after %d attempts: %w", maxRetries, err)
 		}
+		// Non-unique constraint error - fail immediately
+		r.logger.Database().Error("Belief event insert failed",
+			"error", err.Error(),
+			"beliefEventId", beliefID,
+			"beliefId", event.BeliefID,
+			"verb", event.Verb,
+			"fingerprintId", event.FingerprintID)
+		return fmt.Errorf("failed to store belief event: %w", err)
 	}
 
 	// Should never reach here
@@ -283,7 +297,11 @@ func (r *SQLEventRepository) FindActionEventsInRange(startTime, endTime time.Tim
 			"endTime", endTime)
 		return nil, fmt.Errorf("failed to query action events: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in FindActionEventsInRange", "error", err)
+		}
+	}()
 
 	var events []*analytics.ActionEvent
 	for rows.Next() {
@@ -383,7 +401,11 @@ func (r *SQLEventRepository) FindBeliefEventsInRange(startTime, endTime time.Tim
 			"endTime", endTime)
 		return nil, fmt.Errorf("failed to query belief events: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in FindBeliefEventsInRange", "error", err)
+		}
+	}()
 
 	var events []*analytics.BeliefEvent
 	for rows.Next() {
@@ -519,7 +541,11 @@ func (r *SQLEventRepository) LoadFingerprintBeliefs(fingerprintID string) (map[s
 		r.logger.Database().Error("Failed to query fingerprint beliefs", "error", err.Error(), "fingerprintId", fingerprintID)
 		return nil, fmt.Errorf("failed to query fingerprint beliefs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in LoadFingerprintBeliefs", "error", err)
+		}
+	}()
 
 	beliefs := make(map[string][]string)
 	for rows.Next() {

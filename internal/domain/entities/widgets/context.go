@@ -22,14 +22,14 @@ type WidgetContext struct {
 
 // WidgetState represents the resolved state for a specific widget
 type WidgetState struct {
-	WidgetID        string                 `json:"widgetId"`
-	WidgetType      string                 `json:"widgetType"` // "belief", "toggle", "identifyAs", etc.
-	BeliefKey       string                 `json:"beliefKey"`
-	CurrentValue    interface{}            `json:"currentValue"`
-	IsPersonalized  bool                   `json:"isPersonalized"`
-	VisibilityState string                 `json:"visibilityState"` // "visible", "hidden", "default"
-	Properties      map[string]interface{} `json:"properties"`      // Widget-specific props
-	LastModified    time.Time              `json:"lastModified"`
+	WidgetID        string         `json:"widgetId"`
+	WidgetType      string         `json:"widgetType"` // "belief", "toggle", "identifyAs", etc.
+	BeliefKey       string         `json:"beliefKey"`
+	CurrentValue    any            `json:"currentValue"`
+	IsPersonalized  bool           `json:"isPersonalized"`
+	VisibilityState string         `json:"visibilityState"` // "visible", "hidden", "default"
+	Properties      map[string]any `json:"properties"`      // Widget-specific props
+	LastModified    time.Time      `json:"lastModified"`
 }
 
 // WidgetBeliefMapping represents widget→belief relationships for a pane
@@ -59,13 +59,13 @@ func NewWidgetState(widgetID, widgetType, beliefKey string) *WidgetState {
 		BeliefKey:       beliefKey,
 		IsPersonalized:  false,
 		VisibilityState: "default",
-		Properties:      make(map[string]interface{}),
+		Properties:      make(map[string]any),
 		LastModified:    time.Now(),
 	}
 }
 
 // UpdateFromSessionContext updates widget context from session belief context
-func (wc *WidgetContext) UpdateFromSessionContext(sbc *session.SessionBeliefContext) {
+func (wc *WidgetContext) UpdateFromSessionContext(sbc *session.BeliefContext) {
 	if sbc != nil {
 		wc.UserBeliefs = sbc.UserBeliefs
 		wc.PersonalizationOn = len(sbc.UserBeliefs) > 0
@@ -120,7 +120,7 @@ func (wc *WidgetContext) HasPersonalizedWidgets() bool {
 }
 
 // GetBeliefValue retrieves belief value for template rendering
-func (wc *WidgetContext) GetBeliefValue(beliefKey string) interface{} {
+func (wc *WidgetContext) GetBeliefValue(beliefKey string) any {
 	if values, exists := wc.UserBeliefs[beliefKey]; exists && len(values) > 0 {
 		return values[0] // Return first value for simple widgets
 	}
@@ -147,19 +147,19 @@ func (wc *WidgetContext) IsPersonalizationEnabled() bool {
 }
 
 // SetProperty sets a property on a widget state
-func (ws *WidgetState) SetProperty(key string, value interface{}) {
+func (ws *WidgetState) SetProperty(key string, value any) {
 	ws.Properties[key] = value
 	ws.LastModified = time.Now()
 }
 
 // GetProperty retrieves a property from widget state
-func (ws *WidgetState) GetProperty(key string) (interface{}, bool) {
+func (ws *WidgetState) GetProperty(key string) (any, bool) {
 	value, exists := ws.Properties[key]
 	return value, exists
 }
 
 // UpdateCurrentValue updates the current value of the widget
-func (ws *WidgetState) UpdateCurrentValue(value interface{}) {
+func (ws *WidgetState) UpdateCurrentValue(value any) {
 	ws.CurrentValue = value
 	ws.IsPersonalized = true
 	ws.LastModified = time.Now()

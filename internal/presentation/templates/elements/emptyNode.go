@@ -14,7 +14,7 @@ func NewEmptyNodeRenderer(ctx *rendering.RenderContext) *EmptyNodeRenderer {
 }
 
 // Render returns an empty div element, matching EmptyNode.astro behavior
-func (enr *EmptyNodeRenderer) Render(nodeID string) string {
+func (enr *EmptyNodeRenderer) Render(_ string) string {
 	return `<div></div>`
 }
 

@@ -14,17 +14,20 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
+// SankeyNode represents an individual entity or state in a Sankey diagram.
 type SankeyNode struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 
+// SankeyLink represents the flow between two SankeyNodes with a specific value.
 type SankeyLink struct {
 	Source int `json:"source"`
 	Target int `json:"target"`
 	Value  int `json:"value"`
 }
 
+// SankeyDiagram contains the complete nodes and links structure for flow visualization.
 type SankeyDiagram struct {
 	ID    string       `json:"id"`
 	Title string       `json:"title"`
@@ -32,6 +35,7 @@ type SankeyDiagram struct {
 	Links []SankeyLink `json:"links"`
 }
 
+// ContentItem represents a specific piece of content within the analytics context.
 type ContentItem struct {
 	Title string `json:"title"`
 	Slug  string `json:"slug"`
@@ -43,16 +47,19 @@ type potentialLink struct {
 	value int
 }
 
+// AvailableFilter represents a filtering option that can be applied to analytics queries.
 type AvailableFilter struct {
 	BeliefSlug string   `json:"beliefSlug"`
 	Values     []string `json:"values"`
 }
 
+// EpinetAnalyticsService handles complex flow analysis and visualization data for Epinets.
 type EpinetAnalyticsService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
+// NewEpinetAnalyticsService creates a new instance of EpinetAnalyticsService.
 func NewEpinetAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *EpinetAnalyticsService {
 	return &EpinetAnalyticsService{
 		logger:      logger,
@@ -60,8 +67,7 @@ func NewEpinetAnalyticsService(logger *logging.ChanneledLogger, perfTracker *per
 	}
 }
 
-// in: internal/application/services/epinet_analytics_service.go
-
+// ComputeEpinetSankey generates a Sankey diagram structure based on Epinet flow data and filters.
 func (s *EpinetAnalyticsService) ComputeEpinetSankey(tenantCtx *tenant.Context, epinetID string, filters *SankeyFilters) (*SankeyDiagram, []AvailableFilter, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("compute_epinet_sankey", tenantCtx.TenantID)
@@ -470,7 +476,7 @@ func (s *EpinetAnalyticsService) getEpinetConfig(tenantCtx *tenant.Context, epin
 					GateType:  nodeStep.GateType,
 					Title:     nodeStep.Title,
 					Values:    nodeStep.Values,
-					ObjectIds: nodeStep.ObjectIDs,
+					ObjectIDs: nodeStep.ObjectIDs,
 					StepIndex: i + 1,
 				}
 				if nodeStep.ObjectType != nil {

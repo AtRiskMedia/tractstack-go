@@ -14,12 +14,14 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// MenuRepository handles the persistence and retrieval of Menu nodes and their hierarchical items.
 type MenuRepository struct {
 	db     *sql.DB
 	cache  interfaces.ContentCache
 	logger *logging.ChanneledLogger
 }
 
+// NewMenuRepository creates a new instance of the MenuRepository.
 func NewMenuRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *MenuRepository {
 	return &MenuRepository{
 		db:     db,
@@ -28,6 +30,7 @@ func NewMenuRepository(db *sql.DB, cache interfaces.ContentCache, logger *loggin
 	}
 }
 
+// FindByID retrieves a single menu node by its unique identifier.
 func (r *MenuRepository) FindByID(tenantID, id string) (*content.MenuNode, error) {
 	if menu, found := r.cache.GetMenu(tenantID, id); found {
 		return menu, nil
@@ -70,6 +73,7 @@ func (r *MenuRepository) FindAll(tenantID string) ([]*content.MenuNode, error) {
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves multiple menu nodes for a tenant using a slice of IDs.
 func (r *MenuRepository) FindByIDs(tenantID string, ids []string) ([]*content.MenuNode, error) {
 	var result []*content.MenuNode
 	var missingIDs []string
@@ -97,6 +101,7 @@ func (r *MenuRepository) FindByIDs(tenantID string, ids []string) ([]*content.Me
 	return result, nil
 }
 
+// Store saves a new menu node into the persistence layer.
 func (r *MenuRepository) Store(tenantID string, menu *content.MenuNode) error {
 	optionsJSON, _ := json.Marshal(menu.OptionsPayload)
 
@@ -120,6 +125,7 @@ func (r *MenuRepository) Store(tenantID string, menu *content.MenuNode) error {
 	return nil
 }
 
+// Update modifies an existing menu node in the persistence layer.
 func (r *MenuRepository) Update(tenantID string, menu *content.MenuNode) error {
 	optionsJSON, _ := json.Marshal(menu.OptionsPayload)
 
@@ -143,6 +149,7 @@ func (r *MenuRepository) Update(tenantID string, menu *content.MenuNode) error {
 	return nil
 }
 
+// Delete removes a menu node from the persistence layer by its ID.
 func (r *MenuRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM menus WHERE id = ?`
 
@@ -174,7 +181,11 @@ func (r *MenuRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query menu IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query menus: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var menuIDs []string
 	for rows.Next() {
@@ -252,7 +263,11 @@ func (r *MenuRepository) loadMultipleFromDB(ids []string) ([]*content.MenuNode, 
 		r.logger.Database().Error("Failed to query multiple menus", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query menus: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var menus []*content.MenuNode
 

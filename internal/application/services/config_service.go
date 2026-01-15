@@ -18,6 +18,8 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
+
+	// We got turso
 	_ "github.com/tursodatabase/libsql-client-go/libsql"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -239,7 +241,11 @@ func (c *ConfigService) TestTursoConnection(databaseURL, authToken string) error
 	if err != nil {
 		return fmt.Errorf("failed to open database connection: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			c.logger.Database().Error("Failed to close Turso connection test", "error", err)
+		}
+	}()
 
 	// Test with simple query
 	var result int
@@ -479,18 +485,20 @@ func (c *ConfigService) processBase64Assets(mediaPath string, request *BrandConf
 }
 
 func (c *ConfigService) getExtensionFromBase64(data string) string {
-	if strings.Contains(data, "data:image/svg+xml") {
+	switch {
+	case strings.Contains(data, "data:image/svg+xml"):
 		return ".svg"
-	} else if strings.Contains(data, "data:image/png") {
+	case strings.Contains(data, "data:image/png"):
 		return ".png"
-	} else if strings.Contains(data, "data:image/jpeg") || strings.Contains(data, "data:image/jpg") {
+	case strings.Contains(data, "data:image/jpeg") || strings.Contains(data, "data:image/jpg"):
 		return ".jpg"
-	} else if strings.Contains(data, "data:image/x-icon") || strings.Contains(data, "data:image/vnd.microsoft.icon") {
+	case strings.Contains(data, "data:image/x-icon") || strings.Contains(data, "data:image/vnd.microsoft.icon"):
 		return ".ico"
-	} else if strings.Contains(data, "data:image/webp") {
+	case strings.Contains(data, "data:image/webp"):
 		return ".webp"
+	default:
+		return ".png" // Fallback
 	}
-	return ".png" // Fallback
 }
 
 func (c *ConfigService) processSVG(data, filename, targetDir string) (string, error) {

@@ -7,6 +7,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 )
 
+// TractStackRepository defines the persistence interface for TractStack nodes.
 type TractStackRepository interface {
 	FindByID(tenantID, id string) (*content.TractStackNode, error)
 	FindBySlug(tenantID, slug string) (*content.TractStackNode, error)
@@ -17,6 +18,7 @@ type TractStackRepository interface {
 	Delete(tenantID, id string) error
 }
 
+// StoryFragmentRepository defines the persistence interface for StoryFragment nodes and their relationships.
 type StoryFragmentRepository interface {
 	FindByID(tenantID, id string) (*content.StoryFragmentNode, error)
 	FindBySlug(tenantID, slug string) (*content.StoryFragmentNode, error)
@@ -33,6 +35,7 @@ type StoryFragmentRepository interface {
 	SearchMetadata(tenantID, term string) ([]FTSResult, error)
 }
 
+// PaneRepository defines the persistence interface for Pane nodes, including content search and markdown handling.
 type PaneRepository interface {
 	FindByID(tenantID, id string) (*content.PaneNode, error)
 	FindBySlug(tenantID, slug string) (*content.PaneNode, error)
@@ -50,6 +53,7 @@ type PaneRepository interface {
 	SearchContent(tenantID, term string) ([]FTSResult, error)
 }
 
+// MenuRepository defines the persistence interface for Menu nodes.
 type MenuRepository interface {
 	FindByID(tenantID, id string) (*content.MenuNode, error)
 	FindAll(tenantID string) ([]*content.MenuNode, error)
@@ -59,6 +63,7 @@ type MenuRepository interface {
 	Delete(tenantID, id string) error
 }
 
+// ResourceRepository defines the persistence interface for Resource nodes.
 type ResourceRepository interface {
 	FindByID(tenantID, id string) (*content.ResourceNode, error)
 	FindBySlug(tenantID, slug string) (*content.ResourceNode, error)
@@ -73,6 +78,7 @@ type ResourceRepository interface {
 	FindFileIDsByResourceID(tenantID string, resourceID string) ([]string, error)
 }
 
+// BeliefRepository defines the persistence interface for Belief nodes.
 type BeliefRepository interface {
 	FindByID(tenantID, id string) (*content.BeliefNode, error)
 	FindBySlug(tenantID, slug string) (*content.BeliefNode, error)
@@ -84,6 +90,7 @@ type BeliefRepository interface {
 	Delete(tenantID, id string) error
 }
 
+// EpinetRepository defines the persistence interface for Epinet nodes.
 type EpinetRepository interface {
 	FindByID(tenantID, id string) (*content.EpinetNode, error)
 	FindAll(tenantID string) ([]*content.EpinetNode, error)
@@ -93,6 +100,7 @@ type EpinetRepository interface {
 	Delete(tenantID, id string) error
 }
 
+// ImageFileRepository defines the persistence interface for ImageFile nodes.
 type ImageFileRepository interface {
 	FindByID(tenantID, id string) (*content.ImageFileNode, error)
 	FindAll(tenantID string) ([]*content.ImageFileNode, error)

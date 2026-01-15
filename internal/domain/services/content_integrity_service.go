@@ -8,12 +8,15 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/admin"
 )
 
+// ContentIntegrityService provides logic for analyzing content relationships and detecting orphaned references.
 type ContentIntegrityService struct{}
 
+// NewContentIntegrityService creates and returns a new instance of ContentIntegrityService.
 func NewContentIntegrityService() *ContentIntegrityService {
 	return &ContentIntegrityService{}
 }
 
+// CalculateOrphans identifies content items (fragments, panes, menus, files, beliefs) that have no incoming references.
 func (s *ContentIntegrityService) CalculateOrphans(
 	contentIDMap *admin.ContentIDMap,
 	storyFragmentDeps map[string][]string,
@@ -57,6 +60,7 @@ func (s *ContentIntegrityService) CalculateOrphans(
 	return orphans
 }
 
+// AnalyzeFileReferences extracts a list of file IDs referenced within a given JSON options payload.
 func (s *ContentIntegrityService) AnalyzeFileReferences(optionsPayload string) []string {
 	var fileIDs []string
 	if optionsPayload == "" {
@@ -72,6 +76,7 @@ func (s *ContentIntegrityService) AnalyzeFileReferences(optionsPayload string) [
 	return fileIDs
 }
 
+// AnalyzeBeliefReferences identifies belief slugs referenced in a given JSON options payload, including widget parameters.
 func (s *ContentIntegrityService) AnalyzeBeliefReferences(optionsPayload string) []string {
 	var beliefSlugs []string
 	if optionsPayload == "" {
@@ -103,6 +108,7 @@ func (s *ContentIntegrityService) AnalyzeBeliefReferences(optionsPayload string)
 	return beliefSlugs
 }
 
+// AnalyzeActionLispReferences parses an Action Lisp string to extract referenced content slugs (e.g., from "goto" or "navigate" commands).
 func (s *ContentIntegrityService) AnalyzeActionLispReferences(actionLisp, homeSlug string) []string {
 	var slugs []string
 	if actionLisp == "" {
@@ -128,8 +134,8 @@ func (s *ContentIntegrityService) AnalyzeActionLispReferences(actionLisp, homeSl
 	return slugs
 }
 
+// BuildOrphanAnalysisPayload constructs the final response object containing all identified orphans grouped by type.
 func (s *ContentIntegrityService) BuildOrphanAnalysisPayload(
-	contentIDMap *admin.ContentIDMap,
 	storyFragmentDeps map[string][]string,
 	paneDeps map[string][]string,
 	menuDeps map[string][]string,
@@ -166,11 +172,11 @@ func (s *ContentIntegrityService) scanForBeliefWidgets(data any, beliefSlugs *[]
 	switch v := data.(type) {
 	case map[string]any:
 		if tagName, ok := v["tagName"].(string); ok && tagName == "code" {
-			if copy, ok := v["copy"].(string); ok {
+			if copyVal, ok := v["copy"].(string); ok {
 				if params, ok := v["codeHookParams"].([]any); ok && len(params) > 0 {
-					if strings.HasPrefix(copy, "belief(") ||
-						strings.HasPrefix(copy, "toggle(") ||
-						strings.HasPrefix(copy, "identifyAs(") {
+					if strings.HasPrefix(copyVal, "belief(") ||
+						strings.HasPrefix(copyVal, "toggle(") ||
+						strings.HasPrefix(copyVal, "identifyAs(") {
 						if beliefSlug, ok := params[0].(string); ok && beliefSlug != "" {
 							*beliefSlugs = append(*beliefSlugs, beliefSlug)
 						}

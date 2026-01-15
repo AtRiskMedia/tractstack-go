@@ -12,13 +12,13 @@ import (
 
 // Tracker manages performance markers and provides metrics aggregation
 type Tracker struct {
-	markers    map[string]*Marker     // Active and completed markers by unique ID
-	snapshots  []*PerformanceSnapshot // Historical performance snapshots
-	alerts     []*PerformanceAlert    // Active performance alerts
-	thresholds *AlertThresholds       // Configurable alert thresholds
-	mu         sync.RWMutex           // Protects concurrent access
-	started    time.Time              // When tracking started
-	config     *TrackerConfig         // Tracker configuration
+	markers    map[string]*Marker // Active and completed markers by unique ID
+	snapshots  []*Snapshot        // Historical performance snapshots
+	alerts     []*Alert           // Active performance alerts
+	thresholds *AlertThresholds   // Configurable alert thresholds
+	mu         sync.RWMutex       // Protects concurrent access
+	started    time.Time          // When tracking started
+	config     *TrackerConfig     // Tracker configuration
 }
 
 // TrackerConfig contains configuration options for the performance tracker
@@ -92,8 +92,8 @@ func NewTracker(config *TrackerConfig) *Tracker {
 
 	tracker := &Tracker{
 		markers:    make(map[string]*Marker),
-		snapshots:  make([]*PerformanceSnapshot, 0),
-		alerts:     make([]*PerformanceAlert, 0),
+		snapshots:  make([]*Snapshot, 0),
+		alerts:     make([]*Alert, 0),
 		thresholds: DefaultAlertThresholds(),
 		started:    time.Now(),
 		config:     config,
@@ -174,8 +174,8 @@ func (t *Tracker) checkForAlerts(marker *Marker) {
 }
 
 // evaluateThresholds checks a marker against all relevant thresholds
-func (t *Tracker) evaluateThresholds(marker *Marker) []*PerformanceAlert {
-	var alerts []*PerformanceAlert
+func (t *Tracker) evaluateThresholds(marker *Marker) []*Alert {
+	var alerts []*Alert
 
 	// Check general response time thresholds
 	if marker.Duration > t.thresholds.CriticalResponseThreshold {
@@ -231,8 +231,8 @@ func (t *Tracker) evaluateThresholds(marker *Marker) []*PerformanceAlert {
 }
 
 // createAlert creates a new performance alert
-func (t *Tracker) createAlert(marker *Marker, severity AlertSeverity, message string) *PerformanceAlert {
-	return &PerformanceAlert{
+func (t *Tracker) createAlert(marker *Marker, severity AlertSeverity, message string) *Alert {
+	return &Alert{
 		ID:        fmt.Sprintf("alert_%d", time.Now().UnixNano()),
 		Timestamp: time.Now(),
 		TenantID:  marker.TenantID,
@@ -296,11 +296,11 @@ func (t *Tracker) GetActiveOperations(tenantID string) []Marker {
 }
 
 // GetAlerts returns performance alerts for a specific tenant
-func (t *Tracker) GetAlerts(tenantID string) []*PerformanceAlert {
+func (t *Tracker) GetAlerts(tenantID string) []*Alert {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	var alerts []*PerformanceAlert
+	var alerts []*Alert
 	for _, alert := range t.alerts {
 		if alert.TenantID == tenantID {
 			alerts = append(alerts, alert)
@@ -310,11 +310,11 @@ func (t *Tracker) GetAlerts(tenantID string) []*PerformanceAlert {
 }
 
 // TakeSnapshot creates a performance snapshot for the specified tenant
-func (t *Tracker) TakeSnapshot(tenantID string) *PerformanceSnapshot {
+func (t *Tracker) TakeSnapshot(tenantID string) *Snapshot {
 	metrics := t.GetRecentMetrics(tenantID, time.Minute*5)
 	activeOps := t.GetActiveOperations(tenantID)
 
-	snapshot := &PerformanceSnapshot{
+	snapshot := &Snapshot{
 		Timestamp:           time.Now(),
 		TenantID:            tenantID,
 		ActiveOperations:    len(activeOps),
@@ -349,7 +349,10 @@ func (t *Tracker) calculateHealth(metrics, activeOps []Marker) HealthStatus {
 	warningIssues := 0
 	totalOps := len(metrics) + len(activeOps)
 
-	allOps := append(metrics, activeOps...)
+	// Create a new slice to combine both lists without modifying the original 'metrics' array
+	allOps := make([]Marker, 0, totalOps)
+	allOps = append(allOps, metrics...)
+	allOps = append(allOps, activeOps...)
 
 	for _, op := range allOps {
 		duration := op.Duration

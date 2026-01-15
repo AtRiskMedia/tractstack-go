@@ -7,11 +7,11 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 )
 
-// ContentMapRepository provides efficient bulk queries for building content maps
-type ContentMapRepository interface {
+// MapRepository provides efficient bulk queries for building content maps
+type MapRepository interface {
 	// BuildContentMap executes a single UNION query across all content tables
 	// to efficiently retrieve all content items for the content map
-	BuildContentMap(tenantID string) ([]*content.ContentMapItem, error)
+	BuildContentMap(tenantID string) ([]*content.MapItem, error)
 }
 
 // DependencyRepository provides bulk queries for dependency analysis
@@ -35,8 +35,8 @@ type DependencyRepository interface {
 	ScanBeliefDependencies(tenantID string) (map[string][]string, error)
 }
 
-// BulkQueryRepository combines both content map and dependency operations
-type BulkQueryRepository interface {
-	ContentMapRepository
+// QueryRepository combines both content map and dependency operations
+type QueryRepository interface {
+	MapRepository
 	DependencyRepository
 }

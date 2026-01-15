@@ -26,51 +26,62 @@ const (
 	bold        = "\033[1m"
 )
 
+// Reporter handles the formatting and generation of reports during cache cleanup operations.
 type Reporter struct {
 	cache interfaces.Cache
 }
 
+// NewReporter creates a new instance of a cleanup reporter.
 func NewReporter(cache interfaces.Cache) *Reporter {
 	return &Reporter{cache: cache}
 }
 
+// LogHeader records a primary title section in the cleanup log.
 func (r *Reporter) LogHeader(title string) {
 	fmt.Printf("%s%s✓ %s %s\n", bold, cyan, strings.ToUpper(title), reset)
 }
 
+// LogSubHeader records a secondary header section in the cleanup log.
 func (r *Reporter) LogSubHeader(text string) {
 	fmt.Printf("%s%s░▒▓ %s %s\n", bold, dimCyan, text, reset)
 }
 
+// LogStepSuccess records the successful completion of an individual cleanup step.
 func (r *Reporter) LogStepSuccess(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s⚡ %s%s...%s\n", dimGrey, grey, formattedMsg, reset)
 }
 
+// LogStage records the beginning or completion of a major cleanup phase.
 func (r *Reporter) LogStage(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s%s✦ %s%s%s\n", success, bold, grey, formattedMsg, reset)
 }
 
+// LogSuccess records an overall success message for a cleanup operation.
 func (r *Reporter) LogSuccess(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s%s✦ %s%s%s\n", success, bold, white, formattedMsg, reset)
 }
 
+// LogError records failure details and the associated error for a cleanup step.
 func (r *Reporter) LogError(message string, err error) {
 	fmt.Printf("%s%s✖ ERROR: %s%s: %v%s\n", bold, errorRed, grey, message, err, reset)
 }
 
+// LogWarning records a non-fatal issue encountered during cleanup.
 func (r *Reporter) LogWarning(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s%s⚠ WARNING: %s%s%s\n", bold, warning, grey, formattedMsg, reset)
 }
 
+// LogInfo records general informational messages during the cleanup process.
 func (r *Reporter) LogInfo(message string, args ...any) {
 	formattedMsg := fmt.Sprintf(message, args...)
 	fmt.Printf("%s▶ %s%s%s\n", dimGrey, grey, formattedMsg, reset)
 }
 
+// GenerateTenantReport compiles all logged entries into a final string report for a specific tenant.
 func (r *Reporter) GenerateTenantReport(tenantID string) string {
 	var report strings.Builder
 	timestamp := time.Now().UTC().Format("2006-01-02 15:04:05 MST")

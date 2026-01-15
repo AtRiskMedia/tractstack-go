@@ -65,8 +65,8 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 	var paneID, gotoPaneID string
 
 	// Handle bulk unset first, as it's a distinct form payload
-	if unsetBeliefIds := c.PostForm("unsetBeliefIds"); unsetBeliefIds != "" {
-		beliefIDs := strings.Split(unsetBeliefIds, ",")
+	if unsetBeliefIDs := c.PostForm("unsetBeliefIds"); unsetBeliefIDs != "" {
+		beliefIDs := strings.Split(unsetBeliefIDs, ",")
 		for _, beliefID := range beliefIDs {
 			beliefID = strings.TrimSpace(beliefID)
 			if beliefID != "" {
@@ -101,9 +101,9 @@ func (h *StateHandlers) PostState(c *gin.Context) {
 		paneID = c.PostForm("paneId")
 	}
 
-	if unsetBeliefIds := c.PostForm("unsetBeliefIds"); unsetBeliefIds != "" {
+	if unsetBeliefIDs := c.PostForm("unsetBeliefIds"); unsetBeliefIDs != "" {
 		h.logger.System().Debug("UNSET DEBUG: Processing UNSET request",
-			"unsetBeliefIds", unsetBeliefIds,
+			"unsetBeliefIds", unsetBeliefIDs,
 			"storyFragmentId", storyFragmentID,
 			"eventCount", len(eventList))
 	}

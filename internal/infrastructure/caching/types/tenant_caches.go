@@ -21,7 +21,6 @@ type TenantContentCache struct {
 
 	StoryfragmentBeliefRegistries map[string]*StoryfragmentBeliefRegistry // storyfragmentId -> belief registry
 
-	// Lookup indices
 	SlugToID      map[string]string   // slug -> id
 	CategoryToIDs map[string][]string // category -> []id
 
@@ -34,7 +33,6 @@ type TenantContentCache struct {
 	AllEpinetIDs        []string
 	AllFileIDs          []string
 
-	// Content map cache
 	FullContentMap        []FullContentMapItem `json:"fullContentMap,omitempty"`
 	ContentMapLastUpdated time.Time            `json:"contentMapLastUpdated"`
 
@@ -90,6 +88,7 @@ type TenantAnalyticsCache struct {
 	Mu           sync.RWMutex // Exported for access
 }
 
+// FullContentMapItem represents a complete content item within the cached content map.
 type FullContentMapItem struct {
 	ID              string   `json:"id"`
 	Title           string   `json:"title"`
@@ -112,12 +111,14 @@ type FullContentMapItem struct {
 	Promoted        *bool    `json:"promoted,omitempty"`
 }
 
+// OrphanAnalysisCache holds the cached result of an orphan analysis operation.
 type OrphanAnalysisCache struct {
 	Data        *OrphanAnalysisPayload `json:"data"`
 	ETag        string                 `json:"etag"`
 	LastUpdated time.Time              `json:"lastUpdated"`
 }
 
+// OrphanAnalysisPayload contains the detailed results of an orphan analysis.
 type OrphanAnalysisPayload struct {
 	StoryFragments map[string][]string `json:"storyFragments"`
 	Panes          map[string][]string `json:"panes"`

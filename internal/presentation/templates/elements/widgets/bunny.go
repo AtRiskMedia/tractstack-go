@@ -433,6 +433,7 @@ type bunnyWidgetData struct {
 	ChaptersJSON     string
 }
 
+// RenderBunny generates the HTML and JavaScript required to embed a Bunny.net video player with the specified configuration.
 func RenderBunny(classNames string, hook *rendering.CodeHook) string {
 	if hook == nil || hook.Value1 == nil || hook.Value2 == nil || *hook.Value1 == "" || *hook.Value2 == "" {
 		return `<div class="w-full aspect-video bg-gray-100 flex items-center justify-center text-center p-4"><div><p class="text-gray-500 mb-2">Bunny video is missing required Video ID or Title.</p></div></div>`

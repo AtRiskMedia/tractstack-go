@@ -78,7 +78,7 @@ func Initialize() error {
 	appContainer := container.NewContainer(tenantManager, cacheManager)
 	logger := appContainer.Logger
 	tenantManager.SetLogger(logger)
-	tenantManager.SetFTSService(appContainer.FTSService)
+	tenantManager.SetService(appContainer.Service)
 	log.Printf("%s✓ DI Container Built       %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
 	// --- Step 4: Run Startup Migrations for ALL Tenants ---

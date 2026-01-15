@@ -23,7 +23,7 @@ type Context struct {
 	Status       string
 	CacheManager *manager.Manager
 	Logger       *logging.ChanneledLogger
-	ftsService   *fts.FTSService
+	ftsService   *fts.Service
 	Domains      []string
 }
 
@@ -60,6 +60,7 @@ func (ctx *Context) GetCacheManager() *manager.Manager {
 	return ctx.CacheManager
 }
 
+// GetLogger returns the channeled logger associated with the current tenant context.
 func (ctx *Context) GetLogger() *logging.ChanneledLogger {
 	return ctx.Logger
 }
@@ -133,7 +134,7 @@ func (ctx *Context) ImageFileRepo() repositories.ImageFileRepository {
 }
 
 // BulkRepo returns a bulk repository instance for complex operations
-func (ctx *Context) BulkRepo() bulk.BulkQueryRepository {
+func (ctx *Context) BulkRepo() bulk.QueryRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
 	return bulk.NewRepository(db, ctx.Logger)
 }

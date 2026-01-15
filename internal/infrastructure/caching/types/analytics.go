@@ -1,5 +1,5 @@
 // Package types defines analytics data structures for multi-tenant analytics processing.
-package types
+package types //nolint:revive
 
 import (
 	"time"
@@ -154,7 +154,7 @@ type EpinetStep struct {
 	GateType   string   `json:"gateType"`
 	Values     []string `json:"values"`
 	ObjectType string   `json:"objectType"`
-	ObjectIds  []string `json:"objectIds"`
+	ObjectIDs  []string `json:"objectIds"`
 	Title      string   `json:"title"`
 	BeliefSlug string   `json:"beliefSlug"`
 	StepIndex  int      `json:"stepIndex"`
@@ -166,9 +166,9 @@ type ContentItem struct {
 	Slug  string `json:"slug"`
 }
 
-// The ActionEvent and BeliefEvent structs are defined in the domain/analytics package
-// and are imported where needed, so they are not duplicated here.
 type (
+	// ActionEvent is an alias for analytics.ActionEvent used within the caching layer.
 	ActionEvent = analytics.ActionEvent
+	// BeliefEvent is an alias for analytics.BeliefEvent used within the caching layer.
 	BeliefEvent = analytics.BeliefEvent
 )

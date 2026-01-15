@@ -145,8 +145,8 @@ func (brs *BeliefRegistryService) scanNodeRecursive(nodeData any, foundBeliefs *
 	// A widget is defined as a `code` tag with specific parameters.
 	if tagName, ok := nodeMap["tagName"].(string); ok && tagName == "code" {
 		var copyText string
-		if copy, ok := nodeMap["copy"].(string); ok {
-			copyText = copy
+		if copyVal, ok := nodeMap["copy"].(string); ok {
+			copyText = copyVal
 		}
 
 		// The widget type (e.g., "belief", "toggle") is encoded in the `copy` field.

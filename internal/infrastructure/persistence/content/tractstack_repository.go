@@ -13,12 +13,14 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// TractStackRepository handles the persistence and retrieval of TractStack nodes.
 type TractStackRepository struct {
 	db     *sql.DB
 	cache  interfaces.ContentCache
 	logger *logging.ChanneledLogger
 }
 
+// NewTractStackRepository creates a new instance of the TractStackRepository.
 func NewTractStackRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *TractStackRepository {
 	return &TractStackRepository{
 		db:     db,
@@ -27,6 +29,7 @@ func NewTractStackRepository(db *sql.DB, cache interfaces.ContentCache, logger *
 	}
 }
 
+// FindByID retrieves a single TractStack node by its unique identifier.
 func (r *TractStackRepository) FindByID(tenantID, id string) (*content.TractStackNode, error) {
 	if tractStack, found := r.cache.GetTractStack(tenantID, id); found {
 		return tractStack, nil
@@ -44,6 +47,7 @@ func (r *TractStackRepository) FindByID(tenantID, id string) (*content.TractStac
 	return tractStack, nil
 }
 
+// FindBySlug retrieves a single TractStack node by its URL-friendly slug.
 func (r *TractStackRepository) FindBySlug(tenantID, slug string) (*content.TractStackNode, error) {
 	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
@@ -80,6 +84,7 @@ func (r *TractStackRepository) FindAll(tenantID string) ([]*content.TractStackNo
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves multiple TractStack nodes for a tenant using a slice of IDs.
 func (r *TractStackRepository) FindByIDs(tenantID string, ids []string) ([]*content.TractStackNode, error) {
 	var result []*content.TractStackNode
 	var missingIDs []string
@@ -107,6 +112,7 @@ func (r *TractStackRepository) FindByIDs(tenantID string, ids []string) ([]*cont
 	return result, nil
 }
 
+// Store saves a new TractStack node into the persistence layer.
 func (r *TractStackRepository) Store(tenantID string, tractStack *content.TractStackNode) error {
 	query := `INSERT INTO tractstacks (id, title, slug, social_image_path) VALUES (?, ?, ?, ?)`
 
@@ -128,6 +134,7 @@ func (r *TractStackRepository) Store(tenantID string, tractStack *content.TractS
 	return nil
 }
 
+// Update modifies an existing TractStack node in the persistence layer.
 func (r *TractStackRepository) Update(tenantID string, tractStack *content.TractStackNode) error {
 	query := `UPDATE tractstacks SET title = ?, slug = ?, social_image_path = ? WHERE id = ?`
 
@@ -149,6 +156,7 @@ func (r *TractStackRepository) Update(tenantID string, tractStack *content.Tract
 	return nil
 }
 
+// Delete removes a TractStack node from the persistence layer by its ID.
 func (r *TractStackRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM tractstacks WHERE id = ?`
 
@@ -180,7 +188,11 @@ func (r *TractStackRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query tractstack IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query tractstacks: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var tractStackIDs []string
 	for rows.Next() {
@@ -257,7 +269,11 @@ func (r *TractStackRepository) loadMultipleFromDB(ids []string) ([]*content.Trac
 		r.logger.Database().Error("Failed to query multiple tractstacks", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query tractstacks: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var tractStacks []*content.TractStackNode
 

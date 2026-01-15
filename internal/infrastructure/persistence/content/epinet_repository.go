@@ -14,12 +14,14 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// EpinetRepository handles the persistence and retrieval of Epinet nodes from the database.
 type EpinetRepository struct {
 	db     *sql.DB
 	cache  interfaces.ContentCache
 	logger *logging.ChanneledLogger
 }
 
+// NewEpinetRepository creates a new instance of the EpinetRepository.
 func NewEpinetRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *EpinetRepository {
 	return &EpinetRepository{
 		db:     db,
@@ -28,6 +30,7 @@ func NewEpinetRepository(db *sql.DB, cache interfaces.ContentCache, logger *logg
 	}
 }
 
+// FindByID retrieves a single Epinet node by its unique identifier from the database or cache.
 func (r *EpinetRepository) FindByID(tenantID, id string) (*content.EpinetNode, error) {
 	if epinet, found := r.cache.GetEpinet(tenantID, id); found {
 		return epinet, nil
@@ -64,6 +67,7 @@ func (r *EpinetRepository) FindAll(tenantID string) ([]*content.EpinetNode, erro
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves a collection of Epinet nodes based on a provided list of identifiers.
 func (r *EpinetRepository) FindByIDs(tenantID string, ids []string) ([]*content.EpinetNode, error) {
 	var result []*content.EpinetNode
 	var missingIDs []string
@@ -91,6 +95,7 @@ func (r *EpinetRepository) FindByIDs(tenantID string, ids []string) ([]*content.
 	return result, nil
 }
 
+// Store saves a new Epinet node to the database and ensures cache consistency.
 func (r *EpinetRepository) Store(tenantID string, epinet *content.EpinetNode) error {
 	stepsJSON, _ := json.Marshal(epinet.Steps)
 
@@ -114,6 +119,7 @@ func (r *EpinetRepository) Store(tenantID string, epinet *content.EpinetNode) er
 	return nil
 }
 
+// Update modifies an existing Epinet node and clears relevant cache entries.
 func (r *EpinetRepository) Update(tenantID string, epinet *content.EpinetNode) error {
 	stepsJSON, _ := json.Marshal(epinet.Steps)
 
@@ -137,6 +143,7 @@ func (r *EpinetRepository) Update(tenantID string, epinet *content.EpinetNode) e
 	return nil
 }
 
+// Delete removes an Epinet node from storage and triggers a cleanup of dependent cache items.
 func (r *EpinetRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM epinets WHERE id = ?`
 
@@ -315,9 +322,9 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 				if objectType, ok := stepMap["objectType"].(string); ok {
 					step.ObjectType = &objectType
 				}
-				if objectIds, ok := stepMap["objectIds"].([]any); ok {
-					step.ObjectIDs = make([]string, len(objectIds))
-					for j, id := range objectIds {
+				if objectIDs, ok := stepMap["objectIds"].([]any); ok {
+					step.ObjectIDs = make([]string, len(objectIDs))
+					for j, id := range objectIDs {
 						if str, ok := id.(string); ok {
 							step.ObjectIDs[j] = str
 						}
@@ -358,9 +365,9 @@ func (r *EpinetRepository) parseOptionsPayload(epinet *content.EpinetNode, optio
 					if objectType, ok := stepMap["objectType"].(string); ok {
 						step.ObjectType = &objectType
 					}
-					if objectIds, ok := stepMap["objectIds"].([]any); ok {
-						step.ObjectIDs = make([]string, len(objectIds))
-						for j, id := range objectIds {
+					if objectIDs, ok := stepMap["objectIds"].([]any); ok {
+						step.ObjectIDs = make([]string, len(objectIDs))
+						for j, id := range objectIDs {
 							if str, ok := id.(string); ok {
 								step.ObjectIDs[j] = str
 							}

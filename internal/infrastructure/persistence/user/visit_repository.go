@@ -73,7 +73,11 @@ func (r *SQLVisitRepository) FindByFingerprintID(fingerprintID string) ([]*user.
 		r.logger.Database().Error("Failed to query visits by fingerprint ID", "error", err.Error(), "fingerprintId", fingerprintID)
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows", "error", err)
+		}
+	}()
 
 	var visits []*user.Visit
 	for rows.Next() {

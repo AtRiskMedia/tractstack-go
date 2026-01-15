@@ -13,10 +13,12 @@ import (
 
 var playIconSVG = `<svg viewBox="0 0 459 459" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" class="inline-block" style="height:1em; margin-left: 0.25em;"><path d="M229.5,0C102.751,0,0,102.751,0,229.5S102.751,459,229.5,459S459,356.249,459,229.5S356.249,0,229.5,0z M310.292,239.651 l-111.764,76.084c-3.761,2.56-8.63,2.831-12.652,0.704c-4.022-2.128-6.538-6.305-6.538-10.855V153.416 c0-4.55,2.516-8.727,6.538-10.855c4.022-2.127,8.891-1.857,12.652,0.704l111.764,76.084c3.359,2.287,5.37,6.087,5.37,10.151 C315.662,233.564,313.652,237.364,310.292,239.651z" fill="currentColor"></path></svg>`
 
+// HastRenderer handles the rendering of an HTML Abstract Syntax Tree (HAST) into a string.
 type HastRenderer struct {
 	ctx *rendering.RenderContext
 }
 
+// Render traverses the HAST and produces the final sanitized HTML string.
 func (hr *HastRenderer) Render(ast *rendering.HTMLAST) string {
 	var sb strings.Builder
 
@@ -70,10 +72,7 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 	sb.WriteString(node.Tag)
 
 	// Determine if we should apply interactive logic (Not in Editor Preview)
-	shouldApplyInteractions := true
-	if hr.ctx != nil && hr.ctx.IsEditorPreview {
-		shouldApplyInteractions = false
-	}
+	shouldApplyInteractions := hr.ctx == nil || !hr.ctx.IsEditorPreview
 
 	// Helpers for processing
 	var buttonParsedAction *lisp.ParsedAction
@@ -99,7 +98,8 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 			paneID = hr.ctx.ContainingPaneID
 		}
 
-		if node.Tag == "button" {
+		switch node.Tag {
+		case "button":
 			if payload, ok := node.Attrs["data-callback"]; ok && payload != "" {
 				parsed := lisp.Parse(payload, paneID, "")
 				buttonParsedAction = parsed // Save for icon rendering later
@@ -108,15 +108,15 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 					if parsed.IsClientSideEvent {
 						payloadBytes, _ := json.Marshal(parsed.ClientSidePayload)
 						onclickVal := fmt.Sprintf(`document.dispatchEvent(new CustomEvent('%s', { bubbles: true, detail: %s }))`, parsed.ClientSideEventName, string(payloadBytes))
-						sb.WriteString(fmt.Sprintf(` onclick="%s"`, template.HTMLEscapeString(onclickVal)))
+						fmt.Fprintf(sb, ` onclick="%s"`, template.HTMLEscapeString(onclickVal))
 					} else if parsed.HxVals != nil {
 						hxValsBytes, _ := json.Marshal(parsed.HxVals)
 						sb.WriteString(` hx-post="/api/v1/state" hx-trigger="click" hx-swap="none"`)
-						sb.WriteString(fmt.Sprintf(` hx-vals='%s'`, string(hxValsBytes)))
+						fmt.Fprintf(sb, ` hx-vals='%s'`, string(hxValsBytes))
 					}
 				}
 			}
-		} else if node.Tag == "a" {
+		case "a":
 			// External Link Attributes
 			if val, ok := node.Attrs["data-external"]; ok && val == "true" {
 				isExternalLink = true
@@ -135,7 +135,7 @@ func (hr *HastRenderer) renderNode(sb *strings.Builder, node rendering.HTMLASTNo
 				}
 				valsBytes, _ := json.Marshal(vals)
 				sb.WriteString(` hx-post="/api/v1/state" hx-trigger="mousedown" hx-swap="none"`)
-				sb.WriteString(fmt.Sprintf(` hx-vals='%s'`, string(valsBytes)))
+				fmt.Fprintf(sb, ` hx-vals='%s'`, string(valsBytes))
 			}
 		}
 	}

@@ -31,7 +31,7 @@ type Config struct {
 }
 
 // LoadTenantConfig loads configuration for a specific tenant from its env.json file.
-func LoadTenantConfig(tenantID string, logger *logging.ChanneledLogger) (*Config, error) {
+func LoadTenantConfig(tenantID string, _ *logging.ChanneledLogger) (*Config, error) {
 	configPath := filepath.Join(config.BackendPath, "config", tenantID, "env.json")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("tenant config file not found at %s", configPath)
@@ -179,13 +179,13 @@ func LoadDesignLibrary(tenantID string) (*types.DesignLibraryConfig, error) {
 	return &designLibrary, nil
 }
 
-// TenantRegistry holds the global tenant configuration
-type TenantRegistry struct {
-	Tenants map[string]TenantInfo `json:"tenants"`
+// Registry holds the global tenant configuration
+type Registry struct {
+	Tenants map[string]Info `json:"tenants"`
 }
 
-// TenantInfo holds tenant metadata
-type TenantInfo struct {
+// Info holds tenant metadata
+type Info struct {
 	TenantID     string   `json:"tenantId"`
 	Domains      []string `json:"domains"`
 	Status       string   `json:"status"`       // "unknown", "inactive", "active"
@@ -193,13 +193,13 @@ type TenantInfo struct {
 }
 
 // LoadTenantRegistry loads the global tenant registry
-func LoadTenantRegistry() (*TenantRegistry, error) {
+func LoadTenantRegistry() (*Registry, error) {
 	registryPath := filepath.Join(config.BackendPath, "config", "t8k", "tenants.json")
 
 	if _, err := os.Stat(registryPath); os.IsNotExist(err) {
 		// Create default registry with inactive default tenant
-		defaultRegistry := &TenantRegistry{
-			Tenants: map[string]TenantInfo{
+		defaultRegistry := &Registry{
+			Tenants: map[string]Info{
 				"default": {
 					TenantID:     "default",
 					Domains:      []string{"*"},
@@ -232,7 +232,7 @@ func LoadTenantRegistry() (*TenantRegistry, error) {
 		return nil, fmt.Errorf("failed to read tenant registry: %w", err)
 	}
 
-	var registry TenantRegistry
+	var registry Registry
 	if err := json.Unmarshal(data, &registry); err != nil {
 		return nil, fmt.Errorf("failed to parse tenant registry: %w", err)
 	}
@@ -251,7 +251,7 @@ func RegisterTenant(tenantID string) error {
 
 	// Add tenant if it doesn't exist
 	if _, exists := registry.Tenants[tenantID]; !exists {
-		registry.Tenants[tenantID] = TenantInfo{
+		registry.Tenants[tenantID] = Info{
 			TenantID:     tenantID,
 			Domains:      []string{"*"},
 			Status:       "inactive",

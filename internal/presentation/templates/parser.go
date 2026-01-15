@@ -73,8 +73,8 @@ func parseNodeFromMap(nodeMap map[string]any) (*rendering.NodeRenderData, error)
 		nodeData.TagName = &tagName
 	}
 
-	if copy, ok := nodeMap["copy"].(string); ok {
-		nodeData.Copy = &copy
+	if copyVal, ok := nodeMap["copy"].(string); ok {
+		nodeData.Copy = &copyVal
 	}
 
 	if elementCSS, ok := nodeMap["elementCss"].(string); ok {

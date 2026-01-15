@@ -12,7 +12,7 @@ import (
 
 // ValidateJWT validates a JWT token and returns the claims
 func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+	token, err := jwt.Parse(tokenString, func(_ *jwt.Token) (any, error) {
 		return []byte(jwtSecret), nil
 	})
 	if err != nil {

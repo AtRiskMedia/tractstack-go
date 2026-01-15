@@ -13,7 +13,7 @@ import (
 )
 
 // ReindexFTSTables clears and re-populates all FTS indexes from the source tables.
-func ReindexFTSTables(db *sql.DB, ftsService *fts.FTSService, logger *logging.ChanneledLogger) error {
+func ReindexFTSTables(db *sql.DB, ftsService *fts.Service, logger *logging.ChanneledLogger) error {
 	logger.Database().Info("Starting FTS re-population...")
 
 	tx, err := db.Begin()
@@ -116,10 +116,11 @@ func ReindexFTSTables(db *sql.DB, ftsService *fts.FTSService, logger *logging.Ch
 
 		// Only index resources in COLLECTION_ROUTES (if configured)
 		shouldIndex := false
-		if len(config.CollectionRoutes) == 0 {
+		switch {
+		case len(config.CollectionRoutes) == 0:
 			// If no collection routes configured, index all resources
 			logger.Database().Debug("No COLLECTION_ROUTES configured, skipping indexing on resources")
-		} else if categorySlug.Valid {
+		case categorySlug.Valid:
 			// Check if this resource's category is in the collection routes
 			for _, route := range config.CollectionRoutes {
 				if categorySlug.String == route {
@@ -132,7 +133,7 @@ func ReindexFTSTables(db *sql.DB, ftsService *fts.FTSService, logger *logging.Ch
 				logger.Database().Debug("Category not in COLLECTION_ROUTES, skipping", "category", categorySlug.String)
 				skippedCount++
 			}
-		} else {
+		default:
 			logger.Database().Debug("No category_slug, skipping resource", "resourceId", resourceID)
 			skippedCount++
 		}

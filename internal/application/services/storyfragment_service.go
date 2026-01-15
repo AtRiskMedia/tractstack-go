@@ -374,6 +374,7 @@ func (s *StoryFragmentService) Delete(tenantCtx *tenant.Context, id string) erro
 	return nil
 }
 
+// EnrichWithMetadata populates a story fragment node with session-specific context and SEO metadata.
 func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, storyFragment *content.StoryFragmentNode, sessionID string) error {
 	if storyFragment == nil {
 		return fmt.Errorf("storyFragment cannot be nil")
@@ -437,6 +438,7 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 	return nil
 }
 
+// GetImpressionsByPaneIDs retrieves interaction metrics for a specific set of panes.
 func (s *StoryFragmentService) GetImpressionsByPaneIDs(tenantCtx *tenant.Context, paneIDs []string) ([]map[string]any, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("get_impressions_by_pane_ids", tenantCtx.TenantID)

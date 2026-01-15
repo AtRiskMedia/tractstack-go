@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// VisitHandlers manages HTTP requests related to visitor tracking and profiles.
 type VisitHandlers struct {
 	sessionService *services.SessionService
 	authService    *services.AuthService
@@ -28,6 +29,7 @@ type VisitHandlers struct {
 	perfTracker    *performance.Tracker
 }
 
+// ProfileRequest defines the payload for creating or updating a visitor profile.
 type ProfileRequest struct {
 	SessionID      *string `json:"sessionId,omitempty"`
 	EncryptedEmail *string `json:"encryptedEmail,omitempty"`
@@ -40,6 +42,7 @@ type ProfileRequest struct {
 	IsUpdate       bool    `json:"isUpdate"`
 }
 
+// ProfileResponse defines the data returned after a profile operation.
 type ProfileResponse struct {
 	Success        bool          `json:"success"`
 	Profile        *user.Profile `json:"profile,omitempty"`
@@ -53,6 +56,7 @@ type ProfileResponse struct {
 	Error          string        `json:"error,omitempty"`
 }
 
+// VisitResponse defines the tracking data returned after processing a visit.
 type VisitResponse struct {
 	Fingerprint string        `json:"fingerprint"`
 	VisitID     string        `json:"visitId"`
@@ -62,6 +66,7 @@ type VisitResponse struct {
 	Consent     string        `json:"consent"`
 }
 
+// SSEMessage defines the structure for data pushed via Server-Sent Events.
 type SSEMessage struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionId,omitempty"`
@@ -69,6 +74,7 @@ type SSEMessage struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// NewVisitHandlers initializes a new VisitHandlers instance with required services.
 func NewVisitHandlers(sessionService *services.SessionService, authService *services.AuthService, broadcaster messaging.Broadcaster, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *VisitHandlers {
 	return &VisitHandlers{
 		sessionService: sessionService,
@@ -190,6 +196,7 @@ func (h *VisitHandlers) PostVisit(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// GetSSE establishes a long-running Server-Sent Events connection for real-time updates.
 func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -317,6 +324,7 @@ func (h *VisitHandlers) GetSSE(c *gin.Context) {
 	}
 }
 
+// PostProfile processes visitor profile submissions and updates session state.
 func (h *VisitHandlers) PostProfile(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {

@@ -447,7 +447,11 @@ func (s *SysOpService) getContentMap(tenantID string) (map[string]struct{ Title,
 	if err != nil {
 		return contentMap, fmt.Errorf("failed to create tenant context: %w", err)
 	}
-	defer tenantCtx.Close()
+	defer func() {
+		if err := tenantCtx.Close(); err != nil {
+			s.logger.System().Error("Failed to close tenant context in getContentMap", "error", err)
+		}
+	}()
 
 	// Use content map service to get cached content map
 	response, _, err := s.contentMapService.GetContentMap(tenantCtx, "", tenantCtx.CacheManager)
@@ -475,7 +479,11 @@ func (s *SysOpService) getEpinets(tenantID string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tenant context: %w", err)
 	}
-	defer tenantCtx.Close()
+	defer func() {
+		if err := tenantCtx.Close(); err != nil {
+			s.logger.System().Error("Failed to close tenant context in getEpinets", "error", err)
+		}
+	}()
 
 	epinetRepo := tenantCtx.EpinetRepo()
 	epinets, err := epinetRepo.FindAll(tenantID)

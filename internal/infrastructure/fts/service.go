@@ -12,15 +12,15 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 )
 
-// FTSService provides methods to interact with the Full-Text Search (FTS5) virtual tables.
+// Service provides methods to interact with the Full-Text Search (FTS5) virtual tables.
 // It is designed to be called from within existing database transactions in the repository layer.
-type FTSService struct {
+type Service struct {
 	logger *logging.ChanneledLogger
 }
 
-// NewFTSService creates a new FTS service.
-func NewFTSService(logger *logging.ChanneledLogger) *FTSService {
-	return &FTSService{
+// NewService creates a new FTS service.
+func NewService(logger *logging.ChanneledLogger) *Service {
+	return &Service{
 		logger: logger,
 	}
 }
@@ -115,7 +115,7 @@ const (
 )
 
 // sanitizeMarkdown strips markdown and prepares text for FTS indexing with comprehensive cleaning.
-func (s *FTSService) sanitizeMarkdown(input string) string {
+func (s *Service) sanitizeMarkdown(input string) string {
 	if input == "" {
 		return ""
 	}
@@ -222,7 +222,7 @@ func isRepeatedChars(word string) bool {
 }
 
 // IndexPaneContent sanitizes and indexes the body of a markdown pane.
-func (s *FTSService) IndexPaneContent(tx *sql.Tx, paneID, content string) error {
+func (s *Service) IndexPaneContent(tx *sql.Tx, paneID, content string) error {
 	sanitizedContent := s.sanitizeMarkdown(content)
 	if sanitizedContent == "" {
 		// If there's no content after sanitization, ensure any old index entry is gone.
@@ -243,7 +243,7 @@ func (s *FTSService) IndexPaneContent(tx *sql.Tx, paneID, content string) error 
 }
 
 // IndexHTMLAST extracts text from the AST and indexes it using the standard pane indexer.
-func (s *FTSService) IndexHTMLAST(tx *sql.Tx, paneID string, ast *rendering.HTMLAST) error {
+func (s *Service) IndexHTMLAST(tx *sql.Tx, paneID string, ast *rendering.HTMLAST) error {
 	if ast == nil {
 		return s.DeletePaneContent(tx, paneID)
 	}
@@ -258,7 +258,7 @@ func (s *FTSService) IndexHTMLAST(tx *sql.Tx, paneID string, ast *rendering.HTML
 }
 
 // extractTextFromHTMLAST walks the AST and extracts text nodes, adding spacing for blocks.
-func (s *FTSService) extractTextFromHTMLAST(sb *strings.Builder, node rendering.HTMLASTNode) {
+func (s *Service) extractTextFromHTMLAST(sb *strings.Builder, node rendering.HTMLASTNode) {
 	if node.Tag == "text" {
 		sb.WriteString(node.Text)
 		sb.WriteString(" ")
@@ -290,7 +290,7 @@ func isBlockElement(tag string) bool {
 }
 
 // IndexStoryFragmentMetadata sanitizes and indexes the title and description of a story fragment.
-func (s *FTSService) IndexStoryFragmentMetadata(tx *sql.Tx, sfID, title, description string) error {
+func (s *Service) IndexStoryFragmentMetadata(tx *sql.Tx, sfID, title, description string) error {
 	combinedContent := s.sanitizeMarkdown(title + " " + description)
 	if combinedContent == "" {
 		return s.DeleteStoryFragmentMetadata(tx, sfID)
@@ -309,7 +309,7 @@ func (s *FTSService) IndexStoryFragmentMetadata(tx *sql.Tx, sfID, title, descrip
 }
 
 // IndexResourceBody sanitizes and indexes the body content of a resource from its options payload.
-func (s *FTSService) IndexResourceBody(tx *sql.Tx, resourceID, bodyContent string) error {
+func (s *Service) IndexResourceBody(tx *sql.Tx, resourceID, bodyContent string) error {
 	sanitizedContent := s.sanitizeMarkdown(bodyContent)
 	if sanitizedContent == "" {
 		return s.deleteResourceBodyIndex(tx, resourceID)
@@ -328,7 +328,7 @@ func (s *FTSService) IndexResourceBody(tx *sql.Tx, resourceID, bodyContent strin
 }
 
 // DeletePaneContent removes a pane's content from the FTS index.
-func (s *FTSService) DeletePaneContent(tx *sql.Tx, paneID string) error {
+func (s *Service) DeletePaneContent(tx *sql.Tx, paneID string) error {
 	query := `DELETE FROM pane_content_fts WHERE pane_id = ?`
 	if _, err := tx.Exec(query, paneID); err != nil {
 		s.logger.Database().Error("Failed to delete from pane_content_fts", "error", err, "paneId", paneID)
@@ -338,7 +338,7 @@ func (s *FTSService) DeletePaneContent(tx *sql.Tx, paneID string) error {
 }
 
 // DeleteStoryFragmentMetadata removes a story fragment's metadata from the FTS index.
-func (s *FTSService) DeleteStoryFragmentMetadata(tx *sql.Tx, sfID string) error {
+func (s *Service) DeleteStoryFragmentMetadata(tx *sql.Tx, sfID string) error {
 	query := `DELETE FROM storyfragment_metadata_fts WHERE storyfragment_id = ?`
 	if _, err := tx.Exec(query, sfID); err != nil {
 		s.logger.Database().Error("Failed to delete from storyfragment_metadata_fts", "error", err, "storyFragmentId", sfID)
@@ -348,7 +348,7 @@ func (s *FTSService) DeleteStoryFragmentMetadata(tx *sql.Tx, sfID string) error 
 }
 
 // deleteResourceBodyIndex removes a resource's body content from the FTS index.
-func (s *FTSService) deleteResourceBodyIndex(tx *sql.Tx, resourceID string) error {
+func (s *Service) deleteResourceBodyIndex(tx *sql.Tx, resourceID string) error {
 	query := `DELETE FROM resource_body_fts WHERE resource_id = ?`
 	if _, err := tx.Exec(query, resourceID); err != nil {
 		s.logger.Database().Error("Failed to delete from resource_body_fts", "error", err, "resourceId", resourceID)

@@ -19,12 +19,14 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// SessionService manages user sessions, fingerprints, and visits.
 type SessionService struct {
 	beliefBroadcaster *BeliefBroadcastService
 	logger            *logging.ChanneledLogger
 	perfTracker       *performance.Tracker
 }
 
+// NewSessionService creates a new instance of SessionService.
 func NewSessionService(beliefBroadcaster *BeliefBroadcastService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *SessionService {
 	return &SessionService{
 		beliefBroadcaster: beliefBroadcaster,
@@ -33,6 +35,7 @@ func NewSessionService(beliefBroadcaster *BeliefBroadcastService, logger *loggin
 	}
 }
 
+// SessionResult represents the outcome of a session processing operation.
 type SessionResult struct {
 	FingerprintID string        `json:"fingerprint"`
 	VisitID       string        `json:"visitId"`
@@ -47,6 +50,7 @@ type SessionResult struct {
 	Error         string        `json:"error,omitempty"`
 }
 
+// VisitRequest contains data for recording a new visit.
 type VisitRequest struct {
 	SessionID           *string `json:"sessionId,omitempty"`
 	StoryfragmentID     *string `json:"storyfragmentId,omitempty"`
@@ -57,11 +61,13 @@ type VisitRequest struct {
 	Consent             *string `json:"consent,omitempty"`
 }
 
+// SessionResponse represents the data returned to the client after session processing.
 type SessionResponse struct {
 	Fingerprint string `json:"fingerprint"`
 	VisitID     string `json:"visitId"`
 }
 
+// VisitRowData represents a single row of visit data.
 type VisitRowData struct {
 	ID            string
 	FingerprintID string
@@ -69,6 +75,7 @@ type VisitRowData struct {
 	CreatedAt     time.Time
 }
 
+// ProcessVisitRequest handles an incoming visit request and updates session state.
 func (s *SessionService) ProcessVisitRequest(req *VisitRequest, storyfragmentID string, tenantCtx *tenant.Context) *SessionResult {
 	if req.SessionID == nil {
 		return &SessionResult{Success: false, Error: "session ID required"}
@@ -356,7 +363,8 @@ func (s *SessionService) processSessionCloning(newSessionID, storyfragmentID, ol
 	}
 }
 
-func (s *SessionService) HandleVisitCreation(fingerprintID string, hasProfile bool, tenantCtx *tenant.Context) (string, error) {
+// HandleVisitCreation ensures a visit record exists for the given fingerprint.
+func (s *SessionService) HandleVisitCreation(fingerprintID string, _ bool, tenantCtx *tenant.Context) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -376,6 +384,7 @@ func (s *SessionService) HandleVisitCreation(fingerprintID string, hasProfile bo
 	return visitID, nil
 }
 
+// GetLatestVisitByFingerprint retrieves the most recent visit for a fingerprint.
 func (s *SessionService) GetLatestVisitByFingerprint(fingerprintID string, tenantCtx *tenant.Context) (*VisitRowData, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -406,6 +415,7 @@ func (s *SessionService) GetLatestVisitByFingerprint(fingerprintID string, tenan
 	return &visit, nil
 }
 
+// CreateFingerprint creates a new fingerprint record.
 func (s *SessionService) CreateFingerprint(fingerprintID string, leadID *string, tenantCtx *tenant.Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -415,6 +425,7 @@ func (s *SessionService) CreateFingerprint(fingerprintID string, leadID *string,
 	return err
 }
 
+// FindFingerprintByLeadID looks up a fingerprint ID associated with a lead.
 func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenant.Context) *string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -432,6 +443,7 @@ func (s *SessionService) FindFingerprintByLeadID(leadID string, tenantCtx *tenan
 	return &fingerprintID
 }
 
+// GetLeadByFingerprint retrieves the lead associated with a fingerprint.
 func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -484,6 +496,7 @@ func (s *SessionService) GetLeadByFingerprint(fingerprintID string, tenantCtx *t
 	return &lead, nil
 }
 
+// GetLeadByID retrieves a lead by their ID.
 func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -535,6 +548,7 @@ func (s *SessionService) GetLeadByID(leadID string, tenantCtx *tenant.Context) (
 	return &lead, nil
 }
 
+// ValidateLeadCredentials checks if the provided credentials match a valid lead.
 func (s *SessionService) ValidateLeadCredentials(email, password string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	s.logger.Auth().Info("Validating lead credentials", "email", email)
 
@@ -555,6 +569,7 @@ func (s *SessionService) ValidateLeadCredentials(email, password string, tenantC
 	return lead, nil
 }
 
+// GetLeadByEmail retrieves a lead entity associated with a specific email address.
 func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context) (*user.Lead, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -606,6 +621,7 @@ func (s *SessionService) GetLeadByEmail(email string, tenantCtx *tenant.Context)
 	return &lead, nil
 }
 
+// HandleProfileSession manages the synchronization of a user profile with an active web session.
 func (s *SessionService) HandleProfileSession(tenantCtx *tenant.Context, profile *user.Profile, sessionID string) (*SessionResponse, error) {
 	s.logger.Auth().Debug("HandleProfileSession ENTRY",
 		"sessionId", sessionID,

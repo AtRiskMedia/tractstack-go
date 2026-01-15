@@ -201,6 +201,7 @@ type TestResponse struct {
 	CompletedAt   time.Time                 `json:"completedAt"`
 }
 
+// GetGeneralHealth returns the operational status and connection metrics for the database system.
 func (h *DatabaseHandlers) GetGeneralHealth(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 

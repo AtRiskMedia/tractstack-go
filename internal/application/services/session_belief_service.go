@@ -21,7 +21,7 @@ func NewSessionBeliefService() *SessionBeliefService {
 func (s *SessionBeliefService) GetSessionBeliefContext(
 	tenantCtx *tenant.Context,
 	sessionID, storyfragmentID string,
-) (*session.SessionBeliefContext, error) {
+) (*session.BeliefContext, error) {
 	if sessionID == "" || storyfragmentID == "" {
 		return nil, nil
 	}
@@ -34,7 +34,7 @@ func (s *SessionBeliefService) GetSessionBeliefContext(
 	}
 
 	// Convert from types to our domain entity
-	domainCtx := &session.SessionBeliefContext{
+	domainCtx := &session.BeliefContext{
 		SessionID:       sessionBeliefCtx.SessionID,
 		StoryfragmentID: sessionBeliefCtx.StoryfragmentID,
 		UserBeliefs:     sessionBeliefCtx.UserBeliefs,
@@ -78,7 +78,7 @@ func (s *SessionBeliefService) GetUserBeliefs(
 func (s *SessionBeliefService) CreateSessionBeliefContext(
 	tenantCtx *tenant.Context,
 	sessionID, storyfragmentID string,
-) (*session.SessionBeliefContext, error) {
+) (*session.BeliefContext, error) {
 	// Get user beliefs via session→fingerprint chain
 	userBeliefs, err := s.GetUserBeliefs(tenantCtx, sessionID)
 	if err != nil {
@@ -92,7 +92,7 @@ func (s *SessionBeliefService) CreateSessionBeliefContext(
 	}
 
 	// Create domain context
-	ctx := session.NewSessionBeliefContext(sessionID, storyfragmentID)
+	ctx := session.NewBeliefContext(sessionID, storyfragmentID)
 	ctx.UpdateUserBeliefs(userBeliefs)
 
 	// Add structured belief states

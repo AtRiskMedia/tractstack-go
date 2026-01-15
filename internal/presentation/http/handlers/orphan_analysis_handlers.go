@@ -77,7 +77,11 @@ func (h *SysOpHandlers) GetOrphanAnalysis(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Tenant not found or could not be initialized"})
 		return
 	}
-	defer tenantCtx.Close()
+	defer func() {
+		if err := tenantCtx.Close(); err != nil {
+			h.container.Logger.System().Error("Failed to close tenant context in SysOp GetOrphanAnalysis", "error", err)
+		}
+	}()
 
 	// Get client's ETag for cache validation
 	clientETag := c.GetHeader("If-None-Match")

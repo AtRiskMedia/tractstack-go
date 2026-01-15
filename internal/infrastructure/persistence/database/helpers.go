@@ -9,7 +9,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
-	_ "github.com/tursodatabase/libsql-client-go/libsql"
+	_ "github.com/tursodatabase/libsql-client-go/libsql" // We got turso
 )
 
 // TestTursoConnection tests the Turso database connection
@@ -22,7 +22,11 @@ func TestTursoConnection(databaseURL, authToken string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open connection: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			fmt.Printf("Failed to close Turso connection: %v\n", err)
+		}
+	}()
 
 	// Test with a simple query
 	var result int
@@ -52,7 +56,11 @@ func TestTursoConnectionWithLogger(databaseURL, authToken string, logger *loggin
 		logger.Database().Error("Failed to open Turso connection", "error", err.Error(), "databaseURL", databaseURL)
 		return fmt.Errorf("failed to open connection: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Database().Error("Failed to close Turso connection", "error", err)
+		}
+	}()
 
 	// Test with a simple query
 	var result int

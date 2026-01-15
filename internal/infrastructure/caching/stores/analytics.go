@@ -337,7 +337,7 @@ func (as *AnalyticsStore) SetDashboardData(tenantID string, data *types.Dashboar
 }
 
 // GetEpinetSankey retrieves a cached Sankey diagram
-func (as *AnalyticsStore) GetEpinetSankey(tenantID, epinetID string, filters string) (*types.SankeyDiagram, string, bool) {
+func (as *AnalyticsStore) GetEpinetSankey(tenantID, epinetID string, _ string) (*types.SankeyDiagram, string, bool) {
 	// This functionality is not part of the immediate plan, returning not found.
 	if as.logger != nil {
 		as.logger.Cache().Debug("Cache operation", "operation", "get", "type", "epinet_sankey", "tenantId", tenantID, "epinetId", epinetID, "hit", false, "reason", "not_implemented")
@@ -346,7 +346,7 @@ func (as *AnalyticsStore) GetEpinetSankey(tenantID, epinetID string, filters str
 }
 
 // SetEpinetSankey stores a computed Sankey diagram
-func (as *AnalyticsStore) SetEpinetSankey(tenantID, epinetID string, filters string, data *types.SankeyDiagram, etag string) {
+func (as *AnalyticsStore) SetEpinetSankey(tenantID, epinetID string, _ string, _ *types.SankeyDiagram, _ string) {
 	// This functionality is not part of the immediate plan.
 	if as.logger != nil {
 		as.logger.Cache().Debug("Cache operation", "operation", "set", "type", "epinet_sankey", "tenantId", tenantID, "epinetId", epinetID, "reason", "not_implemented")

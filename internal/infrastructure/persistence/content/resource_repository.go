@@ -17,14 +17,16 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// ResourceRepository manages the storage and retrieval of resource nodes, including their relationships to files and search indexing.
 type ResourceRepository struct {
 	db         *sql.DB
 	cache      interfaces.ContentCache
 	logger     *logging.ChanneledLogger
-	ftsService *fts.FTSService
+	ftsService *fts.Service
 }
 
-func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.FTSService) *ResourceRepository {
+// NewResourceRepository initializes a ResourceRepository with necessary database and search service dependencies.
+func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger, ftsService *fts.Service) *ResourceRepository {
 	return &ResourceRepository{
 		db:         db,
 		cache:      cache,
@@ -33,6 +35,7 @@ func NewResourceRepository(db *sql.DB, cache interfaces.ContentCache, logger *lo
 	}
 }
 
+// FindByID fetches a resource node by its primary key.
 func (r *ResourceRepository) FindByID(tenantID, id string) (*content.ResourceNode, error) {
 	if resource, found := r.cache.GetResource(tenantID, id); found {
 		return resource, nil
@@ -50,6 +53,7 @@ func (r *ResourceRepository) FindByID(tenantID, id string) (*content.ResourceNod
 	return resource, nil
 }
 
+// FindBySlug fetches a resource node using its unique URL slug.
 func (r *ResourceRepository) FindBySlug(tenantID, slug string) (*content.ResourceNode, error) {
 	id, err := r.getIDBySlugFromDB(slug)
 	if err != nil {
@@ -62,6 +66,7 @@ func (r *ResourceRepository) FindBySlug(tenantID, slug string) (*content.Resourc
 	return r.FindByID(tenantID, id)
 }
 
+// FindByCategory returns all resource nodes associated with a specific category slug.
 func (r *ResourceRepository) FindByCategory(tenantID, category string) ([]*content.ResourceNode, error) {
 	if resourceIDs, found := r.cache.GetResourcesByCategory(tenantID, category); found {
 		return r.FindByIDs(tenantID, resourceIDs)
@@ -102,6 +107,7 @@ func (r *ResourceRepository) FindAll(tenantID string) ([]*content.ResourceNode, 
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs returns a set of resource nodes for a given list of identifiers.
 func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*content.ResourceNode, error) {
 	var result []*content.ResourceNode
 	var missingIDs []string
@@ -129,6 +135,7 @@ func (r *ResourceRepository) FindByIDs(tenantID string, ids []string) ([]*conten
 	return result, nil
 }
 
+// Store persists a new resource node and establishes its file associations.
 func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNode, fileIDs []string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -198,6 +205,7 @@ func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNo
 	return nil
 }
 
+// Update refreshes an existing resource node's data and file links in the database.
 func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceNode, fileIDs []string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -241,6 +249,7 @@ func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceN
 	return nil
 }
 
+// Delete removes a resource node and its associated file links from the database.
 func (r *ResourceRepository) Delete(tenantID, id string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -267,6 +276,9 @@ func (r *ResourceRepository) Delete(tenantID, id string) error {
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction for resource delete: %w", err)
 	}
+
+	r.cache.InvalidateResource(tenantID, id)
+
 	return nil
 }
 
@@ -312,7 +324,11 @@ func (r *ResourceRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query resource IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query resources: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var resourceIDs []string
 	for rows.Next() {
@@ -400,7 +416,11 @@ func (r *ResourceRepository) loadMultipleFromDB(ids []string) ([]*content.Resour
 		r.logger.Database().Error("Failed to query multiple resources", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query resources: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var resources []*content.ResourceNode
 
@@ -474,7 +494,11 @@ func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, 
 		r.logger.Database().Error("Failed to query resources by category", "error", err.Error(), "category", category)
 		return nil, fmt.Errorf("failed to query resources by category: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in getIDsByCategoryFromDB", "error", err)
+		}
+	}()
 
 	var resourceIDs []string
 	for rows.Next() {
@@ -493,6 +517,7 @@ func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, 
 	return resourceIDs, rows.Err()
 }
 
+// FindByFilters performs a complex search for resources using optional IDs, categories, and slugs.
 func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
 	resourceMap := make(map[string]*content.ResourceNode)
 
@@ -543,7 +568,11 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 			r.logger.Database().Error("Failed to query resources by filters", "error", err.Error())
 			return nil, fmt.Errorf("failed to query resources by filters: %w", err)
 		}
-		defer rows.Close()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				r.logger.Database().Error("Failed to close rows in FindByFilters", "error", err)
+			}
+		}()
 
 		for rows.Next() {
 			var resource content.ResourceNode
@@ -587,14 +616,18 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 }
 
 // SearchBodies performs a prefix search on the resource_body_fts table.
-func (r *ResourceRepository) SearchBodies(tenantID, term string) ([]repositories.FTSResult, error) {
+func (r *ResourceRepository) SearchBodies(_, term string) ([]repositories.FTSResult, error) {
 	query := `SELECT resource_id, rank, snippet(resource_body_fts, 1, '>>>', '<<<', '...', 1) FROM resource_body_fts WHERE content MATCH ? ORDER BY rank LIMIT 10`
 	searchTerm := term + "*"
 	rows, err := r.db.Query(query, searchTerm)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search resource bodies: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in SearchBodies", "error", err)
+		}
+	}()
 
 	var results []repositories.FTSResult
 	for rows.Next() {
@@ -608,13 +641,17 @@ func (r *ResourceRepository) SearchBodies(tenantID, term string) ([]repositories
 }
 
 // FindFileIDsByResourceID queries the junction table for all file IDs linked to a specific resource ID.
-func (r *ResourceRepository) FindFileIDsByResourceID(tenantID string, resourceID string) ([]string, error) {
+func (r *ResourceRepository) FindFileIDsByResourceID(_ string, resourceID string) ([]string, error) {
 	query := `SELECT file_id FROM file_resources WHERE resource_id = ?`
 	rows, err := r.db.Query(query, resourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query file_resources by resource_id: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in FindFileIDsByResourceID", "error", err)
+		}
+	}()
 
 	var fileIDs []string
 	for rows.Next() {

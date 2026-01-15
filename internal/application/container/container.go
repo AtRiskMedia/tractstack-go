@@ -65,7 +65,7 @@ type Container struct {
 	Broadcaster            messaging.Broadcaster
 	SysOpBroadcaster       *messaging.SysOpBroadcaster
 	SysOpService           *services.SysOpService
-	FTSService             *fts.FTSService
+	Service                *fts.Service
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -120,7 +120,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	}
 
 	aaiService := services.NewAAIService(logger, perfTracker)
-	ftsService := fts.NewFTSService(logger)
+	ftsService := fts.NewService(logger)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
 	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
@@ -251,7 +251,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		Broadcaster:            broadcaster,
 		SysOpService:           sysOpService,
 		SysOpBroadcaster:       sysOpBroadcaster,
-		FTSService:             ftsService,
+		Service:                ftsService,
 
 		// Infrastructure
 		TenantManager: tenantManager,

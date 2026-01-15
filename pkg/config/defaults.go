@@ -118,73 +118,100 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 }
 
 var (
-	// Folder location
+	// BackendPath defines the root directory for backend storage and configuration.
 	BackendPath string
 
-	// Server Configuration
-	Port               string
-	ServerReadTimeout  time.Duration
+	// Port specifies the network port the server listens on.
+	Port string
+	// ServerReadTimeout is the maximum duration for reading the entire request, including the body.
+	ServerReadTimeout time.Duration
+	// ServerWriteTimeout is the maximum duration the server will wait for a write to complete.
 	ServerWriteTimeout time.Duration
-	ServerIdleTimeout  time.Duration
+	// ServerIdleTimeout is the maximum amount of time to wait for the next request when keep-alives are enabled.
+	ServerIdleTimeout time.Duration
 
-	// Multi-tenant Configuration
+	// EnableMultiTenant indicates whether multi-tenant support is active.
 	EnableMultiTenant bool
 
-	// Cache Configuration
-	MaxTenants           int
-	MaxMemoryMB          int
+	// MaxTenants sets the maximum number of tenants allowed in memory.
+	MaxTenants int
+	// MaxMemoryMB sets the soft memory limit for the application in megabytes.
+	MaxMemoryMB int
+	// MaxSessionsPerTenant is the limit on active sessions allowed for a single tenant.
 	MaxSessionsPerTenant int
 
-	// Database Pool
-	DBMaxOpenConns           int
-	DBMaxIdleConns           int
+	// DBMaxOpenConns sets the maximum number of open connections to the database.
+	DBMaxOpenConns int
+	// DBMaxIdleConns defines the maximum number of idle connections allowed in the database pool.
+	DBMaxIdleConns int
+	// DBConnMaxLifetimeMinutes defines the maximum number of minutes a database connection may be reused.
 	DBConnMaxLifetimeMinutes int
-	DBConnMaxIdleMinutes     int
-	SlowQueryThreshold       time.Duration
+	// DBConnMaxIdleMinutes defines the maximum number of minutes a database connection can remain idle in the pool.
+	DBConnMaxIdleMinutes int
+	// SlowQueryThreshold defines the duration after which a database query is logged as a slow operation.
+	SlowQueryThreshold time.Duration
 
-	// SSE Configuration
-	MaxSessionsPerClient        int
-	MaxSessionConnections       int
+	// MaxSessionsPerClient is the limit on active sessions allowed from a single client IP.
+	MaxSessionsPerClient int
+	// MaxSessionConnections defines the maximum number of concurrent active session connections allowed globally.
+	MaxSessionConnections int
+	// SSEConnectionTimeoutMinutes defines the maximum duration in minutes that a Server-Sent Events connection is allowed to remain open before being cycled.
 	SSEConnectionTimeoutMinutes int
+	// SSEHeartbeatIntervalSeconds defines the frequency at which keep-alive signals are sent over SSE connections.
 	SSEHeartbeatIntervalSeconds int
+	// SSEInactivityTimeoutMinutes defines the duration a Server-Sent Events connection can remain idle before being closed.
 	SSEInactivityTimeoutMinutes int
 
-	// TTL Configuration
+	// ContentCacheTTL is the time-to-live for cached content items.
 	ContentCacheTTL time.Duration
-	UserStateTTL    time.Duration
-	HTMLChunkTTL    time.Duration
+	// UserStateTTL defines the duration before cached visitor belief states are considered stale.
+	UserStateTTL time.Duration
+	// HTMLChunkTTL defines the duration that rendered HTML fragments remain in the cache before expiration.
+	HTMLChunkTTL time.Duration
+	// AnalyticsBinTTL defines the duration that aggregated analytics bins are kept in the cache.
 	AnalyticsBinTTL time.Duration
-	CurrentHourTTL  time.Duration
-	LeadMetricsTTL  time.Duration
-	DashboardTTL    time.Duration
+	// CurrentHourTTL defines the time-to-live duration for analytics data pertaining to the current active hour.
+	CurrentHourTTL time.Duration
+	// LeadMetricsTTL defines the duration that calculated lead performance metrics remain valid in the cache.
+	LeadMetricsTTL time.Duration
+	// DashboardTTL defines the duration that aggregated dashboard data remains valid in the cache.
+	DashboardTTL time.Duration
 
-	// Cleanup Intervals
-	CleanupInterval           time.Duration
-	TenantTimeout             time.Duration
-	SSECleanupInterval        time.Duration
-	DBPoolCleanupInterval     time.Duration
+	// CleanupInterval specifies how often background cleanup tasks run.
+	CleanupInterval time.Duration
+	// TenantTimeout is the duration of inactivity after which a tenant's resources are unloaded from memory.
+	TenantTimeout time.Duration
+	// SSECleanupInterval is the frequency at which the system checks for and removes stale SSE connections.
+	SSECleanupInterval time.Duration
+	// DBPoolCleanupInterval is the frequency at which the system performs maintenance on the database connection pool.
+	DBPoolCleanupInterval time.Duration
+	// RepositoryCleanupInterval is the frequency at which the system performs garbage collection on repository caches.
 	RepositoryCleanupInterval time.Duration
-	RepositoryCleanupVerbose  bool
+	// RepositoryCleanupVerbose determines if detailed logs should be emitted during repository cleanup operations.
+	RepositoryCleanupVerbose bool
 
-	// SSL Configuration
-	SSLEnabled  bool
+	// SSLEnabled indicates if the server should run with SSL/TLS encryption.
+	SSLEnabled bool
+	// SSLCertPath is the file path to the SSL certificate.
 	SSLCertPath string
-	SSLKeyPath  string
+	// SSLKeyPath is the file path to the SSL private key.
+	SSLKeyPath string
+	// BindAddress is the specific network interface address the server binds to.
 	BindAddress string
 
-	// Collection Configuration
+	// CollectionRoutes defines the list of category slugs that should be treated as collections.
 	CollectionRoutes []string
 
-	// Logging Configuration
+	// LogVerbosity sets the level of logging detail (e.g., DEBUG, INFO, WARN).
 	LogVerbosity string
 
-	// SysOp Configuration
+	// SysopPassword is the password required for accessing system operator endpoints.
 	SysopPassword string
 
-	// Allow Sandbox access to askLemur? (CAREFUL)
+	// SandboxSecret is the secret key used to authorize access to sandbox features.
 	SandboxSecret string
 
-	// Analytics Configuration
+	// ExposeAnalytics indicates whether analytics data should be exposed via API.
 	ExposeAnalytics bool
 )
 

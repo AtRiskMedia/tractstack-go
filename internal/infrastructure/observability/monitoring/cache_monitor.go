@@ -225,6 +225,7 @@ type ContentTypeWarmingStats struct {
 // CacheHealthStatus represents the health of cache operations
 type CacheHealthStatus string
 
+// CacheHealthy indicates that the cache is performing optimally with high hit ratios.
 const (
 	CacheHealthy   CacheHealthStatus = "healthy"   // Performing optimally
 	CacheDegraded  CacheHealthStatus = "degraded"  // Some performance issues
@@ -291,6 +292,7 @@ type CacheAlert struct {
 // CacheAlertCategory represents the type of cache alert
 type CacheAlertCategory string
 
+// CacheAlertHitRatio indicates an alert triggered by a drop in cache hit ratio.
 const (
 	CacheAlertHitRatio CacheAlertCategory = "hit_ratio"
 	CacheAlertLatency  CacheAlertCategory = "latency"
@@ -647,19 +649,16 @@ func (cpm *CachePerformanceMonitor) updateOverallHealth() {
 
 	// Determine overall health
 	var overallHealth CacheHealthStatus
-	if len(criticalLayers) > 0 {
-		if len(criticalLayers) >= 2 {
-			overallHealth = CacheCritical
-		} else {
-			overallHealth = CacheUnhealthy
-		}
-	} else if len(warningLayers) > 0 {
-		if len(warningLayers) >= 2 {
-			overallHealth = CacheUnhealthy
-		} else {
-			overallHealth = CacheDegraded
-		}
-	} else {
+	switch {
+	case len(criticalLayers) >= 2:
+		overallHealth = CacheCritical
+	case len(criticalLayers) > 0:
+		overallHealth = CacheUnhealthy
+	case len(warningLayers) >= 2:
+		overallHealth = CacheUnhealthy
+	case len(warningLayers) > 0:
+		overallHealth = CacheDegraded
+	default:
 		overallHealth = CacheHealthy
 	}
 

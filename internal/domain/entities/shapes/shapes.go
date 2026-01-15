@@ -1,16 +1,19 @@
 // Package shapes provides SVG shape data for visual break rendering.
 package shapes
 
+// SvgBreakData holds the geometric data for rendering an SVG visual break.
 type SvgBreakData struct {
 	ViewBox []int  `json:"viewBox"`
 	Path    string `json:"path"`
 }
 
+// GetShape retrieves the SVG path data for a named shape.
 func GetShape(shapeName string) (SvgBreakData, bool) {
 	shape, exists := SvgBreaks[shapeName]
 	return shape, exists
 }
 
+// GetAllShapeNames returns a list of all available SVG break shape names.
 func GetAllShapeNames() []string {
 	names := make([]string, 0, len(SvgBreaks))
 	for name := range SvgBreaks {
@@ -19,11 +22,13 @@ func GetAllShapeNames() []string {
 	return names
 }
 
+// HasShape checks if a shape with the given name exists in the registry.
 func HasShape(shapeName string) bool {
 	_, exists := SvgBreaks[shapeName]
 	return exists
 }
 
+// SvgBreaks is the registry of available SVG shapes used for visual breaks.
 var SvgBreaks = map[string]SvgBreakData{
 	"kCzcut1": {
 		ViewBox: []int{1000, 101},

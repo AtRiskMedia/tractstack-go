@@ -3,6 +3,7 @@ package rendering
 
 import "time"
 
+// HTMLASTNode represents a single node within the HTML Abstract Syntax Tree.
 type HTMLASTNode struct {
 	Tag      string            `json:"tag"`
 	Attrs    map[string]string `json:"attrs,omitempty"`
@@ -11,12 +12,14 @@ type HTMLASTNode struct {
 	ID       string            `json:"id,omitempty"`
 }
 
+// ViewportCSS holds CSS class strings tailored for different viewport sizes (XS, MD, XL).
 type ViewportCSS struct {
 	XS string `json:"xs"`
 	MD string `json:"md"`
 	XL string `json:"xl"`
 }
 
+// HTMLAST represents the complete HTML Abstract Syntax Tree structure, including global CSS and the node tree.
 type HTMLAST struct {
 	CSS              string         `json:"css"`
 	ViewportCSS      ViewportCSS    `json:"viewportCss"`

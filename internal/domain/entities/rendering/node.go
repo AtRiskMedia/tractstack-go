@@ -55,6 +55,7 @@ type NodeRenderData struct {
 	CustomData map[string]any `json:"customData,omitempty"`
 }
 
+// BackgroundNode defines the properties for a background element, including its ID, position, and sizing.
 type BackgroundNode struct {
 	ID       string
 	Position string

@@ -14,17 +14,20 @@ import (
 
 // --- Data Structures ---
 
+// DisclosurePayload defines the structure for the interactive disclosure widget's JSON configuration.
 type DisclosurePayload struct {
 	Styles      WidgetStyles     `json:"styles"`
 	Disclosures []DisclosureItem `json:"disclosures"`
 }
 
+// WidgetStyles defines the visual styling properties for the disclosure widget.
 type WidgetStyles struct {
 	TextColor string `json:"textColor"`
 	BgColor   string `json:"bgColor"`
 	BgOpacity int    `json:"bgOpacity"`
 }
 
+// DisclosureItem represents a single interactive item within the disclosure grid.
 type DisclosureItem struct {
 	BeliefValue string `json:"beliefValue"`
 	Title       string `json:"title"`
@@ -64,6 +67,7 @@ var disclosureGridTmpl = template.Must(template.New("interactiveDisclosureGrid")
 		`{{define "content"}}<i class="bi bi-{{.Icon}}"></i><span>{{.Title}}</span>{{if .Description}}<p>{{.Description}}</p>{{end}}{{end}}`,
 ))
 
+// RenderInteractiveDisclosure generates the HTML for an interactive grid of disclosure items based on user belief state.
 func RenderInteractiveDisclosure(ctx *rendering.RenderContext, classNames, beliefSlug, jsonPayload string) string {
 	var payload DisclosurePayload
 	if err := json.Unmarshal([]byte(jsonPayload), &payload); err != nil {

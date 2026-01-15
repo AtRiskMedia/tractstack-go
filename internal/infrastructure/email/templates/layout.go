@@ -7,6 +7,7 @@ import (
 	"log"
 )
 
+// EmailLayoutProps defines the content and configuration for the main email layout.
 type EmailLayoutProps struct {
 	Preheader      string
 	Content        string
@@ -96,6 +97,7 @@ var emailLayoutTemplate = template.Must(template.New("emailLayout").Parse(`
   </body>
 </html>`))
 
+// GetEmailLayout generates the complete HTML email structure with the provided content.
 func GetEmailLayout(props EmailLayoutProps) string {
 	// Set defaults exactly as before
 	preheader := props.Preheader

@@ -114,6 +114,7 @@ func (h *SysOpHandlers) GetTenantToken(c *gin.Context) {
 	})
 }
 
+// AuthCheck validates the current system operator's session and permissions.
 func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
 	sysopPassword := config.SysopPassword
 
@@ -129,16 +130,17 @@ func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
 	var message string
 	var docsLink string
 
-	if sysopPassword == "storykeep" {
+	switch {
+	case sysopPassword == "storykeep":
 		passwordRequired = true
 		message = "Default SYSOP_PASSWORD 'storykeep' is not secure. Please set SYSOP_PASSWORD or configure tenant admin password."
-	} else if sysopPassword != "" {
+	case sysopPassword != "":
 		effectivePassword = sysopPassword
 		passwordRequired = true
-	} else if fallbackHash != "" {
+	case fallbackHash != "":
 		passwordRequired = true
 		message = "Using tenant admin password for SysOp access. Set SYSOP_PASSWORD to restrict SysOp authentication."
-	} else {
+	default:
 		passwordRequired = false
 		message = "Welcome to your story keep. Set SYSOP_PASSWORD to protect the system"
 		docsLink = "https://tractstack.org"
@@ -176,6 +178,7 @@ func (h *SysOpHandlers) AuthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// Login handles system operator authentication requests.
 func (h *SysOpHandlers) Login(c *gin.Context) {
 	var request struct {
 		Password string `json:"password"`
@@ -221,6 +224,7 @@ func (h *SysOpHandlers) Login(c *gin.Context) {
 	c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid password"})
 }
 
+// SysOpAuthMiddleware provides a GIN middleware for protecting system operator routes.
 func (h *SysOpHandlers) SysOpAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sysopPassword := config.SysopPassword
@@ -481,6 +485,7 @@ func (h *SysOpHandlers) clientWritePump(client *messaging.SysOpClient) {
 	}
 }
 
+// GetActivityGraph returns time-series data for system activity visualization.
 func (h *SysOpHandlers) GetActivityGraph(c *gin.Context) {
 	tenantID := c.Query("tenant")
 	if tenantID == "" {

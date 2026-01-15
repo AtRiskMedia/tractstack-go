@@ -3,7 +3,6 @@
 package logging
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,36 +17,48 @@ import (
 type Channel string
 
 const (
-	// System channels
-	ChannelSystem   Channel = "system"   // General system operations
-	ChannelStartup  Channel = "startup"  // Application startup and initialization
-	ChannelShutdown Channel = "shutdown" // Application shutdown and cleanup
+	// ChannelSystem represents general system operations.
+	ChannelSystem Channel = "system"
+	// ChannelStartup represents application startup and initialization events.
+	ChannelStartup Channel = "startup"
+	// ChannelShutdown represents application shutdown events.
+	ChannelShutdown Channel = "shutdown"
 
-	// Business logic channels
-	ChannelAuth      Channel = "auth"      // Authentication and authorization
-	ChannelContent   Channel = "content"   // Content management operations
-	ChannelAnalytics Channel = "analytics" // Analytics processing and queries
-	ChannelCache     Channel = "cache"     // Cache operations and management
+	// ChannelAuth represents authentication and authorization events.
+	ChannelAuth Channel = "auth"
+	// ChannelContent represents the logging channel for content management operations.
+	ChannelContent Channel = "content"
+	// ChannelAnalytics represents the logging channel for analytics and event processing operations.
+	ChannelAnalytics Channel = "analytics"
+	// ChannelCache represents the logging channel for internal caching operations and management.
+	ChannelCache Channel = "cache"
 
-	// Infrastructure channels
-	ChannelDatabase Channel = "database" // Database operations and queries
-	ChannelTenant   Channel = "tenant"   // Multi-tenant operations
-	ChannelSSE      Channel = "sse"      // Server-sent events and real-time
+	// ChannelDatabase represents database operations and queries.
+	ChannelDatabase Channel = "database"
+	// ChannelTenant represents the logging channel for tenant-specific configuration and lifecycle events.
+	ChannelTenant Channel = "tenant"
+	// ChannelSSE represents the logging channel for Server-Sent Events (SSE) streaming and connection management.
+	ChannelSSE Channel = "sse"
 
-	// Performance and monitoring channels
-	ChannelPerf      Channel = "performance" // Performance monitoring and metrics
-	ChannelSlowQuery Channel = "slow-query"  // Slow database queries
-	ChannelMemory    Channel = "memory"      // Memory usage and garbage collection
-	ChannelAlert     Channel = "alert"       // Performance alerts and warnings
+	// ChannelPerf represents performance monitoring and metrics.
+	ChannelPerf Channel = "performance"
+	// ChannelSlowQuery represents the logging channel specifically for identifying and recording database queries that exceed the performance threshold.
+	ChannelSlowQuery Channel = "slow-query"
+	// ChannelMemory represents the logging channel for memory usage, allocation, and garbage collection events.
+	ChannelMemory Channel = "memory"
+	// ChannelAlert represents the logging channel for critical system alerts and notifications.
+	ChannelAlert Channel = "alert"
 
-	// Development and debugging channels
-	ChannelDebug Channel = "debug" // Debug information
-	ChannelTrace Channel = "trace" // Detailed tracing information
+	// ChannelDebug represents development and debugging information.
+	ChannelDebug Channel = "debug"
+	// ChannelTrace represents the logging channel for high-verbosity execution tracing and spans.
+	ChannelTrace Channel = "trace"
 )
 
 // LogLevel represents the severity level of log messages
 type LogLevel string
 
+// LevelTrace represents the most detailed tracing information level.
 const (
 	LevelTrace LogLevel = "TRACE"
 	LevelDebug LogLevel = "DEBUG"
@@ -120,7 +131,7 @@ func NewChanneledLogger(config *LoggerConfig) (*ChanneledLogger, error) {
 
 	// Create log directory if file output is enabled
 	if config.OutputToFile {
-		if err := os.MkdirAll(config.LogDirectory, 0755); err != nil {
+		if err := os.MkdirAll(config.LogDirectory, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create log directory: %w", err)
 		}
 	}
@@ -168,7 +179,7 @@ func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, e
 		filename := fmt.Sprintf("%s.log", string(channel))
 		filepath := filepath.Join(cl.config.LogDirectory, filename)
 
-		file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			return nil, fmt.Errorf("failed to open log file %s: %w", filepath, err)
 		}
@@ -176,26 +187,25 @@ func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, e
 		writers = append(writers, file)
 	}
 
-	// Add our custom SSE writer to the list of outputs.
-	// Now, every log message will also be sent to the broadcaster.
 	writers = append(writers, NewSSEWriter())
 
 	// Create multi-writer if we have multiple outputs
 	var writer io.Writer
-	if len(writers) == 1 {
-		writer = writers[0]
-	} else if len(writers) > 1 {
-		writer = io.MultiWriter(writers...)
-	} else {
+	switch len(writers) {
+	case 0:
 		// Fallback to stdout
 		writer = os.Stdout
+	case 1:
+		writer = writers[0]
+	default:
+		writer = io.MultiWriter(writers...)
 	}
 
 	// Configure handler options
 	handlerOpts := &slog.HandlerOptions{
 		Level:     level,
 		AddSource: cl.config.IncludeSource,
-		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 			return a
 		},
 	}
@@ -214,22 +224,53 @@ func (cl *ChanneledLogger) createChannelLogger(channel Channel) (*slog.Logger, e
 	return logger, nil
 }
 
-func (cl *ChanneledLogger) System() *slog.Logger    { return cl.channels[ChannelSystem] }
-func (cl *ChanneledLogger) Startup() *slog.Logger   { return cl.channels[ChannelStartup] }
-func (cl *ChanneledLogger) Shutdown() *slog.Logger  { return cl.channels[ChannelShutdown] }
-func (cl *ChanneledLogger) Auth() *slog.Logger      { return cl.channels[ChannelAuth] }
-func (cl *ChanneledLogger) Content() *slog.Logger   { return cl.channels[ChannelContent] }
+// System returns the logger channel for system operations.
+func (cl *ChanneledLogger) System() *slog.Logger { return cl.channels[ChannelSystem] }
+
+// Startup returns the logger channel for startup events.
+func (cl *ChanneledLogger) Startup() *slog.Logger { return cl.channels[ChannelStartup] }
+
+// Shutdown returns the logger channel for shutdown events.
+func (cl *ChanneledLogger) Shutdown() *slog.Logger { return cl.channels[ChannelShutdown] }
+
+// Auth returns the logger channel for authentication events.
+func (cl *ChanneledLogger) Auth() *slog.Logger { return cl.channels[ChannelAuth] }
+
+// Content returns the logger channel for content management operations.
+func (cl *ChanneledLogger) Content() *slog.Logger { return cl.channels[ChannelContent] }
+
+// Analytics returns the logger channel for analytics processing.
 func (cl *ChanneledLogger) Analytics() *slog.Logger { return cl.channels[ChannelAnalytics] }
-func (cl *ChanneledLogger) Cache() *slog.Logger     { return cl.channels[ChannelCache] }
-func (cl *ChanneledLogger) Database() *slog.Logger  { return cl.channels[ChannelDatabase] }
-func (cl *ChanneledLogger) Tenant() *slog.Logger    { return cl.channels[ChannelTenant] }
-func (cl *ChanneledLogger) SSE() *slog.Logger       { return cl.channels[ChannelSSE] }
-func (cl *ChanneledLogger) Perf() *slog.Logger      { return cl.channels[ChannelPerf] }
+
+// Cache returns the logger channel for cache operations.
+func (cl *ChanneledLogger) Cache() *slog.Logger { return cl.channels[ChannelCache] }
+
+// Database returns the logger channel for database operations.
+func (cl *ChanneledLogger) Database() *slog.Logger { return cl.channels[ChannelDatabase] }
+
+// Tenant returns the logger channel for tenant-specific operations.
+func (cl *ChanneledLogger) Tenant() *slog.Logger { return cl.channels[ChannelTenant] }
+
+// SSE returns the logger channel for Server-Sent Events.
+func (cl *ChanneledLogger) SSE() *slog.Logger { return cl.channels[ChannelSSE] }
+
+// Perf returns the logger channel for performance metrics.
+func (cl *ChanneledLogger) Perf() *slog.Logger { return cl.channels[ChannelPerf] }
+
+// SlowQuery returns the logger channel specifically for slow database queries.
 func (cl *ChanneledLogger) SlowQuery() *slog.Logger { return cl.channels[ChannelSlowQuery] }
-func (cl *ChanneledLogger) Memory() *slog.Logger    { return cl.channels[ChannelMemory] }
-func (cl *ChanneledLogger) Alert() *slog.Logger     { return cl.channels[ChannelAlert] }
-func (cl *ChanneledLogger) Debug() *slog.Logger     { return cl.channels[ChannelDebug] }
-func (cl *ChanneledLogger) Trace() *slog.Logger     { return cl.channels[ChannelTrace] }
+
+// Memory returns the logger channel for memory usage stats.
+func (cl *ChanneledLogger) Memory() *slog.Logger { return cl.channels[ChannelMemory] }
+
+// Alert returns the logger channel for system alerts.
+func (cl *ChanneledLogger) Alert() *slog.Logger { return cl.channels[ChannelAlert] }
+
+// Debug returns the logger channel for debugging information.
+func (cl *ChanneledLogger) Debug() *slog.Logger { return cl.channels[ChannelDebug] }
+
+// Trace returns the logger channel for detailed tracing.
+func (cl *ChanneledLogger) Trace() *slog.Logger { return cl.channels[ChannelTrace] }
 
 // GetChannel returns a logger for a specific channel
 func (cl *ChanneledLogger) GetChannel(channel Channel) *slog.Logger {
@@ -259,32 +300,6 @@ func (cl *ChanneledLogger) WithTenantAndOperation(channel Channel, tenantID, ope
 		slog.String("tenantId", tenantID),
 		slog.String("operation", operation),
 	)
-}
-
-// WithContext returns a logger with context from the provided context.Context
-func (cl *ChanneledLogger) WithContext(channel Channel, ctx context.Context) *slog.Logger {
-	logger := cl.GetChannel(channel)
-
-	// Extract common context values
-	if tenantID := ctx.Value("tenantId"); tenantID != nil {
-		if tenantStr, ok := tenantID.(string); ok {
-			logger = logger.With(slog.String("tenantId", tenantStr))
-		}
-	}
-
-	if operation := ctx.Value("operation"); operation != nil {
-		if opStr, ok := operation.(string); ok {
-			logger = logger.With(slog.String("operation", opStr))
-		}
-	}
-
-	if requestID := ctx.Value("requestId"); requestID != nil {
-		if reqStr, ok := requestID.(string); ok {
-			logger = logger.With(slog.String("requestId", reqStr))
-		}
-	}
-
-	return logger
 }
 
 // LogPerformanceMarker logs a performance marker with appropriate context

@@ -31,6 +31,7 @@ const (
 	weeklyBatchSize     = 168 // 7 days * 24 hours
 )
 
+// EpinetAnalysis contains the results of a structural analysis for a specific Epinet.
 type EpinetAnalysis struct {
 	BeliefValues     map[string]bool
 	IdentifyAsValues map[string]bool
@@ -39,6 +40,7 @@ type EpinetAnalysis struct {
 	ObjectIDs        map[string]bool
 }
 
+// WarmingService handles the pre-computation and caching of expensive data structures.
 type WarmingService struct {
 	logger                  *logging.ChanneledLogger
 	perfTracker             *performance.Tracker
@@ -57,6 +59,7 @@ type WarmingService struct {
 	contentMapService    *ContentMapService
 }
 
+// NewWarmingService creates a new instance of WarmingService with required dependencies.
 func NewWarmingService(
 	logger *logging.ChanneledLogger,
 	perfTracker *performance.Tracker,
@@ -89,6 +92,7 @@ func NewWarmingService(
 	}
 }
 
+// WarmAllTenants iterates through all active tenants and triggers pre-computation for their data.
 func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 
@@ -132,6 +136,7 @@ func (ws *WarmingService) WarmAllTenants(tenantManager *tenant.Manager, cache in
 	return nil
 }
 
+// WarmTenant performs data warming operations for a single specific tenant.
 func (ws *WarmingService) WarmTenant(tenantCtx *tenant.Context, tenantID string, cache interfaces.Cache, contentMapSvc *ContentMapService, beliefRegistrySvc *BeliefRegistryService, reporter *cleanup.Reporter) error {
 	start := time.Now()
 	reporter.LogSubHeader(fmt.Sprintf("Warming Tenant: %s", tenantID))
@@ -356,7 +361,7 @@ func (ws *WarmingService) getEpinets(tenantCtx *tenant.Context) ([]types.EpinetC
 				GateType:  nodeStep.GateType,
 				Title:     nodeStep.Title,
 				Values:    nodeStep.Values,
-				ObjectIds: nodeStep.ObjectIDs,
+				ObjectIDs: nodeStep.ObjectIDs,
 			}
 			if nodeStep.ObjectType != nil {
 				step.ObjectType = *nodeStep.ObjectType
@@ -398,7 +403,7 @@ func (ws *WarmingService) analyzeEpinets(epinets []types.EpinetConfig) *EpinetAn
 				if step.ObjectType != "" {
 					analysis.ActionTypes[step.ObjectType] = true
 				}
-				for _, id := range step.ObjectIds {
+				for _, id := range step.ObjectIDs {
 					analysis.ObjectIDs[id] = true
 				}
 			}
@@ -417,8 +422,8 @@ func (ws *WarmingService) eventMatchesStep(event analytics.ActionEvent, step typ
 	if step.ObjectType != "" && step.ObjectType != event.ObjectType {
 		return false
 	}
-	if len(step.ObjectIds) > 0 {
-		return slices.Contains(step.ObjectIds, event.ObjectID)
+	if len(step.ObjectIDs) > 0 {
+		return slices.Contains(step.ObjectIDs, event.ObjectID)
 	}
 	return true
 }
@@ -790,6 +795,7 @@ func (ws *WarmingService) getNodeName(step types.EpinetStep, contextValue string
 	return ""
 }
 
+// WarmHourlyEpinetData pre-computes analytics bins for Epinets over a historical time range.
 func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, hoursBack int) error {
 	const fullAnalyticsRange = 674
 
@@ -881,6 +887,7 @@ func (ws *WarmingService) WarmHourlyEpinetData(tenantCtx *tenant.Context, cache 
 	return nil
 }
 
+// WarmRecentHours ensures analytics bins for the most recent hours are computed and cached.
 func (ws *WarmingService) WarmRecentHours(tenantCtx *tenant.Context, cache interfaces.WriteOnlyAnalyticsCache, missingHourKeys []string) error {
 	if len(missingHourKeys) == 0 {
 		return nil

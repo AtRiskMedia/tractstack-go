@@ -450,6 +450,7 @@ func (h *AnalyticsHandlers) HandleAllAnalytics(c *gin.Context) {
 	})
 }
 
+// HandleContentSummary processes requests for high-level content performance metrics.
 func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -491,6 +492,7 @@ func (h *AnalyticsHandlers) HandleContentSummary(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hotContent": dashboard.HotContent})
 }
 
+// HandleLeadsDownload processes requests to export lead data as a downloadable file.
 func (h *AnalyticsHandlers) HandleLeadsDownload(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {

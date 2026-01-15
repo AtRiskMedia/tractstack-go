@@ -53,7 +53,7 @@ type LeadRepository interface {
 	FindByEmail(email string) (*Lead, error)
 	Store(lead *Lead) error
 	Update(lead *Lead) error
-	ValidateCredentials(email, password string) (*Lead, error)
+	ValidateCredentials(email string) (*Lead, error)
 }
 
 // FingerprintRepository defines the operations for persisting Fingerprint entities.

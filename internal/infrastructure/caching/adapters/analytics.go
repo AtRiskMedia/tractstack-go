@@ -18,14 +18,17 @@ func NewWriteOnlyAnalyticsCacheAdapter(m *manager.Manager) interfaces.WriteOnlyA
 	return &WriteOnlyAnalyticsCacheAdapter{manager: m}
 }
 
+// SetHourlyEpinetBin stores the hourly analytics bin for a specific Epinet.
 func (a *WriteOnlyAnalyticsCacheAdapter) SetHourlyEpinetBin(tenantID, epinetID, hourKey string, bin *types.HourlyEpinetBin) {
 	a.manager.SetHourlyEpinetBin(tenantID, epinetID, hourKey, bin)
 }
 
+// SetHourlyContentBin stores the hourly analytics bin for a specific content item.
 func (a *WriteOnlyAnalyticsCacheAdapter) SetHourlyContentBin(tenantID, contentID, hourKey string, bin *types.HourlyContentBin) {
 	a.manager.SetHourlyContentBin(tenantID, contentID, hourKey, bin)
 }
 
+// SetHourlySiteBin stores the hourly analytics bin for the entire site.
 func (a *WriteOnlyAnalyticsCacheAdapter) SetHourlySiteBin(tenantID, hourKey string, bin *types.HourlySiteBin) {
 	a.manager.SetHourlySiteBin(tenantID, hourKey, bin)
 }
@@ -40,14 +43,17 @@ func (a *WriteOnlyAnalyticsCacheAdapter) SetDashboardData(tenantID string, data 
 	a.manager.SetDashboardDataWithETag(tenantID, "", data.Data, "")
 }
 
+// PurgeExpiredBins removes analytics bins that are older than the specified retention period.
 func (a *WriteOnlyAnalyticsCacheAdapter) PurgeExpiredBins(tenantID string, olderThan string) {
 	a.manager.PurgeExpiredBins(tenantID, olderThan)
 }
 
+// InvalidateAnalyticsCache clears all analytics-related cache entries for a tenant.
 func (a *WriteOnlyAnalyticsCacheAdapter) InvalidateAnalyticsCache(tenantID string) {
 	a.manager.InvalidateAnalyticsCache(tenantID)
 }
 
+// UpdateLastFullHour updates the marker indicating the last fully processed hour for analytics.
 func (a *WriteOnlyAnalyticsCacheAdapter) UpdateLastFullHour(tenantID, hourKey string) {
 	a.manager.UpdateLastFullHour(tenantID, hourKey)
 }

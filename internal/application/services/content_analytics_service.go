@@ -10,22 +10,26 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
+// HourlyActivity maps hour keys to node activity data.
 type HourlyActivity map[string]map[string]struct {
 	Events     map[string]int `json:"events"`
 	VisitorIDs []string       `json:"visitorIds"`
 }
 
+// StoryfragmentAnalytics contains analytics data for a specific story fragment.
 type StoryfragmentAnalytics struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
 	EventCounts int    `json:"eventCounts"`
 }
 
+// ContentAnalyticsService handles analysis of content usage and engagement.
 type ContentAnalyticsService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
+// NewContentAnalyticsService creates a new instance of ContentAnalyticsService.
 func NewContentAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ContentAnalyticsService {
 	return &ContentAnalyticsService{
 		logger:      logger,
@@ -33,6 +37,7 @@ func NewContentAnalyticsService(logger *logging.ChanneledLogger, perfTracker *pe
 	}
 }
 
+// GetHourlyNodeActivity retrieves activity data for nodes grouped by hour.
 func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Context, epinetID string, startHour, endHour *int) (HourlyActivity, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("get_hourly_node_activity", tenantCtx.TenantID)
@@ -120,6 +125,7 @@ func (s *ContentAnalyticsService) GetHourlyNodeActivity(tenantCtx *tenant.Contex
 	return hourlyActivity, nil
 }
 
+// GetStoryfragmentAnalytics retrieves analytics for specific story fragments within a time range.
 func (s *ContentAnalyticsService) GetStoryfragmentAnalytics(tenantCtx *tenant.Context, epinetIDs []string, startHour, endHour int) ([]StoryfragmentAnalytics, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("get_storyfragment_analytics", tenantCtx.TenantID)

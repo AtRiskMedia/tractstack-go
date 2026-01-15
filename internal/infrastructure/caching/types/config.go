@@ -21,6 +21,7 @@ type TenantConfigCache struct {
 	Mu          sync.RWMutex `json:"-"`
 }
 
+// TemplateNode represents a node within a template structure configuration.
 type TemplateNode struct {
 	NodeType        string          `json:"nodeType"`
 	TagName         string          `json:"tagName,omitempty"`
@@ -34,11 +35,13 @@ type TemplateNode struct {
 	Nodes           []*TemplateNode `json:"nodes,omitempty"`
 }
 
+// TemplateMarkdown represents markdown content configuration within a template.
 type TemplateMarkdown struct {
 	NodeType string          `json:"nodeType"`
 	Nodes    []*TemplateNode `json:"nodes"`
 }
 
+// TemplatePane represents a pane configuration within a template.
 type TemplatePane struct {
 	NodeType      string            `json:"nodeType"`
 	Title         string            `json:"title"`
@@ -47,12 +50,14 @@ type TemplatePane struct {
 	Markdown      *TemplateMarkdown `json:"markdown,omitempty"`
 }
 
+// StorageButtonPayload defines the data structure for button interactions in storage.
 type StorageButtonPayload struct {
 	ButtonClasses      map[string][]string `json:"buttonClasses"`
 	ButtonHoverClasses map[string][]string `json:"buttonHoverClasses"`
 	CallbackPayload    string              `json:"callbackPayload"`
 }
 
+// StorageNode represents a content node as stored in the persistence layer.
 type StorageNode struct {
 	NodeType        string                       `json:"nodeType"`
 	TagName         string                       `json:"tagName,omitempty"`
@@ -66,6 +71,7 @@ type StorageNode struct {
 	Nodes           []*StorageNode               `json:"nodes,omitempty"`
 }
 
+// StorageMarkdown represents markdown content as stored in the persistence layer.
 type StorageMarkdown struct {
 	NodeType       string           `json:"nodeType"`
 	Type           string           `json:"type"`
@@ -74,12 +80,14 @@ type StorageMarkdown struct {
 	Nodes          []*StorageNode   `json:"nodes"`
 }
 
+// GridColumns defines the column count for grid layouts at different breakpoints.
 type GridColumns struct {
 	Mobile  int `json:"mobile"`
 	Tablet  int `json:"tablet"`
 	Desktop int `json:"desktop"`
 }
 
+// StorageGridLayoutNode represents a grid layout configuration stored in the database.
 type StorageGridLayoutNode struct {
 	NodeType       string            `json:"nodeType"`
 	Type           string            `json:"type"`
@@ -89,12 +97,14 @@ type StorageGridLayoutNode struct {
 	Nodes          []StorageMarkdown `json:"nodes,omitempty"`
 }
 
+// VisualBreakData contains configuration for a visual break element.
 type VisualBreakData struct {
 	Collection string `json:"collection"`
 	Image      string `json:"image"`
 	SvgFill    string `json:"svgFill"`
 }
 
+// StorageBgPane represents a background pane configuration stored in the database.
 type StorageBgPane struct {
 	NodeType              string           `json:"nodeType"`
 	Type                  string           `json:"type"`
@@ -115,6 +125,7 @@ type StorageBgPane struct {
 	HiddenViewportMobile  bool             `json:"hiddenViewportMobile,omitempty"`
 }
 
+// StoragePane represents a pane configuration stored in the database.
 type StoragePane struct {
 	NodeType     string                 `json:"nodeType"`
 	Title        string                 `json:"title"`
@@ -126,6 +137,7 @@ type StoragePane struct {
 	BgPane       *StorageBgPane         `json:"bgPane,omitempty"`
 }
 
+// DesignLibraryEntry represents a reusable design template in the library.
 type DesignLibraryEntry struct {
 	Category      string      `json:"category"`
 	Title         string      `json:"title"`
@@ -135,6 +147,7 @@ type DesignLibraryEntry struct {
 	Template      StoragePane `json:"template"`
 }
 
+// DesignLibraryConfig is a collection of design library entries.
 type DesignLibraryConfig []DesignLibraryEntry
 
 // KnownResourcesConfig holds resource category definitions

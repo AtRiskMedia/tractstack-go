@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// SessionBeliefTarget identifies a specific session and story fragment pair for belief operations.
 type SessionBeliefTarget struct {
 	SessionID       string
 	StoryfragmentID string

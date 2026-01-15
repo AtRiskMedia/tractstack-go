@@ -49,6 +49,7 @@ func NewFragmentService(
 	}
 }
 
+// GenerateFragment creates an HTML fragment for the specified pane and variant.
 func (s *FragmentService) GenerateFragment(
 	tenantCtx *tenant.Context,
 	paneID, sessionID, storyfragmentID string,

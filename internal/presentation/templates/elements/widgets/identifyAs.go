@@ -175,29 +175,30 @@ func sanitizeID(target string) string {
 
 func getIdentifyAsButtonClasses(isSelected, isOtherSelected bool) string {
 	var classes string
-	if isSelected {
+	switch {
+	case isSelected:
 		// Selected: bright background with lime accent
 		classes = "bg-white ring-lime-500 border-lime-500"
-	} else if isOtherSelected {
+	case isOtherSelected:
 		// When something else is selected: muted but still interactive
 		classes = "bg-gray-200 hover:bg-gray-300 ring-gray-400 opacity-60"
-	} else {
+	default:
 		// Default unselected: clean but clearly unselected
 		classes = "bg-gray-100 hover:bg-orange-100 ring-gray-300"
 	}
-
 	return classes
 }
 
 func getIdentifyAsTextColor(isSelected, isOtherSelected bool) string {
 	var textColor string
-	if isSelected {
+	switch {
+	case isSelected:
 		// Selected: strong text contrast
 		textColor = "text-gray-900"
-	} else if isOtherSelected {
+	case isOtherSelected:
 		// When something else is selected: muted text
 		textColor = "text-gray-500"
-	} else {
+	default:
 		// Default unselected: medium contrast
 		textColor = "text-gray-700"
 	}
@@ -206,16 +207,16 @@ func getIdentifyAsTextColor(isSelected, isOtherSelected bool) string {
 
 func getIdentifyAsIndicatorColor(isSelected, isOtherSelected bool) string {
 	var color string
-	if isSelected {
+	switch {
+	case isSelected:
 		// Selected: bright lime indicator
 		color = "bg-lime-400"
-	} else if isOtherSelected {
+	case isOtherSelected:
 		// When something else is selected: muted gray
 		color = "bg-gray-400"
-	} else {
+	default:
 		// Default unselected: subtle orange hint
 		color = "bg-gray-300"
 	}
-
 	return color
 }

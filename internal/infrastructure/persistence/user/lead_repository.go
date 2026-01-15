@@ -175,8 +175,8 @@ func (r *SQLLeadRepository) Update(lead *user.Lead) error {
 	return nil
 }
 
-// ValidateCredentials checks email/password combination and returns the Lead if valid.
-func (r *SQLLeadRepository) ValidateCredentials(email, password string) (*user.Lead, error) {
+// ValidateCredentials checks email and returns the Lead if valid.
+func (r *SQLLeadRepository) ValidateCredentials(email string) (*user.Lead, error) {
 	start := time.Now()
 	r.logger.Database().Debug("Validating lead credentials", "email", email)
 
@@ -189,7 +189,6 @@ func (r *SQLLeadRepository) ValidateCredentials(email, password string) (*user.L
 		r.logger.Database().Debug("Credential validation failed - lead not found", "email", email, "duration", time.Since(start))
 		return nil, nil // Lead not found
 	}
-
 	// Password validation would be done at service layer
 	// Repository just returns the lead for credential checking
 	r.logger.Database().Info("Credential validation completed", "email", email, "leadId", lead.ID, "duration", time.Since(start))

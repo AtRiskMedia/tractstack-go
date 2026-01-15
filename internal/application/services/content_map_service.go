@@ -31,8 +31,8 @@ func NewContentMapService(logger *logging.ChanneledLogger, perfTracker *performa
 
 // ContentMapResponse represents the API response structure
 type ContentMapResponse struct {
-	Data        []*content.ContentMapItem `json:"data"`
-	LastUpdated int64                     `json:"lastUpdated"`
+	Data        []*content.MapItem `json:"data"`
+	LastUpdated int64              `json:"lastUpdated"`
 }
 
 // GetContentMap returns content map with timestamp-based caching
@@ -43,13 +43,13 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 
 	// Check cache first
 	if cachedItems, exists := cache.GetFullContentMap(tenantCtx.TenantID); exists {
-		convertedItems := make([]*content.ContentMapItem, len(cachedItems))
+		convertedItems := make([]*content.MapItem, len(cachedItems))
 
 		// Convert cached items with type-specific fields
 		for i, item := range cachedItems {
 			switch item.Type {
 			case "Resource":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:           item.ID,
 					Title:        item.Title,
 					Slug:         item.Slug,
@@ -57,7 +57,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 					CategorySlug: item.CategorySlug,
 				}
 			case "Menu":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:    item.ID,
 					Title: item.Title,
 					Slug:  item.Slug,
@@ -65,7 +65,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 					Theme: item.Theme,
 				}
 			case "Pane":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:        item.ID,
 					Title:     item.Title,
 					Slug:      item.Slug,
@@ -73,7 +73,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 					IsContext: item.IsContext,
 				}
 			case "StoryFragment":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:              item.ID,
 					Title:           item.Title,
 					Slug:            item.Slug,
@@ -90,7 +90,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 					ThumbSrcSet:     item.ThumbSrcSet,
 				}
 			case "TractStack":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:              item.ID,
 					Title:           item.Title,
 					Slug:            item.Slug,
@@ -98,7 +98,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 					SocialImagePath: item.SocialImagePath,
 				}
 			case "Belief":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:    item.ID,
 					Title: item.Title,
 					Slug:  item.Slug,
@@ -106,7 +106,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 					Scale: item.Scale,
 				}
 			case "Epinet":
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:       item.ID,
 					Title:    item.Title,
 					Slug:     item.Slug,
@@ -115,7 +115,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				}
 			case "Topic":
 				// Special case for Topic items (all-topics)
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:     item.ID,
 					Title:  item.Title,
 					Slug:   item.Slug,
@@ -124,7 +124,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				}
 			default:
 				// Fallback for unknown types
-				convertedItems[i] = &content.ContentMapItem{
+				convertedItems[i] = &content.MapItem{
 					ID:    item.ID,
 					Title: item.Title,
 					Slug:  item.Slug,
@@ -171,11 +171,11 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 	cache.SetFullContentMap(tenantCtx.TenantID, cacheItems)
 
 	// Convert to response format with type-specific fields
-	convertedItems := make([]*content.ContentMapItem, len(contentMap))
+	convertedItems := make([]*content.MapItem, len(contentMap))
 	for i, item := range contentMap {
 		switch item.Type {
 		case "Resource":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:           item.ID,
 				Title:        item.Title,
 				Slug:         item.Slug,
@@ -183,7 +183,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				CategorySlug: item.CategorySlug,
 			}
 		case "Menu":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:    item.ID,
 				Title: item.Title,
 				Slug:  item.Slug,
@@ -191,7 +191,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				Theme: item.Theme,
 			}
 		case "Pane":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:        item.ID,
 				Title:     item.Title,
 				Slug:      item.Slug,
@@ -199,7 +199,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				IsContext: item.IsContext,
 			}
 		case "StoryFragment":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:              item.ID,
 				Title:           item.Title,
 				Slug:            item.Slug,
@@ -216,7 +216,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				ThumbSrcSet:     item.ThumbSrcSet,
 			}
 		case "TractStack":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:              item.ID,
 				Title:           item.Title,
 				Slug:            item.Slug,
@@ -224,7 +224,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				SocialImagePath: item.SocialImagePath,
 			}
 		case "Belief":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:    item.ID,
 				Title: item.Title,
 				Slug:  item.Slug,
@@ -232,7 +232,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 				Scale: item.Scale,
 			}
 		case "Epinet":
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:       item.ID,
 				Title:    item.Title,
 				Slug:     item.Slug,
@@ -241,7 +241,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 			}
 		default:
 			// Fallback for unknown types
-			convertedItems[i] = &content.ContentMapItem{
+			convertedItems[i] = &content.MapItem{
 				ID:    item.ID,
 				Title: item.Title,
 				Slug:  item.Slug,
@@ -261,7 +261,7 @@ func (cms *ContentMapService) GetContentMap(tenantCtx *tenant.Context, clientLas
 }
 
 // convertToFullContentMapItems converts domain entities to cache types
-func (cms *ContentMapService) convertToFullContentMapItems(contentMap []*content.ContentMapItem) []types.FullContentMapItem {
+func (cms *ContentMapService) convertToFullContentMapItems(contentMap []*content.MapItem) []types.FullContentMapItem {
 	cacheItems := make([]types.FullContentMapItem, len(contentMap))
 
 	for i, item := range contentMap {

@@ -10,27 +10,32 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/utilities"
 )
 
+// TimeRangeStats contains aggregated statistics for a specific time range.
 type TimeRangeStats struct {
 	Daily   int `json:"daily"`
 	Weekly  int `json:"weekly"`
 	Monthly int `json:"monthly"`
 }
 
+// LineDataPoint represents a single point in a line chart.
 type LineDataPoint struct {
 	X string `json:"x"`
 	Y int    `json:"y"`
 }
 
+// LineDataSeries represents a series of data points for a line chart.
 type LineDataSeries struct {
 	ID   string          `json:"id"`
 	Data []LineDataPoint `json:"data"`
 }
 
+// HotItem represents a trending or popular item.
 type HotItem struct {
 	ID          string `json:"id"`
 	TotalEvents int    `json:"totalEvents"`
 }
 
+// DashboardAnalytics contains the complete data set for the dashboard view.
 type DashboardAnalytics struct {
 	Stats            TimeRangeStats   `json:"stats"`
 	Line             []LineDataSeries `json:"line"`
@@ -43,16 +48,19 @@ type DashboardAnalytics struct {
 	MonthlyAnonymous int              `json:"monthlyAnonymous"`
 }
 
+// EpinetConfig contains the configuration settings for an Epinet's dashboard display.
 type EpinetConfig struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 }
 
+// DashboardAnalyticsService provides methods to aggregate and calculate data for the admin dashboard.
 type DashboardAnalyticsService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
+// NewDashboardAnalyticsService creates a new instance of DashboardAnalyticsService.
 func NewDashboardAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *DashboardAnalyticsService {
 	return &DashboardAnalyticsService{
 		logger:      logger,
@@ -60,6 +68,7 @@ func NewDashboardAnalyticsService(logger *logging.ChanneledLogger, perfTracker *
 	}
 }
 
+// ComputeDashboard calculates all metrics required for the dashboard display.
 func (s *DashboardAnalyticsService) ComputeDashboard(tenantCtx *tenant.Context, startHour, endHour int) (*DashboardAnalytics, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("compute_dashboard", tenantCtx.TenantID)

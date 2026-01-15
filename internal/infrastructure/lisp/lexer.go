@@ -5,60 +5,67 @@ import (
 	"strconv"
 )
 
-// LispToken represents a token in the parsed lisp expression
-type LispToken any
+// Token represents a token in the parsed lisp expression
+type Token any
 
-// LispLexer tokenizes a lisp expression, handling quotes, parentheses, and comments
+// Lexer tokenizes a lisp expression, handling quotes, parentheses, and comments
 // Returns tokens and remaining string after parsing
-func LispLexer(payload string, inString bool) ([]LispToken, string, error) {
-	tokens := []LispToken{}
+func Lexer(payload string, inString bool) ([]Token, string, error) {
+	tokens := []Token{}
 	curToken := ""
 
 	for i := 0; i < len(payload); i++ {
 		char := payload[i : i+1]
 
-		if char == `"` && !inString {
+		switch {
+		case char == `"` && !inString:
 			// Start of quoted string - recurse
-			tokenized, remaining, err := LispLexer(payload[i+1:], true)
+			tokenized, remaining, err := Lexer(payload[i+1:], true)
 			if err != nil {
 				return nil, "", err
 			}
 			tokens = append(tokens, tokenized)
 			payload = remaining
 			i = -1
-		} else if char == `"` && inString {
+
+		case char == `"` && inString:
 			// End of quoted string
 			if len(curToken) > 0 {
 				tokens = append(tokens, parseToken(curToken))
 			}
 			return tokens, payload[i+1:], nil
-		} else if char == "(" {
+
+		case char == "(":
 			// Start of nested expression - recurse
-			tokenized, remaining, err := LispLexer(payload[i+1:], false)
+			tokenized, remaining, err := Lexer(payload[i+1:], false)
 			if err != nil {
 				return nil, "", err
 			}
 			tokens = append(tokens, tokenized)
 			payload = remaining
 			i = -1
-		} else if char == ")" {
+
+		case char == ")":
 			// End of expression
 			if len(curToken) > 0 {
 				tokens = append(tokens, parseToken(curToken))
 			}
 			return tokens, payload[i+1:], nil
-		} else if char == ";" {
+
+		case char == ";":
 			// Skip comments until newline
 			for i < len(payload) && payload[i:i+1] != "\n" {
 				i++
 			}
-		} else if isWhitespace(char) && !inString {
+
+		case isWhitespace(char) && !inString:
 			// End of current token
 			if len(curToken) > 0 {
 				tokens = append(tokens, parseToken(curToken))
 			}
 			curToken = ""
-		} else {
+
+		default:
 			// Add character to current token
 			curToken += char
 		}
@@ -73,7 +80,7 @@ func LispLexer(payload string, inString bool) ([]LispToken, string, error) {
 }
 
 // parseToken converts string to number if possible, otherwise returns string
-func parseToken(token string) LispToken {
+func parseToken(token string) Token {
 	if num, err := strconv.Atoi(token); err == nil {
 		return num
 	}

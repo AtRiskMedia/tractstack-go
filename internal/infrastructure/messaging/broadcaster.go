@@ -152,13 +152,13 @@ func (b *SSEBroadcaster) BroadcastToSpecificSession(tenantID, sessionID, storyfr
 	}
 }
 
-// HasViewingSessions checks if any sessions are viewing a specific storyfragment.
-func (b *SSEBroadcaster) HasViewingSessions(tenantID, storyfragmentID string) bool {
+// HasViewingSessions checks if any sessions are active
+// This is a simplified check. A more robust implementation would track the
+// active storyfragment per session. For now, we check if any session for the tenant exists.
+func (b *SSEBroadcaster) HasViewingSessions(tenantID, _ string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// This is a simplified check. A more robust implementation would track the
-	// active storyfragment per session. For now, we check if any session for the tenant exists.
 	if tenantSessions, exists := b.tenantSessions[tenantID]; exists {
 		return len(tenantSessions) > 0
 	}

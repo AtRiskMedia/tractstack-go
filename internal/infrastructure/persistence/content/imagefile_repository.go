@@ -13,12 +13,14 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
+// ImageFileRepository handles the persistence and retrieval of image file metadata.
 type ImageFileRepository struct {
 	db     *sql.DB
 	cache  interfaces.ContentCache
 	logger *logging.ChanneledLogger
 }
 
+// NewImageFileRepository creates a new instance of the ImageFileRepository.
 func NewImageFileRepository(db *sql.DB, cache interfaces.ContentCache, logger *logging.ChanneledLogger) *ImageFileRepository {
 	return &ImageFileRepository{
 		db:     db,
@@ -27,6 +29,7 @@ func NewImageFileRepository(db *sql.DB, cache interfaces.ContentCache, logger *l
 	}
 }
 
+// FindByID retrieves image file metadata by its unique identifier.
 func (r *ImageFileRepository) FindByID(tenantID, id string) (*content.ImageFileNode, error) {
 	if imageFile, found := r.cache.GetFile(tenantID, id); found {
 		return imageFile, nil
@@ -68,6 +71,7 @@ func (r *ImageFileRepository) FindAll(tenantID string) ([]*content.ImageFileNode
 	return r.FindByIDs(tenantID, ids)
 }
 
+// FindByIDs retrieves multiple image file metadata records using a slice of IDs.
 func (r *ImageFileRepository) FindByIDs(tenantID string, ids []string) ([]*content.ImageFileNode, error) {
 	var result []*content.ImageFileNode
 	var missingIDs []string
@@ -95,6 +99,7 @@ func (r *ImageFileRepository) FindByIDs(tenantID string, ids []string) ([]*conte
 	return result, nil
 }
 
+// Store saves a new image file record into the persistence layer.
 func (r *ImageFileRepository) Store(tenantID string, imageFile *content.ImageFileNode) error {
 	query := `INSERT INTO files (id, filename, alt_description, url, src_set) VALUES (?, ?, ?, ?, ?)`
 
@@ -117,6 +122,7 @@ func (r *ImageFileRepository) Store(tenantID string, imageFile *content.ImageFil
 	return nil
 }
 
+// Update modifies an existing image file record in the persistence layer.
 func (r *ImageFileRepository) Update(tenantID string, imageFile *content.ImageFileNode) error {
 	query := `UPDATE files SET filename = ?, alt_description = ?, url = ?, src_set = ? WHERE id = ?`
 
@@ -139,6 +145,7 @@ func (r *ImageFileRepository) Update(tenantID string, imageFile *content.ImageFi
 	return nil
 }
 
+// Delete removes an image file record from the persistence layer by ID.
 func (r *ImageFileRepository) Delete(tenantID, id string) error {
 	query := `DELETE FROM files WHERE id = ?`
 
@@ -170,7 +177,11 @@ func (r *ImageFileRepository) loadAllIDsFromDB() ([]string, error) {
 		r.logger.Database().Error("Failed to query file IDs", "error", err.Error())
 		return nil, fmt.Errorf("failed to query files: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadAllIDsFromDB", "error", err)
+		}
+	}()
 
 	var fileIDs []string
 	for rows.Next() {
@@ -248,7 +259,11 @@ func (r *ImageFileRepository) loadMultipleFromDB(ids []string) ([]*content.Image
 		r.logger.Database().Error("Failed to query multiple files", "error", err.Error(), "count", len(ids))
 		return nil, fmt.Errorf("failed to query files: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			r.logger.Database().Error("Failed to close rows in loadMultipleFromDB", "error", err)
+		}
+	}()
 
 	var imageFiles []*content.ImageFileNode
 	for rows.Next() {

@@ -110,11 +110,28 @@ func (d *DBService) PerformHealthCheck(tenantCtx *tenant.Context) map[string]any
 
 // GetConnectionStats returns database connection statistics
 func (d *DBService) GetConnectionStats(tenantCtx *tenant.Context) map[string]any {
+	// Safety check to ensure we have a valid database connection
+	if tenantCtx == nil || tenantCtx.Database == nil || tenantCtx.Database.Conn == nil {
+		return map[string]any{
+			"available": false,
+			"openConns": 0,
+			"inUse":     0,
+			"idle":      0,
+			"error":     "No database connection available",
+		}
+	}
+
+	// Retrieve actual stats from the standard library sql.DB object
+	stats := tenantCtx.Database.Conn.Stats()
+
 	return map[string]any{
-		"available": true,
-		"openConns": 1,
-		"inUse":     0,
-		"idle":      1,
+		"available":    true,
+		"openConns":    stats.OpenConnections,
+		"inUse":        stats.InUse,
+		"idle":         stats.Idle,
+		"waitCount":    stats.WaitCount,
+		"waitDuration": stats.WaitDuration.String(),
+		"maxOpenConns": stats.MaxOpenConnections,
 	}
 }
 

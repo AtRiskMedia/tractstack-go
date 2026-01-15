@@ -51,9 +51,8 @@ func (p *ImageProcessor) ProcessBase64Image(data, filename, subdir string) (stri
 	// Route to appropriate processor based on format
 	if strings.Contains(data, "image/svg+xml") {
 		return processSVG(data, fullFilename, targetDir)
-	} else {
-		return processBinaryImage(data, fullFilename, targetDir)
 	}
+	return processBinaryImage(data, fullFilename, targetDir)
 }
 
 // ProcessVersionedImage handles brand asset uploads with timestamp versioning and cleanup
@@ -130,19 +129,21 @@ func processSVG(data, filename, targetDir string) (string, error) {
 
 // extractExtension auto-detects file extension from MIME type
 func extractExtension(data string) string {
-	if strings.Contains(data, "data:image/svg+xml") {
+	switch {
+	case strings.Contains(data, "data:image/svg+xml"):
 		return "svg"
-	} else if strings.Contains(data, "data:image/png") {
+	case strings.Contains(data, "data:image/png"):
 		return "png"
-	} else if strings.Contains(data, "data:image/jpeg") || strings.Contains(data, "data:image/jpg") {
+	case strings.Contains(data, "data:image/jpeg") || strings.Contains(data, "data:image/jpg"):
 		return "jpg"
-	} else if strings.Contains(data, "data:image/x-icon") || strings.Contains(data, "data:image/vnd.microsoft.icon") {
+	case strings.Contains(data, "data:image/x-icon") || strings.Contains(data, "data:image/vnd.microsoft.icon"):
 		return "ico"
-	} else if strings.Contains(data, "data:image/webp") {
+	case strings.Contains(data, "data:image/webp"):
 		return "webp"
+	default:
+		// Fallback to PNG
+		return "png"
 	}
-	// Fallback to PNG
-	return "png"
 }
 
 // deleteVersionedFile cleans up old versioned files before new upload

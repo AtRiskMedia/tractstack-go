@@ -124,8 +124,8 @@ type SystemPerformanceTracker struct {
 	GracefulShutdown     *Marker `json:"gracefulShutdown,omitempty"`
 }
 
-// PerformanceSnapshot represents a point-in-time view of system performance
-type PerformanceSnapshot struct {
+// Snapshot represents a point-in-time view of system performance
+type Snapshot struct {
 	Timestamp           time.Time                    `json:"timestamp"`
 	TenantID            string                       `json:"tenantId"`
 	Auth                *AuthPerformanceTracker      `json:"auth,omitempty"`
@@ -141,6 +141,7 @@ type PerformanceSnapshot struct {
 // HealthStatus represents the overall health of a system component
 type HealthStatus string
 
+// HealthHealthy indicates all operations are performing within normal parameters.
 const (
 	HealthHealthy   HealthStatus = "healthy"   // All operations performing within normal parameters
 	HealthDegraded  HealthStatus = "degraded"  // Some operations showing performance issues
@@ -148,8 +149,8 @@ const (
 	HealthUnknown   HealthStatus = "unknown"   // Unable to determine health status
 )
 
-// PerformanceAlert represents a performance threshold violation
-type PerformanceAlert struct {
+// Alert represents a performance threshold violation
+type Alert struct {
 	ID           string         `json:"id"`
 	Timestamp    time.Time      `json:"timestamp"`
 	TenantID     string         `json:"tenantId"`
@@ -165,6 +166,7 @@ type PerformanceAlert struct {
 // AlertSeverity represents the severity level of a performance alert
 type AlertSeverity string
 
+// AlertInfo indicates an informational alert level.
 const (
 	AlertInfo     AlertSeverity = "info"     // Informational alert
 	AlertWarning  AlertSeverity = "warning"  // Performance degradation detected

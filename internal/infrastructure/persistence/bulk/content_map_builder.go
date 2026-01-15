@@ -28,7 +28,7 @@ func NewContentMapBuilder(db *database.DB, logger *logging.ChanneledLogger) *Con
 }
 
 // BuildContentMap executes single UNION query to build complete content map
-func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.ContentMapItem, error) {
+func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.MapItem, error) {
 	start := time.Now()
 	cmb.logger.Database().Debug("Starting content map build", "tenantID", tenantID)
 
@@ -211,7 +211,7 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 		}
 	}()
 
-	var items []*content.ContentMapItem
+	var items []*content.MapItem
 	rowCount := 0
 	for rows.Next() {
 		item, err := cmb.scanContentMapRow(rows)
@@ -247,7 +247,7 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 			allTopics = append(allTopics, topic)
 		}
 
-		allTopicsItem := &content.ContentMapItem{
+		allTopicsItem := &content.MapItem{
 			ID:     "all-topics",
 			Slug:   "all-topics",
 			Title:  "All Topics",
@@ -261,9 +261,9 @@ func (cmb *ContentMapBuilder) BuildContentMap(tenantID string) ([]*content.Conte
 	return items, nil
 }
 
-// scanContentMapRow scans a single row into ContentMapItem
-func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.ContentMapItem, error) {
-	var item content.ContentMapItem
+// scanContentMapRow scans a single row into MapItem
+func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.MapItem, error) {
+	var item content.MapItem
 	var extra, parentID, parentTitle, parentSlug sql.NullString
 	var changed, paneIDs, description, topics sql.NullString
 	var isContext sql.NullBool
@@ -356,7 +356,7 @@ func (cmb *ContentMapBuilder) scanContentMapRow(rows *sql.Rows) (*content.Conten
 	return &item, nil
 }
 
-func (cmb *ContentMapBuilder) addThumbnailPaths(item *content.ContentMapItem, socialImagePath string) {
+func (cmb *ContentMapBuilder) addThumbnailPaths(item *content.MapItem, socialImagePath string) {
 	if socialImagePath == "" {
 		return
 	}
