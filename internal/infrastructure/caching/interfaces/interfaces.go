@@ -101,6 +101,7 @@ type UserStateCache interface {
 	GetAllFingerprintIDs(tenantID string) []string
 	GetAllVisitIDs(tenantID string) []string
 	GetAllStoryfragmentBeliefRegistryIDs(tenantID string) []string
+	GetSessionMetrics(tenantID string) types.SessionMetrics
 }
 
 // HTMLChunkCache defines operations for HTML fragment caching

@@ -41,6 +41,14 @@ type AnalyticsService struct {
 	perfTracker *performance.Tracker
 }
 
+// PulseMetrics contains real-time activity data.
+type PulseMetrics struct {
+	ActiveVisitors int `json:"activeVisitors"`
+	ActiveLeads    int `json:"activeLeads"`
+	ActiveGuests   int `json:"activeGuests"`
+	Velocity       int `json:"velocity"`
+}
+
 // NewAnalyticsService creates a new instance of AnalyticsService.
 func NewAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AnalyticsService {
 	return &AnalyticsService{
@@ -145,4 +153,27 @@ func (s *AnalyticsService) getHourKeysForTimeRange(hoursBack int) []string {
 	}
 
 	return hourKeys
+}
+
+// GetPulseMetrics retrieves real-time and recent activity metrics.
+func (s *AnalyticsService) GetPulseMetrics(tenantCtx *tenant.Context) (*PulseMetrics, error) {
+	// 1. Get Live Session Metrics (Memory)
+	sessionMetrics := tenantCtx.CacheManager.GetSessionMetrics(tenantCtx.TenantID)
+
+	// 2. Get Velocity (Last Full Hour Site Bin)
+	// We use the last full hour to avoid the "sawtooth" effect of the current hour resetting.
+	lastHour := time.Now().UTC().Add(-1 * time.Hour)
+	lastHourKey := utilities.FormatHourKey(lastHour)
+
+	velocity := 0
+	if bin, exists := tenantCtx.CacheManager.GetHourlySiteBin(tenantCtx.TenantID, lastHourKey); exists && bin.Data != nil {
+		velocity = bin.Data.PageViews
+	}
+
+	return &PulseMetrics{
+		ActiveVisitors: sessionMetrics.Total,
+		ActiveLeads:    sessionMetrics.Authenticated,
+		ActiveGuests:   sessionMetrics.Anonymous,
+		Velocity:       velocity,
+	}, nil
 }

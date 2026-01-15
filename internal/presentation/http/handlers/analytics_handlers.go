@@ -517,3 +517,21 @@ func (h *AnalyticsHandlers) HandleLeadsDownload(c *gin.Context) {
 	h.logger.Analytics().Info("Leads download completed", "tenantId", tenantCtx.TenantID, "duration", time.Since(start))
 	marker.SetSuccess(true)
 }
+
+// HandlePulse returns real-time activity metrics for the current tenant.
+func (h *AnalyticsHandlers) HandlePulse(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	metrics, err := h.analyticsService.GetPulseMetrics(tenantCtx)
+	if err != nil {
+		h.logger.Analytics().Error("Failed to calculate pulse metrics", "error", err, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to calculate pulse metrics"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"pulse": metrics})
+}

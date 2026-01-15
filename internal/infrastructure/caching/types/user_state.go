@@ -94,3 +94,10 @@ type Referrer struct {
 	UTMTerm      *string `json:"utmTerm,omitempty"`
 	UTMContent   *string `json:"utmContent,omitempty"`
 }
+
+// SessionMetrics holds aggregated real-time statistics about active user sessions.
+type SessionMetrics struct {
+	Total         int `json:"total"`
+	Authenticated int `json:"authenticated"`
+	Anonymous     int `json:"anonymous"`
+}
