@@ -232,7 +232,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		UnsetButtonRenderer:  unsetButtonRenderer,
 
 		// Analytics Services
-		AnalyticsService:          services.NewAnalyticsService(logger, perfTracker),
+		AnalyticsService:          services.NewAnalyticsService(broadcaster, logger, perfTracker),
 		DashboardAnalyticsService: services.NewDashboardAnalyticsService(logger, perfTracker),
 		EpinetAnalyticsService:    services.NewEpinetAnalyticsService(logger, perfTracker),
 		LeadAnalyticsService:      services.NewLeadAnalyticsService(logger, perfTracker),

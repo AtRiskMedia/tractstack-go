@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
@@ -37,6 +38,7 @@ type SankeyFilters struct {
 
 // AnalyticsService handles retrieval and processing of visitor analytics data.
 type AnalyticsService struct {
+	broadcaster messaging.Broadcaster
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
@@ -44,14 +46,13 @@ type AnalyticsService struct {
 // PulseMetrics contains real-time activity data.
 type PulseMetrics struct {
 	ActiveVisitors int `json:"activeVisitors"`
-	ActiveLeads    int `json:"activeLeads"`
-	ActiveGuests   int `json:"activeGuests"`
 	Velocity       int `json:"velocity"`
 }
 
 // NewAnalyticsService creates a new instance of AnalyticsService.
-func NewAnalyticsService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AnalyticsService {
+func NewAnalyticsService(broadcaster messaging.Broadcaster, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AnalyticsService {
 	return &AnalyticsService{
+		broadcaster: broadcaster,
 		logger:      logger,
 		perfTracker: perfTracker,
 	}
@@ -157,8 +158,8 @@ func (s *AnalyticsService) getHourKeysForTimeRange(hoursBack int) []string {
 
 // GetPulseMetrics retrieves real-time and recent activity metrics.
 func (s *AnalyticsService) GetPulseMetrics(tenantCtx *tenant.Context) (*PulseMetrics, error) {
-	// 1. Get Live Session Metrics (Memory)
-	sessionMetrics := tenantCtx.CacheManager.GetSessionMetrics(tenantCtx.TenantID)
+	// 1. Get Live Session Metrics (SSE Connections)
+	activeVisitors := s.broadcaster.GetActiveSessionCount(tenantCtx.TenantID)
 
 	// 2. Get Velocity (Last Full Hour Site Bin)
 	// We use the last full hour to avoid the "sawtooth" effect of the current hour resetting.
@@ -171,9 +172,7 @@ func (s *AnalyticsService) GetPulseMetrics(tenantCtx *tenant.Context) (*PulseMet
 	}
 
 	return &PulseMetrics{
-		ActiveVisitors: sessionMetrics.Total,
-		ActiveLeads:    sessionMetrics.Authenticated,
-		ActiveGuests:   sessionMetrics.Anonymous,
+		ActiveVisitors: activeVisitors,
 		Velocity:       velocity,
 	}, nil
 }

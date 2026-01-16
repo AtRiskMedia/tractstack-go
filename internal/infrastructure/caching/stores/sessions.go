@@ -866,36 +866,3 @@ func (ss *SessionsStore) BatchInvalidateSessionBeliefContexts(tenantID string, t
 		ss.logger.Cache().Info("Batch cache invalidation", "operation", "batch_invalidate", "type", "session_belief_context", "tenantId", tenantID, "targetCount", len(targets), "invalidatedCount", invalidatedCount, "duration", time.Since(start))
 	}
 }
-
-// GetSessionMetrics aggregates real-time counters for active sessions.
-func (ss *SessionsStore) GetSessionMetrics(tenantID string) types.SessionMetrics {
-	start := time.Now()
-	cache, exists := ss.GetTenantCache(tenantID)
-	if !exists {
-		if ss.logger != nil {
-			ss.logger.Cache().Debug("Cache operation", "operation", "get_session_metrics", "tenantId", tenantID, "hit", false, "reason", "tenant_not_initialized", "duration", time.Since(start))
-		}
-		return types.SessionMetrics{}
-	}
-
-	cache.SessionsMu.RLock()
-	defer cache.SessionsMu.RUnlock()
-
-	metrics := types.SessionMetrics{
-		Total: len(cache.SessionStates),
-	}
-
-	for _, session := range cache.SessionStates {
-		if session.LeadID != nil && *session.LeadID != "" {
-			metrics.Authenticated++
-		}
-	}
-
-	metrics.Anonymous = metrics.Total - metrics.Authenticated
-
-	if ss.logger != nil {
-		ss.logger.Cache().Debug("Cache operation", "operation", "get_session_metrics", "tenantId", tenantID, "total", metrics.Total, "authenticated", metrics.Authenticated, "duration", time.Since(start))
-	}
-
-	return metrics
-}

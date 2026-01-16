@@ -164,3 +164,14 @@ func (b *SSEBroadcaster) HasViewingSessions(tenantID, _ string) bool {
 	}
 	return false
 }
+
+// GetActiveSessionCount returns the number of active sessions for a specific tenant.
+func (b *SSEBroadcaster) GetActiveSessionCount(tenantID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if sessions, exists := b.tenantSessions[tenantID]; exists {
+		return len(sessions)
+	}
+	return 0
+}

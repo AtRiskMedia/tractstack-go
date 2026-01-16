@@ -1101,8 +1101,3 @@ func (m *Manager) SetGenericWithTTL(tenantID, key string, value any, ttl time.Du
 	}
 	m.genericStore[fmt.Sprintf("%s:%s", tenantID, key)] = item
 }
-
-// GetSessionMetrics returns aggregated real-time statistics about active user sessions.
-func (m *Manager) GetSessionMetrics(tenantID string) types.SessionMetrics {
-	return m.sessionsStore.GetSessionMetrics(tenantID)
-}

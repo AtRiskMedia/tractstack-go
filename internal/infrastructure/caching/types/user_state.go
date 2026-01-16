@@ -1,5 +1,5 @@
 // Package types defines user state and session data structures.
-package types
+package types //nolint:revive
 
 import (
 	"sync"

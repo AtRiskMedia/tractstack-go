@@ -8,4 +8,5 @@ type Broadcaster interface {
 	GetSessionConnectionCount(tenantID, sessionID string) int
 	BroadcastToSpecificSession(tenantID, sessionID, storyfragmentID string, paneIDs []string, scrollTarget *string, codeHookVisibility map[string]any)
 	HasViewingSessions(tenantID, storyfragmentID string) bool
+	GetActiveSessionCount(tenantID string) int
 }
