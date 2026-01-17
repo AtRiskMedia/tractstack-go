@@ -28,10 +28,10 @@ func (r *UnsetButtonRenderer) RenderUnsetButton(
 
 	var hxVals string
 	if gotoPaneID != "" {
-		hxVals = fmt.Sprintf(`{"unsetBeliefIDs": %q, "paneId": %q, "gotoPaneID": %q}`,
+		hxVals = fmt.Sprintf(`{"unsetBeliefIds": %q, "paneId": %q, "gotoPaneID": %q}`,
 			unsetBeliefIDs, paneID, gotoPaneID)
 	} else {
-		hxVals = fmt.Sprintf(`{"unsetBeliefIDs": %q, "paneId": %q}`,
+		hxVals = fmt.Sprintf(`{"unsetBeliefIds": %q, "paneId": %q}`,
 			unsetBeliefIDs, paneID)
 	}
 
