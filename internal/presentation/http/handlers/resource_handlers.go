@@ -241,7 +241,7 @@ func (h *ResourceHandlers) findOrphanedFileIDs(existingResource *content.Resourc
 			// Check if the existing resource had a file for this field.
 			if existingValue, exists := existingResource.OptionsPayload[key]; exists {
 				// The existing value should be a map if it's a processed image.
-				if existingMap, ok := existingValue.(map[string]interface{}); ok {
+				if existingMap, ok := existingValue.(map[string]any); ok {
 					// If it has a fileId, it's an orphan.
 					if fileID, ok := existingMap["fileId"].(string); ok && fileID != "" {
 						orphanedIDs = append(orphanedIDs, fileID)
@@ -406,7 +406,7 @@ func (h *ResourceHandlers) processResourceImages(tenantCtx *tenant.Context, reso
 
 		// Mutate the payload: replace base64 with a structured object.
 		// This keeps the payload consistent and provides the frontend with necessary data.
-		imagePayload := map[string]interface{}{
+		imagePayload := map[string]any{
 			"fileId": fileID,
 			"src":    src,
 		}
@@ -417,4 +417,52 @@ func (h *ResourceHandlers) processResourceImages(tenantCtx *tenant.Context, reso
 	}
 
 	return createdFileIDs, nil
+}
+
+// SyncShopifyResources handles the batch synchronization of Shopify products.
+func (h *ResourceHandlers) SyncShopifyResources(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	start := time.Now()
+	marker := h.perfTracker.StartOperation("batch_sync_shopify_request", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var resources []*content.ResourceNode
+	if err := c.ShouldBindJSON(&resources); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	created, updated, totalIncoming, totalExisting, err := h.resourceService.BatchSyncShopify(tenantCtx, resources)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	h.logger.Content().Info("Shopify sync request completed",
+		"tenantId", tenantCtx.TenantID,
+		"created", created,
+		"updated", updated,
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	h.logger.Perf().Info("Performance for SyncShopifyResources request",
+		"duration", marker.Duration,
+		"tenantId", tenantCtx.TenantID,
+		"success", true,
+		"itemCount", len(resources))
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "sync completed",
+		"stats": gin.H{
+			"created":       created,
+			"updated":       updated,
+			"totalIncoming": totalIncoming,
+			"totalExisting": totalExisting,
+		},
+	})
 }

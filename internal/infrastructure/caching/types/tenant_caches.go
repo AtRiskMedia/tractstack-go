@@ -1,5 +1,5 @@
 // Package types defines cache data structures for multi-tenant content and analytics.
-package types
+package types //nolint:revive
 
 import (
 	"sync"

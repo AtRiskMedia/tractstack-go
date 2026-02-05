@@ -262,6 +262,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 				protectedNodes.POST("/resources/create", resourceHandlers.CreateResource)
 				protectedNodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
 				protectedNodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
+				protectedNodes.POST("/resources/sync/shopify", resourceHandlers.SyncShopifyResources)
 
 				// Story fragment - Write
 				protectedNodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)

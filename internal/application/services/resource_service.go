@@ -302,3 +302,97 @@ func (s *ResourceService) SearchBodies(tenantCtx *tenant.Context, term string) (
 	repo := tenantCtx.ResourceRepo()
 	return repo.SearchBodies(tenantCtx.TenantID, term)
 }
+
+// BatchSyncShopify synchronizes external Shopify products with internal resources.
+// It detects changes based on the 'gid' in OptionsPayload and performs a batch upsert.
+func (s *ResourceService) BatchSyncShopify(tenantCtx *tenant.Context, incomingResources []*content.ResourceNode) (int, int, int, int, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("batch_sync_shopify", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	resourceRepo := tenantCtx.ResourceRepo()
+
+	existingProducts, err := resourceRepo.FindByCategory(tenantCtx.TenantID, "product")
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("failed to fetch existing products: %w", err)
+	}
+	existingServices, err := resourceRepo.FindByCategory(tenantCtx.TenantID, "service")
+	if err != nil {
+		return 0, 0, 0, 0, fmt.Errorf("failed to fetch existing services: %w", err)
+	}
+
+	totalExisting := len(existingProducts) + len(existingServices)
+	totalIncoming := len(incomingResources)
+
+	existingMap := make(map[string]*content.ResourceNode)
+	for _, r := range existingProducts {
+		if gid, ok := r.OptionsPayload["gid"].(string); ok {
+			existingMap[gid] = r
+		}
+	}
+	for _, r := range existingServices {
+		if gid, ok := r.OptionsPayload["gid"].(string); ok {
+			existingMap[gid] = r
+		}
+	}
+
+	var creates []*content.ResourceNode
+	var updates []*content.ResourceNode
+
+	for _, incoming := range incomingResources {
+		gid, ok := incoming.OptionsPayload["gid"].(string)
+		if !ok || gid == "" {
+			continue
+		}
+
+		if existing, found := existingMap[gid]; found {
+			incomingData, _ := incoming.OptionsPayload["shopifyData"].(string)
+			existingData, _ := existing.OptionsPayload["shopifyData"].(string)
+
+			hasChanged := false
+
+			switch {
+			case incoming.Title != existing.Title:
+				hasChanged = true
+			case incoming.Slug != existing.Slug:
+				hasChanged = true
+			case incoming.OneLiner != existing.OneLiner:
+				hasChanged = true
+			case incomingData != existingData:
+				hasChanged = true
+			}
+
+			if hasChanged {
+				incoming.ID = existing.ID
+				updates = append(updates, incoming)
+			}
+		} else {
+			if incoming.ID == "" {
+				incoming.ID = security.GenerateULID()
+			}
+			creates = append(creates, incoming)
+		}
+	}
+
+	if len(creates) > 0 || len(updates) > 0 {
+		if err := resourceRepo.BatchUpsert(tenantCtx.TenantID, creates, updates); err != nil {
+			return 0, 0, 0, 0, fmt.Errorf("batch upsert failed: %w", err)
+		}
+
+		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+			s.logger.Content().Error("Failed to refresh content map after shopify sync", "error", err)
+		}
+	}
+
+	// Logging WARN to ensure visibility as per instructions
+	s.logger.Content().Warn("Shopify batch sync completed",
+		"tenantId", tenantCtx.TenantID,
+		"created", len(creates),
+		"updated", len(updates),
+		"totalIncoming", totalIncoming,
+		"totalExisting", totalExisting,
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return len(creates), len(updates), totalIncoming, totalExisting, nil
+}
