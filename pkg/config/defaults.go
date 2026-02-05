@@ -137,6 +137,8 @@ var (
 	ShopifyReconcileInterval time.Duration
 	// ShopifyReconcileStartupDelay is the initial delay after server startup before the first reconciliation scan begins.
 	ShopifyReconcileStartupDelay time.Duration
+	// ShopifyDataTTL is the cache interval for shopify data
+	ShopifyDataTTL time.Duration
 
 	// MaxTenants sets the maximum number of tenants allowed in memory.
 	MaxTenants int
@@ -250,6 +252,7 @@ func init() {
 	// Shopify service
 	ShopifyReconcileInterval = time.Duration(getEnvInt("SHOPIFY_RECONCILE_INTERVAL_HOURS", 48)) * time.Hour
 	ShopifyReconcileStartupDelay = time.Duration(getEnvInt("SHOPIFY_RECONCILE_STARTUP_DELAY_MINUTES", 48)) * time.Minute
+	ShopifyDataTTL = time.Duration(getEnvInt("SHOPIFY_DATA_TTL", 5)) * time.Minute
 
 	// Memory Management
 	MaxTenants = getEnvInt("MAX_TENANTS", 0)

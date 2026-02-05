@@ -50,14 +50,13 @@ func (s *ShopifyService) VerifySignature(tenantCtx *tenant.Context, body []byte,
 }
 
 // ParseWebhook converts a raw Shopify webhook payload into a ResourceNode.
+// It is resilient to minimal payloads and handles both numeric IDs and GID strings.
 func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error) {
-	// 1. Unmarshal into a generic map to capture the full payload for storage
 	var rawData map[string]any
 	if err := json.Unmarshal(body, &rawData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal webhook body: %w", err)
 	}
 
-	// 2. Extract Key Fields safely
 	var idStr string
 	if v, ok := rawData["id"].(float64); ok {
 		idStr = fmt.Sprintf("%.0f", v)
@@ -69,35 +68,41 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 		return nil, fmt.Errorf("missing 'id' in webhook payload")
 	}
 
-	gid := fmt.Sprintf("gid://shopify/Product/%s", idStr)
+	// Respect the user's observation: if it's already a GID, use it; otherwise, prefix it.
+	gid := idStr
+	if !strings.HasPrefix(idStr, "gid://") {
+		gid = fmt.Sprintf("gid://shopify/Product/%s", idStr)
+	}
+
 	title, _ := rawData["title"].(string)
 	handle, _ := rawData["handle"].(string)
 	description, _ := rawData["body_html"].(string)
 
-	oneLiner := bluemonday.StrictPolicy().Sanitize(description)
-	if len(oneLiner) > 255 {
-		oneLiner = oneLiner[:252] + "..."
+	oneLiner := ""
+	if description != "" {
+		oneLiner = bluemonday.StrictPolicy().Sanitize(description)
+		if len(oneLiner) > 255 {
+			oneLiner = oneLiner[:252] + "..."
+		}
 	}
 
-	// 3. Construct OptionsPayload
 	optionsPayload := make(map[string]any)
 	optionsPayload["gid"] = gid
-
 	jsonData, _ := json.Marshal(rawData)
 	optionsPayload["shopifyData"] = string(jsonData)
 
-	// 4. Construct ResourceNode
-	slug := fmt.Sprintf("product-%s", handle)
+	slug := ""
+	if handle != "" {
+		slug = fmt.Sprintf("product-%s", handle)
+	}
 
-	resource := &content.ResourceNode{
+	return &content.ResourceNode{
 		Title:          title,
 		Slug:           slug,
 		OneLiner:       oneLiner,
 		NodeType:       "Resource",
 		OptionsPayload: optionsPayload,
-	}
-
-	return resource, nil
+	}, nil
 }
 
 // FetchProducts queries the Shopify Storefront API via GraphQL to get all products.
@@ -293,20 +298,63 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 }
 
 // ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
-func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, error) {
-	// 1. Fetch all products from Shopify (paginated)
+// It updates existing resources, creates new ones, and prunes orphaned resources
+// that no longer exist on Shopify.
+func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int, error) {
+	// 1. Fetch all products currently active on Shopify
 	productsJSON, err := s.FetchProducts(tenantCtx)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
 	var resp struct {
 		Products []map[string]any `json:"products"`
 	}
 	if err := json.Unmarshal(productsJSON, &resp); err != nil {
-		return 0, 0, fmt.Errorf("failed to parse products for reconciliation: %w", err)
+		return 0, 0, 0, fmt.Errorf("failed to parse products for reconciliation: %w", err)
 	}
 
+	// 2. Map incoming GIDs for fast diffing
+	incomingGIDs := make(map[string]bool)
+	for _, p := range resp.Products {
+		if id, ok := p["id"].(string); ok {
+			incomingGIDs[id] = true
+		}
+	}
+
+	// 3. Prune Orphans: Find local resources that are no longer on Shopify
+	deletedCount := 0
+
+	// Get all local resources in categories managed by Shopify
+	localProducts, _ := s.resourceService.GetByCategory(tenantCtx, "product")
+	localServices, _ := s.resourceService.GetByCategory(tenantCtx, "service")
+
+	// Fix for gocritic: Pre-allocate and append to the same slice to satisfy linter
+	allLocal := make([]*content.ResourceNode, 0, len(localProducts)+len(localServices))
+	allLocal = append(allLocal, localProducts...)
+	allLocal = append(allLocal, localServices...)
+
+	for _, local := range allLocal {
+		gid, ok := local.OptionsPayload["gid"].(string)
+		if !ok || gid == "" {
+			continue // Not a Shopify-linked resource
+		}
+
+		if !incomingGIDs[gid] {
+			// This GID exists locally but is missing from the Shopify fetch
+			op, err := s.resourceService.SyncShopifyDeletion(tenantCtx, gid)
+			if err != nil {
+				s.logger.System().Error("Failed to prune orphaned Shopify resource",
+					"error", err, "gid", gid, "tenantId", tenantCtx.TenantID)
+				continue
+			}
+			if op == "deleted" {
+				deletedCount++
+			}
+		}
+	}
+
+	// 4. Upsert path: Create or update products found in the fetch
 	totalProcessed := len(resp.Products)
 	reconciledCount := 0
 	pCleaner := bluemonday.StrictPolicy()
@@ -337,7 +385,8 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, erro
 
 		op, err := s.resourceService.UpsertShopifyResource(tenantCtx, resource)
 		if err != nil {
-			s.logger.System().Error("Failed to reconcile product", "error", err, "handle", handle, "tenantId", tenantCtx.TenantID)
+			s.logger.System().Error("Failed to reconcile product",
+				"error", err, "handle", handle, "tenantId", tenantCtx.TenantID)
 			continue
 		}
 
@@ -346,5 +395,5 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, erro
 		}
 	}
 
-	return totalProcessed, reconciledCount, nil
+	return totalProcessed, reconciledCount, deletedCount, nil
 }

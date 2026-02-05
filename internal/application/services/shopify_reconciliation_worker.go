@@ -117,8 +117,9 @@ func (w *ShopifyReconciliationWorker) performReconciliation(tenantID string) {
 		return
 	}
 
-	// Capture both counts from the service
-	processed, reconciled, err := w.shopifyService.ReconcileAll(tenantCtx)
+	// 1. Execute the reconciliation pass
+	// Capturing the new deletedCount alongside processed and reconciled counts
+	processed, reconciled, deleted, err := w.shopifyService.ReconcileAll(tenantCtx)
 
 	w.syncMutex.Lock()
 	w.lastSync[tenantID] = time.Now()
@@ -131,14 +132,16 @@ func (w *ShopifyReconciliationWorker) performReconciliation(tenantID string) {
 	}
 
 	duration := time.Since(start)
-	// Output required log: Duration, Processed, and Reconciled counts
-	fmt.Printf("✓ Shopify reconciliation complete for %s: %d/%d products reconciled (%v)\n",
-		tenantID, reconciled, processed, duration.Round(time.Second))
+
+	// 2. Log the summary including the count of pruned (deleted) orphaned resources
+	fmt.Printf("✓ Shopify reconciliation complete for %s: %d updated/created, %d pruned, %d total processed (%v)\n",
+		tenantID, reconciled, deleted, processed, duration.Round(time.Second))
 
 	w.logger.System().Info("Shopify reconciliation successful",
 		"tenantId", tenantID,
 		"totalProcessed", processed,
 		"reconciledCount", reconciled,
+		"deletedCount", deleted,
 		"duration", duration)
 }
 

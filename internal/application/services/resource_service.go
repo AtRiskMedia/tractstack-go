@@ -430,3 +430,67 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 	marker.SetSuccess(true)
 	return operation, nil
 }
+
+// SyncShopifyDeletion handles the removal of a resource triggered by a Shopify deletion event.
+// It is idempotent: if the resource is not found, it returns "none" and no error.
+func (s *ResourceService) SyncShopifyDeletion(tenantCtx *tenant.Context, gid string) (string, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("sync_shopify_deletion", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if gid == "" {
+		return "", fmt.Errorf("shopify GID cannot be empty for deletion")
+	}
+
+	// 1. Ensure cache is populated for lookup (in-memory scan)
+	// We check both categories where Shopify resources might live.
+	products, err := s.GetByCategory(tenantCtx, "product")
+	if err != nil {
+		return "", fmt.Errorf("failed to load products for deletion lookup: %w", err)
+	}
+	services, err := s.GetByCategory(tenantCtx, "service")
+	if err != nil {
+		return "", fmt.Errorf("failed to load services for deletion lookup: %w", err)
+	}
+
+	// 2. Scan for existing resource by GID
+	var targetID string
+	for _, p := range products {
+		if val, ok := p.OptionsPayload["gid"].(string); ok && val == gid {
+			targetID = p.ID
+			break
+		}
+	}
+	if targetID == "" {
+		for _, svc := range services {
+			if val, ok := svc.OptionsPayload["gid"].(string); ok && val == gid {
+				targetID = svc.ID
+				break
+			}
+		}
+	}
+
+	// 3. Idempotent check: if not found, we are done.
+	if targetID == "" {
+		s.logger.Content().Debug("Shopify resource not found for deletion; skipping",
+			"tenantId", tenantCtx.TenantID,
+			"gid", gid)
+		marker.SetSuccess(true)
+		return "none", nil
+	}
+
+	// 4. Perform the actual deletion using the existing orchestration method.
+	// This handles DB removal, junction tables, FTS, and cache invalidation.
+	if err := s.Delete(tenantCtx, targetID); err != nil {
+		return "", fmt.Errorf("failed to delete Shopify-linked resource %s: %w", targetID, err)
+	}
+
+	s.logger.Content().Info("Shopify resource deleted successfully",
+		"tenantId", tenantCtx.TenantID,
+		"gid", gid,
+		"resourceId", targetID,
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return "deleted", nil
+}
