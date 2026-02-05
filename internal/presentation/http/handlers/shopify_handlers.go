@@ -105,7 +105,9 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	}
 
 	// 4. Upsert the resource using the optimized in-memory lookup
-	if err := h.resourceService.UpsertShopifyResource(tenantCtx, resource); err != nil {
+	// Capture the operation status to match the new (string, error) signature
+	op, err := h.resourceService.UpsertShopifyResource(tenantCtx, resource)
+	if err != nil {
 		h.logger.System().Error("Failed to upsert Shopify resource", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync resource"})
 		return
@@ -114,6 +116,7 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	h.logger.System().Info("Shopify webhook processed successfully",
 		"tenantId", tenantCtx.TenantID,
 		"resourceSlug", resource.Slug,
+		"operation", op,
 		"duration", time.Since(start))
 
 	marker.SetSuccess(true)

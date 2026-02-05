@@ -18,15 +18,17 @@ import (
 
 // ShopifyService handles communication with Shopify APIs and webhook verification.
 type ShopifyService struct {
-	logger        *logging.ChanneledLogger
-	tenantManager *tenant.Manager
+	logger          *logging.ChanneledLogger
+	tenantManager   *tenant.Manager
+	resourceService *ResourceService
 }
 
 // NewShopifyService creates a new Shopify service instance.
-func NewShopifyService(logger *logging.ChanneledLogger, tenantManager *tenant.Manager) *ShopifyService {
+func NewShopifyService(logger *logging.ChanneledLogger, tenantManager *tenant.Manager, resourceService *ResourceService) *ShopifyService {
 	return &ShopifyService{
-		logger:        logger,
-		tenantManager: tenantManager,
+		logger:          logger,
+		tenantManager:   tenantManager,
+		resourceService: resourceService,
 	}
 }
 
@@ -297,4 +299,62 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 	}
 
 	return json.Marshal(response)
+}
+
+// ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
+// Returns (totalProcessed, reconciledCount, error).
+func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, error) {
+	// 1. Fetch all products from Shopify (paginated)
+	productsJSON, err := s.FetchProducts(tenantCtx)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var resp struct {
+		Products []map[string]any `json:"products"`
+	}
+	if err := json.Unmarshal(productsJSON, &resp); err != nil {
+		return 0, 0, fmt.Errorf("failed to parse products for reconciliation: %w", err)
+	}
+
+	totalProcessed := len(resp.Products)
+	reconciledCount := 0
+
+	for _, p := range resp.Products {
+		id, _ := p["id"].(string)
+		handle, _ := p["handle"].(string)
+		title, _ := p["title"].(string)
+		description, _ := p["description"].(string)
+
+		oneLiner := description
+		if len(oneLiner) > 255 {
+			oneLiner = oneLiner[:252] + "..."
+		}
+
+		optionsPayload := make(map[string]any)
+		optionsPayload["gid"] = id
+		jsonData, _ := json.Marshal(p)
+		optionsPayload["shopifyData"] = string(jsonData)
+
+		resource := &content.ResourceNode{
+			Title:          title,
+			Slug:           fmt.Sprintf("product-%s", handle),
+			OneLiner:       oneLiner,
+			NodeType:       "Resource",
+			OptionsPayload: optionsPayload,
+		}
+
+		// Use the status from Upsert to determine if we actually wrote to the DB
+		op, err := s.resourceService.UpsertShopifyResource(tenantCtx, resource)
+		if err != nil {
+			s.logger.System().Error("Failed to reconcile product", "error", err, "handle", handle, "tenantId", tenantCtx.TenantID)
+			continue
+		}
+
+		if op != "none" {
+			reconciledCount++
+		}
+	}
+
+	return totalProcessed, reconciledCount, nil
 }

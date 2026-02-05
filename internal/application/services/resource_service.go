@@ -326,42 +326,37 @@ func (s *ResourceService) GetByCategory(tenantCtx *tenant.Context, category stri
 	return resources, nil
 }
 
-// UpsertShopifyResource handles single-item synchronization from a Shopify webhook.
-// It relies on an in-memory scan of cached resources to resolve the stable ResourceID from the Shopify GID.
-func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
+// UpsertShopifyResource handles single-item synchronization from a Shopify webhook or reconciliation scan.
+// Returns the operation performed ("created", "updated", or "none") and any error.
+func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resource *content.ResourceNode) (string, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("upsert_shopify_resource", tenantCtx.TenantID)
 	defer marker.Complete()
 
 	// 1. Ensure cache is populated for lookup (in-memory scan)
-	// We fetch both potentially relevant categories to find if this GID exists anywhere.
 	products, err := s.GetByCategory(tenantCtx, "product")
 	if err != nil {
-		return fmt.Errorf("failed to pre-load products for upsert lookup: %w", err)
+		return "", fmt.Errorf("failed to pre-load products for upsert lookup: %w", err)
 	}
 	services, err := s.GetByCategory(tenantCtx, "service")
 	if err != nil {
-		return fmt.Errorf("failed to pre-load services for upsert lookup: %w", err)
+		return "", fmt.Errorf("failed to pre-load services for upsert lookup: %w", err)
 	}
 
 	// 2. Identify the Target GID from the incoming payload
 	targetGID, ok := resource.OptionsPayload["gid"].(string)
 	if !ok || targetGID == "" {
-		return fmt.Errorf("incoming shopify resource missing required 'gid' in optionsPayload")
+		return "", fmt.Errorf("incoming shopify resource missing required 'gid' in optionsPayload")
 	}
 
 	// 3. Scan for existing resource (O(N) in memory, fast)
 	var existing *content.ResourceNode
-
-	// Check products
 	for _, p := range products {
 		if gid, ok := p.OptionsPayload["gid"].(string); ok && gid == targetGID {
 			existing = p
 			break
 		}
 	}
-
-	// Check services if not found
 	if existing == nil {
 		for _, svc := range services {
 			if gid, ok := svc.OptionsPayload["gid"].(string); ok && gid == targetGID {
@@ -393,14 +388,12 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 			// Preserve the authoritative ID
 			resource.ID = existing.ID
 
-			// If the incoming resource doesn't have a specific category set yet, inherit it.
 			if resource.CategorySlug == nil {
 				resource.CategorySlug = existing.CategorySlug
 			}
 
-			// We pass nil for fileIDs as this path is strictly data synchronization
 			if err := resourceRepo.Update(tenantCtx.TenantID, resource, nil); err != nil {
-				return fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
+				return "", fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
 			}
 			operation = "updated"
 		}
@@ -409,14 +402,13 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		if resource.ID == "" {
 			resource.ID = security.GenerateULID()
 		}
-		// Default to 'product' if not specified
 		if resource.CategorySlug == nil {
 			defaultCat := "product"
 			resource.CategorySlug = &defaultCat
 		}
 
 		if err := resourceRepo.Store(tenantCtx.TenantID, resource, nil); err != nil {
-			return fmt.Errorf("failed to create shopify resource: %w", err)
+			return "", fmt.Errorf("failed to create shopify resource: %w", err)
 		}
 		operation = "created"
 	}
@@ -424,7 +416,6 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 	// 6. Refresh Content Map if a write occurred
 	if operation != "none" {
 		tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
-		// We trigger a map refresh to ensure slugs and routing are up to date
 		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 			s.logger.Content().Error("Failed to refresh content map after shopify upsert", "error", err)
 		}
@@ -437,5 +428,5 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		"duration", time.Since(start))
 
 	marker.SetSuccess(true)
-	return nil
+	return operation, nil
 }
