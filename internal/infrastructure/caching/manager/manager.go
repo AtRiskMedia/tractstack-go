@@ -1101,3 +1101,15 @@ func (m *Manager) SetGenericWithTTL(tenantID, key string, value any, ttl time.Du
 	}
 	m.genericStore[fmt.Sprintf("%s:%s", tenantID, key)] = item
 }
+
+// GetShopifyCatalog retrieves the cached Shopify catalog for a tenant from the content store.
+func (m *Manager) GetShopifyCatalog(tenantID string) ([]byte, bool) {
+	return m.contentStore.GetShopifyCatalog(tenantID)
+}
+
+// SetShopifyCatalog stores the raw Shopify catalog data for a tenant in the content store
+// and updates the tenant's last access time.
+func (m *Manager) SetShopifyCatalog(tenantID string, data []byte) {
+	m.contentStore.SetShopifyCatalog(tenantID, data)
+	m.updateTenantAccessTime(tenantID)
+}

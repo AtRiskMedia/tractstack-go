@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // ContentStore implements content caching operations with tenant isolation
@@ -55,8 +56,11 @@ func (cs *ContentStore) InitializeTenant(tenantID string) {
 			AllPaneIDs:                    make([]string, 0),
 			FullContentMap:                make([]types.FullContentMapItem, 0),
 			ContentMapLastUpdated:         time.Now().UTC(),
-			LastUpdated:                   time.Now().UTC(),
-			OrphanAnalysis:                nil,
+			// Shopify Data initialization
+			ShopifyCatalog:            nil,
+			ShopifyCatalogLastUpdated: time.Time{},
+			LastUpdated:               time.Now().UTC(),
+			OrphanAnalysis:            nil,
 		}
 
 		if cs.logger != nil {
@@ -630,6 +634,10 @@ func (cs *ContentStore) InvalidateContentCache(tenantID string) {
 	cache.FullContentMap = make([]types.FullContentMapItem, 0)
 	cache.OrphanAnalysis = nil
 
+	// Clear Shopify catalog fields
+	cache.ShopifyCatalog = nil
+	cache.ShopifyCatalogLastUpdated = time.Time{}
+
 	cache.LastUpdated = time.Now().UTC()
 
 	if cs.logger != nil {
@@ -946,4 +954,55 @@ func (cs *ContentStore) RemoveFileID(tenantID, id string) {
 	cache.AllFileIDs = slices.DeleteFunc(cache.AllFileIDs, func(existingID string) bool {
 		return existingID == id
 	})
+}
+
+// GetShopifyCatalog retrieves the Shopify catalog for a tenant
+func (cs *ContentStore) GetShopifyCatalog(tenantID string) ([]byte, bool) {
+	start := time.Now()
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return nil, false
+	}
+
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+
+	if len(cache.ShopifyCatalog) == 0 {
+		return nil, false
+	}
+
+	// Check if data is expired
+	if time.Since(cache.ShopifyCatalogLastUpdated) > config.ShopifyDataTTL {
+		if cs.logger != nil {
+			cs.logger.Cache().Debug("Cache operation", "operation", "get", "type", "shopify_catalog", "tenantId", tenantID, "hit", false, "reason", "expired", "duration", time.Since(start))
+		}
+		return nil, false
+	}
+
+	if cs.logger != nil {
+		cs.logger.Cache().Debug("Cache operation", "operation", "get", "type", "shopify_catalog", "tenantId", tenantID, "hit", true, "bytes", len(cache.ShopifyCatalog), "duration", time.Since(start))
+	}
+
+	return cache.ShopifyCatalog, true
+}
+
+// SetShopifyCatalog stores the Shopify catalog for a tenant
+func (cs *ContentStore) SetShopifyCatalog(tenantID string, data []byte) {
+	start := time.Now()
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		cs.InitializeTenant(tenantID)
+		cache, _ = cs.GetTenantCache(tenantID)
+	}
+
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+
+	cache.ShopifyCatalog = data
+	cache.ShopifyCatalogLastUpdated = time.Now().UTC()
+	cache.LastUpdated = time.Now().UTC()
+
+	if cs.logger != nil {
+		cs.logger.Cache().Debug("Cache operation", "operation", "set", "type", "shopify_catalog", "tenantId", tenantID, "bytes", len(data), "duration", time.Since(start))
+	}
 }

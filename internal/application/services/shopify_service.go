@@ -106,8 +106,13 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 }
 
 // FetchProducts queries the Shopify Storefront API via GraphQL to get all products.
-// This replaces the logic previously held in the frontend `getProducts.ts`.
+// It checks the backend cache first to reduce API calls.
 func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error) {
+	// 1. Check Backend Cache
+	if cached, found := tenantCtx.CacheManager.GetShopifyCatalog(tenantCtx.TenantID); found {
+		return cached, nil
+	}
+
 	token := tenantCtx.Config.ShopifyStorefrontToken
 	// Assuming ShopifyStoreDomain is available in config (e.g., "my-shop.myshopify.com")
 	domain := tenantCtx.Config.ShopifyStoreDomain
@@ -294,7 +299,15 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 		"products": finalProducts,
 	}
 
-	return json.Marshal(response)
+	jsonData, err := json.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal shopify products: %w", err)
+	}
+
+	// 2. Update Backend Cache
+	tenantCtx.CacheManager.SetShopifyCatalog(tenantCtx.TenantID, jsonData)
+
+	return jsonData, nil
 }
 
 // ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
