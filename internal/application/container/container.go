@@ -65,6 +65,7 @@ type Container struct {
 	Broadcaster            messaging.Broadcaster
 	SysOpBroadcaster       *messaging.SysOpBroadcaster
 	SysOpService           *services.SysOpService
+	ShopifyService         *services.ShopifyService
 	Service                *fts.Service
 
 	// Infrastructure Dependencies
@@ -108,17 +109,14 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 	var emailService email.Service
 	if apiKey := os.Getenv("RESEND_API_KEY"); apiKey != "" {
-		var err error
-		emailService, err = email.NewService()
-		if err != nil {
-			panic("Failed to initialize email service: " + err.Error())
-		}
+		emailService = email.NewService()
 		logger.Startup().Info("Email service initialized successfully with Resend API")
 	} else {
 		emailService = nil
 		logger.Startup().Warn("Email service disabled - RESEND_API_KEY not configured")
 	}
 
+	shopifyService := services.NewShopifyService(logger, tenantManager)
 	aaiService := services.NewAAIService(logger, perfTracker)
 	ftsService := fts.NewService(logger)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
@@ -251,6 +249,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		Broadcaster:            broadcaster,
 		SysOpService:           sysOpService,
 		SysOpBroadcaster:       sysOpBroadcaster,
+		ShopifyService:         shopifyService,
 		Service:                ftsService,
 
 		// Infrastructure

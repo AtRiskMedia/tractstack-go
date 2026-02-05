@@ -193,6 +193,8 @@ type BrandConfig struct {
 	FaviconBase64      string                `json:"FAVICON_BASE64,omitempty"`
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 	HasAAI             bool                  `json:"HAS_AAI"`
+	HasShopify         bool                  `json:"HAS_SHOPIFY"`
+	HasResend          bool                  `json:"HAS_RESEND"`
 	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
 }

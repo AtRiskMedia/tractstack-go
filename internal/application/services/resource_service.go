@@ -303,96 +303,139 @@ func (s *ResourceService) SearchBodies(tenantCtx *tenant.Context, term string) (
 	return repo.SearchBodies(tenantCtx.TenantID, term)
 }
 
-// BatchSyncShopify synchronizes external Shopify products with internal resources.
-// It detects changes based on the 'gid' in OptionsPayload and performs a batch upsert.
-func (s *ResourceService) BatchSyncShopify(tenantCtx *tenant.Context, incomingResources []*content.ResourceNode) (int, int, int, int, error) {
+// GetByCategory returns all resources associated with a specific category slug.
+// This is required to support in-memory lookups for integrations.
+func (s *ResourceService) GetByCategory(tenantCtx *tenant.Context, category string) ([]*content.ResourceNode, error) {
 	start := time.Now()
-	marker := s.perfTracker.StartOperation("batch_sync_shopify", tenantCtx.TenantID)
+	marker := s.perfTracker.StartOperation("get_resources_by_category", tenantCtx.TenantID)
 	defer marker.Complete()
 
 	resourceRepo := tenantCtx.ResourceRepo()
-
-	existingProducts, err := resourceRepo.FindByCategory(tenantCtx.TenantID, "product")
+	resources, err := resourceRepo.FindByCategory(tenantCtx.TenantID, category)
 	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("failed to fetch existing products: %w", err)
-	}
-	existingServices, err := resourceRepo.FindByCategory(tenantCtx.TenantID, "service")
-	if err != nil {
-		return 0, 0, 0, 0, fmt.Errorf("failed to fetch existing services: %w", err)
+		return nil, fmt.Errorf("failed to get resources by category %s: %w", category, err)
 	}
 
-	totalExisting := len(existingProducts) + len(existingServices)
-	totalIncoming := len(incomingResources)
-
-	existingMap := make(map[string]*content.ResourceNode)
-	for _, r := range existingProducts {
-		if gid, ok := r.OptionsPayload["gid"].(string); ok {
-			existingMap[gid] = r
-		}
-	}
-	for _, r := range existingServices {
-		if gid, ok := r.OptionsPayload["gid"].(string); ok {
-			existingMap[gid] = r
-		}
-	}
-
-	var creates []*content.ResourceNode
-	var updates []*content.ResourceNode
-
-	for _, incoming := range incomingResources {
-		gid, ok := incoming.OptionsPayload["gid"].(string)
-		if !ok || gid == "" {
-			continue
-		}
-
-		if existing, found := existingMap[gid]; found {
-			incomingData, _ := incoming.OptionsPayload["shopifyData"].(string)
-			existingData, _ := existing.OptionsPayload["shopifyData"].(string)
-
-			hasChanged := false
-
-			switch {
-			case incoming.Title != existing.Title:
-				hasChanged = true
-			case incoming.Slug != existing.Slug:
-				hasChanged = true
-			case incoming.OneLiner != existing.OneLiner:
-				hasChanged = true
-			case incomingData != existingData:
-				hasChanged = true
-			}
-
-			if hasChanged {
-				incoming.ID = existing.ID
-				updates = append(updates, incoming)
-			}
-		} else {
-			if incoming.ID == "" {
-				incoming.ID = security.GenerateULID()
-			}
-			creates = append(creates, incoming)
-		}
-	}
-
-	if len(creates) > 0 || len(updates) > 0 {
-		if err := resourceRepo.BatchUpsert(tenantCtx.TenantID, creates, updates); err != nil {
-			return 0, 0, 0, 0, fmt.Errorf("batch upsert failed: %w", err)
-		}
-
-		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
-			s.logger.Content().Error("Failed to refresh content map after shopify sync", "error", err)
-		}
-	}
-
-	// Logging WARN to ensure visibility as per instructions
-	s.logger.Content().Warn("Shopify batch sync completed",
+	s.logger.Content().Debug("Retrieved resources by category",
 		"tenantId", tenantCtx.TenantID,
-		"created", len(creates),
-		"updated", len(updates),
-		"totalIncoming", totalIncoming,
-		"totalExisting", totalExisting,
+		"category", category,
+		"count", len(resources),
 		"duration", time.Since(start))
 
 	marker.SetSuccess(true)
-	return len(creates), len(updates), totalIncoming, totalExisting, nil
+	return resources, nil
+}
+
+// UpsertShopifyResource handles single-item synchronization from a Shopify webhook.
+// It relies on an in-memory scan of cached resources to resolve the stable ResourceID from the Shopify GID.
+func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resource *content.ResourceNode) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("upsert_shopify_resource", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	// 1. Ensure cache is populated for lookup (in-memory scan)
+	// We fetch both potentially relevant categories to find if this GID exists anywhere.
+	products, err := s.GetByCategory(tenantCtx, "product")
+	if err != nil {
+		return fmt.Errorf("failed to pre-load products for upsert lookup: %w", err)
+	}
+	services, err := s.GetByCategory(tenantCtx, "service")
+	if err != nil {
+		return fmt.Errorf("failed to pre-load services for upsert lookup: %w", err)
+	}
+
+	// 2. Identify the Target GID from the incoming payload
+	targetGID, ok := resource.OptionsPayload["gid"].(string)
+	if !ok || targetGID == "" {
+		return fmt.Errorf("incoming shopify resource missing required 'gid' in optionsPayload")
+	}
+
+	// 3. Scan for existing resource (O(N) in memory, fast)
+	var existing *content.ResourceNode
+
+	// Check products
+	for _, p := range products {
+		if gid, ok := p.OptionsPayload["gid"].(string); ok && gid == targetGID {
+			existing = p
+			break
+		}
+	}
+
+	// Check services if not found
+	if existing == nil {
+		for _, svc := range services {
+			if gid, ok := svc.OptionsPayload["gid"].(string); ok && gid == targetGID {
+				existing = svc
+				break
+			}
+		}
+	}
+
+	resourceRepo := tenantCtx.ResourceRepo()
+	operation := "none"
+
+	if existing != nil {
+		// 4. UPDATE Path
+		incomingData, _ := resource.OptionsPayload["shopifyData"].(string)
+		existingData, _ := existing.OptionsPayload["shopifyData"].(string)
+
+		hasChanged := false
+		switch {
+		case resource.Title != existing.Title:
+			hasChanged = true
+		case resource.OneLiner != existing.OneLiner:
+			hasChanged = true
+		case incomingData != existingData:
+			hasChanged = true
+		}
+
+		if hasChanged {
+			// Preserve the authoritative ID
+			resource.ID = existing.ID
+
+			// If the incoming resource doesn't have a specific category set yet, inherit it.
+			if resource.CategorySlug == nil {
+				resource.CategorySlug = existing.CategorySlug
+			}
+
+			// We pass nil for fileIDs as this path is strictly data synchronization
+			if err := resourceRepo.Update(tenantCtx.TenantID, resource, nil); err != nil {
+				return fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
+			}
+			operation = "updated"
+		}
+	} else {
+		// 5. CREATE Path
+		if resource.ID == "" {
+			resource.ID = security.GenerateULID()
+		}
+		// Default to 'product' if not specified
+		if resource.CategorySlug == nil {
+			defaultCat := "product"
+			resource.CategorySlug = &defaultCat
+		}
+
+		if err := resourceRepo.Store(tenantCtx.TenantID, resource, nil); err != nil {
+			return fmt.Errorf("failed to create shopify resource: %w", err)
+		}
+		operation = "created"
+	}
+
+	// 6. Refresh Content Map if a write occurred
+	if operation != "none" {
+		tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
+		// We trigger a map refresh to ensure slugs and routing are up to date
+		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+			s.logger.Content().Error("Failed to refresh content map after shopify upsert", "error", err)
+		}
+	}
+
+	s.logger.Content().Info("Shopify resource upsert completed",
+		"tenantId", tenantCtx.TenantID,
+		"gid", targetGID,
+		"operation", operation,
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return nil
 }

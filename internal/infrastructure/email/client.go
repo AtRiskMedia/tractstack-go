@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email/templates"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/resendlabs/resend-go"
 )
 
@@ -16,18 +17,13 @@ type Service interface {
 
 // ResendClient is the concrete implementation of the email Service using the Resend API.
 type ResendClient struct {
-	client    *resend.Client
 	fromEmail string
 	fromName  string
 }
 
 // NewService creates a new email service client, returning the Service interface.
-func NewService() (Service, error) {
-	apiKey := os.Getenv("RESEND_API_KEY")
-	if apiKey == "" {
-		return nil, nil
-	}
-
+// It initializes defaults but delegates API key resolution to the runtime methods.
+func NewService() Service {
 	fromEmail := os.Getenv("TENANT_EMAIL_FROM")
 	if fromEmail == "" {
 		fromEmail = "noreply@tractstack.com" // Default from address
@@ -39,14 +35,27 @@ func NewService() (Service, error) {
 	}
 
 	return &ResendClient{
-		client:    resend.NewClient(apiKey),
 		fromEmail: fromEmail,
 		fromName:  fromName,
-	}, nil
+	}
 }
 
 // SendTenantActivationEmail composes and sends the tenant activation email.
+// It retrieves the Resend API key from the tenant's specific configuration.
 func (c *ResendClient) SendTenantActivationEmail(toEmail, tenantID, activationURL string) error {
+	// Load the tenant config to get the tenant-specific Resend API Key
+	config, err := tenant.LoadTenantConfig(tenantID, nil)
+	if err != nil {
+		return fmt.Errorf("failed to load tenant config for email sending: %w", err)
+	}
+
+	if config.ResendAPIKey == "" {
+		return fmt.Errorf("resend API key not configured for tenant %s", tenantID)
+	}
+
+	// Create a new client for this specific request using the tenant's key
+	client := resend.NewClient(config.ResendAPIKey)
+
 	subject := "Activate your TractStack tenant"
 
 	content := templates.GetActivationEmailContent(templates.ActivationEmailProps{
@@ -67,7 +76,7 @@ func (c *ResendClient) SendTenantActivationEmail(toEmail, tenantID, activationUR
 		Html:    htmlContent,
 	}
 
-	_, err := c.client.Emails.Send(params)
+	_, err = client.Emails.Send(params)
 	if err != nil {
 		return fmt.Errorf("failed to send activation email via Resend: %w", err)
 	}

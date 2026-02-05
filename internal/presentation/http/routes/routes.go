@@ -52,6 +52,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	aaiHandlers := handlers.NewAAIHandlers(container.AAIService, container.Logger, container.PerfTracker)
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 	searchHandlers := handlers.NewSearchHandlers(container.SearchService, container.Logger, container.PerfTracker)
+	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.Logger, container.PerfTracker)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -101,6 +102,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	{
 		api.GET("/setup/suitcase", multiTenantHandlers.HandleFetchSuitcase)
 		api.POST("/setup/complete", multiTenantHandlers.HandleSetupComplete)
+
+		api.POST("/hooks/shopify", shopifyHandlers.HandleWebhook)
+		api.GET("/shopify/products", authHandlers.AuthMiddleware(), shopifyHandlers.HandleGetProducts)
 
 		// Config endpoints
 		configGroup := api.Group("/config")
@@ -262,7 +266,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 				protectedNodes.POST("/resources/create", resourceHandlers.CreateResource)
 				protectedNodes.PUT("/resources/:id", resourceHandlers.UpdateResource)
 				protectedNodes.DELETE("/resources/:id", resourceHandlers.DeleteResource)
-				protectedNodes.POST("/resources/sync/shopify", resourceHandlers.SyncShopifyResources)
 
 				// Story fragment - Write
 				protectedNodes.POST("/storyfragments/create", storyFragmentHandlers.CreateStoryFragment)

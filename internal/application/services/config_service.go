@@ -87,17 +87,21 @@ type BrandConfigUpdateRequest struct {
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
 type AdvancedConfigUpdateRequest struct {
-	TursoDatabaseURL string `json:"turso_database_url,omitempty"`
-	TursoAuthToken   string `json:"turso_auth_token,omitempty"`
-	EmailHost        string `json:"email_host,omitempty"`
-	EmailPort        int    `json:"email_port,omitempty"`
-	EmailUser        string `json:"email_user,omitempty"`
-	EmailPass        string `json:"email_pass,omitempty"`
-	EmailFrom        string `json:"email_from,omitempty"`
-	AdminPassword    string `json:"admin_password,omitempty"`
-	EditorPassword   string `json:"editor_password,omitempty"`
-	AAIAPIKey        string `json:"aai_api_key,omitempty"`
-	TursoEnabled     *bool  `json:"turso_enabled,omitempty"`
+	TursoDatabaseURL       string `json:"turso_database_url,omitempty"`
+	TursoAuthToken         string `json:"turso_auth_token,omitempty"`
+	EmailHost              string `json:"email_host,omitempty"`
+	EmailPort              int    `json:"email_port,omitempty"`
+	EmailUser              string `json:"email_user,omitempty"`
+	EmailPass              string `json:"email_pass,omitempty"`
+	EmailFrom              string `json:"email_from,omitempty"`
+	AdminPassword          string `json:"admin_password,omitempty"`
+	EditorPassword         string `json:"editor_password,omitempty"`
+	AAIAPIKey              string `json:"aai_api_key,omitempty"`
+	ShopifyStorefrontToken string `json:"SHOPIFY_STOREFRONT_TOKEN,omitempty"`
+	ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET,omitempty"`
+	ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN,omitempty"`
+	ResendAPIKey           string `json:"RESEND_API_KEY,omitempty"`
+	TursoEnabled           *bool  `json:"turso_enabled,omitempty"`
 }
 
 // ValidateAdminPermissions validates admin-only authentication
@@ -221,6 +225,18 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.AAIAPIKey != "" {
 		tenantCtx.Config.AAIAPIKey = request.AAIAPIKey
 	}
+	if request.ShopifyStorefrontToken != "" {
+		tenantCtx.Config.ShopifyStorefrontToken = request.ShopifyStorefrontToken
+	}
+	if request.ShopifyAPISecret != "" {
+		tenantCtx.Config.ShopifyAPISecret = request.ShopifyAPISecret
+	}
+	if request.ShopifyStoreDomain != "" {
+		tenantCtx.Config.ShopifyStoreDomain = request.ShopifyStoreDomain
+	}
+	if request.ResendAPIKey != "" {
+		tenantCtx.Config.ResendAPIKey = request.ResendAPIKey
+	}
 	if request.TursoEnabled != nil {
 		tenantCtx.Config.TursoEnabled = *request.TursoEnabled
 	}
@@ -310,14 +326,18 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 
 	// This matches the legacy pattern and prevents accidental exposure of computed fields
 	configData := map[string]any{
-		"TURSO_DATABASE_URL":   tenantCtx.Config.TursoDatabase,
-		"TURSO_AUTH_TOKEN":     tenantCtx.Config.TursoToken,
-		"ADMIN_PASSWORD_HASH":  tenantCtx.Config.AdminPasswordHash,
-		"EDITOR_PASSWORD_HASH": tenantCtx.Config.EditorPasswordHash,
-		"AAI_API_KEY":          tenantCtx.Config.AAIAPIKey,
-		"JWT_SECRET":           tenantCtx.Config.JWTSecret,
-		"AES_KEY":              tenantCtx.Config.AESKey,
-		"TURSO_ENABLED":        tenantCtx.Config.TursoEnabled,
+		"TURSO_DATABASE_URL":       tenantCtx.Config.TursoDatabase,
+		"TURSO_AUTH_TOKEN":         tenantCtx.Config.TursoToken,
+		"ADMIN_PASSWORD_HASH":      tenantCtx.Config.AdminPasswordHash,
+		"EDITOR_PASSWORD_HASH":     tenantCtx.Config.EditorPasswordHash,
+		"AAI_API_KEY":              tenantCtx.Config.AAIAPIKey,
+		"JWT_SECRET":               tenantCtx.Config.JWTSecret,
+		"AES_KEY":                  tenantCtx.Config.AESKey,
+		"TURSO_ENABLED":            tenantCtx.Config.TursoEnabled,
+		"SHOPIFY_STOREFRONT_TOKEN": tenantCtx.Config.ShopifyStorefrontToken,
+		"SHOPIFY_API_SECRET":       tenantCtx.Config.ShopifyAPISecret,
+		"SHOPIFY_STORE_DOMAIN":     tenantCtx.Config.ShopifyStoreDomain,
+		"RESEND_API_KEY":           tenantCtx.Config.ResendAPIKey,
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")
