@@ -14,6 +14,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/microcosm-cc/bluemonday"
 )
 
 // ShopifyService handles communication with Shopify APIs and webhook verification.
@@ -57,7 +58,6 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 	}
 
 	// 2. Extract Key Fields safely
-	// Shopify IDs in webhooks are numbers (e.g., 865236123), but we need GID format for consistency with Storefront API
 	var idStr string
 	if v, ok := rawData["id"].(float64); ok {
 		idStr = fmt.Sprintf("%.0f", v)
@@ -69,15 +69,12 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 		return nil, fmt.Errorf("missing 'id' in webhook payload")
 	}
 
-	// Construct GID (Assuming Product for now - this logic might need expansion for Collections/Pages)
 	gid := fmt.Sprintf("gid://shopify/Product/%s", idStr)
-
 	title, _ := rawData["title"].(string)
 	handle, _ := rawData["handle"].(string)
-	description, _ := rawData["body_html"].(string) // Often body_html in REST hooks
+	description, _ := rawData["body_html"].(string)
 
-	// Generate a simple one-liner (stripped of HTML tags ideally, but rough truncation for now)
-	oneLiner := description
+	oneLiner := bluemonday.StrictPolicy().Sanitize(description)
 	if len(oneLiner) > 255 {
 		oneLiner = oneLiner[:252] + "..."
 	}
@@ -86,15 +83,10 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 	optionsPayload := make(map[string]any)
 	optionsPayload["gid"] = gid
 
-	// Store the full raw data as a JSON string to match the frontend's previous behaviour
-	// This allows the frontend components to hydrate from this blob without schema changes.
 	jsonData, _ := json.Marshal(rawData)
 	optionsPayload["shopifyData"] = string(jsonData)
 
 	// 4. Construct ResourceNode
-	// We generate a deterministic slug from the handle.
-	// Note: The Upsert logic will use the GID to find the existing resource,
-	// so if the slug changes in Shopify, we will handle the redirect/update in the Service layer.
 	slug := fmt.Sprintf("product-%s", handle)
 
 	resource := &content.ResourceNode{
@@ -103,7 +95,6 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 		OneLiner:       oneLiner,
 		NodeType:       "Resource",
 		OptionsPayload: optionsPayload,
-		// CategorySlug is intentionally left nil here; UpsertService will apply defaults/inheritance
 	}
 
 	return resource, nil
@@ -302,7 +293,6 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 }
 
 // ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
-// Returns (totalProcessed, reconciledCount, error).
 func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, error) {
 	// 1. Fetch all products from Shopify (paginated)
 	productsJSON, err := s.FetchProducts(tenantCtx)
@@ -319,6 +309,7 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, erro
 
 	totalProcessed := len(resp.Products)
 	reconciledCount := 0
+	pCleaner := bluemonday.StrictPolicy()
 
 	for _, p := range resp.Products {
 		id, _ := p["id"].(string)
@@ -326,7 +317,7 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, erro
 		title, _ := p["title"].(string)
 		description, _ := p["description"].(string)
 
-		oneLiner := description
+		oneLiner := pCleaner.Sanitize(description)
 		if len(oneLiner) > 255 {
 			oneLiner = oneLiner[:252] + "..."
 		}
@@ -344,7 +335,6 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, erro
 			OptionsPayload: optionsPayload,
 		}
 
-		// Use the status from Upsert to determine if we actually wrote to the DB
 		op, err := s.resourceService.UpsertShopifyResource(tenantCtx, resource)
 		if err != nil {
 			s.logger.System().Error("Failed to reconcile product", "error", err, "handle", handle, "tenantId", tenantCtx.TenantID)
