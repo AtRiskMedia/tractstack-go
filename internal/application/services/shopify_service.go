@@ -347,6 +347,14 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int,
 		return 0, 0, 0, fmt.Errorf("failed to parse products for reconciliation: %w", err)
 	}
 
+	// CIRCUIT BREAKER:
+	// Verify we received > 0 products
+	if len(resp.Products) == 0 {
+		s.logger.System().Warn("Shopify reconciliation aborted: 0 products returned from API", "tenantId", tenantCtx.TenantID)
+		// Return an error or nil to stop execution here.
+		return 0, 0, 0, fmt.Errorf("circuit breaker triggered: 0 products returned")
+	}
+
 	// 2. Map incoming GIDs for fast diffing
 	incomingGIDs := make(map[string]bool)
 	for _, p := range resp.Products {
