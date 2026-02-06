@@ -15,6 +15,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/microcosm-cc/bluemonday"
+	"golang.org/x/sync/singleflight"
 )
 
 // ShopifyService handles communication with Shopify APIs and webhook verification.
@@ -22,6 +23,7 @@ type ShopifyService struct {
 	logger          *logging.ChanneledLogger
 	tenantManager   *tenant.Manager
 	resourceService *ResourceService
+	requestGroup    singleflight.Group
 }
 
 // NewShopifyService creates a new Shopify service instance.
@@ -106,30 +108,37 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 }
 
 // FetchProducts queries the Shopify Storefront API via GraphQL to get all products.
-// It checks the backend cache first to reduce API calls.
+// It checks the backend cache first and uses singleflight to prevent thundering herds.
 func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error) {
-	// 1. Check Backend Cache
+	// 1. Check Backend Cache (Fast Path)
 	if cached, found := tenantCtx.CacheManager.GetShopifyCatalog(tenantCtx.TenantID); found {
 		return cached, nil
 	}
 
-	token := tenantCtx.Config.ShopifyStorefrontToken
-	// Assuming ShopifyStoreDomain is available in config (e.g., "my-shop.myshopify.com")
-	domain := tenantCtx.Config.ShopifyStoreDomain
+	// 2. Singleflight: Coalesce concurrent requests for the same tenant
+	// We use the TenantID as the unique key so locking is isolated per tenant.
+	key := fmt.Sprintf("shopify_fetch_%s", tenantCtx.TenantID)
 
-	if token == "" || domain == "" {
-		return nil, fmt.Errorf("shopify credentials (token/domain) missing for tenant %s", tenantCtx.TenantID)
-	}
+	v, err, _ := s.requestGroup.Do(key, func() (interface{}, error) {
+		// --- Start of Original Fetch Logic ---
 
-	cleanDomain := strings.TrimSuffix(domain, "/")
-	// Ensure protocol
-	if !strings.HasPrefix(cleanDomain, "http") {
-		cleanDomain = "https://" + cleanDomain
-	}
-	url := fmt.Sprintf("%s/api/2024-01/graphql.json", cleanDomain)
+		token := tenantCtx.Config.ShopifyStorefrontToken
+		// Assuming ShopifyStoreDomain is available in config
+		domain := tenantCtx.Config.ShopifyStoreDomain
 
-	// GraphQL query to fetch all products (paginated)
-	queryTemplate := `
+		if token == "" || domain == "" {
+			return nil, fmt.Errorf("shopify credentials (token/domain) missing for tenant %s", tenantCtx.TenantID)
+		}
+
+		cleanDomain := strings.TrimSuffix(domain, "/")
+		// Ensure protocol
+		if !strings.HasPrefix(cleanDomain, "http") {
+			cleanDomain = "https://" + cleanDomain
+		}
+		url := fmt.Sprintf("%s/api/2024-01/graphql.json", cleanDomain)
+
+		// GraphQL query to fetch all products (paginated)
+		queryTemplate := `
         query ($cursor: String) {
           products(first: 250, after: $cursor, query: "product_type:'active'") {
             pageInfo {
@@ -183,131 +192,139 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
         }
     `
 
-	var allEdges []any
-	var cursor *string
-	hasNextPage := true
+		var allEdges []any
+		var cursor *string
+		hasNextPage := true
 
-	client := &http.Client{}
+		client := &http.Client{}
 
-	for hasNextPage {
-		reqBody := map[string]any{
-			"query": queryTemplate,
-			"variables": map[string]any{
-				"cursor": cursor,
-			},
-		}
-		jsonBody, _ := json.Marshal(reqBody)
-
-		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create shopify request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Shopify-Storefront-Access-Token", token)
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("shopify request failed: %w", err)
-		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				s.logger.System().Warn("Failed to close Shopify response body", "error", err)
+		for hasNextPage {
+			reqBody := map[string]any{
+				"query": queryTemplate,
+				"variables": map[string]any{
+					"cursor": cursor,
+				},
 			}
-		}()
+			jsonBody, _ := json.Marshal(reqBody)
 
-		if resp.StatusCode != http.StatusOK {
-			b, _ := io.ReadAll(resp.Body)
-			return nil, fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
+			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+			if err != nil {
+				return nil, fmt.Errorf("failed to create shopify request: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Shopify-Storefront-Access-Token", token)
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return nil, fmt.Errorf("shopify request failed: %w", err)
+			}
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					s.logger.System().Warn("Failed to close Shopify response body", "error", err)
+				}
+			}()
+
+			if resp.StatusCode != http.StatusOK {
+				b, _ := io.ReadAll(resp.Body)
+				return nil, fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
+			}
+
+			var result struct {
+				Data struct {
+					Products struct {
+						PageInfo struct {
+							HasNextPage bool   `json:"hasNextPage"`
+							EndCursor   string `json:"endCursor"`
+						} `json:"pageInfo"`
+						Edges []any `json:"edges"`
+					} `json:"products"`
+				} `json:"data"`
+				Errors []any `json:"errors"`
+			}
+
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+				return nil, fmt.Errorf("failed to decode shopify response: %w", err)
+			}
+
+			if len(result.Errors) > 0 {
+				return nil, fmt.Errorf("graphql errors: %v", result.Errors)
+			}
+
+			allEdges = append(allEdges, result.Data.Products.Edges...)
+
+			hasNextPage = result.Data.Products.PageInfo.HasNextPage
+			if hasNextPage {
+				c := result.Data.Products.PageInfo.EndCursor
+				cursor = &c
+			}
 		}
 
-		var result struct {
-			Data struct {
-				Products struct {
-					PageInfo struct {
-						HasNextPage bool   `json:"hasNextPage"`
-						EndCursor   string `json:"endCursor"`
-					} `json:"pageInfo"`
-					Edges []any `json:"edges"`
-				} `json:"products"`
-			} `json:"data"`
-			Errors []any `json:"errors"`
-		}
+		// Transform the edges into a flat list of products to simplify frontend consumption
+		finalProducts := make([]map[string]any, 0, len(allEdges))
+		for _, e := range allEdges {
+			edge, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			node, ok := edge["node"].(map[string]any)
+			if !ok {
+				continue
+			}
 
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			return nil, fmt.Errorf("failed to decode shopify response: %w", err)
-		}
-
-		if len(result.Errors) > 0 {
-			return nil, fmt.Errorf("graphql errors: %v", result.Errors)
-		}
-
-		allEdges = append(allEdges, result.Data.Products.Edges...)
-
-		hasNextPage = result.Data.Products.PageInfo.HasNextPage
-		if hasNextPage {
-			c := result.Data.Products.PageInfo.EndCursor
-			cursor = &c
-		}
-	}
-
-	// Transform the edges into a flat list of products to simplify frontend consumption
-	finalProducts := make([]map[string]any, 0, len(allEdges))
-	for _, e := range allEdges {
-		edge, ok := e.(map[string]any)
-		if !ok {
-			continue
-		}
-		node, ok := edge["node"].(map[string]any)
-		if !ok {
-			continue
-		}
-
-		// Flatten Images (edges -> nodes)
-		if imgs, ok := node["images"].(map[string]any); ok {
-			if iEdges, ok := imgs["edges"].([]any); ok {
-				flatImages := make([]map[string]any, 0)
-				for _, ie := range iEdges {
-					if iEdge, ok := ie.(map[string]any); ok {
-						if iNode, ok := iEdge["node"].(map[string]any); ok {
-							flatImages = append(flatImages, iNode)
+			// Flatten Images (edges -> nodes)
+			if imgs, ok := node["images"].(map[string]any); ok {
+				if iEdges, ok := imgs["edges"].([]any); ok {
+					flatImages := make([]map[string]any, 0)
+					for _, ie := range iEdges {
+						if iEdge, ok := ie.(map[string]any); ok {
+							if iNode, ok := iEdge["node"].(map[string]any); ok {
+								flatImages = append(flatImages, iNode)
+							}
 						}
 					}
+					node["images"] = flatImages
 				}
-				node["images"] = flatImages
 			}
-		}
 
-		// Flatten Variants (edges -> nodes)
-		if vars, ok := node["variants"].(map[string]any); ok {
-			if vEdges, ok := vars["edges"].([]any); ok {
-				flatVariants := make([]map[string]any, 0)
-				for _, ve := range vEdges {
-					if vEdge, ok := ve.(map[string]any); ok {
-						if vNode, ok := vEdge["node"].(map[string]any); ok {
-							flatVariants = append(flatVariants, vNode)
+			// Flatten Variants (edges -> nodes)
+			if vars, ok := node["variants"].(map[string]any); ok {
+				if vEdges, ok := vars["edges"].([]any); ok {
+					flatVariants := make([]map[string]any, 0)
+					for _, ve := range vEdges {
+						if vEdge, ok := ve.(map[string]any); ok {
+							if vNode, ok := vEdge["node"].(map[string]any); ok {
+								flatVariants = append(flatVariants, vNode)
+							}
 						}
 					}
+					node["variants"] = flatVariants
 				}
-				node["variants"] = flatVariants
 			}
+
+			finalProducts = append(finalProducts, node)
 		}
 
-		finalProducts = append(finalProducts, node)
-	}
+		response := map[string]any{
+			"products": finalProducts,
+		}
 
-	response := map[string]any{
-		"products": finalProducts,
-	}
+		jsonData, err := json.Marshal(response)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal shopify products: %w", err)
+		}
 
-	jsonData, err := json.Marshal(response)
+		// Update Backend Cache (within the singleflight group)
+		tenantCtx.CacheManager.SetShopifyCatalog(tenantCtx.TenantID, jsonData)
+
+		return jsonData, nil
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal shopify products: %w", err)
+		return nil, err
 	}
 
-	// 2. Update Backend Cache
-	tenantCtx.CacheManager.SetShopifyCatalog(tenantCtx.TenantID, jsonData)
-
-	return jsonData, nil
+	// Cast the interface{} return value back to []byte
+	return v.([]byte), nil
 }
 
 // ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
