@@ -14,6 +14,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/sync/singleflight"
 )
@@ -109,19 +110,23 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 
 // FetchProducts queries the Shopify Storefront API via GraphQL to get all products.
 // It checks the backend cache first and uses singleflight to prevent thundering herds.
-func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error) {
+func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]any, error) {
 	// 1. Check Backend Cache (Fast Path)
 	if cached, found := tenantCtx.CacheManager.GetShopifyCatalog(tenantCtx.TenantID); found {
-		return cached, nil
+		var envelope struct {
+			Products []map[string]any `json:"products"`
+		}
+		if err := json.Unmarshal(cached, &envelope); err != nil {
+			s.logger.System().Warn("Failed to unmarshal cached shopify catalog", "error", err)
+		} else {
+			return envelope.Products, nil
+		}
 	}
 
 	// 2. Singleflight: Coalesce concurrent requests for the same tenant
-	// We use the TenantID as the unique key so locking is isolated per tenant.
 	key := fmt.Sprintf("shopify_fetch_%s", tenantCtx.TenantID)
 
 	v, err, _ := s.requestGroup.Do(key, func() (any, error) {
-		// --- Start of Original Fetch Logic ---
-
 		token := tenantCtx.Config.ShopifyStorefrontToken
 		domain := tenantCtx.Config.ShopifyStoreDomain
 		apiVersion := tenantCtx.Config.ShopifyAPIVersion
@@ -134,7 +139,6 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 		}
 
 		cleanDomain := strings.TrimSuffix(domain, "/")
-		// Ensure protocol
 		if !strings.HasPrefix(cleanDomain, "http") {
 			cleanDomain = "https://" + cleanDomain
 		}
@@ -199,70 +203,78 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 		var cursor *string
 		hasNextPage := true
 
-		client := &http.Client{}
+		client := &http.Client{
+			Timeout: config.ShopifyRequestTimeout,
+		}
 
 		for hasNextPage {
-			reqBody := map[string]any{
-				"query": queryTemplate,
-				"variables": map[string]any{
-					"cursor": cursor,
-				},
-			}
-			jsonBody, _ := json.Marshal(reqBody)
-
-			req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
-			if err != nil {
-				return nil, fmt.Errorf("failed to create shopify request: %w", err)
-			}
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Shopify-Storefront-Private-Token", token)
-
-			resp, err := client.Do(req)
-			if err != nil {
-				return nil, fmt.Errorf("shopify request failed: %w", err)
-			}
-			defer func() {
-				if err := resp.Body.Close(); err != nil {
-					s.logger.System().Warn("Failed to close Shopify response body", "error", err)
+			err := func() error {
+				reqBody := map[string]any{
+					"query": queryTemplate,
+					"variables": map[string]any{
+						"cursor": cursor,
+					},
 				}
+				jsonBody, _ := json.Marshal(reqBody)
+
+				req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+				if err != nil {
+					return fmt.Errorf("failed to create shopify request: %w", err)
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Shopify-Storefront-Private-Token", token)
+
+				resp, err := client.Do(req)
+				if err != nil {
+					return fmt.Errorf("shopify request failed: %w", err)
+				}
+				defer func() {
+					if closeErr := resp.Body.Close(); closeErr != nil {
+						s.logger.System().Warn("Failed to close Shopify response body", "error", closeErr)
+					}
+				}()
+
+				if resp.StatusCode != http.StatusOK {
+					b, _ := io.ReadAll(resp.Body)
+					return fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
+				}
+
+				var result struct {
+					Data struct {
+						Products struct {
+							PageInfo struct {
+								HasNextPage bool   `json:"hasNextPage"`
+								EndCursor   string `json:"endCursor"`
+							} `json:"pageInfo"`
+							Edges []any `json:"edges"`
+						} `json:"products"`
+					} `json:"data"`
+					Errors []any `json:"errors"`
+				}
+
+				if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+					return fmt.Errorf("failed to decode shopify response: %w", err)
+				}
+
+				if len(result.Errors) > 0 {
+					return fmt.Errorf("graphql errors: %v", result.Errors)
+				}
+
+				allEdges = append(allEdges, result.Data.Products.Edges...)
+
+				hasNextPage = result.Data.Products.PageInfo.HasNextPage
+				if hasNextPage {
+					c := result.Data.Products.PageInfo.EndCursor
+					cursor = &c
+				}
+				return nil
 			}()
-
-			if resp.StatusCode != http.StatusOK {
-				b, _ := io.ReadAll(resp.Body)
-				return nil, fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
-			}
-
-			var result struct {
-				Data struct {
-					Products struct {
-						PageInfo struct {
-							HasNextPage bool   `json:"hasNextPage"`
-							EndCursor   string `json:"endCursor"`
-						} `json:"pageInfo"`
-						Edges []any `json:"edges"`
-					} `json:"products"`
-				} `json:"data"`
-				Errors []any `json:"errors"`
-			}
-
-			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				return nil, fmt.Errorf("failed to decode shopify response: %w", err)
-			}
-
-			if len(result.Errors) > 0 {
-				return nil, fmt.Errorf("graphql errors: %v", result.Errors)
-			}
-
-			allEdges = append(allEdges, result.Data.Products.Edges...)
-
-			hasNextPage = result.Data.Products.PageInfo.HasNextPage
-			if hasNextPage {
-				c := result.Data.Products.PageInfo.EndCursor
-				cursor = &c
+			if err != nil {
+				return nil, err
 			}
 		}
 
-		// Transform the edges into a flat list of products to simplify frontend consumption
+		// Transform the edges into a flat list of products
 		finalProducts := make([]map[string]any, 0, len(allEdges))
 		for _, e := range allEdges {
 			edge, ok := e.(map[string]any)
@@ -307,57 +319,48 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 			finalProducts = append(finalProducts, node)
 		}
 
-		response := map[string]any{
+		// Create envelope for Cache
+		responseEnvelope := map[string]any{
 			"products": finalProducts,
 		}
 
-		jsonData, err := json.Marshal(response)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal shopify products: %w", err)
+		jsonData, err := json.Marshal(responseEnvelope)
+		if err == nil {
+			// Update Backend Cache (within the singleflight group)
+			tenantCtx.CacheManager.SetShopifyCatalog(tenantCtx.TenantID, jsonData)
+		} else {
+			s.logger.System().Error("Failed to marshal shopify products for cache", "error", err)
 		}
 
-		// Update Backend Cache (within the singleflight group)
-		tenantCtx.CacheManager.SetShopifyCatalog(tenantCtx.TenantID, jsonData)
-
-		return jsonData, nil
+		return finalProducts, nil
 	})
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Cast the any return value back to []byte
-	return v.([]byte), nil
+	return v.([]map[string]any), nil
 }
 
 // ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
-// It updates existing resources, creates new ones, and prunes orphaned resources
-// that no longer exist on Shopify.
+// It updates existing resources, creates new ones, and prunes orphaned resources.
 func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int, error) {
 	// 1. Fetch all products currently active on Shopify
-	productsJSON, err := s.FetchProducts(tenantCtx)
+	products, err := s.FetchProducts(tenantCtx)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	var resp struct {
-		Products []map[string]any `json:"products"`
-	}
-	if err := json.Unmarshal(productsJSON, &resp); err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to parse products for reconciliation: %w", err)
-	}
-
 	// CIRCUIT BREAKER:
 	// Verify we received > 0 products
-	if len(resp.Products) == 0 {
+	if len(products) == 0 {
 		s.logger.System().Warn("Shopify reconciliation aborted: 0 products returned from API", "tenantId", tenantCtx.TenantID)
-		// Return an error or nil to stop execution here.
 		return 0, 0, 0, fmt.Errorf("circuit breaker triggered: 0 products returned")
 	}
 
 	// 2. Map incoming GIDs for fast diffing
 	incomingGIDs := make(map[string]bool)
-	for _, p := range resp.Products {
+	for _, p := range products {
 		if id, ok := p["id"].(string); ok {
 			incomingGIDs[id] = true
 		}
@@ -396,11 +399,11 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int,
 	}
 
 	// 4. Upsert path: Create or update products found in the fetch
-	totalProcessed := len(resp.Products)
+	totalProcessed := len(products)
 	reconciledCount := 0
 	pCleaner := bluemonday.StrictPolicy()
 
-	for _, p := range resp.Products {
+	for _, p := range products {
 		id, _ := p["id"].(string)
 		handle, _ := p["handle"].(string)
 		title, _ := p["title"].(string)

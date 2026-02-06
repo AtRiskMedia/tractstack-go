@@ -51,17 +51,14 @@ func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 
 	h.logger.System().Debug("Handling Shopify get products request", "tenantId", tenantCtx.TenantID)
 
-	// Fetch products using the service which handles secrets and GraphQL communication
-	productsJSON, err := h.shopifyService.FetchProducts(tenantCtx)
+	products, err := h.shopifyService.FetchProducts(tenantCtx)
 	if err != nil {
 		h.logger.System().Error("Failed to fetch Shopify products", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// We return the raw JSON from Shopify directly to the frontend
-	// The frontend handles the caching (NanoStore TTL)
-	c.Data(http.StatusOK, "application/json", productsJSON)
+	c.JSON(http.StatusOK, gin.H{"products": products})
 
 	h.logger.System().Info("Shopify products fetched successfully", "duration", time.Since(start))
 	marker.SetSuccess(true)

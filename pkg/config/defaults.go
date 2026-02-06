@@ -139,6 +139,8 @@ var (
 	ShopifyReconcileStartupDelay time.Duration
 	// ShopifyDataTTL is the cache interval for shopify data
 	ShopifyDataTTL time.Duration
+	// ShopifyRequestTimeout is the maximum duration to wait for a Shopify API response
+	ShopifyRequestTimeout time.Duration
 
 	// MaxTenants sets the maximum number of tenants allowed in memory.
 	MaxTenants int
@@ -253,6 +255,7 @@ func init() {
 	ShopifyReconcileInterval = time.Duration(getEnvInt("SHOPIFY_RECONCILE_INTERVAL_HOURS", 48)) * time.Hour
 	ShopifyReconcileStartupDelay = time.Duration(getEnvInt("SHOPIFY_RECONCILE_STARTUP_DELAY_MINUTES", 48)) * time.Minute
 	ShopifyDataTTL = time.Duration(getEnvInt("SHOPIFY_DATA_TTL", 5)) * time.Minute
+	ShopifyRequestTimeout = getEnvDuration("SHOPIFY_REQUEST_TIMEOUT", 30*time.Second)
 
 	// Memory Management
 	MaxTenants = getEnvInt("MAX_TENANTS", 0)
