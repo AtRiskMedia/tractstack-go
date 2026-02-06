@@ -100,6 +100,7 @@ type AdvancedConfigUpdateRequest struct {
 	ShopifyStorefrontToken string `json:"SHOPIFY_STOREFRONT_TOKEN,omitempty"`
 	ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET,omitempty"`
 	ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN,omitempty"`
+	ShopifyAPIVersion      string `json:"SHOPIFY_API_VERSION,omitempty"`
 	ResendAPIKey           string `json:"RESEND_API_KEY,omitempty"`
 	TursoEnabled           *bool  `json:"turso_enabled,omitempty"`
 }
@@ -234,6 +235,9 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.ShopifyStoreDomain != "" {
 		tenantCtx.Config.ShopifyStoreDomain = request.ShopifyStoreDomain
 	}
+	if request.ShopifyAPIVersion != "" {
+		tenantCtx.Config.ShopifyAPIVersion = request.ShopifyAPIVersion
+	}
 	if request.ResendAPIKey != "" {
 		tenantCtx.Config.ResendAPIKey = request.ResendAPIKey
 	}
@@ -337,6 +341,7 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		"SHOPIFY_STOREFRONT_TOKEN": tenantCtx.Config.ShopifyStorefrontToken,
 		"SHOPIFY_API_SECRET":       tenantCtx.Config.ShopifyAPISecret,
 		"SHOPIFY_STORE_DOMAIN":     tenantCtx.Config.ShopifyStoreDomain,
+		"SHOPIFY_API_VERSION":      tenantCtx.Config.ShopifyAPIVersion,
 		"RESEND_API_KEY":           tenantCtx.Config.ResendAPIKey,
 	}
 

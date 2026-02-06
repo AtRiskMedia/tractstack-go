@@ -29,6 +29,7 @@ type Config struct {
 	ShopifyStorefrontToken string             `json:"SHOPIFY_STOREFRONT_TOKEN"`
 	ShopifyAPISecret       string             `json:"SHOPIFY_API_SECRET"`
 	ShopifyStoreDomain     string             `json:"SHOPIFY_STORE_DOMAIN"`
+	ShopifyAPIVersion      string             `json:"SHOPIFY_API_VERSION"`
 	ResendAPIKey           string             `json:"RESEND_API_KEY"`
 	SQLitePath             string             `json:"-"`
 	BrandConfig            *types.BrandConfig `json:"-"`

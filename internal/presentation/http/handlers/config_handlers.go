@@ -4,6 +4,7 @@ package handlers
 import (
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -16,16 +17,17 @@ import (
 
 // AdvancedConfigStatusResponse represents the response structure for advanced config status
 type AdvancedConfigStatusResponse struct {
-	TursoConfigured           bool `json:"tursoConfigured"`
-	TursoTokenSet             bool `json:"tursoTokenSet"`
-	AdminPasswordSet          bool `json:"adminPasswordSet"`
-	EditorPasswordSet         bool `json:"editorPasswordSet"`
-	AAIAPIKeySet              bool `json:"aaiAPIKeySet"`
-	TursoEnabled              bool `json:"tursoEnabled"`
-	ShopifyStorefrontTokenSet bool `json:"shopifyStorefrontTokenSet"`
-	ShopifyAPISecretSet       bool `json:"shopifyApiSecretSet"`
-	ShopifyStoreDomainSet     bool `json:"shopifyStoreDomainSet"`
-	ResendAPIKeySet           bool `json:"resendApiKeySet"`
+	TursoConfigured           bool   `json:"tursoConfigured"`
+	TursoTokenSet             bool   `json:"tursoTokenSet"`
+	AdminPasswordSet          bool   `json:"adminPasswordSet"`
+	EditorPasswordSet         bool   `json:"editorPasswordSet"`
+	AAIAPIKeySet              bool   `json:"aaiAPIKeySet"`
+	TursoEnabled              bool   `json:"tursoEnabled"`
+	ShopifyStorefrontTokenSet bool   `json:"shopifyStorefrontTokenSet"`
+	ShopifyAPISecretSet       bool   `json:"shopifyApiSecretSet"`
+	ShopifyStoreDomainSet     bool   `json:"shopifyStoreDomainSet"`
+	ShopifyAPIVersion         string `json:"shopifyApiVersion"`
+	ResendAPIKeySet           bool   `json:"resendApiKeySet"`
 }
 
 // ConfigHandlers contains all config-related HTTP handlers
@@ -68,7 +70,7 @@ func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 
 	brandConfig := *tenantCtx.Config.BrandConfig
 	brandConfig.HasAAI = tenantCtx.Config.AAIAPIKey != ""
-	brandConfig.HasShopify = tenantCtx.Config.ShopifyStorefrontToken != "" && tenantCtx.Config.ShopifyAPISecret != "" && tenantCtx.Config.ShopifyStoreDomain != ""
+	brandConfig.HasShopify = tenantCtx.Config.ShopifyStorefrontToken != "" && tenantCtx.Config.ShopifyAPISecret != "" && tenantCtx.Config.ShopifyStoreDomain != "" && tenantCtx.Config.ShopifyAPIVersion != ""
 	brandConfig.HasResend = tenantCtx.Config.ResendAPIKey != ""
 	brandConfig.HasHydrationToken = tenantCtx.Config.HydrationToken != ""
 	c.JSON(http.StatusOK, brandConfig)
@@ -150,6 +152,7 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 		ShopifyStorefrontTokenSet: tenantCtx.Config.ShopifyStorefrontToken != "",
 		ShopifyAPISecretSet:       tenantCtx.Config.ShopifyAPISecret != "",
 		ShopifyStoreDomainSet:     tenantCtx.Config.ShopifyStoreDomain != "",
+		ShopifyAPIVersion:         tenantCtx.Config.ShopifyAPIVersion,
 		ResendAPIKeySet:           tenantCtx.Config.ResendAPIKey != "",
 	}
 
@@ -179,6 +182,7 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 		ShopifyStorefrontToken string `json:"SHOPIFY_STOREFRONT_TOKEN"`
 		ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET"`
 		ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN"`
+		ShopifyAPIVersion      string `json:"SHOPIFY_API_VERSION"`
 		ResendAPIKey           string `json:"RESEND_API_KEY"`
 	}
 
@@ -203,6 +207,14 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 		}
 	}
 
+	// Validate shopify API version
+	if request.ShopifyAPIVersion != "" {
+		matched, _ := regexp.MatchString(`^\d{4}-\d{2}$`, request.ShopifyAPIVersion)
+		if !matched {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Shopify API Version must match YYYY-MM format (e.g., 2026-01)"})
+			return
+		}
+	}
 	// Manually update new fields in context config
 	if request.ShopifyStorefrontToken != "" {
 		tenantCtx.Config.ShopifyStorefrontToken = request.ShopifyStorefrontToken
@@ -212,6 +224,9 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	}
 	if request.ShopifyStoreDomain != "" {
 		tenantCtx.Config.ShopifyStoreDomain = request.ShopifyStoreDomain
+	}
+	if request.ShopifyAPIVersion != "" {
+		tenantCtx.Config.ShopifyAPIVersion = request.ShopifyAPIVersion
 	}
 	if request.ResendAPIKey != "" {
 		tenantCtx.Config.ResendAPIKey = request.ResendAPIKey

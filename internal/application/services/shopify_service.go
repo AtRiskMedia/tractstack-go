@@ -119,15 +119,18 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 	// We use the TenantID as the unique key so locking is isolated per tenant.
 	key := fmt.Sprintf("shopify_fetch_%s", tenantCtx.TenantID)
 
-	v, err, _ := s.requestGroup.Do(key, func() (interface{}, error) {
+	v, err, _ := s.requestGroup.Do(key, func() (any, error) {
 		// --- Start of Original Fetch Logic ---
 
 		token := tenantCtx.Config.ShopifyStorefrontToken
-		// Assuming ShopifyStoreDomain is available in config
 		domain := tenantCtx.Config.ShopifyStoreDomain
+		apiVersion := tenantCtx.Config.ShopifyAPIVersion
 
 		if token == "" || domain == "" {
 			return nil, fmt.Errorf("shopify credentials (token/domain) missing for tenant %s", tenantCtx.TenantID)
+		}
+		if apiVersion == "" {
+			return nil, fmt.Errorf("shopify api version not configured for tenant %s", tenantCtx.TenantID)
 		}
 
 		cleanDomain := strings.TrimSuffix(domain, "/")
@@ -135,7 +138,7 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 		if !strings.HasPrefix(cleanDomain, "http") {
 			cleanDomain = "https://" + cleanDomain
 		}
-		url := fmt.Sprintf("%s/api/2024-01/graphql.json", cleanDomain)
+		url := fmt.Sprintf("%s/api/%s/graphql.json", cleanDomain, apiVersion)
 
 		// GraphQL query to fetch all products (paginated)
 		queryTemplate := `
@@ -323,7 +326,7 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 		return nil, err
 	}
 
-	// Cast the interface{} return value back to []byte
+	// Cast the any return value back to []byte
 	return v.([]byte), nil
 }
 
