@@ -212,7 +212,7 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]byte, error
 				return nil, fmt.Errorf("failed to create shopify request: %w", err)
 			}
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Shopify-Storefront-Access-Token", token)
+			req.Header.Set("Shopify-Storefront-Private-Token", token)
 
 			resp, err := client.Do(req)
 			if err != nil {
