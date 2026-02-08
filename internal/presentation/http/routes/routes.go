@@ -105,6 +105,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 		api.POST("/hooks/shopify", shopifyHandlers.HandleWebhook)
 		api.GET("/shopify/products", authHandlers.AuthMiddleware(), shopifyHandlers.HandleGetProducts)
+		api.POST("/shopify/checkout", shopifyHandlers.HandleCreateCheckout)
 
 		// Config endpoints
 		configGroup := api.Group("/config")

@@ -13,6 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CreateCheckoutRequest handles to cart lines
+type CreateCheckoutRequest struct {
+	Lines []services.CartLineInput `json:"lines"`
+}
+
 // ShopifyHandlers provides endpoints for Shopify integration.
 type ShopifyHandlers struct {
 	shopifyService  *services.ShopifyService
@@ -142,4 +147,44 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 
 	marker.SetSuccess(true)
 	c.Status(http.StatusOK)
+}
+
+// HandleCreateCheckout creates a new Shopify cart/checkout via the service.
+func (h *ShopifyHandlers) HandleCreateCheckout(c *gin.Context) {
+	// 1. Resolve Tenant Context using your existing middleware pattern
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("shopify_create_checkout", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	// 2. Parse Request using Gin's binder
+	var req CreateCheckoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.System().Warn("Invalid checkout request body", "error", err, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if len(req.Lines) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cart is empty"})
+		return
+	}
+
+	// 3. Call Service
+	checkoutURL, err := h.shopifyService.CreateCart(tenantCtx, req.Lines)
+	if err != nil {
+		h.logger.System().Error("Failed to create shopify checkout", "error", err, "tenantId", tenantCtx.TenantID)
+		// Return 500 (Internal Server Error) with the error message
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 4. Return Success
+	h.logger.System().Info("Shopify checkout created", "url", checkoutURL, "tenantId", tenantCtx.TenantID)
+	marker.SetSuccess(true)
+	c.JSON(http.StatusOK, gin.H{"checkoutUrl": checkoutURL})
 }

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
@@ -18,6 +19,12 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/sync/singleflight"
 )
+
+// CartLineInput handles a single product action
+type CartLineInput struct {
+	MerchandiseID string `json:"merchandiseId"`
+	Quantity      int    `json:"quantity"`
+}
 
 // ShopifyService handles communication with Shopify APIs and webhook verification.
 type ShopifyService struct {
@@ -440,4 +447,104 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int,
 	}
 
 	return totalProcessed, reconciledCount, deletedCount, nil
+}
+
+// CreateCart creates a new cart via the Shopify Storefront API.
+func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineInput) (string, error) {
+	token := tenantCtx.Config.ShopifyStorefrontToken
+	domain := tenantCtx.Config.ShopifyStoreDomain
+	apiVersion := tenantCtx.Config.ShopifyAPIVersion
+
+	if token == "" || domain == "" {
+		return "", fmt.Errorf("shopify credentials (token/domain) missing for tenant %s", tenantCtx.TenantID)
+	}
+	if apiVersion == "" {
+		// Fallback or error if version is missing, matching FetchProducts behavior
+		return "", fmt.Errorf("shopify api version not configured for tenant %s", tenantCtx.TenantID)
+	}
+
+	cleanDomain := strings.TrimSuffix(domain, "/")
+	if !strings.HasPrefix(cleanDomain, "http") {
+		cleanDomain = "https://" + cleanDomain
+	}
+	url := fmt.Sprintf("%s/api/%s/graphql.json", cleanDomain, apiVersion)
+
+	query := `mutation cartCreate($input: CartInput!) {
+		cartCreate(input: $input) {
+			cart {
+				checkoutUrl
+			}
+			userErrors {
+				field
+				message
+			}
+		}
+	}`
+
+	variables := map[string]any{
+		"input": map[string]any{
+			"lines": lines,
+		},
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"query":     query,
+		"variables": variables,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal cart request: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	// Matches the header used in FetchProducts
+	req.Header.Set("Shopify-Storefront-Private-Token", token)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("shopify cart request failed: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			s.logger.System().Warn("Failed to close Shopify cart response body", "error", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
+	}
+
+	var response struct {
+		Data struct {
+			CartCreate struct {
+				Cart struct {
+					CheckoutURL string `json:"checkoutUrl"`
+				} `json:"cart"`
+				UserErrors []struct {
+					Message string `json:"message"`
+				} `json:"userErrors"`
+			} `json:"cartCreate"`
+		} `json:"data"`
+		Errors []any `json:"errors"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(response.Errors) > 0 {
+		return "", fmt.Errorf("graphql errors: %v", response.Errors)
+	}
+
+	if len(response.Data.CartCreate.UserErrors) > 0 {
+		return "", fmt.Errorf("shopify user error: %s", response.Data.CartCreate.UserErrors[0].Message)
+	}
+
+	return response.Data.CartCreate.Cart.CheckoutURL, nil
 }
