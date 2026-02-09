@@ -426,6 +426,25 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int,
 		jsonData, _ := json.Marshal(p)
 		optionsPayload["shopifyData"] = string(jsonData)
 
+		// Extract Image URL for Sync Detection
+		// We must handle both []any (from cache JSON unmarshal) and []map[string]any (fresh)
+		var imageURL string
+		if rawImages, ok := p["images"].([]any); ok && len(rawImages) > 0 {
+			if firstImg, ok := rawImages[0].(map[string]any); ok {
+				if url, ok := firstImg["url"].(string); ok {
+					imageURL = url
+				}
+			}
+		} else if rawImages, ok := p["images"].([]map[string]any); ok && len(rawImages) > 0 {
+			if url, ok := rawImages[0]["url"].(string); ok {
+				imageURL = url
+			}
+		}
+
+		if imageURL != "" {
+			optionsPayload["shopifyImageSourceUrl"] = imageURL
+		}
+
 		resource := &content.ResourceNode{
 			Title:          title,
 			Slug:           fmt.Sprintf("product-%s", handle),

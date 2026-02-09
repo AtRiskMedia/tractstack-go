@@ -4,14 +4,17 @@ package services
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/media"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // ResourceService orchestrates resource operations with cache-first repository pattern
@@ -366,6 +369,74 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		}
 	}
 
+	// --- Image Sync & Cleanup Logic ---
+	var fileToDelete string
+	var activeFileID string
+	imageChanged := false
+
+	// Retrieve the active file ID from the existing resource if present
+	if existing != nil {
+		if val, ok := existing.OptionsPayload["image"].(string); ok {
+			activeFileID = val
+		}
+	}
+
+	// Check if we have an incoming image URL to process
+	incomingImageURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
+	storedImageURL := ""
+	if existing != nil {
+		storedImageURL, _ = existing.OptionsPayload["shopifyImageSourceUrl"].(string)
+	}
+
+	// Trigger processing if URL changed OR if we have a URL but no file ID (orphaned state repair)
+	if incomingImageURL != "" && (incomingImageURL != storedImageURL || activeFileID == "") {
+		mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
+		processor := media.NewImageProcessor(mediaPath)
+		newFileID := security.GenerateULID()
+
+		// Download and process the new image
+		src, srcSet, err := processor.ProcessURL(incomingImageURL, newFileID)
+		if err != nil {
+			s.logger.Content().Warn("Failed to process shopify image", "error", err, "url", incomingImageURL)
+			// We continue without the image rather than failing the whole product sync
+		} else {
+			filename := filepath.Base(src)
+			imageFile := &content.ImageFileNode{
+				ID:             newFileID,
+				NodeType:       "File",
+				Filename:       filename,
+				AltDescription: resource.Title, // Use product title as default alt
+				Src:            src,
+				SrcSet:         srcSet,
+			}
+
+			if err := s.imageFileService.Create(tenantCtx, imageFile); err != nil {
+				s.logger.Content().Error("Failed to create image file record", "error", err, "fileId", newFileID)
+			} else {
+				// Success: Update state
+				if activeFileID != "" {
+					fileToDelete = activeFileID
+				}
+				activeFileID = newFileID
+				imageChanged = true
+
+				// Update the resource payload
+				resource.OptionsPayload["image"] = activeFileID
+				// shopifyImageSourceUrl is already in resource.OptionsPayload from caller
+			}
+		}
+	} else if existing != nil {
+		// No change: Persist the existing image ID to the new resource object
+		// (The caller might not have populated 'image' in OptionsPayload)
+		resource.OptionsPayload["image"] = activeFileID
+	}
+
+	// Prepare file IDs for the repository (handling the junction table)
+	var fileIDs []string
+	if activeFileID != "" {
+		fileIDs = []string{activeFileID}
+	}
+
 	resourceRepo := tenantCtx.ResourceRepo()
 	operation := "none"
 
@@ -376,6 +447,8 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 
 		hasChanged := false
 		switch {
+		case imageChanged:
+			hasChanged = true
 		case resource.Title != existing.Title:
 			hasChanged = true
 		case resource.OneLiner != existing.OneLiner:
@@ -392,7 +465,8 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 				resource.CategorySlug = existing.CategorySlug
 			}
 
-			if err := resourceRepo.Update(tenantCtx.TenantID, resource, nil); err != nil {
+			// Pass fileIDs to ensure relationship is maintained/updated
+			if err := resourceRepo.Update(tenantCtx.TenantID, resource, fileIDs); err != nil {
 				return "", fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
 			}
 			operation = "updated"
@@ -407,13 +481,23 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 			resource.CategorySlug = &defaultCat
 		}
 
-		if err := resourceRepo.Store(tenantCtx.TenantID, resource, nil); err != nil {
+		// Pass fileIDs to create relationship
+		if err := resourceRepo.Store(tenantCtx.TenantID, resource, fileIDs); err != nil {
 			return "", fmt.Errorf("failed to create shopify resource: %w", err)
 		}
 		operation = "created"
 	}
 
-	// 6. Refresh Content Map if a write occurred
+	// 6. Cleanup: Delete the old file if we successfully replaced it
+	if fileToDelete != "" && operation != "none" {
+		if err := s.imageFileService.Delete(tenantCtx, fileToDelete); err != nil {
+			s.logger.Content().Error("Failed to cleanup old shopify image", "error", err, "oldFileId", fileToDelete)
+		} else {
+			s.logger.Content().Info("Cleaned up old shopify image", "oldFileId", fileToDelete)
+		}
+	}
+
+	// 7. Refresh Content Map if a write occurred
 	if operation != "none" {
 		tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
 		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
