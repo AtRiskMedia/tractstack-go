@@ -26,6 +26,12 @@ type CartLineInput struct {
 	Quantity      int    `json:"quantity"`
 }
 
+// AttributeInput represents a custom key-value pair attached to the cart.
+type AttributeInput struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 // ShopifyService handles communication with Shopify APIs and webhook verification.
 type ShopifyService struct {
 	logger          *logging.ChanneledLogger
@@ -468,8 +474,8 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int,
 	return totalProcessed, reconciledCount, deletedCount, nil
 }
 
-// CreateCart creates a new cart via the Shopify Storefront API.
-func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineInput) (string, error) {
+// CreateCart creates a new cart via the Shopify Storefront API with optional attributes and identity.
+func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineInput, attributes []AttributeInput, email string) (string, error) {
 	token := tenantCtx.Config.ShopifyStorefrontToken
 	domain := tenantCtx.Config.ShopifyStoreDomain
 	apiVersion := tenantCtx.Config.ShopifyAPIVersion
@@ -478,7 +484,6 @@ func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineI
 		return "", fmt.Errorf("shopify credentials (token/domain) missing for tenant %s", tenantCtx.TenantID)
 	}
 	if apiVersion == "" {
-		// Fallback or error if version is missing, matching FetchProducts behavior
 		return "", fmt.Errorf("shopify api version not configured for tenant %s", tenantCtx.TenantID)
 	}
 
@@ -500,10 +505,23 @@ func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineI
 		}
 	}`
 
+	// Construct the input map dynamically to handle optional fields
+	cartInput := map[string]any{
+		"lines": lines,
+	}
+
+	if len(attributes) > 0 {
+		cartInput["attributes"] = attributes
+	}
+
+	if email != "" {
+		cartInput["buyerIdentity"] = map[string]any{
+			"email": email,
+		}
+	}
+
 	variables := map[string]any{
-		"input": map[string]any{
-			"lines": lines,
-		},
+		"input": cartInput,
 	}
 
 	body, err := json.Marshal(map[string]any{
@@ -520,7 +538,6 @@ func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineI
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	// Matches the header used in FetchProducts
 	req.Header.Set("Shopify-Storefront-Private-Token", token)
 
 	client := &http.Client{Timeout: 10 * time.Second}

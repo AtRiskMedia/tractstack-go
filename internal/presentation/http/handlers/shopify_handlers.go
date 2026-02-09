@@ -13,9 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// CreateCheckoutRequest handles to cart lines
+// CreateCheckoutRequest handles cart lines, attributes, and user identity.
 type CreateCheckoutRequest struct {
-	Lines []services.CartLineInput `json:"lines"`
+	Lines      []services.CartLineInput  `json:"lines"`
+	Attributes []services.AttributeInput `json:"attributes"`
+	Email      string                    `json:"email"`
 }
 
 // ShopifyHandlers provides endpoints for Shopify integration.
@@ -174,8 +176,8 @@ func (h *ShopifyHandlers) HandleCreateCheckout(c *gin.Context) {
 		return
 	}
 
-	// 3. Call Service
-	checkoutURL, err := h.shopifyService.CreateCart(tenantCtx, req.Lines)
+	// 3. Call Service with extended parameters (lines, attributes, email)
+	checkoutURL, err := h.shopifyService.CreateCart(tenantCtx, req.Lines, req.Attributes, req.Email)
 	if err != nil {
 		h.logger.System().Error("Failed to create shopify checkout", "error", err, "tenantId", tenantCtx.TenantID)
 		// Return 500 (Internal Server Error) with the error message
