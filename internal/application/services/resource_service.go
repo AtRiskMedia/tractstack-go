@@ -3,6 +3,7 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -330,6 +331,8 @@ func (s *ResourceService) GetByCategory(tenantCtx *tenant.Context, category stri
 }
 
 // UpsertShopifyResource handles single-item synchronization from a Shopify webhook or reconciliation scan.
+// It supports multi-variant image synchronization, performs source URL change detection,
+// and ensures all variant images are correctly linked in the database.
 // Returns the operation performed ("created", "updated", or "none") and any error.
 func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resource *content.ResourceNode) (string, error) {
 	start := time.Now()
@@ -352,7 +355,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		return "", fmt.Errorf("incoming shopify resource missing required 'gid' in optionsPayload")
 	}
 
-	// 3. Scan for existing resource (O(N) in memory, fast)
+	// 3. Scan for existing resource
 	var existing *content.ResourceNode
 	for _, p := range products {
 		if gid, ok := p.OptionsPayload["gid"].(string); ok && gid == targetGID {
@@ -369,110 +372,145 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		}
 	}
 
-	// --- Image Sync & Cleanup Logic ---
-	var fileToDelete string
-	var activeFileID string
-	imageChanged := false
+	// --- Multi-Image Sync Logic ---
 
-	// Retrieve the active file ID from the existing resource if present
+	// allActiveFileIDs tracks every file that should be linked to this resource in the DB
+	var allActiveFileIDs []string
+	// filesToDelete tracks orphaned File IDs replaced during change detection
+	var filesToDelete []string
+
+	// Helper for image processing
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
+	processor := media.NewImageProcessor(mediaPath)
+
+	// A. Process Legacy/Main Image (Preserve existing logic for 'image' field)
+	activeMainFileID := ""
 	if existing != nil {
 		if val, ok := existing.OptionsPayload["image"].(string); ok {
-			activeFileID = val
+			activeMainFileID = val
 		}
 	}
 
-	// Check if we have an incoming image URL to process
-	incomingImageURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
-	storedImageURL := ""
+	incomingMainURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
+	storedMainURL := ""
 	if existing != nil {
-		storedImageURL, _ = existing.OptionsPayload["shopifyImageSourceUrl"].(string)
+		storedMainURL, _ = existing.OptionsPayload["shopifyImageSourceUrl"].(string)
 	}
 
-	// Trigger processing if URL changed OR if we have a URL but no file ID (orphaned state repair)
-	if incomingImageURL != "" && (incomingImageURL != storedImageURL || activeFileID == "") {
-		mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
-		processor := media.NewImageProcessor(mediaPath)
+	if incomingMainURL != "" && (incomingMainURL != storedMainURL || activeMainFileID == "") {
 		newFileID := security.GenerateULID()
-
-		// Download and process the new image
-		src, srcSet, err := processor.ProcessURL(incomingImageURL, newFileID)
-		if err != nil {
-			s.logger.Content().Warn("Failed to process shopify image", "error", err, "url", incomingImageURL)
-			// We continue without the image rather than failing the whole product sync
-		} else {
-			filename := filepath.Base(src)
+		src, srcSet, err := processor.ProcessURL(incomingMainURL, newFileID)
+		if err == nil {
 			imageFile := &content.ImageFileNode{
 				ID:             newFileID,
 				NodeType:       "File",
-				Filename:       filename,
-				AltDescription: resource.Title, // Use product title as default alt
+				Filename:       filepath.Base(src),
+				AltDescription: resource.Title,
 				Src:            src,
 				SrcSet:         srcSet,
 			}
-
-			if err := s.imageFileService.Create(tenantCtx, imageFile); err != nil {
-				s.logger.Content().Error("Failed to create image file record", "error", err, "fileId", newFileID)
-			} else {
-				// Success: Update state
-				if activeFileID != "" {
-					fileToDelete = activeFileID
+			if err := s.imageFileService.Create(tenantCtx, imageFile); err == nil {
+				if activeMainFileID != "" {
+					filesToDelete = append(filesToDelete, activeMainFileID)
 				}
-				activeFileID = newFileID
-				imageChanged = true
-
-				// Update the resource payload
-				resource.OptionsPayload["image"] = activeFileID
-				// shopifyImageSourceUrl is already in resource.OptionsPayload from caller
+				activeMainFileID = newFileID
 			}
 		}
-	} else if existing != nil {
-		// No change: Persist the existing image ID to the new resource object
-		// (The caller might not have populated 'image' in OptionsPayload)
-		resource.OptionsPayload["image"] = activeFileID
+	}
+	if activeMainFileID != "" {
+		resource.OptionsPayload["image"] = activeMainFileID
+		allActiveFileIDs = append(allActiveFileIDs, activeMainFileID)
 	}
 
-	// Prepare file IDs for the repository (handling the junction table)
-	var fileIDs []string
-	if activeFileID != "" {
-		fileIDs = []string{activeFileID}
+	// B. Process Variant Image Map (VariantGID -> {fileId, sourceUrl})
+	type variantEntry struct {
+		FileID    string `json:"fileId,omitempty"`
+		SourceURL string `json:"sourceUrl"`
 	}
 
+	incomingVariantMap := make(map[string]variantEntry)
+	if raw, ok := resource.OptionsPayload["shopifyImage"].(string); ok && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &incomingVariantMap)
+	}
+
+	storedVariantMap := make(map[string]variantEntry)
+	if existing != nil {
+		if raw, ok := existing.OptionsPayload["shopifyImage"].(string); ok && raw != "" {
+			_ = json.Unmarshal([]byte(raw), &storedVariantMap)
+		}
+	}
+
+	finalVariantMap := make(map[string]variantEntry)
+	variantChangeDetected := false
+
+	for vGID, incoming := range incomingVariantMap {
+		stored := storedVariantMap[vGID]
+		useFileID := stored.FileID
+
+		// Change detection: Check if URL changed or if we are missing the local file ID
+		if incoming.SourceURL != "" && (incoming.SourceURL != stored.SourceURL || useFileID == "") {
+			newFileID := security.GenerateULID()
+			src, srcSet, err := processor.ProcessURL(incoming.SourceURL, newFileID)
+			if err == nil {
+				imageFile := &content.ImageFileNode{
+					ID:             newFileID,
+					NodeType:       "File",
+					Filename:       filepath.Base(src),
+					AltDescription: fmt.Sprintf("%s - variant", resource.Title),
+					Src:            src,
+					SrcSet:         srcSet,
+				}
+				if err := s.imageFileService.Create(tenantCtx, imageFile); err == nil {
+					if stored.FileID != "" {
+						filesToDelete = append(filesToDelete, stored.FileID)
+					}
+					useFileID = newFileID
+					variantChangeDetected = true
+				}
+			}
+		}
+
+		if useFileID != "" {
+			finalVariantMap[vGID] = variantEntry{
+				FileID:    useFileID,
+				SourceURL: incoming.SourceURL,
+			}
+			allActiveFileIDs = append(allActiveFileIDs, useFileID)
+		}
+	}
+
+	// Serialize the updated variant map back to the resource
+	if mapData, err := json.Marshal(finalVariantMap); err == nil {
+		resource.OptionsPayload["shopifyImage"] = string(mapData)
+	}
+
+	// 4. Persistence Path
 	resourceRepo := tenantCtx.ResourceRepo()
 	operation := "none"
 
 	if existing != nil {
-		// 4. UPDATE Path
+		// UPDATE Path
 		incomingData, _ := resource.OptionsPayload["shopifyData"].(string)
 		existingData, _ := existing.OptionsPayload["shopifyData"].(string)
 
-		hasChanged := false
-		switch {
-		case imageChanged:
-			hasChanged = true
-		case resource.Title != existing.Title:
-			hasChanged = true
-		case resource.OneLiner != existing.OneLiner:
-			hasChanged = true
-		case incomingData != existingData:
-			hasChanged = true
-		}
+		hasChanged := variantChangeDetected ||
+			resource.Title != existing.Title ||
+			resource.OneLiner != existing.OneLiner ||
+			incomingData != existingData ||
+			resource.OptionsPayload["image"] != existing.OptionsPayload["image"]
 
 		if hasChanged {
-			// Preserve the authoritative ID
 			resource.ID = existing.ID
-
 			if resource.CategorySlug == nil {
 				resource.CategorySlug = existing.CategorySlug
 			}
-
-			// Pass fileIDs to ensure relationship is maintained/updated
-			if err := resourceRepo.Update(tenantCtx.TenantID, resource, fileIDs); err != nil {
+			if err := resourceRepo.Update(tenantCtx.TenantID, resource, allActiveFileIDs); err != nil {
 				return "", fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
 			}
 			operation = "updated"
 		}
 	} else {
-		// 5. CREATE Path
+		// CREATE Path
 		if resource.ID == "" {
 			resource.ID = security.GenerateULID()
 		}
@@ -480,25 +518,20 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 			defaultCat := "product"
 			resource.CategorySlug = &defaultCat
 		}
-
-		// Pass fileIDs to create relationship
-		if err := resourceRepo.Store(tenantCtx.TenantID, resource, fileIDs); err != nil {
+		if err := resourceRepo.Store(tenantCtx.TenantID, resource, allActiveFileIDs); err != nil {
 			return "", fmt.Errorf("failed to create shopify resource: %w", err)
 		}
 		operation = "created"
 	}
 
-	// 6. Cleanup: Delete the old file if we successfully replaced it
-	if fileToDelete != "" && operation != "none" {
-		if err := s.imageFileService.Delete(tenantCtx, fileToDelete); err != nil {
-			s.logger.Content().Error("Failed to cleanup old shopify image", "error", err, "oldFileId", fileToDelete)
-		} else {
-			s.logger.Content().Info("Cleaned up old shopify image", "oldFileId", fileToDelete)
-		}
-	}
-
-	// 7. Refresh Content Map if a write occurred
+	// 5. Cleanup Replaced Files
 	if operation != "none" {
+		for _, fileID := range filesToDelete {
+			if err := s.imageFileService.Delete(tenantCtx, fileID); err != nil {
+				s.logger.Content().Warn("Failed to cleanup replaced shopify image", "error", err, "fileId", fileID)
+			}
+		}
+		// Update cache and refresh content map
 		tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
 		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 			s.logger.Content().Error("Failed to refresh content map after shopify upsert", "error", err)

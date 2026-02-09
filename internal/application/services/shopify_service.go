@@ -192,6 +192,9 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
                         amount
                         currencyCode
                       }
+		                  image {
+                        url
+                      }
                       compareAtPrice {
                         amount
                         currencyCode
@@ -357,21 +360,22 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
 
 // ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
 // It updates existing resources, creates new ones, and prunes orphaned resources.
+// It supports multi-image synchronization via a shopifyImage map in the options payload.
 func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int, error) {
 	// 1. Fetch all products currently active on Shopify
 	products, err := s.FetchProducts(tenantCtx)
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, fmt.Errorf("failed to fetch products: %w", err)
 	}
 
 	// CIRCUIT BREAKER:
-	// Verify we received > 0 products
+	// Verify we received > 0 products to prevent accidental mass deletion
 	if len(products) == 0 {
 		s.logger.System().Warn("Shopify reconciliation aborted: 0 products returned from API", "tenantId", tenantCtx.TenantID)
 		return 0, 0, 0, fmt.Errorf("circuit breaker triggered: 0 products returned")
 	}
 
-	// 2. Map incoming GIDs for fast diffing
+	// 2. Map incoming GIDs for fast diffing during pruning
 	incomingGIDs := make(map[string]bool)
 	for _, p := range products {
 		if id, ok := p["id"].(string); ok {
@@ -432,23 +436,68 @@ func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int,
 		jsonData, _ := json.Marshal(p)
 		optionsPayload["shopifyData"] = string(jsonData)
 
-		// Extract Image URL for Sync Detection
-		// We must handle both []any (from cache JSON unmarshal) and []map[string]any (fresh)
-		var imageURL string
+		// --- Multi-Image and Variant logic ---
+
+		// Extract Main Product Image URL for sync detection and legacy fallback
+		var mainImageURL string
 		if rawImages, ok := p["images"].([]any); ok && len(rawImages) > 0 {
 			if firstImg, ok := rawImages[0].(map[string]any); ok {
-				if url, ok := firstImg["url"].(string); ok {
-					imageURL = url
-				}
+				mainImageURL, _ = firstImg["url"].(string)
 			}
 		} else if rawImages, ok := p["images"].([]map[string]any); ok && len(rawImages) > 0 {
-			if url, ok := rawImages[0]["url"].(string); ok {
-				imageURL = url
+			mainImageURL, _ = rawImages[0]["url"].(string)
+		}
+
+		// Prepare the shopifyImage map: VariantGID -> { sourceUrl }
+		// This will be processed by ResourceService.UpsertShopifyResource to handle file sync
+		shopifyImageMap := make(map[string]any)
+
+		// Extract Variants - Handle both fresh []map[string]any and cached []any
+		var rawVariants []any
+		if v, ok := p["variants"].([]any); ok {
+			rawVariants = v
+		} else if v, ok := p["variants"].([]map[string]any); ok {
+			for _, vm := range v {
+				rawVariants = append(rawVariants, vm)
 			}
 		}
 
-		if imageURL != "" {
-			optionsPayload["shopifyImageSourceUrl"] = imageURL
+		for _, rv := range rawVariants {
+			vMap, ok := rv.(map[string]any)
+			if !ok {
+				continue
+			}
+			vID, _ := vMap["id"].(string)
+			if vID == "" {
+				continue
+			}
+
+			// Extract Variant Image URL (if provided by API), fallback to main product image
+			vImgURL := ""
+			if vImg, ok := vMap["image"].(map[string]any); ok {
+				vImgURL, _ = vImg["url"].(string)
+			}
+			if vImgURL == "" {
+				vImgURL = mainImageURL
+			}
+
+			if vImgURL != "" {
+				shopifyImageMap[vID] = map[string]string{
+					"sourceUrl": vImgURL,
+				}
+			}
+		}
+
+		// Store the variant map as a JSON string (matching the new 'string' type in Dashboard schema)
+		if len(shopifyImageMap) > 0 {
+			if mapData, err := json.Marshal(shopifyImageMap); err == nil {
+				optionsPayload["shopifyImage"] = string(mapData)
+			}
+		}
+
+		// Preserve main trigger for existing UpsertShopifyResource logic
+		if mainImageURL != "" {
+			optionsPayload["shopifyImageSourceUrl"] = mainImageURL
 		}
 
 		resource := &content.ResourceNode{
