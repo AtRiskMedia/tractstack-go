@@ -668,3 +668,72 @@ func (r *ResourceRepository) FindFileIDsByResourceID(_ string, resourceID string
 
 	return fileIDs, nil
 }
+
+// BatchUpsert performs a bulk create and update operation in a single transaction
+func (r *ResourceRepository) BatchUpsert(tenantID string, creates []*content.ResourceNode, updates []*content.ResourceNode) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction for batch upsert: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			r.logger.Database().Error("failed to rollback transaction for batch upsert", "error", err)
+		}
+	}()
+
+	// Process Creates
+	if len(creates) > 0 {
+		query := `INSERT INTO resources (id, title, slug, category_slug, oneliner, action_lisp, options_payload) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		stmt, err := tx.Prepare(query)
+		if err != nil {
+			return fmt.Errorf("failed to prepare insert statement: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
+		for _, resource := range creates {
+			optionsJSON, err := json.Marshal(resource.OptionsPayload)
+			if err != nil {
+				return fmt.Errorf("failed to marshal options for resource %s: %w", resource.ID, err)
+			}
+
+			if _, err := stmt.Exec(resource.ID, resource.Title, resource.Slug, resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON)); err != nil {
+				return fmt.Errorf("failed to insert resource %s: %w", resource.ID, err)
+			}
+		}
+	}
+
+	// Process Updates
+	if len(updates) > 0 {
+		query := `UPDATE resources SET title = ?, slug = ?, category_slug = ?, oneliner = ?, action_lisp = ?, options_payload = ? WHERE id = ?`
+		stmt, err := tx.Prepare(query)
+		if err != nil {
+			return fmt.Errorf("failed to prepare update statement: %w", err)
+		}
+		defer func() { _ = stmt.Close() }()
+
+		for _, resource := range updates {
+			optionsJSON, err := json.Marshal(resource.OptionsPayload)
+			if err != nil {
+				return fmt.Errorf("failed to marshal options for resource %s: %w", resource.ID, err)
+			}
+
+			if _, err := stmt.Exec(resource.Title, resource.Slug, resource.CategorySlug, resource.OneLiner, resource.ActionLisp, string(optionsJSON), resource.ID); err != nil {
+				return fmt.Errorf("failed to update resource %s: %w", resource.ID, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction for batch upsert: %w", err)
+	}
+
+	// Update cache
+	for _, resource := range creates {
+		r.cache.SetResource(tenantID, resource)
+	}
+	for _, resource := range updates {
+		r.cache.SetResource(tenantID, resource)
+	}
+
+	return nil
+}

@@ -133,6 +133,15 @@ var (
 	// EnableMultiTenant indicates whether multi-tenant support is active.
 	EnableMultiTenant bool
 
+	// ShopifyReconcileInterval is the frequency at which the system performs a full reconciliation scan of Shopify products.
+	ShopifyReconcileInterval time.Duration
+	// ShopifyReconcileStartupDelay is the initial delay after server startup before the first reconciliation scan begins.
+	ShopifyReconcileStartupDelay time.Duration
+	// ShopifyDataTTL is the cache interval for shopify data
+	ShopifyDataTTL time.Duration
+	// ShopifyRequestTimeout is the maximum duration to wait for a Shopify API response
+	ShopifyRequestTimeout time.Duration
+
 	// MaxTenants sets the maximum number of tenants allowed in memory.
 	MaxTenants int
 	// MaxMemoryMB sets the soft memory limit for the application in megabytes.
@@ -241,6 +250,12 @@ func init() {
 
 	// Multi-tenant Configuration
 	EnableMultiTenant = getEnvBool("ENABLE_MULTI_TENANT", false)
+
+	// Shopify service
+	ShopifyReconcileInterval = time.Duration(getEnvInt("SHOPIFY_RECONCILE_INTERVAL_HOURS", 48)) * time.Hour
+	ShopifyReconcileStartupDelay = time.Duration(getEnvInt("SHOPIFY_RECONCILE_STARTUP_DELAY_MINUTES", 48)) * time.Minute
+	ShopifyDataTTL = time.Duration(getEnvInt("SHOPIFY_DATA_TTL", 5)) * time.Minute
+	ShopifyRequestTimeout = getEnvDuration("SHOPIFY_REQUEST_TIMEOUT", 30*time.Second)
 
 	// Memory Management
 	MaxTenants = getEnvInt("MAX_TENANTS", 0)

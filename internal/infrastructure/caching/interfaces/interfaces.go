@@ -74,6 +74,8 @@ type ContentCache interface {
 	InvalidateFile(tenantID, id string)
 	AddFileID(tenantID, id string)
 	RemoveFileID(tenantID, id string)
+	GetShopifyCatalog(tenantID string) ([]byte, bool)
+	SetShopifyCatalog(tenantID string, data []byte)
 }
 
 // UserStateCache defines operations for user state caching

@@ -116,6 +116,9 @@ func Initialize() error {
 	cleanupConfig := cleanup.NewConfig()
 	cleanupWorker := cleanup.NewWorker(cacheManager, tenantManager.GetDetector(), cleanupConfig, logger)
 	go cleanupWorker.Start(ctx)
+	if appContainer.ShopifyReconciliationWorker != nil {
+		go appContainer.ShopifyReconciliationWorker.Start(ctx)
+	}
 	log.Printf("%s✓ Background Services Up   %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
 	// --- Step 8: Start HTTP Server ---

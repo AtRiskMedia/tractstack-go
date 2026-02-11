@@ -76,6 +76,7 @@ type ResourceRepository interface {
 	Delete(tenantID, id string) error
 	SearchBodies(tenantID, term string) ([]FTSResult, error)
 	FindFileIDsByResourceID(tenantID string, resourceID string) ([]string, error)
+	BatchUpsert(tenantID string, creates []*content.ResourceNode, updates []*content.ResourceNode) error
 }
 
 // BeliefRepository defines the persistence interface for Belief nodes.

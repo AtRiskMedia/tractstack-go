@@ -1,5 +1,5 @@
 // Package types defines cache data structures for multi-tenant content and analytics.
-package types
+package types //nolint:revive
 
 import (
 	"sync"
@@ -33,8 +33,13 @@ type TenantContentCache struct {
 	AllEpinetIDs        []string
 	AllFileIDs          []string
 
+	// ContentMap
 	FullContentMap        []FullContentMapItem `json:"fullContentMap,omitempty"`
 	ContentMapLastUpdated time.Time            `json:"contentMapLastUpdated"`
+
+	// Shopify Data
+	ShopifyCatalog            []byte
+	ShopifyCatalogLastUpdated time.Time
 
 	// Orphan analysis
 	OrphanAnalysis *OrphanAnalysisCache `json:"orphanAnalysis"`

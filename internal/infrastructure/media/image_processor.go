@@ -4,6 +4,8 @@ package media
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -538,6 +540,100 @@ func (p *ImageProcessor) ProcessResourceImageWithSizes(data, fileID string) (str
 	}
 
 	// Build srcSet string and determine main src
+	srcSet := p.buildContentImageSrcSet(responsivePaths, resourcePath)
+	mainSrc := fmt.Sprintf("/media/images/%s/%s_1920px.webp", resourcePath, fileID)
+
+	return mainSrc, &srcSet, nil
+}
+
+// ProcessURL downloads an image from a URL, validates it, and generates responsive versions.
+// It saves files to the 'resources' directory and returns the main src path and srcSet string.
+func (p *ImageProcessor) ProcessURL(url string, fileID string) (string, *string, error) {
+	if url == "" {
+		return "", nil, fmt.Errorf("empty url provided")
+	}
+
+	// 1. Download the file
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to download image: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("[ERROR] Failed to close response body: %v\n", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("download failed with status: %d", resp.StatusCode)
+	}
+
+	// 2. Detect Extension from Content-Type
+	contentType := resp.Header.Get("Content-Type")
+	var ext string
+	switch {
+	case strings.Contains(contentType, "image/jpeg"):
+		ext = "jpg"
+	case strings.Contains(contentType, "image/png"):
+		ext = "png"
+	case strings.Contains(contentType, "image/webp"):
+		ext = "webp"
+	default:
+		// Fallback: try to guess from URL
+		switch {
+		case strings.HasSuffix(url, ".jpg") || strings.HasSuffix(url, ".jpeg"):
+			ext = "jpg"
+		case strings.HasSuffix(url, ".png"):
+			ext = "png"
+		case strings.HasSuffix(url, ".webp"):
+			ext = "webp"
+		default:
+			return "", nil, fmt.Errorf("unsupported content type: %s", contentType)
+		}
+	}
+
+	// 3. Prepare Target Directory (Resources)
+	const resourcePath = "resources"
+	resourceDir := filepath.Join(p.basePath, "images", resourcePath)
+	if err := os.MkdirAll(resourceDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("failed to create resources directory: %w", err)
+	}
+
+	// 4. Save the downloaded stream to a temporary file
+	// We need it on disk because generateContentImageSizes expects a file path
+	filename := fmt.Sprintf("%s.%s", fileID, ext)
+	downloadPath := filepath.Join(resourceDir, filename)
+
+	out, err := os.Create(downloadPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		if closeErr := out.Close(); closeErr != nil {
+			fmt.Printf("[ERROR] Failed to close file after copy error: %v\n", closeErr)
+		}
+		return "", nil, fmt.Errorf("failed to save download: %w", err)
+	}
+
+	if err := out.Close(); err != nil {
+		return "", nil, fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	// 5. Generate Responsive Versions
+	// This helper handles decoding, resizing (1920, 1080, 600), WebP conversion,
+	// and clean-up of the 'downloadPath' original file.
+	responsivePaths, err := p.generateContentImageSizes(downloadPath, fileID, resourceDir)
+	if err != nil {
+		// Cleanup on failure
+		if removeErr := os.Remove(downloadPath); removeErr != nil {
+			fmt.Printf("[ERROR] Failed to remove temp file after failure: %v\n", removeErr)
+		}
+		return "", nil, fmt.Errorf("failed to generate sizes: %w", err)
+	}
+
+	// 6. Build Return Values
 	srcSet := p.buildContentImageSrcSet(responsivePaths, resourcePath)
 	mainSrc := fmt.Sprintf("/media/images/%s/%s_1920px.webp", resourcePath, fileID)
 

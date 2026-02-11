@@ -241,7 +241,7 @@ func (h *ResourceHandlers) findOrphanedFileIDs(existingResource *content.Resourc
 			// Check if the existing resource had a file for this field.
 			if existingValue, exists := existingResource.OptionsPayload[key]; exists {
 				// The existing value should be a map if it's a processed image.
-				if existingMap, ok := existingValue.(map[string]interface{}); ok {
+				if existingMap, ok := existingValue.(map[string]any); ok {
 					// If it has a fileId, it's an orphan.
 					if fileID, ok := existingMap["fileId"].(string); ok && fileID != "" {
 						orphanedIDs = append(orphanedIDs, fileID)
@@ -406,7 +406,7 @@ func (h *ResourceHandlers) processResourceImages(tenantCtx *tenant.Context, reso
 
 		// Mutate the payload: replace base64 with a structured object.
 		// This keeps the payload consistent and provides the frontend with necessary data.
-		imagePayload := map[string]interface{}{
+		imagePayload := map[string]any{
 			"fileId": fileID,
 			"src":    src,
 		}

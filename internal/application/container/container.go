@@ -53,19 +53,21 @@ type Container struct {
 	ContentAnalyticsService   *services.ContentAnalyticsService
 
 	// System & State Services
-	AuthService            *services.AuthService
-	SessionService         *services.SessionService
-	EventProcessingService *services.EventProcessingService
-	DBService              *services.DBService
-	ConfigService          *services.ConfigService
-	TailwindService        *services.TailwindService
-	MultiTenantService     *services.MultiTenantService
-	AAIService             *services.AAIService
-	LogBroadcaster         *logging.LogBroadcaster
-	Broadcaster            messaging.Broadcaster
-	SysOpBroadcaster       *messaging.SysOpBroadcaster
-	SysOpService           *services.SysOpService
-	Service                *fts.Service
+	AuthService                 *services.AuthService
+	SessionService              *services.SessionService
+	EventProcessingService      *services.EventProcessingService
+	DBService                   *services.DBService
+	ConfigService               *services.ConfigService
+	TailwindService             *services.TailwindService
+	MultiTenantService          *services.MultiTenantService
+	AAIService                  *services.AAIService
+	LogBroadcaster              *logging.LogBroadcaster
+	Broadcaster                 messaging.Broadcaster
+	SysOpBroadcaster            *messaging.SysOpBroadcaster
+	SysOpService                *services.SysOpService
+	ShopifyService              *services.ShopifyService
+	ShopifyReconciliationWorker *services.ShopifyReconciliationWorker
+	Service                     *fts.Service
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -108,11 +110,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 	var emailService email.Service
 	if apiKey := os.Getenv("RESEND_API_KEY"); apiKey != "" {
-		var err error
-		emailService, err = email.NewService()
-		if err != nil {
-			panic("Failed to initialize email service: " + err.Error())
-		}
+		emailService = email.NewService()
 		logger.Startup().Info("Email service initialized successfully with Resend API")
 	} else {
 		emailService = nil
@@ -137,14 +135,21 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		unsetButtonRenderer,
 		scrollTargetService,
 	)
+
+	// --- Core Content Services (Ordered by Dependency) ---
 	contentMapService := services.NewContentMapService(logger, perfTracker)
+	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)
+	resourceService := services.NewResourceService(logger, perfTracker, contentMapService, imageFileService)
+
+	// Shopify integration with now-defined ResourceService
+	shopifyService := services.NewShopifyService(logger, tenantManager, resourceService)
+	shopifyReconciliationWorker := services.NewShopifyReconciliationWorker(shopifyService, tenantManager, logger)
+
 	authService := services.NewAuthService(logger, perfTracker)
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
 	beliefRegistryService := services.NewBeliefRegistryService(logger)
-	imageFileService := services.NewImageFileService(logger, perfTracker, contentMapService)
-	resourceService := services.NewResourceService(logger, perfTracker, contentMapService, imageFileService)
 
 	// Create the orchestrator first, omitting the PaneService to break the dependency cycle.
 	registryRebuildOrchestrator := services.NewRegistryRebuildOrchestrator(
@@ -239,19 +244,21 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ContentAnalyticsService:   services.NewContentAnalyticsService(logger, perfTracker),
 
 		// System & State Services
-		AuthService:            authService,
-		SessionService:         sessionService,
-		EventProcessingService: eventProcessingService,
-		DBService:              dbService,
-		ConfigService:          configService,
-		TailwindService:        tailwindService,
-		MultiTenantService:     multiTenantService,
-		AAIService:             aaiService,
-		LogBroadcaster:         logBroadcaster,
-		Broadcaster:            broadcaster,
-		SysOpService:           sysOpService,
-		SysOpBroadcaster:       sysOpBroadcaster,
-		Service:                ftsService,
+		AuthService:                 authService,
+		SessionService:              sessionService,
+		EventProcessingService:      eventProcessingService,
+		DBService:                   dbService,
+		ConfigService:               configService,
+		TailwindService:             tailwindService,
+		MultiTenantService:          multiTenantService,
+		AAIService:                  aaiService,
+		LogBroadcaster:              logBroadcaster,
+		Broadcaster:                 broadcaster,
+		SysOpService:                sysOpService,
+		SysOpBroadcaster:            sysOpBroadcaster,
+		ShopifyService:              shopifyService,
+		ShopifyReconciliationWorker: shopifyReconciliationWorker,
+		Service:                     ftsService,
 
 		// Infrastructure
 		TenantManager: tenantManager,

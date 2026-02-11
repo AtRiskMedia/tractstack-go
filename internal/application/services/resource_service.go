@@ -3,15 +3,19 @@
 package services
 
 import (
+	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/repositories"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/media"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
+	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
 // ResourceService orchestrates resource operations with cache-first repository pattern
@@ -301,4 +305,309 @@ func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
 func (s *ResourceService) SearchBodies(tenantCtx *tenant.Context, term string) ([]repositories.FTSResult, error) {
 	repo := tenantCtx.ResourceRepo()
 	return repo.SearchBodies(tenantCtx.TenantID, term)
+}
+
+// GetByCategory returns all resources associated with a specific category slug.
+// This is required to support in-memory lookups for integrations.
+func (s *ResourceService) GetByCategory(tenantCtx *tenant.Context, category string) ([]*content.ResourceNode, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("get_resources_by_category", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	resourceRepo := tenantCtx.ResourceRepo()
+	resources, err := resourceRepo.FindByCategory(tenantCtx.TenantID, category)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resources by category %s: %w", category, err)
+	}
+
+	s.logger.Content().Debug("Retrieved resources by category",
+		"tenantId", tenantCtx.TenantID,
+		"category", category,
+		"count", len(resources),
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return resources, nil
+}
+
+// UpsertShopifyResource handles single-item synchronization from a Shopify webhook or reconciliation scan.
+// It supports multi-variant image synchronization, performs source URL change detection,
+// and ensures all variant images are correctly linked in the database.
+// Returns the operation performed ("created", "updated", or "none") and any error.
+func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resource *content.ResourceNode) (string, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("upsert_shopify_resource", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	// 1. Ensure cache is populated for lookup (in-memory scan)
+	products, err := s.GetByCategory(tenantCtx, "product")
+	if err != nil {
+		return "", fmt.Errorf("failed to pre-load products for upsert lookup: %w", err)
+	}
+	services, err := s.GetByCategory(tenantCtx, "service")
+	if err != nil {
+		return "", fmt.Errorf("failed to pre-load services for upsert lookup: %w", err)
+	}
+
+	// 2. Identify the Target GID from the incoming payload
+	targetGID, ok := resource.OptionsPayload["gid"].(string)
+	if !ok || targetGID == "" {
+		return "", fmt.Errorf("incoming shopify resource missing required 'gid' in optionsPayload")
+	}
+
+	// 3. Scan for existing resource
+	var existing *content.ResourceNode
+	for _, p := range products {
+		if gid, ok := p.OptionsPayload["gid"].(string); ok && gid == targetGID {
+			existing = p
+			break
+		}
+	}
+	if existing == nil {
+		for _, svc := range services {
+			if gid, ok := svc.OptionsPayload["gid"].(string); ok && gid == targetGID {
+				existing = svc
+				break
+			}
+		}
+	}
+
+	// --- Multi-Image Sync Logic ---
+
+	// allActiveFileIDs tracks every file that should be linked to this resource in the DB
+	var allActiveFileIDs []string
+	// filesToDelete tracks orphaned File IDs replaced during change detection
+	var filesToDelete []string
+
+	// Helper for image processing
+	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
+	processor := media.NewImageProcessor(mediaPath)
+
+	// A. Process Legacy/Main Image (Preserve existing logic for 'image' field)
+	activeMainFileID := ""
+	if existing != nil {
+		if val, ok := existing.OptionsPayload["image"].(string); ok {
+			activeMainFileID = val
+		}
+	}
+
+	incomingMainURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
+	storedMainURL := ""
+	if existing != nil {
+		storedMainURL, _ = existing.OptionsPayload["shopifyImageSourceUrl"].(string)
+	}
+
+	if incomingMainURL != "" && (incomingMainURL != storedMainURL || activeMainFileID == "") {
+		newFileID := security.GenerateULID()
+		src, srcSet, err := processor.ProcessURL(incomingMainURL, newFileID)
+		if err == nil {
+			imageFile := &content.ImageFileNode{
+				ID:             newFileID,
+				NodeType:       "File",
+				Filename:       filepath.Base(src),
+				AltDescription: resource.Title,
+				Src:            src,
+				SrcSet:         srcSet,
+			}
+			if err := s.imageFileService.Create(tenantCtx, imageFile); err == nil {
+				if activeMainFileID != "" {
+					filesToDelete = append(filesToDelete, activeMainFileID)
+				}
+				activeMainFileID = newFileID
+			}
+		}
+	}
+	if activeMainFileID != "" {
+		resource.OptionsPayload["image"] = activeMainFileID
+		allActiveFileIDs = append(allActiveFileIDs, activeMainFileID)
+	}
+
+	// B. Process Variant Image Map (VariantGID -> {fileId, sourceUrl})
+	type variantEntry struct {
+		FileID    string `json:"fileId,omitempty"`
+		SourceURL string `json:"sourceUrl"`
+	}
+
+	incomingVariantMap := make(map[string]variantEntry)
+	if raw, ok := resource.OptionsPayload["shopifyImage"].(string); ok && raw != "" {
+		_ = json.Unmarshal([]byte(raw), &incomingVariantMap)
+	}
+
+	storedVariantMap := make(map[string]variantEntry)
+	if existing != nil {
+		if raw, ok := existing.OptionsPayload["shopifyImage"].(string); ok && raw != "" {
+			_ = json.Unmarshal([]byte(raw), &storedVariantMap)
+		}
+	}
+
+	finalVariantMap := make(map[string]variantEntry)
+	variantChangeDetected := false
+
+	for vGID, incoming := range incomingVariantMap {
+		stored := storedVariantMap[vGID]
+		useFileID := stored.FileID
+
+		// Change detection: Check if URL changed or if we are missing the local file ID
+		if incoming.SourceURL != "" && (incoming.SourceURL != stored.SourceURL || useFileID == "") {
+			newFileID := security.GenerateULID()
+			src, srcSet, err := processor.ProcessURL(incoming.SourceURL, newFileID)
+			if err == nil {
+				imageFile := &content.ImageFileNode{
+					ID:             newFileID,
+					NodeType:       "File",
+					Filename:       filepath.Base(src),
+					AltDescription: fmt.Sprintf("%s - variant", resource.Title),
+					Src:            src,
+					SrcSet:         srcSet,
+				}
+				if err := s.imageFileService.Create(tenantCtx, imageFile); err == nil {
+					if stored.FileID != "" {
+						filesToDelete = append(filesToDelete, stored.FileID)
+					}
+					useFileID = newFileID
+					variantChangeDetected = true
+				}
+			}
+		}
+
+		if useFileID != "" {
+			finalVariantMap[vGID] = variantEntry{
+				FileID:    useFileID,
+				SourceURL: incoming.SourceURL,
+			}
+			allActiveFileIDs = append(allActiveFileIDs, useFileID)
+		}
+	}
+
+	// Serialize the updated variant map back to the resource
+	if mapData, err := json.Marshal(finalVariantMap); err == nil {
+		resource.OptionsPayload["shopifyImage"] = string(mapData)
+	}
+
+	// 4. Persistence Path
+	resourceRepo := tenantCtx.ResourceRepo()
+	operation := "none"
+
+	if existing != nil {
+		// UPDATE Path
+		incomingData, _ := resource.OptionsPayload["shopifyData"].(string)
+		existingData, _ := existing.OptionsPayload["shopifyData"].(string)
+
+		hasChanged := variantChangeDetected ||
+			resource.Title != existing.Title ||
+			resource.OneLiner != existing.OneLiner ||
+			incomingData != existingData ||
+			resource.OptionsPayload["image"] != existing.OptionsPayload["image"]
+
+		if hasChanged {
+			resource.ID = existing.ID
+			if resource.CategorySlug == nil {
+				resource.CategorySlug = existing.CategorySlug
+			}
+			if err := resourceRepo.Update(tenantCtx.TenantID, resource, allActiveFileIDs); err != nil {
+				return "", fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
+			}
+			operation = "updated"
+		}
+	} else {
+		// CREATE Path
+		if resource.ID == "" {
+			resource.ID = security.GenerateULID()
+		}
+		if resource.CategorySlug == nil {
+			defaultCat := "product"
+			resource.CategorySlug = &defaultCat
+		}
+		if err := resourceRepo.Store(tenantCtx.TenantID, resource, allActiveFileIDs); err != nil {
+			return "", fmt.Errorf("failed to create shopify resource: %w", err)
+		}
+		operation = "created"
+	}
+
+	// 5. Cleanup Replaced Files
+	if operation != "none" {
+		for _, fileID := range filesToDelete {
+			if err := s.imageFileService.Delete(tenantCtx, fileID); err != nil {
+				s.logger.Content().Warn("Failed to cleanup replaced shopify image", "error", err, "fileId", fileID)
+			}
+		}
+		// Update cache and refresh content map
+		tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
+		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
+			s.logger.Content().Error("Failed to refresh content map after shopify upsert", "error", err)
+		}
+	}
+
+	s.logger.Content().Info("Shopify resource upsert completed",
+		"tenantId", tenantCtx.TenantID,
+		"gid", targetGID,
+		"operation", operation,
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return operation, nil
+}
+
+// SyncShopifyDeletion handles the removal of a resource triggered by a Shopify deletion event.
+// It is idempotent: if the resource is not found, it returns "none" and no error.
+func (s *ResourceService) SyncShopifyDeletion(tenantCtx *tenant.Context, gid string) (string, error) {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("sync_shopify_deletion", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if gid == "" {
+		return "", fmt.Errorf("shopify GID cannot be empty for deletion")
+	}
+
+	// 1. Ensure cache is populated for lookup (in-memory scan)
+	// We check both categories where Shopify resources might live.
+	products, err := s.GetByCategory(tenantCtx, "product")
+	if err != nil {
+		return "", fmt.Errorf("failed to load products for deletion lookup: %w", err)
+	}
+	services, err := s.GetByCategory(tenantCtx, "service")
+	if err != nil {
+		return "", fmt.Errorf("failed to load services for deletion lookup: %w", err)
+	}
+
+	// 2. Scan for existing resource by GID
+	var targetID string
+	for _, p := range products {
+		if val, ok := p.OptionsPayload["gid"].(string); ok && val == gid {
+			targetID = p.ID
+			break
+		}
+	}
+	if targetID == "" {
+		for _, svc := range services {
+			if val, ok := svc.OptionsPayload["gid"].(string); ok && val == gid {
+				targetID = svc.ID
+				break
+			}
+		}
+	}
+
+	// 3. Idempotent check: if not found, we are done.
+	if targetID == "" {
+		s.logger.Content().Debug("Shopify resource not found for deletion; skipping",
+			"tenantId", tenantCtx.TenantID,
+			"gid", gid)
+		marker.SetSuccess(true)
+		return "none", nil
+	}
+
+	// 4. Perform the actual deletion using the existing orchestration method.
+	// This handles DB removal, junction tables, FTS, and cache invalidation.
+	if err := s.Delete(tenantCtx, targetID); err != nil {
+		return "", fmt.Errorf("failed to delete Shopify-linked resource %s: %w", targetID, err)
+	}
+
+	s.logger.Content().Info("Shopify resource deleted successfully",
+		"tenantId", tenantCtx.TenantID,
+		"gid", gid,
+		"resourceId", targetID,
+		"duration", time.Since(start))
+
+	marker.SetSuccess(true)
+	return "deleted", nil
 }
