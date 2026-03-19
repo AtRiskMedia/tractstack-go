@@ -2,8 +2,11 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -44,7 +47,7 @@ func NewShopifyHandlers(
 }
 
 // HandleGetProducts proxies the request to Shopify GraphQL via the backend service.
-// This endpoint is authenticated and used by the frontend dashboard.
+// This endpoint supports search and cursor pagination for dynamic discovery.
 func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -56,23 +59,29 @@ func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("shopify_get_products", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	h.logger.System().Debug("Handling Shopify get products request", "tenantId", tenantCtx.TenantID)
+	queryStr := c.Query("q")
+	var cursor *string
+	if cVal := c.Query("cursor"); cVal != "" {
+		cursor = &cVal
+	}
 
-	products, err := h.shopifyService.FetchProducts(tenantCtx)
+	h.logger.System().Debug("Handling Shopify get products request", "tenantId", tenantCtx.TenantID, "query", queryStr)
+
+	result, err := h.shopifyService.FetchProducts(tenantCtx, queryStr, cursor)
 	if err != nil {
 		h.logger.System().Error("Failed to fetch Shopify products", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"products": products})
+	c.JSON(http.StatusOK, result)
 
 	h.logger.System().Info("Shopify products fetched successfully", "duration", time.Since(start))
 	marker.SetSuccess(true)
 }
 
 // HandleWebhook processes incoming webhooks from Shopify (product updates/creation/deletion).
-// It verifies the HMAC signature and routes the operation to the appropriate service method.
+// It verifies the HMAC signature, checks local existence, and routes to the appropriate service.
 func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -84,7 +93,6 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("shopify_webhook", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	// 1. Identify the Shopify Topic
 	topic := c.GetHeader("X-Shopify-Topic")
 	if topic == "" {
 		h.logger.System().Warn("Missing X-Shopify-Topic header", "tenantId", tenantCtx.TenantID)
@@ -92,7 +100,6 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 2. Read the raw body for HMAC verification
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		h.logger.System().Error("Failed to read webhook body", "error", err)
@@ -100,7 +107,6 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 3. Verify Signature
 	signature := c.GetHeader("X-Shopify-Hmac-Sha256")
 	if !h.shopifyService.VerifySignature(tenantCtx, body, signature) {
 		h.logger.System().Warn("Invalid Shopify webhook signature", "tenantId", tenantCtx.TenantID)
@@ -108,30 +114,63 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	// 4. Parse the payload into a ResourceNode
-	// ParseWebhook will be updated to handle minimal deletion payloads (gid only).
-	resource, err := h.shopifyService.ParseWebhook(body)
+	var rawData map[string]any
+	if err := json.Unmarshal(body, &rawData); err != nil {
+		h.logger.System().Error("Failed to unmarshal minimal webhook body", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
+		return
+	}
+
+	var idStr string
+	if v, ok := rawData["id"].(float64); ok {
+		idStr = fmt.Sprintf("%.0f", v)
+	} else if v, ok := rawData["id"].(string); ok {
+		idStr = v
+	}
+
+	if idStr == "" {
+		h.logger.System().Warn("Missing ID in Shopify webhook", "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing id in payload"})
+		return
+	}
+
+	gid := idStr
+	if !strings.HasPrefix(idStr, "gid://") {
+		gid = fmt.Sprintf("gid://shopify/Product/%s", idStr)
+	}
+
+	existsLocally, err := h.resourceService.ExistsByShopifyGID(tenantCtx, gid)
 	if err != nil {
-		h.logger.System().Error("Failed to parse Shopify webhook", "error", err, "topic", topic)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload format"})
+		h.logger.System().Error("Failed to check local Shopify resource existence", "error", err, "gid", gid)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal database error"})
+		return
+	}
+
+	if !existsLocally {
+		h.logger.System().Debug("Ignoring webhook for untracked Shopify resource", "gid", gid, "topic", topic)
+		c.Status(http.StatusOK)
 		return
 	}
 
 	var op string
 	var syncErr error
 
-	// 5. Logic Switch: Branch based on Topic
 	switch topic {
 	case "products/delete":
-		gid, _ := resource.OptionsPayload["gid"].(string)
 		op, syncErr = h.resourceService.SyncShopifyDeletion(tenantCtx, gid)
 
 	case "products/create", "products/update":
+		resource, err := h.shopifyService.ParseWebhook(body)
+		if err != nil {
+			h.logger.System().Error("Failed to parse Shopify webhook", "error", err, "topic", topic)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload format"})
+			return
+		}
 		op, syncErr = h.resourceService.UpsertShopifyResource(tenantCtx, resource)
 
 	default:
 		h.logger.System().Warn("Unsupported Shopify webhook topic", "topic", topic, "tenantId", tenantCtx.TenantID)
-		c.Status(http.StatusAccepted) // Acknowledge but do nothing
+		c.Status(http.StatusAccepted)
 		return
 	}
 
@@ -153,7 +192,6 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 
 // HandleCreateCheckout creates a new Shopify cart/checkout via the service.
 func (h *ShopifyHandlers) HandleCreateCheckout(c *gin.Context) {
-	// 1. Resolve Tenant Context using your existing middleware pattern
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -163,7 +201,6 @@ func (h *ShopifyHandlers) HandleCreateCheckout(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("shopify_create_checkout", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	// 2. Parse Request using Gin's binder
 	var req CreateCheckoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.System().Warn("Invalid checkout request body", "error", err, "tenantId", tenantCtx.TenantID)
@@ -176,16 +213,13 @@ func (h *ShopifyHandlers) HandleCreateCheckout(c *gin.Context) {
 		return
 	}
 
-	// 3. Call Service with extended parameters (lines, attributes, email)
 	checkoutURL, err := h.shopifyService.CreateCart(tenantCtx, req.Lines, req.Attributes, req.Email)
 	if err != nil {
 		h.logger.System().Error("Failed to create shopify checkout", "error", err, "tenantId", tenantCtx.TenantID)
-		// Return 500 (Internal Server Error) with the error message
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 4. Return Success
 	h.logger.System().Info("Shopify checkout created", "url", checkoutURL, "tenantId", tenantCtx.TenantID)
 	marker.SetSuccess(true)
 	c.JSON(http.StatusOK, gin.H{"checkoutUrl": checkoutURL})

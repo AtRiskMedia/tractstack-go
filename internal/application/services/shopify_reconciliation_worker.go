@@ -107,39 +107,38 @@ func (w *ShopifyReconciliationWorker) isDue(tenantID string) bool {
 func (w *ShopifyReconciliationWorker) performReconciliation(tenantID string) {
 	start := time.Now()
 
-	fmt.Printf("▶ Starting Shopify product reconciliation for tenant: %s\n", tenantID)
-	w.logger.System().Info("Starting background Shopify reconciliation", "tenantId", tenantID)
+	fmt.Printf("▶ Starting targeted Shopify background sync for tenant: %s\n", tenantID)
+	w.logger.System().Info("Starting targeted background Shopify sync", "tenantId", tenantID)
 
 	tenantCtx, err := w.tenantManager.NewContextFromID(tenantID)
 	if err != nil {
 		fmt.Printf("✗ Failed to get tenant context for %s: %v\n", tenantID, err)
-		w.logger.System().Error("Failed to get tenant context for reconciliation", "tenantId", tenantID, "error", err)
+		w.logger.System().Error("Failed to get tenant context for Shopify sync", "tenantId", tenantID, "error", err)
 		return
 	}
 
-	// 1. Execute the reconciliation pass
-	// Capturing the new deletedCount alongside processed and reconciled counts
-	processed, reconciled, deleted, err := w.shopifyService.ReconcileAll(tenantCtx)
+	// 1. Execute the chunked reconciliation pass for locally tracked resources
+	verified, reconciled, deleted, err := w.shopifyService.ReconcileAll(tenantCtx)
 
 	w.syncMutex.Lock()
 	w.lastSync[tenantID] = time.Now()
 	w.syncMutex.Unlock()
 
 	if err != nil {
-		fmt.Printf("✗ Shopify reconciliation failed for %s: %v\n", tenantID, err)
-		w.logger.System().Error("Shopify reconciliation failed", "tenantId", tenantID, "error", err)
+		fmt.Printf("✗ Shopify background sync failed for %s: %v\n", tenantID, err)
+		w.logger.System().Error("Shopify background sync failed", "tenantId", tenantID, "error", err)
 		return
 	}
 
 	duration := time.Since(start)
 
-	// 2. Log the summary including the count of pruned (deleted) orphaned resources
-	fmt.Printf("✓ Shopify reconciliation complete for %s: %d updated/created, %d pruned, %d total processed (%v)\n",
-		tenantID, reconciled, deleted, processed, duration.Round(time.Second))
+	// 2. Log the summary of the targeted sync
+	fmt.Printf("✓ Shopify background sync complete for %s: %d updated/created, %d pruned, %d tracked resources verified (%v)\n",
+		tenantID, reconciled, deleted, verified, duration.Round(time.Second))
 
-	w.logger.System().Info("Shopify reconciliation successful",
+	w.logger.System().Info("Shopify background sync successful",
 		"tenantId", tenantID,
-		"totalProcessed", processed,
+		"trackedVerified", verified,
 		"reconciledCount", reconciled,
 		"deletedCount", deleted,
 		"duration", duration)

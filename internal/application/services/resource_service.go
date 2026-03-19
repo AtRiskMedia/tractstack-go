@@ -330,6 +330,22 @@ func (s *ResourceService) GetByCategory(tenantCtx *tenant.Context, category stri
 	return resources, nil
 }
 
+// ExistsByShopifyGID checks if a Shopify resource is tracked locally without hydrating the full node.
+func (s *ResourceService) ExistsByShopifyGID(tenantCtx *tenant.Context, gid string) (bool, error) {
+	marker := s.perfTracker.StartOperation("exists_shopify_gid", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	resourceRepo := tenantCtx.ResourceRepo()
+	exists, err := resourceRepo.ExistsByShopifyGID(tenantCtx.TenantID, gid)
+	if err != nil {
+		return false, fmt.Errorf("repository check for shopify gid failed: %w", err)
+	}
+
+	marker.SetSuccess(true)
+	s.logger.Perf().Info("Performance for ExistsByShopifyGID", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "exists", exists)
+	return exists, nil
+}
+
 // UpsertShopifyResource handles single-item synchronization from a Shopify webhook or reconciliation scan.
 // It supports multi-variant image synchronization, performs source URL change detection,
 // and ensures all variant images are correctly linked in the database.

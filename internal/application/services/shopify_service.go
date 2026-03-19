@@ -1,3 +1,4 @@
+// Package services provides business logic and orchestration for the application.
 package services
 
 import (
@@ -66,7 +67,6 @@ func (s *ShopifyService) VerifySignature(tenantCtx *tenant.Context, body []byte,
 }
 
 // ParseWebhook converts a raw Shopify webhook payload into a ResourceNode.
-// It is resilient to minimal payloads and handles both numeric IDs and GID strings.
 func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error) {
 	var rawData map[string]any
 	if err := json.Unmarshal(body, &rawData); err != nil {
@@ -84,7 +84,6 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 		return nil, fmt.Errorf("missing 'id' in webhook payload")
 	}
 
-	// Respect the user's observation: if it's already a GID, use it; otherwise, prefix it.
 	gid := idStr
 	if !strings.HasPrefix(idStr, "gid://") {
 		gid = fmt.Sprintf("gid://shopify/Product/%s", idStr)
@@ -121,31 +120,28 @@ func (s *ShopifyService) ParseWebhook(body []byte) (*content.ResourceNode, error
 	}, nil
 }
 
-// FetchProducts queries the Shopify Storefront API via GraphQL to get all products.
-// It checks the backend cache first and uses singleflight to prevent thundering herds.
-func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]any, error) {
-	// 1. Check Backend Cache (Fast Path)
-	if cached, found := tenantCtx.CacheManager.GetShopifyCatalog(tenantCtx.TenantID); found {
-		var envelope struct {
-			Products []map[string]any `json:"products"`
-		}
-		if err := json.Unmarshal(cached, &envelope); err != nil {
-			s.logger.System().Warn("Failed to unmarshal cached shopify catalog", "error", err)
-		} else {
-			return envelope.Products, nil
+// FetchProducts queries the Shopify Storefront API via GraphQL.
+// It uses ephemeral caching and singleflight to prevent cross-search data leakage and memory exhaustion.
+func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context, queryStr string, cursor *string) (map[string]any, error) {
+	cursorStr := ""
+	if cursor != nil {
+		cursorStr = *cursor
+	}
+	cacheKey := fmt.Sprintf("shopify_fetch_%s_q:%s_c:%s", tenantCtx.TenantID, queryStr, cursorStr)
+
+	if cached, found := tenantCtx.CacheManager.GetGeneric(tenantCtx.TenantID, cacheKey); found {
+		if result, ok := cached.(map[string]any); ok {
+			return result, nil
 		}
 	}
 
-	// 2. Singleflight: Coalesce concurrent requests for the same tenant
-	key := fmt.Sprintf("shopify_fetch_%s", tenantCtx.TenantID)
-
-	v, err, _ := s.requestGroup.Do(key, func() (any, error) {
+	v, err, _ := s.requestGroup.Do(cacheKey, func() (any, error) {
 		token := tenantCtx.Config.ShopifyStorefrontToken
 		domain := tenantCtx.Config.ShopifyStoreDomain
 		apiVersion := tenantCtx.Config.ShopifyAPIVersion
 
 		if token == "" || domain == "" {
-			return nil, fmt.Errorf("shopify credentials (token/domain) missing for tenant %s", tenantCtx.TenantID)
+			return nil, fmt.Errorf("shopify credentials missing for tenant %s", tenantCtx.TenantID)
 		}
 		if apiVersion == "" {
 			return nil, fmt.Errorf("shopify api version not configured for tenant %s", tenantCtx.TenantID)
@@ -157,10 +153,9 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
 		}
 		url := fmt.Sprintf("%s/api/%s/graphql.json", cleanDomain, apiVersion)
 
-		// GraphQL query to fetch all products (paginated)
 		queryTemplate := `
-        query ($cursor: String) {
-          products(first: 250, after: $cursor, query: "product_type:'active'") {
+        query ($cursor: String, $query: String) {
+          products(first: 25, after: $cursor, query: $query) {
             pageInfo {
               hasNextPage
               endCursor
@@ -171,6 +166,8 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
                 title
                 handle
                 description
+                vendor
+                tags
                 options {
                   name
                   values
@@ -192,7 +189,7 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
                         amount
                         currencyCode
                       }
-		                  image {
+                      image {
                         url
                       }
                       compareAtPrice {
@@ -215,84 +212,63 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
         }
     `
 
-		var allEdges []any
-		var cursor *string
-		hasNextPage := true
-
-		client := &http.Client{
-			Timeout: config.ShopifyRequestTimeout,
+		variables := map[string]any{}
+		if queryStr != "" {
+			variables["query"] = "title:" + queryStr + "*"
+		}
+		if cursor != nil {
+			variables["cursor"] = *cursor
 		}
 
-		for hasNextPage {
-			err := func() error {
-				reqBody := map[string]any{
-					"query": queryTemplate,
-					"variables": map[string]any{
-						"cursor": cursor,
-					},
-				}
-				jsonBody, _ := json.Marshal(reqBody)
+		reqBody := map[string]any{
+			"query":     queryTemplate,
+			"variables": variables,
+		}
+		jsonBody, _ := json.Marshal(reqBody)
 
-				req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
-				if err != nil {
-					return fmt.Errorf("failed to create shopify request: %w", err)
-				}
-				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("Shopify-Storefront-Private-Token", token)
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create shopify request: %w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Shopify-Storefront-Private-Token", token)
 
-				resp, err := client.Do(req)
-				if err != nil {
-					return fmt.Errorf("shopify request failed: %w", err)
-				}
-				defer func() {
-					if closeErr := resp.Body.Close(); closeErr != nil {
-						s.logger.System().Warn("Failed to close Shopify response body", "error", closeErr)
-					}
-				}()
-
-				if resp.StatusCode != http.StatusOK {
-					b, _ := io.ReadAll(resp.Body)
-					return fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
-				}
-
-				var result struct {
-					Data struct {
-						Products struct {
-							PageInfo struct {
-								HasNextPage bool   `json:"hasNextPage"`
-								EndCursor   string `json:"endCursor"`
-							} `json:"pageInfo"`
-							Edges []any `json:"edges"`
-						} `json:"products"`
-					} `json:"data"`
-					Errors []any `json:"errors"`
-				}
-
-				if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-					return fmt.Errorf("failed to decode shopify response: %w", err)
-				}
-
-				if len(result.Errors) > 0 {
-					return fmt.Errorf("graphql errors: %v", result.Errors)
-				}
-
-				allEdges = append(allEdges, result.Data.Products.Edges...)
-
-				hasNextPage = result.Data.Products.PageInfo.HasNextPage
-				if hasNextPage {
-					c := result.Data.Products.PageInfo.EndCursor
-					cursor = &c
-				}
-				return nil
-			}()
-			if err != nil {
-				return nil, err
+		client := &http.Client{Timeout: config.ShopifyRequestTimeout}
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("shopify request failed: %w", err)
+		}
+		defer func() {
+			if closeErr := resp.Body.Close(); closeErr != nil {
+				s.logger.System().Warn("Failed to close Shopify response body", "error", closeErr)
 			}
+		}()
+
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			return nil, fmt.Errorf("shopify api error: %s %s", resp.Status, string(b))
 		}
 
-		// Transform the edges into a flat list of products
-		finalProducts := make([]map[string]any, 0, len(allEdges))
-		for _, e := range allEdges {
+		var result struct {
+			Data struct {
+				Products struct {
+					PageInfo map[string]any `json:"pageInfo"`
+					Edges    []any          `json:"edges"`
+				} `json:"products"`
+			} `json:"data"`
+			Errors []any `json:"errors"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode shopify response: %w", err)
+		}
+
+		if len(result.Errors) > 0 {
+			return nil, fmt.Errorf("graphql errors: %v", result.Errors)
+		}
+
+		finalProducts := make([]map[string]any, 0, len(result.Data.Products.Edges))
+		for _, e := range result.Data.Products.Edges {
 			edge, ok := e.(map[string]any)
 			if !ok {
 				continue
@@ -302,7 +278,6 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
 				continue
 			}
 
-			// Flatten Images (edges -> nodes)
 			if imgs, ok := node["images"].(map[string]any); ok {
 				if iEdges, ok := imgs["edges"].([]any); ok {
 					flatImages := make([]map[string]any, 0)
@@ -317,7 +292,6 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
 				}
 			}
 
-			// Flatten Variants (edges -> nodes)
 			if vars, ok := node["variants"].(map[string]any); ok {
 				if vEdges, ok := vars["edges"].([]any); ok {
 					flatVariants := make([]map[string]any, 0)
@@ -335,188 +309,303 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context) ([]map[string]
 			finalProducts = append(finalProducts, node)
 		}
 
-		// Create envelope for Cache
 		responseEnvelope := map[string]any{
 			"products": finalProducts,
+			"pageInfo": result.Data.Products.PageInfo,
 		}
 
-		jsonData, err := json.Marshal(responseEnvelope)
-		if err == nil {
-			// Update Backend Cache (within the singleflight group)
-			tenantCtx.CacheManager.SetShopifyCatalog(tenantCtx.TenantID, jsonData)
-		} else {
-			s.logger.System().Error("Failed to marshal shopify products for cache", "error", err)
-		}
-
-		return finalProducts, nil
+		tenantCtx.CacheManager.SetGenericWithTTL(tenantCtx.TenantID, cacheKey, responseEnvelope, 60*time.Second)
+		return responseEnvelope, nil
 	})
 
 	if err != nil {
 		return nil, err
 	}
 
-	return v.([]map[string]any), nil
+	return v.(map[string]any), nil
 }
 
-// ReconcileAll performs a mass synchronization of all Shopify products for a tenant.
-// It updates existing resources, creates new ones, and prunes orphaned resources.
-// It supports multi-image synchronization via a shopifyImage map in the options payload.
+// ReconcileAll performs targeted background synchronization of tracked Shopify products.
+// It chunks local GIDs and uses the nodes query to respect pagination limits.
 func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int, error) {
-	// 1. Fetch all products currently active on Shopify
-	products, err := s.FetchProducts(tenantCtx)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("failed to fetch products: %w", err)
-	}
-
-	// CIRCUIT BREAKER:
-	// Verify we received > 0 products to prevent accidental mass deletion
-	if len(products) == 0 {
-		s.logger.System().Warn("Shopify reconciliation aborted: 0 products returned from API", "tenantId", tenantCtx.TenantID)
-		return 0, 0, 0, fmt.Errorf("circuit breaker triggered: 0 products returned")
-	}
-
-	// 2. Map incoming GIDs for fast diffing during pruning
-	incomingGIDs := make(map[string]bool)
-	for _, p := range products {
-		if id, ok := p["id"].(string); ok {
-			incomingGIDs[id] = true
-		}
-	}
-
-	// 3. Prune Orphans: Find local resources that are no longer on Shopify
-	deletedCount := 0
-
-	// Get all local resources in categories managed by Shopify
 	localProducts, _ := s.resourceService.GetByCategory(tenantCtx, "product")
 	localServices, _ := s.resourceService.GetByCategory(tenantCtx, "service")
 
-	// Fix for gocritic: Pre-allocate and append to the same slice to satisfy linter
-	allLocal := make([]*content.ResourceNode, 0, len(localProducts)+len(localServices))
-	allLocal = append(allLocal, localProducts...)
-	allLocal = append(allLocal, localServices...)
+	var allGIDs []string
+	gidToResource := make(map[string]*content.ResourceNode)
 
-	for _, local := range allLocal {
-		gid, ok := local.OptionsPayload["gid"].(string)
-		if !ok || gid == "" {
-			continue // Not a Shopify-linked resource
-		}
-
-		if !incomingGIDs[gid] {
-			// This GID exists locally but is missing from the Shopify fetch
-			op, err := s.resourceService.SyncShopifyDeletion(tenantCtx, gid)
-			if err != nil {
-				s.logger.System().Error("Failed to prune orphaned Shopify resource",
-					"error", err, "gid", gid, "tenantId", tenantCtx.TenantID)
-				continue
-			}
-			if op == "deleted" {
-				deletedCount++
-			}
+	for _, local := range append(localProducts, localServices...) {
+		if gid, ok := local.OptionsPayload["gid"].(string); ok && gid != "" {
+			allGIDs = append(allGIDs, gid)
+			gidToResource[gid] = local
 		}
 	}
 
-	// 4. Upsert path: Create or update products found in the fetch
-	totalProcessed := len(products)
+	if len(allGIDs) == 0 {
+		return 0, 0, 0, nil
+	}
+
+	token := tenantCtx.Config.ShopifyStorefrontToken
+	domain := tenantCtx.Config.ShopifyStoreDomain
+	apiVersion := tenantCtx.Config.ShopifyAPIVersion
+
+	if token == "" || domain == "" || apiVersion == "" {
+		return 0, 0, 0, fmt.Errorf("shopify credentials or api version missing for tenant %s", tenantCtx.TenantID)
+	}
+
+	cleanDomain := strings.TrimSuffix(domain, "/")
+	if !strings.HasPrefix(cleanDomain, "http") {
+		cleanDomain = "https://" + cleanDomain
+	}
+	url := fmt.Sprintf("%s/api/%s/graphql.json", cleanDomain, apiVersion)
+
+	queryTemplate := `
+        query ($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ... on Product {
+              id
+              title
+              handle
+              description
+              vendor
+              tags
+              options {
+                name
+                values
+              }
+              images(first: 20) {
+                edges {
+                  node {
+                    url
+                    altText
+                  }
+                }
+              }
+              variants(first: 250) {
+                edges {
+                  node {
+                    id
+                    title
+                    price {
+                      amount
+                      currencyCode
+                    }
+                    image {
+                      url
+                    }
+                    compareAtPrice {
+                      amount
+                      currencyCode
+                    }
+                    sku
+                    availableForSale
+                    requiresShipping
+                    selectedOptions {
+                      name
+                      value
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    `
+
+	client := &http.Client{Timeout: config.ShopifyRequestTimeout}
+	batchSize := 250
+	totalProcessed := len(allGIDs)
 	reconciledCount := 0
+	deletedCount := 0
 	pCleaner := bluemonday.StrictPolicy()
 
-	for _, p := range products {
-		id, _ := p["id"].(string)
-		handle, _ := p["handle"].(string)
-		title, _ := p["title"].(string)
-		description, _ := p["description"].(string)
-
-		oneLiner := pCleaner.Sanitize(description)
-		if len(oneLiner) > 255 {
-			oneLiner = oneLiner[:252] + "..."
+	for i := 0; i < len(allGIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(allGIDs) {
+			end = len(allGIDs)
 		}
+		chunkIDs := allGIDs[i:end]
 
-		optionsPayload := make(map[string]any)
-		optionsPayload["gid"] = id
-		jsonData, _ := json.Marshal(p)
-		optionsPayload["shopifyData"] = string(jsonData)
-
-		// --- Multi-Image and Variant logic ---
-
-		// Extract Main Product Image URL for sync detection and legacy fallback
-		var mainImageURL string
-		if rawImages, ok := p["images"].([]any); ok && len(rawImages) > 0 {
-			if firstImg, ok := rawImages[0].(map[string]any); ok {
-				mainImageURL, _ = firstImg["url"].(string)
-			}
-		} else if rawImages, ok := p["images"].([]map[string]any); ok && len(rawImages) > 0 {
-			mainImageURL, _ = rawImages[0]["url"].(string)
+		reqBody := map[string]any{
+			"query": queryTemplate,
+			"variables": map[string]any{
+				"ids": chunkIDs,
+			},
 		}
+		jsonBody, _ := json.Marshal(reqBody)
 
-		// Prepare the shopifyImage map: VariantGID -> { sourceUrl }
-		// This will be processed by ResourceService.UpsertShopifyResource to handle file sync
-		shopifyImageMap := make(map[string]any)
-
-		// Extract Variants - Handle both fresh []map[string]any and cached []any
-		var rawVariants []any
-		if v, ok := p["variants"].([]any); ok {
-			rawVariants = v
-		} else if v, ok := p["variants"].([]map[string]any); ok {
-			for _, vm := range v {
-				rawVariants = append(rawVariants, vm)
-			}
-		}
-
-		for _, rv := range rawVariants {
-			vMap, ok := rv.(map[string]any)
-			if !ok {
-				continue
-			}
-			vID, _ := vMap["id"].(string)
-			if vID == "" {
-				continue
-			}
-
-			// Extract Variant Image URL (if provided by API), fallback to main product image
-			vImgURL := ""
-			if vImg, ok := vMap["image"].(map[string]any); ok {
-				vImgURL, _ = vImg["url"].(string)
-			}
-			if vImgURL == "" {
-				vImgURL = mainImageURL
-			}
-
-			if vImgURL != "" {
-				shopifyImageMap[vID] = map[string]string{
-					"sourceUrl": vImgURL,
-				}
-			}
-		}
-
-		// Store the variant map as a JSON string (matching the new 'string' type in Dashboard schema)
-		if len(shopifyImageMap) > 0 {
-			if mapData, err := json.Marshal(shopifyImageMap); err == nil {
-				optionsPayload["shopifyImage"] = string(mapData)
-			}
-		}
-
-		// Preserve main trigger for existing UpsertShopifyResource logic
-		if mainImageURL != "" {
-			optionsPayload["shopifyImageSourceUrl"] = mainImageURL
-		}
-
-		resource := &content.ResourceNode{
-			Title:          title,
-			Slug:           fmt.Sprintf("product-%s", handle),
-			OneLiner:       oneLiner,
-			NodeType:       "Resource",
-			OptionsPayload: optionsPayload,
-		}
-
-		op, err := s.resourceService.UpsertShopifyResource(tenantCtx, resource)
+		req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
 		if err != nil {
-			s.logger.System().Error("Failed to reconcile product",
-				"error", err, "handle", handle, "tenantId", tenantCtx.TenantID)
+			s.logger.System().Error("Failed to create shopify nodes request", "error", err)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Shopify-Storefront-Private-Token", token)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			s.logger.System().Error("Shopify nodes request failed", "error", err)
 			continue
 		}
 
-		if op != "none" {
-			reconciledCount++
+		var result struct {
+			Data struct {
+				Nodes []any `json:"nodes"`
+			} `json:"data"`
+			Errors []any `json:"errors"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			_ = resp.Body.Close()
+			s.logger.System().Error("Failed to decode shopify nodes response", "error", err)
+			continue
+		}
+		_ = resp.Body.Close()
+
+		if len(result.Errors) > 0 {
+			s.logger.System().Error("Graphql errors in nodes fetch", "errors", result.Errors)
+			continue
+		}
+
+		for idx, nodeRaw := range result.Data.Nodes {
+			requestedGID := chunkIDs[idx]
+
+			if nodeRaw == nil {
+				op, err := s.resourceService.SyncShopifyDeletion(tenantCtx, requestedGID)
+				if err != nil {
+					s.logger.System().Error("Failed to prune orphaned Shopify resource", "error", err, "gid", requestedGID)
+				} else if op == "deleted" {
+					deletedCount++
+				}
+				continue
+			}
+
+			node, ok := nodeRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+
+			if imgs, ok := node["images"].(map[string]any); ok {
+				if iEdges, ok := imgs["edges"].([]any); ok {
+					flatImages := make([]map[string]any, 0)
+					for _, ie := range iEdges {
+						if iEdge, ok := ie.(map[string]any); ok {
+							if iNode, ok := iEdge["node"].(map[string]any); ok {
+								flatImages = append(flatImages, iNode)
+							}
+						}
+					}
+					node["images"] = flatImages
+				}
+			}
+
+			if vars, ok := node["variants"].(map[string]any); ok {
+				if vEdges, ok := vars["edges"].([]any); ok {
+					flatVariants := make([]map[string]any, 0)
+					for _, ve := range vEdges {
+						if vEdge, ok := ve.(map[string]any); ok {
+							if vNode, ok := vEdge["node"].(map[string]any); ok {
+								flatVariants = append(flatVariants, vNode)
+							}
+						}
+					}
+					node["variants"] = flatVariants
+				}
+			}
+
+			id, _ := node["id"].(string)
+			handle, _ := node["handle"].(string)
+			title, _ := node["title"].(string)
+			description, _ := node["description"].(string)
+
+			oneLiner := pCleaner.Sanitize(description)
+			if len(oneLiner) > 255 {
+				oneLiner = oneLiner[:252] + "..."
+			}
+
+			optionsPayload := make(map[string]any)
+			optionsPayload["gid"] = id
+			jsonData, _ := json.Marshal(node)
+			optionsPayload["shopifyData"] = string(jsonData)
+
+			var mainImageURL string
+			if rawImages, ok := node["images"].([]any); ok && len(rawImages) > 0 {
+				if firstImg, ok := rawImages[0].(map[string]any); ok {
+					mainImageURL, _ = firstImg["url"].(string)
+				}
+			} else if rawImages, ok := node["images"].([]map[string]any); ok && len(rawImages) > 0 {
+				mainImageURL, _ = rawImages[0]["url"].(string)
+			}
+
+			shopifyImageMap := make(map[string]any)
+			var rawVariants []any
+			if v, ok := node["variants"].([]any); ok {
+				rawVariants = v
+			} else if v, ok := node["variants"].([]map[string]any); ok {
+				for _, vm := range v {
+					rawVariants = append(rawVariants, vm)
+				}
+			}
+
+			for _, rv := range rawVariants {
+				vMap, ok := rv.(map[string]any)
+				if !ok {
+					continue
+				}
+				vID, _ := vMap["id"].(string)
+				if vID == "" {
+					continue
+				}
+
+				vImgURL := ""
+				if vImg, ok := vMap["image"].(map[string]any); ok {
+					vImgURL, _ = vImg["url"].(string)
+				}
+				if vImgURL == "" {
+					vImgURL = mainImageURL
+				}
+
+				if vImgURL != "" {
+					shopifyImageMap[vID] = map[string]string{
+						"sourceUrl": vImgURL,
+					}
+				}
+			}
+
+			if len(shopifyImageMap) > 0 {
+				if mapData, err := json.Marshal(shopifyImageMap); err == nil {
+					optionsPayload["shopifyImage"] = string(mapData)
+				}
+			}
+
+			if mainImageURL != "" {
+				optionsPayload["shopifyImageSourceUrl"] = mainImageURL
+			}
+
+			localEntity := gidToResource[requestedGID]
+			category := "product"
+			if localEntity != nil && localEntity.CategorySlug != nil {
+				category = *localEntity.CategorySlug
+			}
+
+			resource := &content.ResourceNode{
+				Title:          title,
+				Slug:           fmt.Sprintf("%s-%s", category, handle),
+				CategorySlug:   &category,
+				OneLiner:       oneLiner,
+				NodeType:       "Resource",
+				OptionsPayload: optionsPayload,
+			}
+
+			op, err := s.resourceService.UpsertShopifyResource(tenantCtx, resource)
+			if err != nil {
+				s.logger.System().Error("Failed to reconcile product", "error", err, "handle", handle)
+				continue
+			}
+
+			if op != "none" {
+				reconciledCount++
+			}
 		}
 	}
 
@@ -554,7 +643,6 @@ func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineI
 		}
 	}`
 
-	// Construct the input map dynamically to handle optional fields
 	cartInput := map[string]any{
 		"lines": lines,
 	}

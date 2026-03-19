@@ -77,6 +77,7 @@ type ResourceRepository interface {
 	SearchBodies(tenantID, term string) ([]FTSResult, error)
 	FindFileIDsByResourceID(tenantID string, resourceID string) ([]string, error)
 	BatchUpsert(tenantID string, creates []*content.ResourceNode, updates []*content.ResourceNode) error
+	ExistsByShopifyGID(tenantID, gid string) (bool, error)
 }
 
 // BeliefRepository defines the persistence interface for Belief nodes.

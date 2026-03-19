@@ -737,3 +737,29 @@ func (r *ResourceRepository) BatchUpsert(tenantID string, creates []*content.Res
 
 	return nil
 }
+
+// ExistsByShopifyGID performs an O(1) indexed scalar lookup to verify if a Shopify resource
+// is currently tracked in the database. The tenantID is provided to satisfy interface
+// contracts but omitted from the query as the database connection is physically isolated.
+func (r *ResourceRepository) ExistsByShopifyGID(_ string, gid string) (bool, error) {
+	start := time.Now()
+	query := `SELECT 1 FROM resources WHERE json_extract(options_payload, '$.gid') = ? LIMIT 1`
+
+	var exists int
+	err := r.db.QueryRow(query, gid).Scan(&exists)
+
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		r.logger.Database().Error("Failed to check Shopify GID existence", "error", err.Error(), "gid", gid)
+		return false, fmt.Errorf("failed to check shopify gid: %w", err)
+	}
+
+	duration := time.Since(start)
+	if duration > config.SlowQueryThreshold {
+		r.logger.LogSlowQuery(query, duration, "system")
+	}
+
+	return exists == 1, nil
+}
