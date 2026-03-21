@@ -28,8 +28,8 @@ func NewAAIHandlers(aaiService *services.AAIService, logger *logging.ChanneledLo
 	}
 }
 
-// AskLemurRequest represents the request structure for LeMUR API calls
-type AskLemurRequest struct {
+// AaiRequest represents the request structure for LeMUR API calls
+type AaiRequest struct {
 	Prompt      string  `json:"prompt" binding:"required"`
 	InputText   string  `json:"input_text" binding:"required"`
 	FinalModel  string  `json:"final_model,omitempty"`
@@ -37,15 +37,15 @@ type AskLemurRequest struct {
 	Temperature float64 `json:"temperature,omitempty"`
 }
 
-// AskLemurResponse represents the response structure for LeMUR API calls
-type AskLemurResponse struct {
+// AaiResponse represents the response structure for LeMUR API calls
+type AaiResponse struct {
 	Success bool        `json:"success"`
 	Data    interface{} `json:"data,omitempty"`
 	Error   string      `json:"error,omitempty"`
 }
 
-// PostAskLemur handles POST /api/v1/auth/aai/askLemur - calls Assembly AI LeMUR API via the AAIService
-func (h *AAIHandlers) PostAskLemur(c *gin.Context) {
+// PostAai handles POST /api/v1/auth/aai/aai - calls Assembly AI LeMUR API via the AAIService
+func (h *AAIHandlers) PostAai(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
@@ -57,17 +57,17 @@ func (h *AAIHandlers) PostAskLemur(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.System().Debug("Received ask LeMUR request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	var req AskLemurRequest
+	var req AaiRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.logger.System().Warn("Invalid ask LeMUR request", "tenantId", tenantCtx.TenantID, "error", err.Error())
-		c.JSON(http.StatusBadRequest, AskLemurResponse{
+		c.JSON(http.StatusBadRequest, AaiResponse{
 			Success: false,
 			Error:   "Invalid request format",
 		})
 		return
 	}
 
-	serviceRequest := services.AskLemurRequest{
+	serviceRequest := services.AaiRequest{
 		Prompt:      req.Prompt,
 		InputText:   req.InputText,
 		FinalModel:  req.FinalModel,
@@ -75,10 +75,10 @@ func (h *AAIHandlers) PostAskLemur(c *gin.Context) {
 		Temperature: req.Temperature,
 	}
 
-	response, err := h.aaiService.AskLemur(tenantCtx, serviceRequest)
+	response, err := h.aaiService.Aai(tenantCtx, serviceRequest)
 	if err != nil {
 		h.logger.System().Error("AAI service call failed", "tenantId", tenantCtx.TenantID, "error", err.Error(), "duration", time.Since(start))
-		c.JSON(http.StatusInternalServerError, AskLemurResponse{
+		c.JSON(http.StatusInternalServerError, AaiResponse{
 			Success: false,
 			Error:   err.Error(),
 		})
@@ -87,9 +87,9 @@ func (h *AAIHandlers) PostAskLemur(c *gin.Context) {
 
 	h.logger.System().Info("AAI service call successful", "tenantId", tenantCtx.TenantID, "duration", time.Since(start))
 	marker.SetSuccess(true)
-	h.logger.Perf().Info("Performance for PostAskLemur request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
+	h.logger.Perf().Info("Performance for PostAai request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
-	c.JSON(http.StatusOK, AskLemurResponse{
+	c.JSON(http.StatusOK, AaiResponse{
 		Success: true,
 		Data: gin.H{
 			"response": response,

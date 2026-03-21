@@ -366,14 +366,14 @@ STRICT RULES:
 5. Do not include any other text, explanations, or markdown formatting in your response.
 `
 
-	serviceRequest := AskLemurRequest{
+	serviceRequest := AaiRequest{
 		Prompt:    prompt,
 		InputText: string(batchJSON),
 	}
 
-	lemurResponse, err := s.aaiService.AskLemur(tenantCtx, serviceRequest)
+	lemurResponse, err := s.aaiService.Aai(tenantCtx, serviceRequest)
 	if err != nil {
-		return nil, fmt.Errorf("AAIService AskLemur call failed: %w", err)
+		return nil, fmt.Errorf("AAIService Aai call failed: %w", err)
 	}
 
 	lemurResponseStr, ok := lemurResponse.(string)
@@ -381,17 +381,17 @@ STRICT RULES:
 		if marshaled, err := json.Marshal(lemurResponse); err == nil {
 			lemurResponseStr = string(marshaled)
 		} else {
-			return nil, fmt.Errorf("askLemur response was not a string or marshallable object, was type %T", lemurResponse)
+			return nil, fmt.Errorf("aai response was not a string or marshallable object, was type %T", lemurResponse)
 		}
 	}
 
 	var results []AITitleSlug
 	if err := json.Unmarshal([]byte(lemurResponseStr), &results); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal askLemur JSON response: %w. Response: %s", err, lemurResponseStr)
+		return nil, fmt.Errorf("failed to unmarshal aai JSON response: %w. Response: %s", err, lemurResponseStr)
 	}
 
 	if len(results) != len(panes) {
-		return nil, fmt.Errorf("askLemur returned %d results, but expected %d", len(results), len(panes))
+		return nil, fmt.Errorf("aai returned %d results, but expected %d", len(results), len(panes))
 	}
 
 	for i := range results {

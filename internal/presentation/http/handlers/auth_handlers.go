@@ -249,10 +249,10 @@ func (h *AuthHandlers) AdminOnlyMiddleware() gin.HandlerFunc {
 	}
 }
 
-// AskLemurAuthMiddleware provides specific authentication for the askLemur endpoint.
+// AaiAuthMiddleware provides specific authentication for the aai endpoint.
 // It allows access for EITHER a standard admin/editor user OR a request
 // from the sandbox proxy authenticated with a shared secret.
-func (h *AuthHandlers) AskLemurAuthMiddleware() gin.HandlerFunc {
+func (h *AuthHandlers) AaiAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tenantCtx, exists := middleware.GetTenantContext(c)
 		if !exists {
@@ -288,7 +288,7 @@ func (h *AuthHandlers) AskLemurAuthMiddleware() gin.HandlerFunc {
 		}
 
 		// If neither authentication path succeeded, deny access.
-		h.logger.Auth().Warn("Unauthorized askLemur access attempt", "tenantId", tenantCtx.TenantID, "path", c.Request.URL.Path)
+		h.logger.Auth().Warn("Unauthorized aai access attempt", "tenantId", tenantCtx.TenantID, "path", c.Request.URL.Path)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		c.Abort()
 	}
