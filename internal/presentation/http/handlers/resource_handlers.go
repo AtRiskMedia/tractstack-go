@@ -206,7 +206,18 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 		return
 	}
 
-	// Process embedded images and mutate the resource payload
+	if gid, ok := resource.OptionsPayload["gid"].(string); ok && strings.HasPrefix(gid, "gid://shopify/") {
+		_, err := h.resourceService.UpsertShopifyResource(tenantCtx, &resource)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync shopify resource", "details": err.Error()})
+			return
+		}
+
+		marker.SetSuccess(true)
+		c.JSON(http.StatusCreated, resource)
+		return
+	}
+
 	fileIDs, err := h.processResourceImages(tenantCtx, &resource)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process resource images", "details": err.Error()})
@@ -222,7 +233,6 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for CreateResource request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true, "resourceId", resource.ID)
 
-	// Return the mutated resource so the frontend has the resolved image paths
 	c.JSON(http.StatusCreated, resource)
 }
 

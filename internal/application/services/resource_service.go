@@ -390,6 +390,53 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 
 	// --- Multi-Image Sync Logic ---
 
+	// INTERCEPTOR: If the caller provided shopifyData but failed to extract image URLs (common in frontend saves),
+	// extract them here to ensure the ImageProcessor is triggered.
+	if currentURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string); currentURL == "" {
+		if rawJSON, ok := resource.OptionsPayload["shopifyData"].(string); ok && rawJSON != "" {
+			var data struct {
+				Images []struct {
+					URL string `json:"url"`
+				} `json:"images"`
+				Variants []struct {
+					ID    string `json:"id"`
+					Image struct {
+						URL string `json:"url"`
+					} `json:"image"`
+				} `json:"variants"`
+			}
+			if err := json.Unmarshal([]byte(rawJSON), &data); err == nil {
+				// 1. Extract Main Image URL
+				if len(data.Images) > 0 {
+					resource.OptionsPayload["shopifyImageSourceUrl"] = data.Images[0].URL
+				}
+
+				// 2. Extract Variant Map if missing
+				if currentMap, _ := resource.OptionsPayload["shopifyImage"].(string); currentMap == "" {
+					variantMap := make(map[string]map[string]string)
+					mainURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
+
+					for _, v := range data.Variants {
+						if v.ID != "" {
+							vURL := v.Image.URL
+							if vURL == "" {
+								vURL = mainURL // Fallback to product image
+							}
+							if vURL != "" {
+								variantMap[v.ID] = map[string]string{"sourceUrl": vURL}
+							}
+						}
+					}
+					if len(variantMap) > 0 {
+						if b, err := json.Marshal(variantMap); err == nil {
+							resource.OptionsPayload["shopifyImage"] = string(b)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// allActiveFileIDs tracks every file that should be linked to this resource in the DB
 	var allActiveFileIDs []string
 	// filesToDelete tracks orphaned File IDs replaced during change detection
