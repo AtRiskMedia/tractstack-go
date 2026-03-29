@@ -43,14 +43,27 @@ func (s *BookingService) GetAvailability(tenantCtx *tenant.Context, resourceIDs 
 }
 
 // HoldSlot attempts to lock a time slot for a user, using a tenant-level mutex before writing to the DB.
+// It enforces UnavailableHours checks and auto-confirms free bookings.
 func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, resourceIDs []string, leadID string, start, end time.Time) error {
 	mu := s.getTenantLock(tenantCtx.TenantID)
 	mu.Lock()
 	defer mu.Unlock()
 
+	// 1. Check Unavailable Hours (Strict Backend Validation)
+	for _, block := range tenantCtx.Config.BrandConfig.Scheduling.UnavailableHours {
+		blockStart, err1 := time.Parse(time.RFC3339, block.Start)
+		blockEnd, err2 := time.Parse(time.RFC3339, block.End)
+		if err1 == nil && err2 == nil {
+			// If requested start is before the block ends AND requested end is after the block starts -> Overlap
+			if start.Before(blockEnd) && end.After(blockStart) {
+				return fmt.Errorf("time slot overlaps with unavailable hours")
+			}
+		}
+	}
+
 	repo := tenantCtx.BookingRepo()
 
-	// 1. Check for overlapping bookings EXACTLY within the locked context
+	// 2. Check for overlapping database bookings EXACTLY within the locked context
 	overlapping, err := repo.FindOverlapping(tenantCtx.TenantID, resourceIDs, start, end)
 	if err != nil {
 		return fmt.Errorf("failed to check availability: %w", err)
@@ -60,14 +73,35 @@ func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, res
 		return fmt.Errorf("time slot is no longer available")
 	}
 
-	// 2. Create the PENDING booking
+	// 3. Check for Free Booking Auto-Confirmation
+	requiresPayment := false
+	resourceRepo := tenantCtx.ResourceRepo()
+	for _, resID := range resourceIDs {
+		res, err := resourceRepo.FindByID(tenantCtx.TenantID, resID)
+		if err == nil && res != nil && res.OptionsPayload != nil {
+			// Inspect the already-parsed OptionsPayload map for a Shopify GID
+			if gid, exists := res.OptionsPayload["gid"]; exists {
+				if gidStr, ok := gid.(string); ok && gidStr != "" {
+					requiresPayment = true
+					break // At least one paid item found, standard checkout required
+				}
+			}
+		}
+	}
+
+	// 4. Create the Booking (Assigning correct target status)
+	targetStatus := booking.StatusPending
+	if !requiresPayment {
+		targetStatus = booking.StatusConfirmed
+	}
+
 	newBooking := &booking.Booking{
 		ID:          traceID,
 		ResourceIDs: resourceIDs,
 		LeadID:      leadID,
 		StartTime:   start,
 		EndTime:     end,
-		Status:      booking.StatusPending,
+		Status:      targetStatus,
 		CreatedAt:   time.Now().UTC(),
 	}
 
@@ -75,7 +109,12 @@ func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, res
 		return fmt.Errorf("failed to store booking hold: %w", err)
 	}
 
-	s.logger.System().Info("Booking slot held successfully", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+	if targetStatus == booking.StatusConfirmed {
+		s.logger.System().Info("Free booking auto-confirmed successfully", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+	} else {
+		s.logger.System().Info("Booking slot held successfully", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+	}
+
 	return nil
 }
 
