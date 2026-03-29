@@ -27,6 +27,7 @@ type CreateCheckoutRequest struct {
 type ShopifyHandlers struct {
 	shopifyService  *services.ShopifyService
 	resourceService *services.ResourceService
+	bookingService  *services.BookingService
 	logger          *logging.ChanneledLogger
 	perfTracker     *performance.Tracker
 }
@@ -35,12 +36,14 @@ type ShopifyHandlers struct {
 func NewShopifyHandlers(
 	shopifyService *services.ShopifyService,
 	resourceService *services.ResourceService,
+	bookingService *services.BookingService,
 	logger *logging.ChanneledLogger,
 	perfTracker *performance.Tracker,
 ) *ShopifyHandlers {
 	return &ShopifyHandlers{
 		shopifyService:  shopifyService,
 		resourceService: resourceService,
+		bookingService:  bookingService,
 		logger:          logger,
 		perfTracker:     perfTracker,
 	}
@@ -80,8 +83,8 @@ func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 	marker.SetSuccess(true)
 }
 
-// HandleWebhook processes incoming webhooks from Shopify (product updates/creation/deletion).
-// It verifies the HMAC signature, checks local existence, and routes to the appropriate service.
+// HandleWebhook processes incoming webhooks from Shopify (product updates/creation/deletion and order payments).
+// It verifies the HMAC signature, checks local existence for products, and confirms bookings for paid orders.
 func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -114,77 +117,104 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		return
 	}
 
-	var rawData map[string]any
-	if err := json.Unmarshal(body, &rawData); err != nil {
-		h.logger.System().Error("Failed to unmarshal minimal webhook body", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
-		return
-	}
-
-	var idStr string
-	if v, ok := rawData["id"].(float64); ok {
-		idStr = fmt.Sprintf("%.0f", v)
-	} else if v, ok := rawData["id"].(string); ok {
-		idStr = v
-	}
-
-	if idStr == "" {
-		h.logger.System().Warn("Missing ID in Shopify webhook", "tenantId", tenantCtx.TenantID)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing id in payload"})
-		return
-	}
-
-	gid := idStr
-	if !strings.HasPrefix(idStr, "gid://") {
-		gid = fmt.Sprintf("gid://shopify/Product/%s", idStr)
-	}
-
-	existsLocally, err := h.resourceService.ExistsByShopifyGID(tenantCtx, gid)
-	if err != nil {
-		h.logger.System().Error("Failed to check local Shopify resource existence", "error", err, "gid", gid)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal database error"})
-		return
-	}
-
-	if !existsLocally {
-		h.logger.System().Debug("Ignoring webhook for untracked Shopify resource", "gid", gid, "topic", topic)
-		c.Status(http.StatusOK)
-		return
-	}
-
-	var op string
-	var syncErr error
-
 	switch topic {
-	case "products/delete":
-		op, syncErr = h.resourceService.SyncShopifyDeletion(tenantCtx, gid)
-
-	case "products/create", "products/update":
-		resource, err := h.shopifyService.ParseWebhook(body)
-		if err != nil {
-			h.logger.System().Error("Failed to parse Shopify webhook", "error", err, "topic", topic)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload format"})
+	case "orders/paid":
+		var order struct {
+			ID        int64 `json:"id"`
+			LineItems []struct {
+				Properties []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"properties"`
+			} `json:"line_items"`
+		}
+		if err := json.Unmarshal(body, &order); err != nil {
+			h.logger.System().Error("Failed to parse orders/paid webhook", "error", err)
 			return
 		}
-		op, syncErr = h.resourceService.UpsertShopifyResource(tenantCtx, resource)
+
+		orderID := fmt.Sprintf("%d", order.ID)
+		for _, item := range order.LineItems {
+			for _, prop := range item.Properties {
+				if prop.Name == "bookingId" || prop.Name == "Trace ID" {
+					if err := h.bookingService.ConfirmBooking(tenantCtx, prop.Value, &orderID); err != nil {
+						h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", prop.Value)
+					}
+				}
+			}
+		}
+
+	case "products/delete", "products/create", "products/update":
+		var rawData map[string]any
+		if err := json.Unmarshal(body, &rawData); err != nil {
+			h.logger.System().Error("Failed to unmarshal minimal webhook body", "error", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
+			return
+		}
+
+		var idStr string
+		if v, ok := rawData["id"].(float64); ok {
+			idStr = fmt.Sprintf("%.0f", v)
+		} else if v, ok := rawData["id"].(string); ok {
+			idStr = v
+		}
+
+		if idStr == "" {
+			h.logger.System().Warn("Missing ID in Shopify webhook", "tenantId", tenantCtx.TenantID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing id in payload"})
+			return
+		}
+
+		gid := idStr
+		if !strings.HasPrefix(idStr, "gid://") {
+			gid = fmt.Sprintf("gid://shopify/Product/%s", idStr)
+		}
+
+		existsLocally, err := h.resourceService.ExistsByShopifyGID(tenantCtx, gid)
+		if err != nil {
+			h.logger.System().Error("Failed to check local Shopify resource existence", "error", err, "gid", gid)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "internal database error"})
+			return
+		}
+
+		if !existsLocally {
+			h.logger.System().Debug("Ignoring webhook for untracked Shopify resource", "gid", gid, "topic", topic)
+			c.Status(http.StatusOK)
+			return
+		}
+
+		var op string
+		var syncErr error
+
+		if topic == "products/delete" {
+			op, syncErr = h.resourceService.SyncShopifyDeletion(tenantCtx, gid)
+		} else {
+			resource, err := h.shopifyService.ParseWebhook(body)
+			if err != nil {
+				h.logger.System().Error("Failed to parse Shopify webhook", "error", err, "topic", topic)
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload format"})
+				return
+			}
+			op, syncErr = h.resourceService.UpsertShopifyResource(tenantCtx, resource)
+		}
+
+		if syncErr != nil {
+			h.logger.System().Error("Failed to sync Shopify webhook", "error", syncErr, "topic", topic)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync resource"})
+			return
+		}
+
+		h.logger.System().Info("Shopify webhook processed successfully",
+			"tenantId", tenantCtx.TenantID,
+			"topic", topic,
+			"operation", op,
+			"duration", time.Since(start))
 
 	default:
 		h.logger.System().Warn("Unsupported Shopify webhook topic", "topic", topic, "tenantId", tenantCtx.TenantID)
 		c.Status(http.StatusAccepted)
 		return
 	}
-
-	if syncErr != nil {
-		h.logger.System().Error("Failed to sync Shopify webhook", "error", syncErr, "topic", topic)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync resource"})
-		return
-	}
-
-	h.logger.System().Info("Shopify webhook processed successfully",
-		"tenantId", tenantCtx.TenantID,
-		"topic", topic,
-		"operation", op,
-		"duration", time.Since(start))
 
 	marker.SetSuccess(true)
 	c.Status(http.StatusOK)

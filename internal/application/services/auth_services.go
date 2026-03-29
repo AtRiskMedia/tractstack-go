@@ -312,3 +312,23 @@ func (a *AuthService) ValidateEncryptedCredentials(encryptedEmail, encryptedCode
 		ShortBio:       lead.ShortBio,
 	}
 }
+
+// VerifyLeadIdentity checks an email and codeword combination and returns the LeadID if valid
+func (s *AuthService) VerifyLeadIdentity(tenantCtx *tenant.Context, email string, codeword string) (*string, error) {
+	leadRepo := tenantCtx.LeadRepo()
+
+	lead, err := leadRepo.FindByEmail(email)
+	if err != nil {
+		return nil, fmt.Errorf("database error verifying lead: %w", err)
+	}
+
+	if lead == nil {
+		return nil, fmt.Errorf("lead not found")
+	}
+
+	if lead.EncryptedCode != codeword {
+		return nil, fmt.Errorf("invalid codeword")
+	}
+
+	return &lead.ID, nil
+}

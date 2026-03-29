@@ -9,6 +9,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/fts"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	persistenceAnalytics "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/analytics"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/booking"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
@@ -158,4 +159,9 @@ func (ctx *Context) FingerprintRepo() domainUser.FingerprintRepository {
 func (ctx *Context) VisitRepo() domainUser.VisitRepository {
 	db := &database.DB{DB: ctx.Database.Conn}
 	return persistenceUser.NewSQLVisitRepository(db, ctx.Logger)
+}
+
+// BookingRepo returns the repository for appointments
+func (ctx *Context) BookingRepo() repositories.BookingRepository {
+	return booking.NewBookingRepository(ctx.Database.Conn, ctx.Logger)
 }

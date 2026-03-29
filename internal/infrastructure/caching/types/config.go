@@ -197,6 +197,11 @@ type BrandConfig struct {
 	HasResend          bool                  `json:"HAS_RESEND"`
 	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
+	Scheduling         struct {
+		Timezone          string            `json:"timezone"`
+		BusinessHours     map[string]string `json:"businessHours"`
+		BufferGapsMinutes int               `json:"bufferGapsMinutes"`
+	} `json:"scheduling"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go

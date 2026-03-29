@@ -21,6 +21,12 @@ type AuthHandlers struct {
 	perfTracker *performance.Tracker
 }
 
+// VerifyLeadRequest contains auth fields for lead verification request
+type VerifyLeadRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Codeword string `json:"codeword" binding:"required"`
+}
+
 // LoginRequest represents the structure for login requests
 type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
@@ -488,4 +494,28 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 		"token":   newResult.Token,
 		"message": "Token refreshed successfully",
 	})
+}
+
+// HandleVerifyLead authenticates a lead using their email and codeword
+func (h *AuthHandlers) HandleVerifyLead(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var req VerifyLeadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	leadID, err := h.authService.VerifyLeadIdentity(tenantCtx, req.Email, req.Codeword)
+	if err != nil {
+		h.logger.System().Warn("Lead verification failed", "email", req.Email, "error", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"leadId": leadID})
 }

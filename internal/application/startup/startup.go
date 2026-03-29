@@ -119,6 +119,9 @@ func Initialize() error {
 	if appContainer.ShopifyReconciliationWorker != nil {
 		go appContainer.ShopifyReconciliationWorker.Start(ctx)
 	}
+	if appContainer.BookingReconciliationWorker != nil {
+		go appContainer.BookingReconciliationWorker.Start(ctx)
+	}
 	log.Printf("%s✓ Background Services Up   %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
 	// --- Step 8: Start HTTP Server ---
