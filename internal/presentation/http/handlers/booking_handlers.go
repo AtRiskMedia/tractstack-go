@@ -126,7 +126,10 @@ func (h *BookingHandlers) HandleHoldSlot(c *gin.Context) {
 	}
 
 	h.logger.System().Info("Booking hold created", "traceId", req.TraceID, "tenantId", tenantCtx.TenantID)
-	c.Status(http.StatusCreated)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"status":  "CONFIRMED",
+	})
 	marker.SetSuccess(true)
 }
 
