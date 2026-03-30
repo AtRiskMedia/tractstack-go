@@ -111,6 +111,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		api.POST("/bookings/hold", bookingHandlers.HandleHoldSlot)
 		api.DELETE("/bookings/hold/:traceId", bookingHandlers.HandleReleaseHold)
 		api.POST("/auth/verify-lead", authHandlers.HandleVerifyLead)
+		api.POST("/auth/lookup-lead", authHandlers.HandleLookupLead)
 
 		// Config endpoints
 		configGroup := api.Group("/config")
