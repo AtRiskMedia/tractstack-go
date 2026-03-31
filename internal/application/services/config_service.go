@@ -83,6 +83,9 @@ type BrandConfigUpdateRequest struct {
 
 	// Design Library Field
 	DesignLibrary *types.DesignLibraryConfig `json:"DESIGN_LIBRARY,omitempty"`
+
+	// Shopify booking sub-system
+	Scheduling *types.Scheduling `json:"SCHEDULING,omitempty"`
 }
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
@@ -648,6 +651,11 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 	// Update design library (already properly protected with != nil)
 	if request.DesignLibrary != nil {
 		config.DesignLibrary = request.DesignLibrary
+	}
+
+	// Update shopify scheduling config
+	if request.Scheduling != nil {
+		config.Scheduling = *request.Scheduling
 	}
 
 	return config

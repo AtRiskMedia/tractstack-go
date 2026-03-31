@@ -213,7 +213,7 @@ type BrandConfig struct {
 	HasResend          bool                  `json:"HAS_RESEND"`
 	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
-	Scheduling         Scheduling            `json:"scheduling"`
+	Scheduling         Scheduling            `json:"SCHEDULING"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go
