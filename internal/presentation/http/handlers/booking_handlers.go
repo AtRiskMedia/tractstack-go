@@ -4,7 +4,6 @@ package handlers
 import (
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -54,15 +53,6 @@ func (h *BookingHandlers) HandleGetAvailability(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("booking_get_availability", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	resourceIDsParam := c.Query("resourceIds")
-	if resourceIDsParam == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "resourceIds parameter is required"})
-		return
-	}
-
-	// Split the comma-separated list of resource IDs
-	resourceIDs := strings.Split(resourceIDsParam, ",")
-
 	startStr := c.Query("start")
 	endStr := c.Query("end")
 
@@ -78,7 +68,7 @@ func (h *BookingHandlers) HandleGetAvailability(c *gin.Context) {
 		return
 	}
 
-	bookings, err := h.bookingService.GetAvailability(tenantCtx, resourceIDs, start, end)
+	bookings, err := h.bookingService.GetAvailability(tenantCtx, start, end)
 	if err != nil {
 		h.logger.System().Error("Failed to fetch availability", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch availability"})

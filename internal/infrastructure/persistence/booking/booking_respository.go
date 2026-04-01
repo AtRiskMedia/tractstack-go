@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/booking"
@@ -67,27 +66,16 @@ func (r *SQLBookingRepository) FindByID(tenantID, id string) (*booking.Booking, 
 	return &b, nil
 }
 
-// FindOverlapping retrieves any non-cancelled bookings for a resource that overlap with the provided time window.
-func (r *SQLBookingRepository) FindOverlapping(tenantID string, resourceIDs []string, start, end time.Time) ([]*booking.Booking, error) {
-	if len(resourceIDs) == 0 {
-		return []*booking.Booking{}, nil
-	}
+// FindOverlapping retrieves any non-cancelled bookings that overlap with the provided time window globally.
+func (r *SQLBookingRepository) FindOverlapping(tenantID string, start, end time.Time) ([]*booking.Booking, error) {
+	args := []any{string(booking.StatusCancelled), end, start}
 
-	placeholders := make([]string, len(resourceIDs))
-	args := make([]any, 0, len(resourceIDs)+3)
-	for i, id := range resourceIDs {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	args = append(args, string(booking.StatusCancelled), end, start)
-
-	query := fmt.Sprintf(`
-		SELECT DISTINCT b.id, b.resource_ids, b.lead_id, b.start_time, b.end_time, b.status, b.shopify_order_id, b.created_at
-		FROM bookings b, json_each(b.resource_ids) j
-		WHERE j.value IN (%s)
-		AND b.status != ?
+	query := `
+		SELECT b.id, b.resource_ids, b.lead_id, b.start_time, b.end_time, b.status, b.shopify_order_id, b.created_at
+		FROM bookings b
+		WHERE b.status != ?
 		AND b.start_time < ?
-		AND b.end_time > ?`, strings.Join(placeholders, ","))
+		AND b.end_time > ?`
 
 	rows, err := r.db.Query(query, args...)
 	if err != nil {

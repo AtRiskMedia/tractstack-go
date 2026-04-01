@@ -31,10 +31,10 @@ func (s *BookingService) getTenantLock(tenantID string) *sync.Mutex {
 }
 
 // GetAvailability returns overlapping bookings for a given time window to support availability math.
-func (s *BookingService) GetAvailability(tenantCtx *tenant.Context, resourceIDs []string, start, end time.Time) ([]*booking.Booking, error) {
+func (s *BookingService) GetAvailability(tenantCtx *tenant.Context, start, end time.Time) ([]*booking.Booking, error) {
 	repo := tenantCtx.BookingRepo()
 
-	existingBookings, err := repo.FindOverlapping(tenantCtx.TenantID, resourceIDs, start, end)
+	existingBookings, err := repo.FindOverlapping(tenantCtx.TenantID, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch overlapping bookings: %w", err)
 	}
@@ -64,7 +64,7 @@ func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, res
 	repo := tenantCtx.BookingRepo()
 
 	// 2. Check for overlapping database bookings EXACTLY within the locked context
-	overlapping, err := repo.FindOverlapping(tenantCtx.TenantID, resourceIDs, start, end)
+	overlapping, err := repo.FindOverlapping(tenantCtx.TenantID, start, end)
 	if err != nil {
 		return fmt.Errorf("failed to check availability: %w", err)
 	}
