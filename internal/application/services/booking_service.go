@@ -49,6 +49,11 @@ func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, res
 	mu.Lock()
 	defer mu.Unlock()
 
+	// 0. Reject if > max length
+	if end.Sub(start).Minutes() > float64(tenantCtx.Config.BrandConfig.Scheduling.MaxLengthMinutes) {
+		return fmt.Errorf("requested duration exceeds maximum allowed length")
+	}
+
 	// 1. Check Unavailable Hours (Strict Backend Validation)
 	for _, block := range tenantCtx.Config.BrandConfig.Scheduling.UnavailableHours {
 		blockStart, err1 := time.Parse(time.RFC3339, block.Start)
