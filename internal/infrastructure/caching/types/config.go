@@ -175,6 +175,7 @@ type TimeBlock struct {
 type Scheduling struct {
 	Timezone          string               `json:"timezone"`
 	BufferGapsMinutes int                  `json:"bufferGapsMinutes"`
+	MaxLengthMinutes  int                  `json:"maxLengthMinutes"`
 	BusinessHours     map[string]TimeBlock `json:"businessHours"`
 	UnavailableHours  []TimeBlock          `json:"unavailableHours"`
 }
@@ -210,6 +211,7 @@ type BrandConfig struct {
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 	HasAAI             bool                  `json:"HAS_AAI"`
 	HasShopify         bool                  `json:"HAS_SHOPIFY"`
+	ShowShopifyHelper  bool                  `json:"SHOW_SHOPIFY_HELPER"`
 	HasResend          bool                  `json:"HAS_RESEND"`
 	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
