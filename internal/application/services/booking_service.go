@@ -49,7 +49,10 @@ func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, res
 	mu.Lock()
 	defer mu.Unlock()
 
-	// 0. Reject if > max length
+	// 0. Reject if > max length or in past
+	if start.Before(time.Now()) {
+		return fmt.Errorf("requested start time is in the past")
+	}
 	if end.Sub(start).Minutes() > float64(tenantCtx.Config.BrandConfig.Scheduling.MaxLengthMinutes) {
 		return fmt.Errorf("requested duration exceeds maximum allowed length")
 	}
