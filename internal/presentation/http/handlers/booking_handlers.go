@@ -13,6 +13,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ConfirmBookingRequest defines the payload for manually confirming a free booking hold.
+type ConfirmBookingRequest struct {
+	TraceID string `json:"traceId" binding:"required"`
+}
+
 // HoldSlotRequest defines the payload for creating a temporary booking hold.
 type HoldSlotRequest struct {
 	TraceID     string    `json:"traceId" binding:"required"`
@@ -144,4 +149,36 @@ func (h *BookingHandlers) HandleReleaseHold(c *gin.Context) {
 	}
 
 	c.Status(http.StatusOK)
+}
+
+// HandleConfirmBooking manually transitions a pending hold to confirmed.
+// This endpoint is explicitly used for free carts that bypass the Shopify checkout webhook flow.
+func (h *BookingHandlers) HandleConfirmBooking(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("booking_confirm_free", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	var req ConfirmBookingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	// shopifyOrderID is nil because this route strictly handles transactions without payment
+	if err := h.bookingService.ConfirmBooking(tenantCtx, req.TraceID, nil); err != nil {
+		h.logger.System().Error("Failed to confirm free booking", "error", err, "traceId", req.TraceID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm booking"})
+		return
+	}
+
+	marker.SetSuccess(true)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"status":  "CONFIRMED",
+	})
 }

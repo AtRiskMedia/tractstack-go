@@ -109,6 +109,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		api.POST("/shopify/checkout", shopifyHandlers.HandleCreateCheckout)
 		api.GET("/bookings/availability", bookingHandlers.HandleGetAvailability)
 		api.POST("/bookings/hold", bookingHandlers.HandleHoldSlot)
+		api.POST("/bookings/confirm", bookingHandlers.HandleConfirmBooking)
 		api.DELETE("/bookings/hold/:traceId", bookingHandlers.HandleReleaseHold)
 		api.POST("/auth/verify-lead", authHandlers.HandleVerifyLead)
 		api.POST("/auth/lookup-lead", authHandlers.HandleLookupLead)
