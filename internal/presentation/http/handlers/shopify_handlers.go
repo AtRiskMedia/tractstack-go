@@ -120,13 +120,11 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	switch topic {
 	case "orders/paid":
 		var order struct {
-			ID        int64 `json:"id"`
-			LineItems []struct {
-				Properties []struct {
-					Name  string `json:"name"`
-					Value string `json:"value"`
-				} `json:"properties"`
-			} `json:"line_items"`
+			ID             int64 `json:"id"`
+			NoteAttributes []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"note_attributes"`
 		}
 		if err := json.Unmarshal(body, &order); err != nil {
 			h.logger.System().Error("Failed to parse orders/paid webhook", "error", err)
@@ -134,12 +132,10 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		}
 
 		orderID := fmt.Sprintf("%d", order.ID)
-		for _, item := range order.LineItems {
-			for _, prop := range item.Properties {
-				if prop.Name == "bookingId" || prop.Name == "Trace ID" {
-					if err := h.bookingService.ConfirmBooking(tenantCtx, prop.Value, &orderID); err != nil {
-						h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", prop.Value)
-					}
+		for _, attr := range order.NoteAttributes {
+			if attr.Name == "bookingId" || attr.Name == "Trace ID" {
+				if err := h.bookingService.ConfirmBooking(tenantCtx, attr.Value, &orderID); err != nil {
+					h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", attr.Value)
 				}
 			}
 		}
