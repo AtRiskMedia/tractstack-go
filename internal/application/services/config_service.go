@@ -104,6 +104,8 @@ type AdvancedConfigUpdateRequest struct {
 	ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET,omitempty"`
 	ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN,omitempty"`
 	ShopifyAPIVersion      string `json:"SHOPIFY_API_VERSION,omitempty"`
+	ShopifyAdminSlug       string `json:"SHOPIFY_ADMIN_SLUG,omitempty"`
+	UserSetupWebhooks      *bool  `json:"USER_SETUP_WEBHOOKS,omitempty"`
 	ResendAPIKey           string `json:"RESEND_API_KEY,omitempty"`
 	TursoEnabled           *bool  `json:"turso_enabled,omitempty"`
 }
@@ -345,6 +347,8 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		"SHOPIFY_API_SECRET":       tenantCtx.Config.ShopifyAPISecret,
 		"SHOPIFY_STORE_DOMAIN":     tenantCtx.Config.ShopifyStoreDomain,
 		"SHOPIFY_API_VERSION":      tenantCtx.Config.ShopifyAPIVersion,
+		"SHOPIFY_ADMIN_SLUG":       tenantCtx.Config.ShopifyAdminSlug,
+		"USER_SETUP_WEBHOOKS":      tenantCtx.Config.UserSetupWebhooks,
 		"RESEND_API_KEY":           tenantCtx.Config.ResendAPIKey,
 	}
 

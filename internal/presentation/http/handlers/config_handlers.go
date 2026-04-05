@@ -27,6 +27,8 @@ type AdvancedConfigStatusResponse struct {
 	ShopifyAPISecretSet       bool   `json:"shopifyApiSecretSet"`
 	ShopifyStoreDomainSet     bool   `json:"shopifyStoreDomainSet"`
 	ShopifyAPIVersion         string `json:"shopifyApiVersion"`
+	ShopifyAdminSlugSet       bool   `json:"shopifyAdminSlugSet"`
+	UserSetupWebhooks         bool   `json:"userSetupWebhooks"`
 	ResendAPIKeySet           bool   `json:"resendApiKeySet"`
 }
 
@@ -70,7 +72,7 @@ func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 
 	brandConfig := *tenantCtx.Config.BrandConfig
 	brandConfig.HasAAI = tenantCtx.Config.AAIAPIKey != ""
-	brandConfig.HasShopify = tenantCtx.Config.ShopifyStorefrontToken != "" && tenantCtx.Config.ShopifyAPISecret != "" && tenantCtx.Config.ShopifyStoreDomain != "" && tenantCtx.Config.ShopifyAPIVersion != ""
+	brandConfig.HasShopify = tenantCtx.Config.ShopifyStorefrontToken != "" && tenantCtx.Config.ShopifyAPISecret != "" && tenantCtx.Config.ShopifyStoreDomain != "" && tenantCtx.Config.ShopifyAPIVersion != "" && tenantCtx.Config.ShopifyAdminSlug != "" && tenantCtx.Config.UserSetupWebhooks
 	brandConfig.HasResend = tenantCtx.Config.ResendAPIKey != ""
 	brandConfig.HasHydrationToken = tenantCtx.Config.HydrationToken != ""
 	c.JSON(http.StatusOK, brandConfig)
@@ -153,6 +155,8 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 		ShopifyAPISecretSet:       tenantCtx.Config.ShopifyAPISecret != "",
 		ShopifyStoreDomainSet:     tenantCtx.Config.ShopifyStoreDomain != "",
 		ShopifyAPIVersion:         tenantCtx.Config.ShopifyAPIVersion,
+		ShopifyAdminSlugSet:       tenantCtx.Config.ShopifyAdminSlug != "",
+		UserSetupWebhooks:         tenantCtx.Config.UserSetupWebhooks,
 		ResendAPIKeySet:           tenantCtx.Config.ResendAPIKey != "",
 	}
 
@@ -183,6 +187,8 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 		ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET"`
 		ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN"`
 		ShopifyAPIVersion      string `json:"SHOPIFY_API_VERSION"`
+		ShopifyAdminSlug       string `json:"SHOPIFY_ADMIN_SLUG"`
+		UserSetupWebhooks      bool   `json:"USER_SETUP_WEBHOOKS"`
 		ResendAPIKey           string `json:"RESEND_API_KEY"`
 	}
 
@@ -228,6 +234,10 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	if request.ShopifyAPIVersion != "" {
 		tenantCtx.Config.ShopifyAPIVersion = request.ShopifyAPIVersion
 	}
+	if request.ShopifyAdminSlug != "" {
+		tenantCtx.Config.ShopifyAdminSlug = request.ShopifyAdminSlug
+	}
+	tenantCtx.Config.UserSetupWebhooks = request.UserSetupWebhooks
 	if request.ResendAPIKey != "" {
 		tenantCtx.Config.ResendAPIKey = request.ResendAPIKey
 	}
