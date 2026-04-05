@@ -237,7 +237,7 @@ func (r *SQLBookingRepository) DeleteExpiredPending(tenantID string, expirationT
 func (r *SQLBookingRepository) DeletePendingByTraceID(tenantID string, traceID string) error {
 	const query = `
 		DELETE FROM bookings
-		WHERE id = ? AND status = 'pending'
+		WHERE id = ? AND status = 'PENDING'
 	`
 	r.logger.Database().Debug("Executing proactive hold release", "traceId", traceID)
 
