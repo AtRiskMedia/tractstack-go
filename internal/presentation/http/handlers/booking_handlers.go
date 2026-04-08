@@ -4,6 +4,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -180,5 +181,94 @@ func (h *BookingHandlers) HandleConfirmBooking(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"status":  "CONFIRMED",
+	})
+}
+
+// HandleListBookings returns a paginated list of bookings for the administrative dashboard.
+func (h *BookingHandlers) HandleListBookings(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("booking_list", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil {
+		limit = 50
+	}
+
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil {
+		offset = 0
+	}
+
+	status := c.DefaultQuery("status", "ALL")
+
+	bookings, totalCount, err := h.bookingService.ListBookings(tenantCtx, limit, offset, status)
+	if err != nil {
+		h.logger.System().Error("Failed to list bookings", "error", err, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list bookings"})
+		return
+	}
+
+	marker.SetSuccess(true)
+	c.JSON(http.StatusOK, gin.H{
+		"data":       bookings,
+		"totalCount": totalCount,
+	})
+}
+
+// HandleGetMetrics retrieves aggregated booking volume and conversion statistics.
+func (h *BookingHandlers) HandleGetMetrics(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("booking_metrics", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	metrics, err := h.bookingService.GetMetrics(tenantCtx)
+	if err != nil {
+		h.logger.System().Error("Failed to get booking metrics", "error", err, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get booking metrics"})
+		return
+	}
+
+	marker.SetSuccess(true)
+	c.JSON(http.StatusOK, metrics)
+}
+
+// HandleCancelBooking manually cancels an existing booking from the administrative dashboard.
+func (h *BookingHandlers) HandleCancelBooking(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	marker := h.perfTracker.StartOperation("booking_cancel", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	traceID := c.Param("traceId")
+	if traceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "traceId is required"})
+		return
+	}
+
+	if err := h.bookingService.CancelBooking(tenantCtx, traceID); err != nil {
+		h.logger.System().Error("Failed to cancel booking", "error", err, "traceId", traceID, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to cancel booking"})
+		return
+	}
+
+	marker.SetSuccess(true)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"status":  "CANCELLED",
 	})
 }

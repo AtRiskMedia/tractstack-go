@@ -256,3 +256,125 @@ func (r *SQLBookingRepository) DeletePendingByTraceID(tenantID string, traceID s
 
 	return nil
 }
+
+// FindAllPaginated retrieves a paginated list of bookings, optionally filtered by status.
+func (r *SQLBookingRepository) FindAllPaginated(tenantID string, limit, offset int, status string) ([]*booking.Booking, int, error) {
+	var count int
+	countQuery := `SELECT COUNT(*) FROM bookings`
+	var countArgs []any
+
+	if status != "ALL" && status != "" {
+		countQuery += ` WHERE status = ?`
+		countArgs = append(countArgs, status)
+	}
+
+	if err := r.db.QueryRow(countQuery, countArgs...).Scan(&count); err != nil {
+		return nil, 0, fmt.Errorf("failed to count bookings: %w", err)
+	}
+
+	query := `
+		SELECT b.id, b.resource_ids, b.lead_id, l.email, l.first_name, b.start_time, b.end_time, b.status, b.shopify_order_id, b.created_at
+		FROM bookings b
+		LEFT JOIN leads l ON b.lead_id = l.id`
+	var args []any
+
+	if status != "ALL" && status != "" {
+		query += ` WHERE b.status = ?`
+		args = append(args, status)
+	}
+
+	query += ` ORDER BY b.start_time DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to query paginated bookings: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			r.logger.System().Warn("Failed to close rows", "error", closeErr)
+		}
+	}()
+
+	var bookings []*booking.Booking
+	for rows.Next() {
+		var b booking.Booking
+		var statusStr string
+		var shopifyOrderID sql.NullString
+		var leadEmail sql.NullString
+		var leadName sql.NullString
+		var resourceIDsJSON string
+
+		err := rows.Scan(
+			&b.ID,
+			&resourceIDsJSON,
+			&b.LeadID,
+			&leadEmail,
+			&leadName,
+			&b.StartTime,
+			&b.EndTime,
+			&statusStr,
+			&shopifyOrderID,
+			&b.CreatedAt,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan paginated booking: %w", err)
+		}
+
+		if err := json.Unmarshal([]byte(resourceIDsJSON), &b.ResourceIDs); err != nil {
+			return nil, 0, fmt.Errorf("failed to unmarshal resource ids: %w", err)
+		}
+
+		b.Status = booking.BookingStatus(statusStr)
+		if shopifyOrderID.Valid {
+			b.ShopifyOrderID = &shopifyOrderID.String
+		}
+		if leadEmail.Valid {
+			b.LeadEmail = leadEmail.String
+		}
+		if leadName.Valid {
+			b.LeadName = leadName.String
+		}
+
+		bookings = append(bookings, &b)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("row iteration error in paginated bookings: %w", err)
+	}
+
+	return bookings, count, nil
+}
+
+// GetMetrics executes a conditional aggregation to calculate booking volume and conversion metrics.
+func (r *SQLBookingRepository) GetMetrics(tenantID string, now time.Time) (*booking.BookingMetrics, error) {
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	yearStart := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, now.Location())
+	weekStart := now.AddDate(0, 0, -int(now.Weekday()))
+	dayStart := now.Add(-24 * time.Hour)
+
+	query := `
+		SELECT 
+			COALESCE(SUM(CASE WHEN status = 'CONFIRMED' AND start_time >= ? THEN 1 ELSE 0 END), 0) as monthly_confirmed,
+			COALESCE(SUM(CASE WHEN status = 'CONFIRMED' AND start_time >= ? THEN 1 ELSE 0 END), 0) as annual_confirmed,
+			COALESCE(SUM(CASE WHEN status = 'CONFIRMED' AND start_time >= ? THEN 1 ELSE 0 END), 0) as weekly_confirmed,
+			COALESCE(COUNT(DISTINCT CASE WHEN status = 'CONFIRMED' THEN lead_id END), 0) as lead_conversion_anchor,
+			COALESCE(SUM(CASE WHEN status = 'PENDING' AND created_at >= ? THEN 1 ELSE 0 END), 0) as pending_24h,
+			COALESCE(SUM(CASE WHEN status = 'CONFIRMED' AND created_at >= ? THEN 1 ELSE 0 END), 0) as confirmed_24h
+		FROM bookings`
+
+	var m booking.BookingMetrics
+	err := r.db.QueryRow(query, monthStart, yearStart, weekStart, dayStart, dayStart).Scan(
+		&m.TotalMonthlyConfirmed,
+		&m.TotalAnnualConfirmed,
+		&m.TotalWeeklyConfirmed,
+		&m.LeadConversionAnchor,
+		&m.PendingLast24h,
+		&m.ConfirmedLast24h,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch booking metrics: %w", err)
+	}
+
+	return &m, nil
+}

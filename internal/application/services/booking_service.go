@@ -129,3 +129,54 @@ func (s *BookingService) ReleaseHold(tenantCtx *tenant.Context, traceID string) 
 	repo := tenantCtx.BookingRepo()
 	return repo.DeletePendingByTraceID(tenantCtx.TenantID, traceID)
 }
+
+// ListBookings retrieves a paginated list of bookings for the administrative dashboard.
+func (s *BookingService) ListBookings(tenantCtx *tenant.Context, limit, offset int, status string) ([]*booking.Booking, int, error) {
+	repo := tenantCtx.BookingRepo()
+
+	bookings, count, err := repo.FindAllPaginated(tenantCtx.TenantID, limit, offset, status)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list bookings: %w", err)
+	}
+
+	return bookings, count, nil
+}
+
+// GetMetrics calculates aggregated booking volume and conversion statistics.
+func (s *BookingService) GetMetrics(tenantCtx *tenant.Context) (*booking.BookingMetrics, error) {
+	repo := tenantCtx.BookingRepo()
+	now := time.Now().UTC()
+
+	metrics, err := repo.GetMetrics(tenantCtx.TenantID, now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to calculate booking metrics: %w", err)
+	}
+
+	return metrics, nil
+}
+
+// CancelBooking manually transitions a booking to the CANCELLED state.
+// It acquires a tenant-level lock to prevent race conditions with incoming webhooks.
+func (s *BookingService) CancelBooking(tenantCtx *tenant.Context, traceID string) error {
+	mu := s.getTenantLock(tenantCtx.TenantID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	repo := tenantCtx.BookingRepo()
+
+	b, err := repo.FindByID(tenantCtx.TenantID, traceID)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve booking for cancellation: %w", err)
+	}
+	if b == nil {
+		return fmt.Errorf("booking not found for trace ID: %s", traceID)
+	}
+
+	if err := repo.UpdateStatus(tenantCtx.TenantID, traceID, booking.StatusCancelled, nil); err != nil {
+		return fmt.Errorf("failed to cancel booking: %w", err)
+	}
+
+	s.logger.System().Info("Booking manually cancelled", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+
+	return nil
+}

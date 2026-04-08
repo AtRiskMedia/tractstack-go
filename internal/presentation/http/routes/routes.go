@@ -114,6 +114,15 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		api.POST("/auth/verify-lead", authHandlers.HandleVerifyLead)
 		api.POST("/auth/lookup-lead", authHandlers.HandleLookupLead)
 
+		// Protected Booking endpoints (Admin/Editor)
+		protectedBookings := api.Group("/bookings")
+		protectedBookings.Use(authHandlers.AuthMiddleware())
+		{
+			protectedBookings.GET("/list", bookingHandlers.HandleListBookings)
+			protectedBookings.GET("/metrics", bookingHandlers.HandleGetMetrics)
+			protectedBookings.POST("/:traceId/cancel", bookingHandlers.HandleCancelBooking)
+		}
+
 		// Config endpoints
 		configGroup := api.Group("/config")
 		{
