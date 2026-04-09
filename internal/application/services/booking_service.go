@@ -2,6 +2,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -13,14 +14,16 @@ import (
 
 // BookingService handles business logic and orchestration for reservations.
 type BookingService struct {
-	logger *logging.ChanneledLogger
-	locks  sync.Map // Maps tenantID string to *sync.Mutex for WAL-mode queueing
+	logger          *logging.ChanneledLogger
+	resourceService *ResourceService
+	locks           sync.Map // Maps tenantID string to *sync.Mutex for WAL-mode queueing
 }
 
 // NewBookingService creates a new booking service instance.
-func NewBookingService(logger *logging.ChanneledLogger) *BookingService {
+func NewBookingService(logger *logging.ChanneledLogger, resourceService *ResourceService) *BookingService {
 	return &BookingService{
-		logger: logger,
+		logger:          logger,
+		resourceService: resourceService,
 	}
 }
 
@@ -44,10 +47,15 @@ func (s *BookingService) GetAvailability(tenantCtx *tenant.Context, start, end t
 
 // HoldSlot attempts to lock a time slot for a user, using a tenant-level mutex before writing to the DB.
 // It enforces UnavailableHours checks and saves the initial hold as pending.
-func (s *BookingService) HoldSlot(tenantCtx *tenant.Context, traceID string, resourceIDs []string, leadID string, start, end time.Time) error {
+func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context, traceID string, resourceIDs []string, leadID string, start, end time.Time) error {
 	mu := s.getTenantLock(tenantCtx.TenantID)
 	mu.Lock()
 	defer mu.Unlock()
+
+	// Check if client disconnected/timed out while waiting for the WAL queue
+	if ctx.Err() != nil {
+		return fmt.Errorf("client aborted request before lock acquisition: %w", ctx.Err())
+	}
 
 	// 0. Reject if > max length or in past
 	if start.Before(time.Now()) {
@@ -114,6 +122,18 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 	}
 	if b == nil {
 		return fmt.Errorf("booking not found for trace ID: %s", traceID)
+	}
+	// Verify free cart bypass is legitimate
+	if shopifyOrderID == nil {
+		resources, err := s.resourceService.GetByIDs(tenantCtx, b.ResourceIDs)
+		if err != nil {
+			return fmt.Errorf("failed to retrieve resources for validation: %w", err)
+		}
+		for _, res := range resources {
+			if _, hasGID := res.OptionsPayload["gid"]; hasGID {
+				return fmt.Errorf("unauthorized: cannot natively confirm paid resource %s", res.ID)
+			}
+		}
 	}
 
 	if err := repo.UpdateStatus(tenantCtx.TenantID, traceID, booking.StatusConfirmed, shopifyOrderID); err != nil {

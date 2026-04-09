@@ -108,6 +108,7 @@ func (h *BookingHandlers) HandleHoldSlot(c *gin.Context) {
 	}
 
 	err := h.bookingService.HoldSlot(
+		c.Request.Context(),
 		tenantCtx,
 		req.TraceID,
 		req.ResourceIDs,
@@ -124,7 +125,7 @@ func (h *BookingHandlers) HandleHoldSlot(c *gin.Context) {
 	h.logger.System().Info("Booking hold created", "traceId", req.TraceID, "tenantId", tenantCtx.TenantID)
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
-		"status":  "CONFIRMED",
+		"status":  "PENDING",
 	})
 	marker.SetSuccess(true)
 }
