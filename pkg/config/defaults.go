@@ -273,7 +273,7 @@ func init() {
 	SlowQueryThreshold = getEnvDuration("SLOW_QUERY_THRESHOLD", 500*time.Millisecond)
 
 	// Bookings
-	BookingHoldTimeout = time.Duration(getEnvInt("BOOKING_HOLD_TIMEOUT_MINUTES", 15)) * time.Minute
+	BookingHoldTimeout = time.Duration(getEnvInt("BOOKING_HOLD_TIMEOUT_MINUTES", 50)) * time.Minute
 
 	// SSE Configuration
 	MaxSessionsPerClient = getEnvInt("MAX_SESSIONS_PER_CLIENT", 10000)

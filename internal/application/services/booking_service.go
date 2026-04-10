@@ -3,6 +3,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -12,6 +13,9 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
+
+// ErrBookingNotFound used for error return value
+var ErrBookingNotFound = errors.New("booking not found for trace ID")
 
 // BookingService handles business logic and orchestration for reservations.
 type BookingService struct {
@@ -162,7 +166,7 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 		return fmt.Errorf("failed to retrieve booking for confirmation: %w", err)
 	}
 	if b == nil {
-		return fmt.Errorf("booking not found for trace ID: %s", traceID)
+		return ErrBookingNotFound
 	}
 	// Verify free cart bypass is legitimate
 	if shopifyOrderID == nil {

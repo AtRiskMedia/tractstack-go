@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -135,6 +136,10 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		for _, attr := range order.NoteAttributes {
 			if attr.Name == "bookingId" || attr.Name == "Trace ID" {
 				if err := h.bookingService.ConfirmBooking(tenantCtx, attr.Value, &orderID); err != nil {
+					if errors.Is(err, services.ErrBookingNotFound) {
+						h.logger.System().Error("ORPHANED PAYMENT: User paid for an expired booking hold", "traceId", attr.Value, "shopifyOrderId", orderID)
+						return
+					}
 					h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", attr.Value)
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "database lock or confirmation failure, forcing retry"})
 					return
