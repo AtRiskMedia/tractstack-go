@@ -136,6 +136,8 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 			if attr.Name == "bookingId" || attr.Name == "Trace ID" {
 				if err := h.bookingService.ConfirmBooking(tenantCtx, attr.Value, &orderID); err != nil {
 					h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", attr.Value)
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "database lock or confirmation failure, forcing retry"})
+					return
 				}
 			}
 		}

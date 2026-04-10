@@ -4,6 +4,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -57,20 +58,57 @@ func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context
 		return fmt.Errorf("client aborted request before lock acquisition: %w", ctx.Err())
 	}
 
-	// 0. Reject if > max length or in past
+	// 0. Reject if in past
 	if start.Before(time.Now()) {
 		return fmt.Errorf("requested start time is in the past")
 	}
-	if end.Sub(start).Minutes() > float64(tenantCtx.Config.BrandConfig.Scheduling.MaxLengthMinutes) {
+
+	// Strict Backend Duration Validation ---
+	// Fetch the requested resources to calculate the true required duration
+	resources, err := s.resourceService.GetByIDs(tenantCtx, resourceIDs)
+	if err != nil {
+		return fmt.Errorf("failed to validate resource durations: %w", err)
+	}
+
+	var rawMinutes float64 = 0
+	for _, res := range resources {
+		if val, ok := res.OptionsPayload["bookingLengthMinutes"]; ok {
+			// JSON unmarshaler converts numbers to float64 for any/interface{} types
+			if minutes, ok := val.(float64); ok {
+				rawMinutes += minutes
+			}
+		}
+	}
+
+	// Snap to 15-minute intervals matching the frontend's scheduling grid
+	interval := 15.0
+	snappedMinutes := math.Ceil(rawMinutes/interval) * interval
+
+	maxLength := float64(tenantCtx.Config.BrandConfig.Scheduling.MaxLengthMinutes)
+	if snappedMinutes > maxLength {
+		snappedMinutes = maxLength
+	}
+
+	// Enforce a minimum 15m duration if a booking is required but missing duration config
+	if snappedMinutes == 0 && len(resources) > 0 {
+		snappedMinutes = 15.0
+	}
+
+	// Override the user-provided end time with the securely calculated end time
+	secureEnd := start.Add(time.Duration(snappedMinutes) * time.Minute)
+
+	// Final sanity check against global max length limit
+	if secureEnd.Sub(start).Minutes() > maxLength {
 		return fmt.Errorf("requested duration exceeds maximum allowed length")
 	}
+	// -----------------------------------------------
 
 	// 1. Check Unavailable Hours (Strict Backend Validation)
 	for _, block := range tenantCtx.Config.BrandConfig.Scheduling.UnavailableHours {
 		blockStart, err1 := time.Parse(time.RFC3339, block.Start)
 		blockEnd, err2 := time.Parse(time.RFC3339, block.End)
 		if err1 == nil && err2 == nil {
-			if start.Before(blockEnd) && end.After(blockStart) {
+			if start.Before(blockEnd) && secureEnd.After(blockStart) {
 				return fmt.Errorf("time slot overlaps with unavailable hours")
 			}
 		}
@@ -79,7 +117,7 @@ func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context
 	repo := tenantCtx.BookingRepo()
 
 	// 2. Check for overlapping database bookings EXACTLY within the locked context
-	overlapping, err := repo.FindOverlapping(tenantCtx.TenantID, start, end)
+	overlapping, err := repo.FindOverlapping(tenantCtx.TenantID, start, secureEnd)
 	if err != nil {
 		return fmt.Errorf("failed to check availability: %w", err)
 	}
@@ -94,7 +132,7 @@ func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context
 		ResourceIDs: resourceIDs,
 		LeadID:      leadID,
 		StartTime:   start,
-		EndTime:     end,
+		EndTime:     secureEnd,
 		Status:      booking.StatusPending,
 		CreatedAt:   time.Now().UTC(),
 	}
@@ -103,7 +141,10 @@ func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context
 		return fmt.Errorf("failed to store booking hold: %w", err)
 	}
 
-	s.logger.System().Info("Booking slot held successfully", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+	s.logger.System().Info("Booking slot held successfully",
+		"traceId", traceID,
+		"tenantId", tenantCtx.TenantID,
+		"durationMinutes", snappedMinutes)
 
 	return nil
 }
