@@ -167,6 +167,9 @@ func (d *Detector) GetRegistry() *Registry {
 
 // ResolveTenantByDomain finds a tenant ID that claims the given domain
 func (d *Detector) ResolveTenantByDomain(domain string) (string, error) {
+	if strings.Contains(domain, ":") {
+		domain = strings.Split(domain, ":")[0]
+	}
 	// Normalize domain for consistent comparison
 	targetDomain := strings.ToLower(domain)
 

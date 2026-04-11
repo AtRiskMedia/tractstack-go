@@ -4,6 +4,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
@@ -23,7 +24,23 @@ func GetTenantContext(c *gin.Context) (*tenant.Context, bool) {
 	return ctx, ok
 }
 
-// TenantMiddleware creates middleware that extracts tenant information and creates a full tenant context.
+func isBotUserAgent(ua string) bool {
+	if ua == "" {
+		return true
+	}
+	uaLower := strings.ToLower(ua)
+	botKeywords := []string{
+		"bot", "crawler", "spider", "ping", "scanner", "curl", "wget",
+		"httpclient", "python-requests", "go-http-client", "nmap", "zgrab",
+	}
+	for _, kw := range botKeywords {
+		if strings.Contains(uaLower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 // TenantMiddleware creates middleware that extracts tenant information and creates a full tenant context.
 func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tracker) gin.HandlerFunc {
 	logger := tenantManager.GetLogger()
@@ -33,9 +50,22 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 		marker := perfTracker.StartOperation("middleware_tenant_resolution", "unknown")
 		defer marker.Complete()
 
+		// 1. Explicit Identity
 		tenantID := c.GetHeader("X-Tenant-ID")
 		if tenantID == "" {
-			tenantID = c.Query("tenantId") // Fallback for SSE
+			tenantID = c.Query("tenantId")
+		}
+
+		// 2. Implicit Identity via Domain Resolution
+		if tenantID == "" {
+			host := c.Request.Host
+			if strings.Contains(host, ":") {
+				host = strings.Split(host, ":")[0]
+			}
+
+			if resolvedTenant, err := tenantManager.GetDetector().ResolveTenantByDomain(host); err == nil && resolvedTenant != "" {
+				tenantID = resolvedTenant
+			}
 		}
 
 		marker.AddMetadata("path", c.Request.URL.Path)
@@ -45,8 +75,21 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 		}
 
 		if tenantID == "" {
-			errMsg := "X-Tenant-ID header or tenantId query param is required"
-			logger.Tenant().Warn(errMsg, "path", c.Request.URL.Path)
+			// 3. Stateful Verification & Bot Silencing
+			hasState := false
+			if _, err := c.Cookie("tractstack_session_id"); err == nil {
+				hasState = true
+			}
+
+			if !hasState && isBotUserAgent(c.Request.UserAgent()) {
+				marker.SetSuccess(false)
+				marker.SetError(fmt.Errorf("bot request discarded"))
+				c.AbortWithStatus(http.StatusForbidden)
+				return
+			}
+
+			errMsg := "X-Tenant-ID header or registered domain is required"
+			logger.Tenant().Warn(errMsg, "path", c.Request.URL.Path, "host", c.Request.Host)
 			marker.SetSuccess(false)
 			marker.SetError(fmt.Errorf("%s", errMsg))
 			c.JSON(http.StatusBadRequest, gin.H{"error": errMsg})
@@ -56,11 +99,9 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 
 		tenantCtx, err := tenantManager.GetContext(c)
 		if err != nil {
-			// Check if this is default tenant setup scenario
 			if tenantID == "default" {
 				detector := tenantManager.GetDetector()
 				if detector.GetTenantStatus("default") == "inactive" {
-					// explicitly leave the Database as nil to prevent unsafe access.
 					brandConfig, _ := tenant.LoadBrandConfig("default")
 
 					safeConfig := &tenant.Config{
@@ -74,12 +115,9 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 						Status:   "inactive",
 						Config:   safeConfig,
 						Logger:   logger,
-						// Database: nil, // Implicitly nil to prevent unsafe queries
 					}
 
 					c.Set("tenant", safeCtx)
-
-					// Set flags for health handler and continue
 					c.Set("setupNeeded", true)
 					c.Set("tenantId", "default")
 					marker.SetSuccess(true)
@@ -108,8 +146,6 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 				var dbFingerprintID string
 				var latestVisitID string
 
-				// We need a valid VisitID to reconstruct the session.
-				// Query: Verify fingerprint exists AND fetch its most recent visit ID
 				query := `
 					SELECT f.id, v.id 
 					FROM fingerprints f 
@@ -140,7 +176,6 @@ func TenantMiddleware(tenantManager *tenant.Manager, perfTracker *performance.Tr
 				}
 			}
 
-			// Store fingerprint in context for handlers to access even if session restoration failed
 			c.Set("fingerprint_id", cookieFingerprintID)
 		}
 
