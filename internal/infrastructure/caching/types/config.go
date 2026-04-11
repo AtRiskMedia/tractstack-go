@@ -163,6 +163,23 @@ type FieldDefinition struct {
 	MaxNumber         *int   `json:"maxNumber,omitempty"`
 }
 
+// TimeBlock represents a specific window of time for availability calculations.
+// For BusinessHours, Start/End are time strings (e.g., "09:00", "17:00").
+// For UnavailableHours, Start/End are full RFC3339 date-time strings (e.g., "2026-12-25T09:00:00Z").
+type TimeBlock struct {
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+// Scheduling defines the availability and rules for the native booking engine.
+type Scheduling struct {
+	Timezone          string               `json:"timezone"`
+	BufferGapsMinutes int                  `json:"bufferGapsMinutes"`
+	MaxLengthMinutes  int                  `json:"maxLengthMinutes"`
+	BusinessHours     map[string]TimeBlock `json:"businessHours"`
+	UnavailableHours  []TimeBlock          `json:"unavailableHours"`
+}
+
 // BrandConfig holds tenant-specific branding configuration
 type BrandConfig struct {
 	SiteInit           bool                  `json:"SITE_INIT"`
@@ -194,9 +211,11 @@ type BrandConfig struct {
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 	HasAAI             bool                  `json:"HAS_AAI"`
 	HasShopify         bool                  `json:"HAS_SHOPIFY"`
+	ShowShopifyHelper  bool                  `json:"SHOW_SHOPIFY_HELPER"`
 	HasResend          bool                  `json:"HAS_RESEND"`
 	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
+	Scheduling         Scheduling            `json:"SCHEDULING"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go

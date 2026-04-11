@@ -186,6 +186,9 @@ var (
 	// DashboardTTL defines the duration that aggregated dashboard data remains valid in the cache.
 	DashboardTTL time.Duration
 
+	// BookingHoldTimeout defines how long a pending booking is held
+	BookingHoldTimeout time.Duration
+
 	// CleanupInterval specifies how often background cleanup tasks run.
 	CleanupInterval time.Duration
 	// TenantTimeout is the duration of inactivity after which a tenant's resources are unloaded from memory.
@@ -268,6 +271,9 @@ func init() {
 	DBConnMaxLifetimeMinutes = getEnvInt("DB_CONN_MAX_LIFETIME_MINUTES", 15)
 	DBConnMaxIdleMinutes = getEnvInt("DB_CONN_MAX_IDLE_MINUTES", 5)
 	SlowQueryThreshold = getEnvDuration("SLOW_QUERY_THRESHOLD", 500*time.Millisecond)
+
+	// Bookings
+	BookingHoldTimeout = time.Duration(getEnvInt("BOOKING_HOLD_TIMEOUT_MINUTES", 50)) * time.Minute
 
 	// SSE Configuration
 	MaxSessionsPerClient = getEnvInt("MAX_SESSIONS_PER_CLIENT", 10000)

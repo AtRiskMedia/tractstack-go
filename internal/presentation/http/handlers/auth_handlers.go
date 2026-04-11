@@ -14,11 +14,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// LookupLeadRequest contains the email for the frictionless lead lookup
+type LookupLeadRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
 // AuthHandlers contains all authentication-related HTTP handlers
 type AuthHandlers struct {
 	authService *services.AuthService
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+}
+
+// VerifyLeadRequest contains auth fields for lead verification request
+type VerifyLeadRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Codeword string `json:"codeword" binding:"required"`
 }
 
 // LoginRequest represents the structure for login requests
@@ -487,5 +498,64 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 		"role":    tokenInfo.Role,
 		"token":   newResult.Token,
 		"message": "Token refreshed successfully",
+	})
+}
+
+// HandleVerifyLead authenticates a lead using their email and codeword
+func (h *AuthHandlers) HandleVerifyLead(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var req VerifyLeadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	leadID, err := h.authService.VerifyLeadIdentity(tenantCtx, req.Email, req.Codeword)
+	if err != nil {
+		h.logger.System().Warn("Lead verification failed", "email", req.Email, "error", err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"leadId": leadID})
+}
+
+// HandleLookupLead checks if a lead exists by email and returns their ID if so.
+func (h *AuthHandlers) HandleLookupLead(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+
+	var req LookupLeadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request format"})
+		return
+	}
+
+	leadRepo := tenantCtx.LeadRepo()
+	lead, err := leadRepo.FindByEmail(req.Email)
+	if err != nil {
+		h.logger.System().Warn("Database error during lead lookup", "error", err, "email", req.Email)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "lookup failed"})
+		return
+	}
+
+	// Email not found
+	if lead == nil {
+		c.JSON(http.StatusOK, gin.H{"exists": false})
+		return
+	}
+
+	// Email found, return the linking ID for the booking handshake
+	c.JSON(http.StatusOK, gin.H{
+		"exists": true,
+		"leadId": lead.ID,
 	})
 }

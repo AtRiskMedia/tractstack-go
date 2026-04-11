@@ -37,6 +37,8 @@ type Container struct {
 	WarmingService              *services.WarmingService
 	RegistryRebuildOrchestrator *services.RegistryRebuildOrchestrator
 	SearchService               *services.SearchService
+	BookingService              *services.BookingService
+	BookingReconciliationWorker *services.BookingReconciliationWorker
 
 	// Fragment Services
 	SessionBeliefService *services.SessionBeliefService
@@ -177,6 +179,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
 	searchService := services.NewSearchService(paneService, storyFragmentService, resourceService, contentMapService)
+	bookingService := services.NewBookingService(logger, resourceService)
+	bookingReconciliationWorker := services.NewBookingReconciliationWorker(tenantManager, logger)
 
 	// Create WarmingService, now injecting all its required content service dependencies.
 	warmingService := services.NewWarmingService(
@@ -228,6 +232,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		WarmingService:              warmingService,
 		RegistryRebuildOrchestrator: registryRebuildOrchestrator,
 		SearchService:               searchService,
+		BookingService:              bookingService,
+		BookingReconciliationWorker: bookingReconciliationWorker,
 
 		// Fragment Services
 		SessionBeliefService: sessionBeliefService,

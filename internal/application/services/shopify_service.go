@@ -23,8 +23,9 @@ import (
 
 // CartLineInput handles a single product action
 type CartLineInput struct {
-	MerchandiseID string `json:"merchandiseId"`
-	Quantity      int    `json:"quantity"`
+	MerchandiseID string           `json:"merchandiseId"`
+	Quantity      int              `json:"quantity"`
+	Attributes    []AttributeInput `json:"attributes,omitempty"`
 }
 
 // AttributeInput represents a custom key-value pair attached to the cart.
@@ -634,6 +635,7 @@ func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineI
 	query := `mutation cartCreate($input: CartInput!) {
 		cartCreate(input: $input) {
 			cart {
+				id
 				checkoutUrl
 			}
 			userErrors {
@@ -697,10 +699,12 @@ func (s *ShopifyService) CreateCart(tenantCtx *tenant.Context, lines []CartLineI
 		Data struct {
 			CartCreate struct {
 				Cart struct {
+					ID          string `json:"id"`
 					CheckoutURL string `json:"checkoutUrl"`
 				} `json:"cart"`
 				UserErrors []struct {
-					Message string `json:"message"`
+					Field   []string `json:"field"`
+					Message string   `json:"message"`
 				} `json:"userErrors"`
 			} `json:"cartCreate"`
 		} `json:"data"`
