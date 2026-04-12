@@ -55,6 +55,7 @@ func NewShopifyHandlers(
 func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
+		h.logger.System().Error("PRODUCTS ABORT: No tenant context found", "path", c.Request.URL.Path)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
@@ -89,6 +90,7 @@ func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
+		h.logger.System().Error("WEBHOOK ABORT: No tenant context found for request", "path", c.Request.URL.Path)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
@@ -227,6 +229,7 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 func (h *ShopifyHandlers) HandleCreateCheckout(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
+		h.logger.System().Error("CHECKOUT ABORT: No tenant context found", "path", c.Request.URL.Path)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}

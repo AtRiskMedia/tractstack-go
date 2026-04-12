@@ -96,6 +96,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	// Public domain resolution endpoint (no tenant context required)
 	r.GET("/api/v1/resolve-domain", multiTenantHandlers.HandleResolveDomain)
 	hooksAPI := r.Group("/api/v1/hooks")
+	hooksAPI.Use(middleware.TenantMiddleware(container.TenantManager, container.PerfTracker))
 	hooksAPI.POST("/shopify", shopifyHandlers.HandleWebhook)
 
 	// API routes with tenant middleware
