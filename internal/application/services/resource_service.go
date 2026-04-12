@@ -347,9 +347,7 @@ func (s *ResourceService) ExistsByShopifyGID(tenantCtx *tenant.Context, gid stri
 }
 
 // UpsertShopifyResource handles single-item synchronization from a Shopify webhook or reconciliation scan.
-// It supports multi-variant image synchronization, performs source URL change detection,
-// and ensures all variant images are correctly linked in the database.
-// Returns the operation performed ("created", "updated", or "none") and any error.
+// It merges fresh Shopify data with existing local metadata to preserve tracking keys like 'group' or 'serviceBound'.
 func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resource *content.ResourceNode) (string, error) {
 	start := time.Now()
 	marker := s.perfTracker.StartOperation("upsert_shopify_resource", tenantCtx.TenantID)
@@ -388,65 +386,22 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		}
 	}
 
-	// --- Multi-Image Sync Logic ---
-
-	// INTERCEPTOR: If the caller provided shopifyData but failed to extract image URLs (common in frontend saves),
-	// extract them here to ensure the ImageProcessor is triggered.
-	if currentURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string); currentURL == "" {
-		if rawJSON, ok := resource.OptionsPayload["shopifyData"].(string); ok && rawJSON != "" {
-			var data struct {
-				Images []struct {
-					URL string `json:"url"`
-				} `json:"images"`
-				Variants []struct {
-					ID    string `json:"id"`
-					Image struct {
-						URL string `json:"url"`
-					} `json:"image"`
-				} `json:"variants"`
-			}
-			if err := json.Unmarshal([]byte(rawJSON), &data); err == nil {
-				// 1. Extract Main Image URL
-				if len(data.Images) > 0 {
-					resource.OptionsPayload["shopifyImageSourceUrl"] = data.Images[0].URL
-				}
-
-				// 2. Extract Variant Map if missing
-				if currentMap, _ := resource.OptionsPayload["shopifyImage"].(string); currentMap == "" {
-					variantMap := make(map[string]map[string]string)
-					mainURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
-
-					for _, v := range data.Variants {
-						if v.ID != "" {
-							vURL := v.Image.URL
-							if vURL == "" {
-								vURL = mainURL // Fallback to product image
-							}
-							if vURL != "" {
-								variantMap[v.ID] = map[string]string{"sourceUrl": vURL}
-							}
-						}
-					}
-					if len(variantMap) > 0 {
-						if b, err := json.Marshal(variantMap); err == nil {
-							resource.OptionsPayload["shopifyImage"] = string(b)
-						}
-					}
-				}
+	// 4. NON-DESTRUCTIVE MERGE: Preserve local-only metadata
+	if existing != nil {
+		for k, v := range existing.OptionsPayload {
+			// If the fresh GraphQL payload doesn't contain a key present in the DB,
+			// it is likely a local-only attribute (e.g., 'group', 'serviceBound') and must be kept.
+			if _, incomingExists := resource.OptionsPayload[k]; !incomingExists {
+				resource.OptionsPayload[k] = v
 			}
 		}
 	}
 
-	// allActiveFileIDs tracks every file that should be linked to this resource in the DB
-	var allActiveFileIDs []string
-	// filesToDelete tracks orphaned File IDs replaced during change detection
-	var filesToDelete []string
-
-	// Helper for image processing
+	// 5. Image Processing and Change Detection
 	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
 	processor := media.NewImageProcessor(mediaPath)
 
-	// A. Process Legacy/Main Image (Preserve existing logic for 'image' field)
+	// Process Main Image
 	activeMainFileID := ""
 	if existing != nil {
 		if val, ok := existing.OptionsPayload["image"].(string); ok {
@@ -459,6 +414,9 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 	if existing != nil {
 		storedMainURL, _ = existing.OptionsPayload["shopifyImageSourceUrl"].(string)
 	}
+
+	var allActiveFileIDs []string
+	var filesToDelete []string
 
 	if incomingMainURL != "" && (incomingMainURL != storedMainURL || activeMainFileID == "") {
 		newFileID := security.GenerateULID()
@@ -485,7 +443,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		allActiveFileIDs = append(allActiveFileIDs, activeMainFileID)
 	}
 
-	// B. Process Variant Image Map (VariantGID -> {fileId, sourceUrl})
+	// Process Variant Map
 	type variantEntry struct {
 		FileID    string `json:"fileId,omitempty"`
 		SourceURL string `json:"sourceUrl"`
@@ -510,7 +468,6 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		stored := storedVariantMap[vGID]
 		useFileID := stored.FileID
 
-		// Change detection: Check if URL changed or if we are missing the local file ID
 		if incoming.SourceURL != "" && (incoming.SourceURL != stored.SourceURL || useFileID == "") {
 			newFileID := security.GenerateULID()
 			src, srcSet, err := processor.ProcessURL(incoming.SourceURL, newFileID)
@@ -542,17 +499,15 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		}
 	}
 
-	// Serialize the updated variant map back to the resource
 	if mapData, err := json.Marshal(finalVariantMap); err == nil {
 		resource.OptionsPayload["shopifyImage"] = string(mapData)
 	}
 
-	// 4. Persistence Path
+	// 6. Persistence
 	resourceRepo := tenantCtx.ResourceRepo()
 	operation := "none"
 
 	if existing != nil {
-		// UPDATE Path
 		incomingData, _ := resource.OptionsPayload["shopifyData"].(string)
 		existingData, _ := existing.OptionsPayload["shopifyData"].(string)
 
@@ -573,7 +528,6 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 			operation = "updated"
 		}
 	} else {
-		// CREATE Path
 		if resource.ID == "" {
 			resource.ID = security.GenerateULID()
 		}
@@ -587,21 +541,20 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		operation = "created"
 	}
 
-	// 5. Cleanup Replaced Files
+	// 7. Post-Sync Orchestration
 	if operation != "none" {
 		for _, fileID := range filesToDelete {
 			if err := s.imageFileService.Delete(tenantCtx, fileID); err != nil {
 				s.logger.Content().Warn("Failed to cleanup replaced shopify image", "error", err, "fileId", fileID)
 			}
 		}
-		// Update cache and refresh content map
 		tenantCtx.CacheManager.SetResource(tenantCtx.TenantID, resource)
 		if err := s.contentMapService.RefreshContentMap(tenantCtx, tenantCtx.GetCacheManager()); err != nil {
 			s.logger.Content().Error("Failed to refresh content map after shopify upsert", "error", err)
 		}
 	}
 
-	s.logger.Content().Info("Shopify resource upsert completed",
+	s.logger.Content().Info("Shopify resource sync complete",
 		"tenantId", tenantCtx.TenantID,
 		"gid", targetGID,
 		"operation", operation,

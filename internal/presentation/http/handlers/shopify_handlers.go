@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -85,12 +84,11 @@ func (h *ShopifyHandlers) HandleGetProducts(c *gin.Context) {
 	marker.SetSuccess(true)
 }
 
-// HandleWebhook processes incoming webhooks from Shopify (product updates/creation/deletion and order payments).
-// It verifies the HMAC signature, checks local existence for products, and confirms bookings for paid orders.
+// HandleWebhook processes incoming webhooks from Shopify, directing product updates to the
+// high-fidelity GraphQL sync pipeline and processing order payments via the REST payload.
 func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
-		h.logger.System().Error("WEBHOOK ABORT: No tenant context found for request", "path", c.Request.URL.Path)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
 		return
 	}
@@ -122,6 +120,7 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 
 	switch topic {
 	case "orders/paid":
+		// AUTHORITATIVE REST PATH: Headless Storefront API cannot query Order objects by ID.
 		var order struct {
 			ID             int64 `json:"id"`
 			NoteAttributes []struct {
@@ -149,32 +148,16 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 			}
 		}
 
-	case "products/delete", "products/create", "products/update":
-		var rawData map[string]any
-		if err := json.Unmarshal(body, &rawData); err != nil {
-			h.logger.System().Error("Failed to unmarshal minimal webhook body", "error", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json payload"})
+	case "products/delete", "products/update":
+		// EXTRACT GID: Parse minimal ID from REST payload
+		gid, err := h.shopifyService.ParseWebhook(body)
+		if err != nil {
+			h.logger.System().Error("Failed to extract GID from Shopify webhook", "error", err, "topic", topic)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload format"})
 			return
 		}
 
-		var idStr string
-		if v, ok := rawData["id"].(float64); ok {
-			idStr = fmt.Sprintf("%.0f", v)
-		} else if v, ok := rawData["id"].(string); ok {
-			idStr = v
-		}
-
-		if idStr == "" {
-			h.logger.System().Warn("Missing ID in Shopify webhook", "tenantId", tenantCtx.TenantID)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "missing id in payload"})
-			return
-		}
-
-		gid := idStr
-		if !strings.HasPrefix(idStr, "gid://") {
-			gid = fmt.Sprintf("gid://shopify/Product/%s", idStr)
-		}
-
+		// FILTER: Only process updates for resources currently tracked in the database
 		existsLocally, err := h.resourceService.ExistsByShopifyGID(tenantCtx, gid)
 		if err != nil {
 			h.logger.System().Error("Failed to check local Shopify resource existence", "error", err, "gid", gid)
@@ -194,13 +177,8 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 		if topic == "products/delete" {
 			op, syncErr = h.resourceService.SyncShopifyDeletion(tenantCtx, gid)
 		} else {
-			resource, err := h.shopifyService.ParseWebhook(body)
-			if err != nil {
-				h.logger.System().Error("Failed to parse Shopify webhook", "error", err, "topic", topic)
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload format"})
-				return
-			}
-			op, syncErr = h.resourceService.UpsertShopifyResource(tenantCtx, resource)
+			// TARGETED GRAPHQL SYNC: Fetch high-fidelity data and perform non-destructive merge
+			op, syncErr = h.shopifyService.SyncProductByGID(tenantCtx, gid)
 		}
 
 		if syncErr != nil {
@@ -216,7 +194,8 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 			"duration", time.Since(start))
 
 	default:
-		h.logger.System().Warn("Unsupported Shopify webhook topic", "topic", topic, "tenantId", tenantCtx.TenantID)
+		// Accept unsupported topics without processing to prevent Shopify from retrying noise
+		h.logger.System().Debug("Unsupported Shopify webhook topic received", "topic", topic, "tenantId", tenantCtx.TenantID)
 		c.Status(http.StatusAccepted)
 		return
 	}
