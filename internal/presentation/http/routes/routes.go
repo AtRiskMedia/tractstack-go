@@ -106,7 +106,6 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		api.GET("/setup/suitcase", multiTenantHandlers.HandleFetchSuitcase)
 		api.POST("/setup/complete", multiTenantHandlers.HandleSetupComplete)
 
-		api.POST("/hooks/shopify", shopifyHandlers.HandleWebhook)
 		api.GET("/shopify/products", authHandlers.AuthMiddleware(), shopifyHandlers.HandleGetProducts)
 		api.POST("/shopify/checkout", shopifyHandlers.HandleCreateCheckout)
 		api.GET("/bookings/availability", bookingHandlers.HandleGetAvailability)
