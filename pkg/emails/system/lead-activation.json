@@ -1,0 +1,30 @@
+{
+  "subject": "Activate your TractStack account",
+  "blocks": [
+    {
+      "type": "text",
+      "content": "Hi {{.FirstName}},",
+      "align": "left",
+      "color": "#111827",
+      "isBold": false
+    },
+    {
+      "type": "text",
+      "content": "Welcome! Please click the button below to activate your account and verify your email address.",
+      "align": "left",
+      "color": "#374151",
+      "isBold": false
+    },
+    {
+      "type": "divider",
+      "color": "#E5E7EB"
+    },
+    {
+      "type": "button",
+      "label": "Activate Account",
+      "url": "{{.ActivationURL}}",
+      "bgColor": "#2563EB",
+      "textColor": "#FFFFFF"
+    }
+  ]
+}

@@ -13,7 +13,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oklog/ulid/v2 v2.1.1
-	github.com/resendlabs/resend-go v1.7.0
+	github.com/resend/resend-go/v2 v2.28.0
 	github.com/tursodatabase/libsql-client-go v0.0.0-20240902231107-85af5b9d094d
 	golang.org/x/crypto v0.31.0
 	golang.org/x/sync v0.19.0

@@ -1,0 +1,30 @@
+{
+  "subject": "Booking Confirmed: Order #{{.ShopifyOrderID}}",
+  "blocks": [
+    {
+      "type": "text",
+      "content": "Hi {{.LeadName}}, your booking is confirmed!",
+      "align": "center",
+      "color": "#111827",
+      "isBold": true
+    },
+    {
+      "type": "divider",
+      "color": "#E5E7EB"
+    },
+    {
+      "type": "text",
+      "content": "Thank you for your reservation. Your Shopify Order Number is {{.ShopifyOrderID}}.",
+      "align": "left",
+      "color": "#374151",
+      "isBold": false
+    },
+    {
+      "type": "button",
+      "label": "View Order",
+      "url": "{{.ShopifyOrderUrl}}",
+      "bgColor": "#0F172A",
+      "textColor": "#FFFFFF"
+    }
+  ]
+}

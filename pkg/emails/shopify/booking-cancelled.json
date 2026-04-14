@@ -1,0 +1,30 @@
+{
+  "subject": "Booking Cancelled: Order #{{.ShopifyOrderID}}",
+  "blocks": [
+    {
+      "type": "text",
+      "content": "Hi {{.LeadName}},",
+      "align": "left",
+      "color": "#111827",
+      "isBold": false
+    },
+    {
+      "type": "text",
+      "content": "Your booking for Order #{{.ShopifyOrderID}} has been cancelled.",
+      "align": "left",
+      "color": "#111827",
+      "isBold": false
+    },
+    {
+      "type": "divider",
+      "color": "#E5E7EB"
+    },
+    {
+      "type": "text",
+      "content": "If you have any questions or would like to rebook, please reply directly to this email.",
+      "align": "left",
+      "color": "#6B7280",
+      "isBold": false
+    }
+  ]
+}

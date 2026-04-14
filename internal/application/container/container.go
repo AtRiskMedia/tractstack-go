@@ -60,6 +60,8 @@ type Container struct {
 	EventProcessingService      *services.EventProcessingService
 	DBService                   *services.DBService
 	ConfigService               *services.ConfigService
+	EmailTemplateService        *services.EmailTemplateService
+	EmailWorker                 *services.EmailWorker
 	TailwindService             *services.TailwindService
 	MultiTenantService          *services.MultiTenantService
 	AAIService                  *services.AAIService
@@ -147,7 +149,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	shopifyService := services.NewShopifyService(logger, tenantManager, resourceService)
 	shopifyReconciliationWorker := services.NewShopifyReconciliationWorker(shopifyService, tenantManager, logger)
 
-	authService := services.NewAuthService(logger, perfTracker)
+	emailTemplateService := services.NewEmailTemplateService(logger, perfTracker)
+	var emailWorker *services.EmailWorker
+	if emailService != nil {
+		emailWorker = services.NewEmailWorker(emailService, emailTemplateService, tenantManager, logger)
+	}
+
+	authService := services.NewAuthService(logger, perfTracker, emailWorker)
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
@@ -179,7 +187,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
 	searchService := services.NewSearchService(paneService, storyFragmentService, resourceService, contentMapService)
-	bookingService := services.NewBookingService(logger, resourceService)
+	bookingService := services.NewBookingService(logger, resourceService, emailWorker)
 	bookingReconciliationWorker := services.NewBookingReconciliationWorker(tenantManager, logger)
 
 	// Create WarmingService, now injecting all its required content service dependencies.
@@ -255,6 +263,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		EventProcessingService:      eventProcessingService,
 		DBService:                   dbService,
 		ConfigService:               configService,
+		EmailTemplateService:        emailTemplateService,
+		EmailWorker:                 emailWorker,
 		TailwindService:             tailwindService,
 		MultiTenantService:          multiTenantService,
 		AAIService:                  aaiService,

@@ -4,7 +4,6 @@ package templates
 import (
 	"bytes"
 	"html/template"
-	"log"
 	"net/url"
 	"regexp"
 	"strings"
@@ -18,7 +17,6 @@ type ButtonProps struct {
 	TextColor       string
 }
 
-// Template data structure for email button
 type buttonTemplateData struct {
 	BackgroundColor string
 	URL             string
@@ -26,17 +24,26 @@ type buttonTemplateData struct {
 	Text            string
 }
 
-// ParagraphProps controls how paragraph content is handled
+// ParagraphProps controls how paragraph content and styling are handled.
 type ParagraphProps struct {
 	Text           string
-	AllowBasicHTML bool // When true, allows safe HTML tags like <strong>, <em>, <a>
+	AllowBasicHTML bool
+	Align          string
+	Color          string
+	IsBold         bool
 }
 
 type paragraphTemplateData struct {
-	Text template.HTML // Only used for pre-sanitized content
+	Text   template.HTML
+	Align  string
+	Color  string
+	IsBold bool
 }
 
-// Compiled templates for email components
+type dividerTemplateData struct {
+	Color string
+}
+
 var (
 	buttonTemplate = template.Must(template.New("emailButton").Parse(`
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" class="btn btn-primary" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; box-sizing: border-box; width: 100%; min-width: 100%;" width="100%">
@@ -57,56 +64,38 @@ var (
       </tbody>
     </table>`))
 
-	paragraphTemplate = template.Must(template.New("emailParagraph").Parse(`<p style="font-family: Helvetica, sans-serif; font-size: 16px; font-weight: normal; margin: 0; margin-bottom: 16px;">{{.Text}}</p>`))
+	paragraphTemplate = template.Must(template.New("emailParagraph").Parse(`
+    <p style="font-family: Helvetica, sans-serif; font-size: 16px; margin: 0; margin-bottom: 16px; text-align: {{.Align}}; color: {{.Color}}; {{if .IsBold}}font-weight: bold;{{else}}font-weight: normal;{{end}}">
+      {{.Text}}
+    </p>`))
+
+	dividerTemplate = template.Must(template.New("emailDivider").Parse(`
+    <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="width: 100%; margin-bottom: 24px; margin-top: 8px;">
+      <tbody>
+        <tr>
+          <td style="border-top: 1px solid {{.Color}}; width: 100%;"></td>
+        </tr>
+      </tbody>
+    </table>`))
 )
 
-// allowedHTMLTags defines safe HTML tags for email content
 var allowedHTMLTags = map[string]bool{
-	"strong": true,
-	"b":      true,
-	"em":     true,
-	"i":      true,
-	"u":      true,
-	"br":     true,
-	"a":      true, // Allow links
-	"img":    true, // Allow images
-	"span":   true, // Allow spans for styling
+	"strong": true, "b": true, "em": true, "i": true, "u": true,
+	"br": true, "a": true, "img": true, "span": true,
 }
 
-// allowedAttributes defines safe attributes per tag
 var allowedAttributes = map[string]map[string]bool{
-	"a": {
-		"href":   true,
-		"title":  true,
-		"target": true,
-	},
-	"img": {
-		"src":    true,
-		"alt":    true,
-		"width":  true,
-		"height": true,
-		"style":  true, // For email inline styles
-	},
-	"span": {
-		"style": true, // For email inline styles
-	},
-	"strong": {
-		"style": true,
-	},
-	"em": {
-		"style": true,
-	},
-	"b": {
-		"style": true,
-	},
-	"i": {
-		"style": true,
-	},
+	"a":      {"href": true, "title": true, "target": true},
+	"img":    {"src": true, "alt": true, "width": true, "height": true, "style": true},
+	"span":   {"style": true},
+	"strong": {"style": true},
+	"em":     {"style": true},
+	"b":      {"style": true},
+	"i":      {"style": true},
 }
 
 // GetButton generates the HTML for a styled email button.
 func GetButton(props ButtonProps) string {
-	// Set defaults exactly as before
 	backgroundColor := props.BackgroundColor
 	if backgroundColor == "" {
 		backgroundColor = "#0867ec"
@@ -117,44 +106,49 @@ func GetButton(props ButtonProps) string {
 		textColor = "#ffffff"
 	}
 
-	// Validate and sanitize URL
 	sanitizedURL := sanitizeEmailURL(props.URL)
 	if sanitizedURL == "" {
-		log.Printf("Invalid or unsafe URL in email button: %s", props.URL)
-		sanitizedURL = "#" // Fallback to safe anchor
+		sanitizedURL = "#"
 	}
 
-	// Validate and sanitize colors (basic hex color validation)
-	backgroundColor = sanitizeColor(backgroundColor)
-	textColor = sanitizeColor(textColor)
-
-	// Create template data
 	templateData := buttonTemplateData{
-		BackgroundColor: backgroundColor,
+		BackgroundColor: sanitizeColor(backgroundColor),
 		URL:             sanitizedURL,
-		TextColor:       textColor,
-		Text:            props.Text, // Text is automatically escaped by template
+		TextColor:       sanitizeColor(textColor),
+		Text:            props.Text,
 	}
 
-	// Execute template
 	var buf bytes.Buffer
 	if err := buttonTemplate.Execute(&buf, templateData); err != nil {
-		log.Printf("Error executing email button template: %v", err)
 		return `<div style="color: red;">Button template error</div>`
 	}
-
 	return buf.String()
 }
 
-// GetParagraph safely renders paragraph content with optional basic HTML support
+// GetDivider generates a safe HTML table-based divider.
+func GetDivider(color string) string {
+	if color == "" {
+		color = "#E5E7EB"
+	}
+
+	templateData := dividerTemplateData{
+		Color: sanitizeColor(color),
+	}
+
+	var buf bytes.Buffer
+	if err := dividerTemplate.Execute(&buf, templateData); err != nil {
+		return `<div style="color: red;">Divider template error</div>`
+	}
+	return buf.String()
+}
+
 func GetParagraph(text string) string {
 	return GetParagraphWithOptions(ParagraphProps{
 		Text:           text,
-		AllowBasicHTML: false, // Default to safe, escaped text only
+		AllowBasicHTML: false,
 	})
 }
 
-// GetParagraphWithHTML allows basic HTML tags in paragraph content (use with caution)
 func GetParagraphWithHTML(text string) string {
 	return GetParagraphWithOptions(ParagraphProps{
 		Text:           text,
@@ -162,81 +156,84 @@ func GetParagraphWithHTML(text string) string {
 	})
 }
 
-// GetParagraphWithOptions provides fine-grained control over paragraph rendering
+// GetParagraphWithOptions provides fine-grained control over paragraph rendering,
+// including alignment, color, and font weight.
 func GetParagraphWithOptions(props ParagraphProps) string {
 	var processedText template.HTML
 
 	if props.AllowBasicHTML {
-		// Sanitize and allow only safe HTML tags
 		processedText = template.HTML(sanitizeBasicHTML(props.Text))
 	} else {
-		// Escape all HTML - secure default behavior
 		var buf bytes.Buffer
 		textTemplate := template.Must(template.New("escapeText").Parse("{{.}}"))
 		if err := textTemplate.Execute(&buf, props.Text); err != nil {
-			log.Printf("Error escaping paragraph text: %v", err)
 			return `<div style="color: red;">Paragraph escaping error</div>`
 		}
 		processedText = template.HTML(buf.String())
 	}
 
+	align := props.Align
+	if align == "" {
+		align = "left"
+	}
+	if align != "left" && align != "center" && align != "right" {
+		align = "left"
+	}
+
+	color := props.Color
+	if color == "" {
+		color = "#333333"
+	}
+
 	templateData := paragraphTemplateData{
-		Text: processedText,
+		Text:   processedText,
+		Align:  align,
+		Color:  sanitizeColor(color),
+		IsBold: props.IsBold,
 	}
 
 	var buf bytes.Buffer
 	if err := paragraphTemplate.Execute(&buf, templateData); err != nil {
-		log.Printf("Error executing email paragraph template: %v", err)
 		return `<div style="color: red;">Paragraph template error</div>`
 	}
 
 	return buf.String()
 }
 
-// sanitizeBasicHTML allows only safe HTML tags and removes dangerous content
 func sanitizeBasicHTML(input string) string {
-	// Remove script tags and their content completely
 	scriptRegex := regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`)
 	input = scriptRegex.ReplaceAllString(input, "")
 
-	// Remove dangerous event handlers (onclick, onload, etc.)
 	eventRegex := regexp.MustCompile(`(?i)\s+on\w+\s*=\s*["\'][^"\']*["\']`)
 	input = eventRegex.ReplaceAllString(input, "")
 
-	// Remove javascript: URLs
 	jsRegex := regexp.MustCompile(`(?i)javascript\s*:`)
 	input = jsRegex.ReplaceAllString(input, "")
 
-	// Allow only specific safe tags, remove all others
-	// This regex captures opening tags, closing tags, and self-closing tags
 	tagRegex := regexp.MustCompile(`<(/?)(\w+)([^>]*)>`)
 
 	input = tagRegex.ReplaceAllStringFunc(input, func(match string) string {
 		submatches := tagRegex.FindStringSubmatch(match)
 		if len(submatches) < 4 {
-			return "" // Remove malformed tags
+			return ""
 		}
 
 		isClosing := submatches[1] == "/"
 		tagName := strings.ToLower(submatches[2])
 		attributes := submatches[3]
 
-		// Check if tag is allowed
 		if !allowedHTMLTags[tagName] {
-			return "" // Remove disallowed tags
+			return ""
 		}
 
-		// For closing tags, just return the tag
 		if isClosing {
 			return "</" + tagName + ">"
 		}
 
-		// For self-closing tags without attributes
 		if tagName == "br" && strings.TrimSpace(attributes) == "" {
 			return "<br>"
 		}
 
-		// Sanitize attributes for opening tags
 		safeAttributes := sanitizeAttributes(tagName, attributes)
 		if safeAttributes == "" {
 			return "<" + tagName + ">"
@@ -248,7 +245,6 @@ func sanitizeBasicHTML(input string) string {
 	return input
 }
 
-// sanitizeAttributes filters attributes to only allow safe ones
 func sanitizeAttributes(tagName, attributes string) string {
 	if attributes == "" {
 		return ""
@@ -256,10 +252,9 @@ func sanitizeAttributes(tagName, attributes string) string {
 
 	allowedForTag, exists := allowedAttributes[tagName]
 	if !exists {
-		return "" // No attributes allowed for this tag
+		return ""
 	}
 
-	// Parse attributes using regex
 	attrRegex := regexp.MustCompile(`(\w+)\s*=\s*["\']([^"\']*)["\']`)
 	matches := attrRegex.FindAllStringSubmatch(attributes, -1)
 
@@ -273,35 +268,28 @@ func sanitizeAttributes(tagName, attributes string) string {
 		attrName := strings.ToLower(match[1])
 		attrValue := match[2]
 
-		// Check if attribute is allowed for this tag
 		if !allowedForTag[attrName] {
 			continue
 		}
 
-		// Additional validation based on attribute type
 		switch attrName {
 		case "href":
-			// Validate URLs
 			if sanitizedURL := sanitizeEmailURL(attrValue); sanitizedURL != "" {
 				safeAttrs = append(safeAttrs, attrName+`="`+sanitizedURL+`"`)
 			}
 		case "src":
-			// Validate image URLs (similar to href)
 			if sanitizedURL := sanitizeImageURL(attrValue); sanitizedURL != "" {
 				safeAttrs = append(safeAttrs, attrName+`="`+sanitizedURL+`"`)
 			}
 		case "style":
-			// Basic CSS validation
 			if safeCSS := sanitizeInlineCSS(attrValue); safeCSS != "" {
 				safeAttrs = append(safeAttrs, attrName+`="`+safeCSS+`"`)
 			}
 		case "alt", "title", "width", "height":
-			// Text attributes - escape and validate
 			if cleanValue := sanitizeTextAttribute(attrValue); cleanValue != "" {
 				safeAttrs = append(safeAttrs, attrName+`="`+cleanValue+`"`)
 			}
 		case "target":
-			// Only allow safe target values
 			if attrValue == "_blank" || attrValue == "_self" {
 				safeAttrs = append(safeAttrs, attrName+`="`+attrValue+`"`)
 			}
@@ -315,61 +303,36 @@ func sanitizeAttributes(tagName, attributes string) string {
 	return " " + strings.Join(safeAttrs, " ")
 }
 
-// sanitizeImageURL validates URLs for images
 func sanitizeImageURL(url string) string {
-	// Same validation as email URLs but also allow data: URLs for inline images
 	if strings.HasPrefix(url, "data:image/") {
-		return url // Allow data URLs for images
+		return url
 	}
-	return sanitizeEmailURL(url) // Use existing URL validation
+	return sanitizeEmailURL(url)
 }
 
-// sanitizeInlineCSS removes dangerous CSS properties and validates against safe properties
 func sanitizeInlineCSS(css string) string {
-	// Remove potentially dangerous CSS
 	dangerous := []string{
-		"javascript:",
-		"expression(",
-		"@import",
-		"behavior:",
-		"-moz-binding",
+		"javascript:", "expression(", "@import", "behavior:", "-moz-binding",
 	}
 
 	cssLower := strings.ToLower(css)
 	for _, danger := range dangerous {
 		if strings.Contains(cssLower, danger) {
-			return "" // Block entirely if dangerous content found
+			return ""
 		}
 	}
 
-	// Allow common safe CSS properties for email styling
 	safeProperties := map[string]bool{
-		"color":            true,
-		"background-color": true,
-		"font-size":        true,
-		"font-weight":      true,
-		"font-family":      true,
-		"text-align":       true,
-		"text-decoration":  true,
-		"margin":           true,
-		"margin-top":       true,
-		"margin-bottom":    true,
-		"margin-left":      true,
-		"margin-right":     true,
-		"padding":          true,
-		"padding-top":      true,
-		"padding-bottom":   true,
-		"padding-left":     true,
-		"padding-right":    true,
-		"border":           true,
-		"border-radius":    true,
-		"width":            true,
-		"height":           true,
-		"display":          true,
-		"line-height":      true,
+		"color": true, "background-color": true, "font-size": true,
+		"font-weight": true, "font-family": true, "text-align": true,
+		"text-decoration": true, "margin": true, "margin-top": true,
+		"margin-bottom": true, "margin-left": true, "margin-right": true,
+		"padding": true, "padding-top": true, "padding-bottom": true,
+		"padding-left": true, "padding-right": true, "border": true,
+		"border-radius": true, "width": true, "height": true,
+		"display": true, "line-height": true,
 	}
 
-	// Parse CSS properties
 	properties := strings.Split(css, ";")
 	var safeProps []string
 
@@ -379,7 +342,6 @@ func sanitizeInlineCSS(css string) string {
 			continue
 		}
 
-		// Split property:value
 		parts := strings.SplitN(prop, ":", 2)
 		if len(parts) != 2 {
 			continue
@@ -388,9 +350,7 @@ func sanitizeInlineCSS(css string) string {
 		propName := strings.TrimSpace(strings.ToLower(parts[0]))
 		propValue := strings.TrimSpace(parts[1])
 
-		// Check if property is allowed
 		if safeProperties[propName] {
-			// Basic value validation - no HTML or javascript
 			if !strings.Contains(propValue, "<") && !strings.Contains(propValue, ">") &&
 				!strings.Contains(strings.ToLower(propValue), "javascript:") {
 				safeProps = append(safeProps, propName+": "+propValue)
@@ -405,56 +365,48 @@ func sanitizeInlineCSS(css string) string {
 	return strings.Join(safeProps, "; ")
 }
 
-// sanitizeTextAttribute cleans text attributes
 func sanitizeTextAttribute(text string) string {
-	// Remove any HTML/script content from text attributes
 	text = strings.ReplaceAll(text, "<", "&lt;")
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	text = strings.ReplaceAll(text, "\"", "&quot;")
 	text = strings.ReplaceAll(text, "'", "&#39;")
 
-	// Remove javascript: protocols
 	if strings.Contains(strings.ToLower(text), "javascript:") {
 		return ""
 	}
-
 	return text
 }
 
-// sanitizeEmailURL validates and sanitizes URLs for email use
 func sanitizeEmailURL(rawURL string) string {
 	if rawURL == "" {
 		return ""
 	}
 
-	// Parse and validate the URL
+	// Support uncompiled Go template variables so they can be parsed later.
+	if strings.HasPrefix(rawURL, "{{.") && strings.HasSuffix(rawURL, "}}") {
+		return rawURL
+	}
+
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
-		log.Printf("Invalid email URL: %s, error: %v", rawURL, err)
 		return ""
 	}
 
-	// Only allow http, https, and mailto schemes for email buttons
 	scheme := strings.ToLower(parsedURL.Scheme)
 	if scheme != "http" && scheme != "https" && scheme != "mailto" {
-		log.Printf("Blocked unsafe URL scheme in email: %s", scheme)
 		return ""
 	}
 
-	// Return the sanitized URL
 	return parsedURL.String()
 }
 
-// sanitizeColor validates and sanitizes hex color values
 func sanitizeColor(color string) string {
 	if color == "" {
-		return "#000000" // Default to black
+		return "#000000"
 	}
 
-	// Remove any whitespace
 	color = strings.TrimSpace(color)
 
-	// Must start with # and be followed by 3 or 6 hex digits
 	if !strings.HasPrefix(color, "#") {
 		return "#000000"
 	}
@@ -464,7 +416,6 @@ func sanitizeColor(color string) string {
 		return "#000000"
 	}
 
-	// Check if all characters are valid hex digits
 	for _, char := range hex {
 		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
 			return "#000000"

@@ -53,6 +53,7 @@ type BrandConfigUpdateRequest struct {
 	SiteURL            string `json:"SITE_URL,omitempty"`
 	Slogan             string `json:"SLOGAN,omitempty"`
 	Footer             string `json:"FOOTER,omitempty"`
+	AdminEmail         string `json:"ADMIN_EMAIL,omitempty"`
 
 	// SEO and Social Fields
 	OGTitle  string `json:"OGTITLE,omitempty"`
@@ -604,6 +605,9 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 	}
 	if request.Footer != "" {
 		config.Footer = request.Footer
+	}
+	if request.AdminEmail != "" {
+		config.AdminEmail = request.AdminEmail
 	}
 
 	// Update SEO and social fields (strings protected with != "")

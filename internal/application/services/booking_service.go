@@ -21,14 +21,16 @@ var ErrBookingNotFound = errors.New("booking not found for trace ID")
 type BookingService struct {
 	logger          *logging.ChanneledLogger
 	resourceService *ResourceService
+	emailWorker     *EmailWorker
 	locks           sync.Map // Maps tenantID string to *sync.Mutex for WAL-mode queueing
 }
 
 // NewBookingService creates a new booking service instance.
-func NewBookingService(logger *logging.ChanneledLogger, resourceService *ResourceService) *BookingService {
+func NewBookingService(logger *logging.ChanneledLogger, resourceService *ResourceService, emailWorker *EmailWorker) *BookingService {
 	return &BookingService{
 		logger:          logger,
 		resourceService: resourceService,
+		emailWorker:     emailWorker,
 	}
 }
 
@@ -186,6 +188,29 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 	}
 
 	s.logger.System().Info("Booking confirmed", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+
+	if s.emailWorker != nil && shopifyOrderID != nil {
+		lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
+		if lead != nil {
+			siteURL := tenantCtx.Config.BrandConfig.SiteURL
+			if siteURL == "" {
+				siteURL = "https://tractstack.com"
+			}
+			orderURL := fmt.Sprintf("%s/account/orders/%s", siteURL, *shopifyOrderID)
+			s.emailWorker.Enqueue(EmailJob{
+				TenantID:     tenantCtx.TenantID,
+				To:           []string{lead.Email},
+				Category:     "shopify",
+				TemplateName: "booking-confirmed",
+				Data: map[string]any{
+					"LeadName":        lead.FirstName,
+					"ShopifyOrderID":  *shopifyOrderID,
+					"ShopifyOrderUrl": orderURL,
+				},
+			})
+		}
+	}
+
 	return nil
 }
 
@@ -242,6 +267,23 @@ func (s *BookingService) CancelBooking(tenantCtx *tenant.Context, traceID string
 	}
 
 	s.logger.System().Info("Booking manually cancelled", "traceId", traceID, "tenantId", tenantCtx.TenantID)
+
+	if s.emailWorker != nil {
+		lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
+		if lead != nil {
+			orderID := traceID
+			s.emailWorker.Enqueue(EmailJob{
+				TenantID:     tenantCtx.TenantID,
+				To:           []string{lead.Email},
+				Category:     "shopify",
+				TemplateName: "booking-cancelled",
+				Data: map[string]any{
+					"LeadName":       lead.FirstName,
+					"ShopifyOrderID": orderID,
+				},
+			})
+		}
+	}
 
 	return nil
 }

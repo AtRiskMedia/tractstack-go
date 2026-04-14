@@ -22,13 +22,15 @@ import (
 type AuthService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+	emailWorker *EmailWorker
 }
 
 // NewAuthService creates a new authentication service
-func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *AuthService {
+func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, emailWorker *EmailWorker) *AuthService {
 	return &AuthService{
 		logger:      logger,
 		perfTracker: perfTracker,
+		emailWorker: emailWorker,
 	}
 }
 
@@ -166,6 +168,25 @@ func (a *AuthService) CreateLead(firstName, email, password, contactPersona, sho
 	token, err := security.GenerateProfileToken(profile, tenantCtx.Config.JWTSecret, tenantCtx.Config.AESKey)
 	if err != nil {
 		return nil, fmt.Errorf("token generation failed")
+	}
+
+	if a.emailWorker != nil {
+		siteURL := tenantCtx.Config.BrandConfig.SiteURL
+		if siteURL == "" {
+			siteURL = "https://tractstack.com"
+		}
+		activationURL := fmt.Sprintf("%s/storykeep/init?token=%s", siteURL, token)
+
+		a.emailWorker.Enqueue(EmailJob{
+			TenantID:     tenantCtx.TenantID,
+			To:           []string{email},
+			Category:     "system",
+			TemplateName: "lead-activation",
+			Data: map[string]any{
+				"FirstName":     firstName,
+				"ActivationURL": activationURL,
+			},
+		})
 	}
 
 	return &CreateLeadResult{

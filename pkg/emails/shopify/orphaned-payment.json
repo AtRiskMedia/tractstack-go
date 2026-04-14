@@ -1,0 +1,37 @@
+{
+  "subject": "System Alert: Orphaned Payment Detected (Order #{{.ShopifyOrderID}})",
+  "blocks": [
+    {
+      "type": "text",
+      "content": "An orphaned payment was detected.",
+      "align": "left",
+      "color": "#991B1B",
+      "isBold": true
+    },
+    {
+      "type": "divider",
+      "color": "#E5E7EB"
+    },
+    {
+      "type": "text",
+      "content": "Trace ID: {{.TraceID}}",
+      "align": "left",
+      "color": "#111827",
+      "isBold": false
+    },
+    {
+      "type": "text",
+      "content": "Shopify Order ID: {{.ShopifyOrderID}}",
+      "align": "left",
+      "color": "#111827",
+      "isBold": false
+    },
+    {
+      "type": "text",
+      "content": "Action Required: The database booking hold expired before the Shopify webhook arrived. Please check the Shopify admin dashboard to issue a refund or manually reschedule the customer.",
+      "align": "left",
+      "color": "#374151",
+      "isBold": false
+    }
+  ]
+}

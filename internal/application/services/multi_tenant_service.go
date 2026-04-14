@@ -110,7 +110,7 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 	}
 
 	// Create initial brand.json with SITE_URL from the first domain in the list
-	if err := s.saveInitialBrandConfig(req.TenantID, req.Domains[0]); err != nil {
+	if err := s.saveInitialBrandConfig(req.TenantID, req.Domains[0], req.AdminEmail); err != nil {
 		marker.SetError(err)
 		return err
 	}
@@ -126,6 +126,11 @@ func (s *MultiTenantService) ProvisionTenant(req ProvisionRequest) error {
 	}
 
 	if err := s.copyDefaultDesigns(req.TenantID); err != nil {
+		marker.SetError(err)
+		return err
+	}
+
+	if err := s.copyDefaultEmails(req.TenantID); err != nil {
 		marker.SetError(err)
 		return err
 	}
@@ -386,7 +391,7 @@ func (s *MultiTenantService) copyDefaultDesigns(tenantID string) error {
 	return copyFile(sourcePath, targetPath)
 }
 
-func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) error {
+func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain, adminEmail string) error {
 	siteURL := ""
 	if domain != "*" {
 		siteURL = fmt.Sprintf("https://%s", domain)
@@ -397,6 +402,7 @@ func (s *MultiTenantService) saveInitialBrandConfig(tenantID, domain string) err
 		"HOME_SLUG":            "hello",
 		"TRACTSTACK_HOME_SLUG": "HELLO",
 		"THEME":                "light-bold",
+		"ADMIN_EMAIL":          adminEmail,
 	}
 
 	configPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "brand.json")
@@ -453,4 +459,33 @@ func (s *MultiTenantService) CompleteSetup(tenantID, hydrationToken string) erro
 	marker.SetSuccess(true)
 	s.logger.Tenant().Info("Setup completed and hydration token cleared", "tenantId", tenantID)
 	return nil
+}
+
+// copyDefaultEmails recursively copies the baseline email JSON templates to the tenant's specific config directory.
+// filepath.Walk is required here because the emails directory contains domain-specific subdirectories (e.g., shopify/, system/).
+func (s *MultiTenantService) copyDefaultEmails(tenantID string) error {
+	sourceDir := filepath.Join("pkg", "emails")
+	targetDir := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "emails")
+
+	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil // If no defaults exist yet, gracefully skip
+			}
+			return err
+		}
+
+		relPath, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+
+		targetPath := filepath.Join(targetDir, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(targetPath, 0o755)
+		}
+
+		return copyFile(path, targetPath)
+	})
 }

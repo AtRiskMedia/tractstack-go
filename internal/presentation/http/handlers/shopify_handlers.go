@@ -28,6 +28,7 @@ type ShopifyHandlers struct {
 	shopifyService  *services.ShopifyService
 	resourceService *services.ResourceService
 	bookingService  *services.BookingService
+	emailWorker     *services.EmailWorker
 	logger          *logging.ChanneledLogger
 	perfTracker     *performance.Tracker
 }
@@ -37,6 +38,7 @@ func NewShopifyHandlers(
 	shopifyService *services.ShopifyService,
 	resourceService *services.ResourceService,
 	bookingService *services.BookingService,
+	emailWorker *services.EmailWorker,
 	logger *logging.ChanneledLogger,
 	perfTracker *performance.Tracker,
 ) *ShopifyHandlers {
@@ -44,6 +46,7 @@ func NewShopifyHandlers(
 		shopifyService:  shopifyService,
 		resourceService: resourceService,
 		bookingService:  bookingService,
+		emailWorker:     emailWorker,
 		logger:          logger,
 		perfTracker:     perfTracker,
 	}
@@ -139,6 +142,19 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 				if err := h.bookingService.ConfirmBooking(tenantCtx, attr.Value, &orderID); err != nil {
 					if errors.Is(err, services.ErrBookingNotFound) {
 						h.logger.System().Error("ORPHANED PAYMENT: User paid for an expired booking hold", "traceId", attr.Value, "shopifyOrderId", orderID)
+
+						if h.emailWorker != nil && tenantCtx.Config.BrandConfig != nil && tenantCtx.Config.BrandConfig.AdminEmail != "" {
+							h.emailWorker.Enqueue(services.EmailJob{
+								TenantID:     tenantCtx.TenantID,
+								To:           []string{tenantCtx.Config.BrandConfig.AdminEmail},
+								Category:     "shopify",
+								TemplateName: "orphaned-payment",
+								Data: map[string]any{
+									"TraceID":        attr.Value,
+									"ShopifyOrderID": orderID,
+								},
+							})
+						}
 						return
 					}
 					h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", attr.Value)

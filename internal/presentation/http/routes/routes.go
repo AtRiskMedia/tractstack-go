@@ -52,8 +52,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	aaiHandlers := handlers.NewAAIHandlers(container.AAIService, container.Logger, container.PerfTracker)
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 	searchHandlers := handlers.NewSearchHandlers(container.SearchService, container.Logger, container.PerfTracker)
-	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.BookingService, container.Logger, container.PerfTracker)
+	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.BookingService, container.EmailWorker, container.Logger, container.PerfTracker)
 	bookingHandlers := handlers.NewBookingHandlers(container.BookingService, container.Logger, container.PerfTracker)
+	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -123,6 +124,16 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			protectedBookings.GET("/list", bookingHandlers.HandleListBookings)
 			protectedBookings.GET("/metrics", bookingHandlers.HandleGetMetrics)
 			protectedBookings.POST("/:traceId/cancel", bookingHandlers.HandleCancelBooking)
+		}
+
+		// Email Templates
+		emailGroup := api.Group("/emails")
+		emailGroup.Use(authHandlers.AuthMiddleware())
+		{
+			emailGroup.GET("/templates", emailTemplateHandlers.HandleListTemplates)
+			emailGroup.GET("/templates/:category/:template", emailTemplateHandlers.HandleGetTemplate)
+			emailGroup.POST("/templates/:category/:template", emailTemplateHandlers.HandleSaveTemplate)
+			emailGroup.POST("/preview", emailTemplateHandlers.HandlePreviewTemplate)
 		}
 
 		// Config endpoints
