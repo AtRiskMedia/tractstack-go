@@ -51,7 +51,7 @@ func (h *EmailTemplateHandlers) HandleListTemplates(c *gin.Context) {
 	}
 
 	marker.SetSuccess(true)
-	c.JSON(http.StatusOK, templates)
+	c.JSON(http.StatusOK, gin.H{"data": templates})
 }
 
 // HandleGetTemplate fetches a specific template configuration, returning either the tenant override or the system fallback.
@@ -76,7 +76,7 @@ func (h *EmailTemplateHandlers) HandleGetTemplate(c *gin.Context) {
 	}
 
 	marker.SetSuccess(true)
-	c.JSON(http.StatusOK, template)
+	c.JSON(http.StatusOK, gin.H{"data": template})
 }
 
 // HandleSaveTemplate stores a modified email template configuration directly to the tenant's configuration directory.
@@ -107,7 +107,7 @@ func (h *EmailTemplateHandlers) HandleSaveTemplate(c *gin.Context) {
 	}
 
 	marker.SetSuccess(true)
-	c.Status(http.StatusOK)
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
 // HandlePreviewTemplate takes an unsaved template and mock data to return a compiled HTML preview.
@@ -142,7 +142,9 @@ func (h *EmailTemplateHandlers) HandlePreviewTemplate(c *gin.Context) {
 
 	marker.SetSuccess(true)
 	c.JSON(http.StatusOK, gin.H{
-		"subject": subject,
-		"html":    body,
+		"data": gin.H{
+			"subject": subject,
+			"html":    body,
+		},
 	})
 }
