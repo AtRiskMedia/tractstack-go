@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"os"
-	"path/filepath"
 	texttemplate "text/template"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email/templates"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
-	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // EmailTemplate represents the root schema of the parallel email builder.
@@ -26,13 +24,15 @@ type EmailTemplate struct {
 
 // EmailTemplateService manages the storage, retrieval, and compilation of isolated email JSON schemas.
 type EmailTemplateService struct {
+	loader      tenant.EmailConfigLoader
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 }
 
 // NewEmailTemplateService creates a new instance of the email template service.
-func NewEmailTemplateService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *EmailTemplateService {
+func NewEmailTemplateService(loader tenant.EmailConfigLoader, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *EmailTemplateService {
 	return &EmailTemplateService{
+		loader:      loader,
 		logger:      logger,
 		perfTracker: perfTracker,
 	}
@@ -47,21 +47,10 @@ func (s *EmailTemplateService) GetTemplate(tenantID, category, templateName stri
 
 	filename := fmt.Sprintf("%s.json", templateName)
 
-	tenantPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "emails", category, filename)
-	fallbackPath := filepath.Join("pkg", "emails", category, filename)
-
-	data, err := os.ReadFile(tenantPath)
+	data, err := s.loader.ReadTemplate(tenantID, category, filename)
 	if err != nil {
-		if os.IsNotExist(err) {
-			data, err = os.ReadFile(fallbackPath)
-			if err != nil {
-				marker.SetError(err)
-				return nil, fmt.Errorf("template not found in tenant or fallback paths: %w", err)
-			}
-		} else {
-			marker.SetError(err)
-			return nil, fmt.Errorf("failed to read tenant template: %w", err)
-		}
+		marker.SetError(err)
+		return nil, fmt.Errorf("failed to read template data: %w", err)
 	}
 
 	var tmpl EmailTemplate
@@ -80,21 +69,14 @@ func (s *EmailTemplateService) SaveTemplate(tenantID, category, templateName str
 	marker := s.perfTracker.StartOperation("email_template_save", tenantID)
 	defer marker.Complete()
 
-	dirPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "emails", category)
-	if err := os.MkdirAll(dirPath, 0o755); err != nil {
-		marker.SetError(err)
-		return fmt.Errorf("failed to create tenant email directory: %w", err)
-	}
-
-	filePath := filepath.Join(dirPath, fmt.Sprintf("%s.json", templateName))
-
 	data, err := json.MarshalIndent(template, "", "  ")
 	if err != nil {
 		marker.SetError(err)
 		return fmt.Errorf("failed to marshal template: %w", err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+	filename := fmt.Sprintf("%s.json", templateName)
+	if err := s.loader.WriteTemplate(tenantID, category, filename, data); err != nil {
 		marker.SetError(err)
 		return fmt.Errorf("failed to write template file: %w", err)
 	}
@@ -109,39 +91,10 @@ func (s *EmailTemplateService) ListTemplates() (map[string][]string, error) {
 	marker := s.perfTracker.StartOperation("email_template_list", "system")
 	defer marker.Complete()
 
-	basePath := filepath.Join("pkg", "emails")
-	templates := make(map[string][]string)
-
-	entries, err := os.ReadDir(basePath)
+	templates, err := s.loader.ListTemplates()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return templates, nil
-		}
 		marker.SetError(err)
-		return nil, fmt.Errorf("failed to read base emails directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			category := entry.Name()
-			categoryPath := filepath.Join(basePath, category)
-
-			files, err := os.ReadDir(categoryPath)
-			if err != nil {
-				continue
-			}
-
-			var tplNames []string
-			for _, file := range files {
-				if !file.IsDir() && filepath.Ext(file.Name()) == ".json" {
-					name := file.Name()[:len(file.Name())-len(".json")]
-					tplNames = append(tplNames, name)
-				}
-			}
-			if len(tplNames) > 0 {
-				templates[category] = tplNames
-			}
-		}
+		return nil, fmt.Errorf("failed to list templates via loader: %w", err)
 	}
 
 	marker.SetSuccess(true)

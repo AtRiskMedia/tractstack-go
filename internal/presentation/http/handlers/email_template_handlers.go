@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"html/template"
 	"net/http"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -93,14 +94,28 @@ func (h *EmailTemplateHandlers) HandleSaveTemplate(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("handler_email_save", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	var template services.EmailTemplate
-	if err := c.ShouldBindJSON(&template); err != nil {
+	var templateData services.EmailTemplate // Renamed to templateData to avoid shadowing the "html/template" package
+	if err := c.ShouldBindJSON(&templateData); err != nil {
 		h.logger.System().Warn("Invalid email template payload", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload structure"})
 		return
 	}
 
-	if err := h.emailTemplateService.SaveTemplate(tenantCtx.TenantID, category, templateName, &template); err != nil {
+	siteURL := tenantCtx.Config.BrandConfig.SiteURL
+	rawHTML, err := services.ParseEmailBlocks(templateData.Blocks, siteURL)
+	if err != nil {
+		h.logger.System().Warn("Pre-flight validation failed: invalid blocks", "error", err, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template blocks"})
+		return
+	}
+
+	if _, err := template.New("validate").Parse(rawHTML); err != nil {
+		h.logger.System().Warn("Pre-flight validation failed: malformed HTML/template", "error", err, "tenantId", tenantCtx.TenantID)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "template compilation error"})
+		return
+	}
+
+	if err := h.emailTemplateService.SaveTemplate(tenantCtx.TenantID, category, templateName, &templateData); err != nil {
 		h.logger.System().Error("Failed to save email template", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist template"})
 		return

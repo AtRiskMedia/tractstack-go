@@ -3,10 +3,12 @@ package templates
 
 import (
 	"bytes"
+	"fmt"
 	"html/template"
 	"net/url"
-	"regexp"
 	"strings"
+
+	"github.com/microcosm-cc/bluemonday"
 )
 
 // ButtonProps defines the properties for rendering an email button.
@@ -15,6 +17,7 @@ type ButtonProps struct {
 	URL             string
 	BackgroundColor string
 	TextColor       string
+	SiteURL         string // Support global URL rewriting
 }
 
 type buttonTemplateData struct {
@@ -31,6 +34,7 @@ type ParagraphProps struct {
 	Align          string
 	Color          string
 	IsBold         bool
+	SiteURL        string // Support global URL rewriting
 }
 
 type paragraphTemplateData struct {
@@ -77,21 +81,34 @@ var (
         </tr>
       </tbody>
     </table>`))
+
+	emailSanitizer *bluemonday.Policy
 )
 
-var allowedHTMLTags = map[string]bool{
-	"strong": true, "b": true, "em": true, "i": true, "u": true,
-	"br": true, "a": true, "img": true, "span": true,
-}
+func init() {
+	// Initialize strict bluemonday policy to replace legacy custom regex sanitizers
+	emailSanitizer = bluemonday.NewPolicy()
 
-var allowedAttributes = map[string]map[string]bool{
-	"a":      {"href": true, "title": true, "target": true},
-	"img":    {"src": true, "alt": true, "width": true, "height": true, "style": true},
-	"span":   {"style": true},
-	"strong": {"style": true},
-	"em":     {"style": true},
-	"b":      {"style": true},
-	"i":      {"style": true},
+	// Whitelist essential formatting layout tags
+	emailSanitizer.AllowElements("strong", "b", "em", "i", "u", "br", "a", "img", "span")
+
+	// Allow core safe attributes
+	emailSanitizer.AllowAttrs("href", "title", "target").OnElements("a")
+	emailSanitizer.AllowAttrs("src", "alt", "width", "height", "style").OnElements("img")
+	emailSanitizer.AllowAttrs("style").OnElements("span", "strong", "em", "b", "i")
+
+	// Enforce strict URL requirements
+	emailSanitizer.AllowURLSchemes("http", "https", "mailto")
+	emailSanitizer.RequireParseableURLs(true)
+
+	// Explicitly whitelist valid inline CSS properties for layout components
+	emailSanitizer.AllowStyles(
+		"color", "background-color", "font-size", "font-weight",
+		"font-family", "text-align", "text-decoration",
+		"margin", "margin-top", "margin-bottom", "margin-left", "margin-right",
+		"padding", "padding-top", "padding-bottom", "padding-left", "padding-right",
+		"border", "border-radius", "width", "height", "display", "line-height",
+	).Globally()
 }
 
 // GetButton generates the HTML for a styled email button.
@@ -106,7 +123,7 @@ func GetButton(props ButtonProps) string {
 		textColor = "#ffffff"
 	}
 
-	sanitizedURL := sanitizeEmailURL(props.URL)
+	sanitizedURL := RewriteEmailURL(props.URL, props.SiteURL)
 	if sanitizedURL == "" {
 		sanitizedURL = "#"
 	}
@@ -162,7 +179,9 @@ func GetParagraphWithOptions(props ParagraphProps) string {
 	var processedText template.HTML
 
 	if props.AllowBasicHTML {
-		processedText = template.HTML(sanitizeBasicHTML(props.Text))
+		// Apply bluemonday sanitization and then perform global URL rewriting on the resulting fragment
+		sanitized := emailSanitizer.Sanitize(props.Text)
+		processedText = template.HTML(RewriteFragmentURLs(sanitized, props.SiteURL))
 	} else {
 		var buf bytes.Buffer
 		textTemplate := template.Must(template.New("escapeText").Parse("{{.}}"))
@@ -200,189 +219,13 @@ func GetParagraphWithOptions(props ParagraphProps) string {
 	return buf.String()
 }
 
-func sanitizeBasicHTML(input string) string {
-	scriptRegex := regexp.MustCompile(`(?i)<script[^>]*>.*?</script>`)
-	input = scriptRegex.ReplaceAllString(input, "")
-
-	eventRegex := regexp.MustCompile(`(?i)\s+on\w+\s*=\s*["\'][^"\']*["\']`)
-	input = eventRegex.ReplaceAllString(input, "")
-
-	jsRegex := regexp.MustCompile(`(?i)javascript\s*:`)
-	input = jsRegex.ReplaceAllString(input, "")
-
-	tagRegex := regexp.MustCompile(`<(/?)(\w+)([^>]*)>`)
-
-	input = tagRegex.ReplaceAllStringFunc(input, func(match string) string {
-		submatches := tagRegex.FindStringSubmatch(match)
-		if len(submatches) < 4 {
-			return ""
-		}
-
-		isClosing := submatches[1] == "/"
-		tagName := strings.ToLower(submatches[2])
-		attributes := submatches[3]
-
-		if !allowedHTMLTags[tagName] {
-			return ""
-		}
-
-		if isClosing {
-			return "</" + tagName + ">"
-		}
-
-		if tagName == "br" && strings.TrimSpace(attributes) == "" {
-			return "<br>"
-		}
-
-		safeAttributes := sanitizeAttributes(tagName, attributes)
-		if safeAttributes == "" {
-			return "<" + tagName + ">"
-		}
-
-		return "<" + tagName + safeAttributes + ">"
-	})
-
-	return input
-}
-
-func sanitizeAttributes(tagName, attributes string) string {
-	if attributes == "" {
-		return ""
-	}
-
-	allowedForTag, exists := allowedAttributes[tagName]
-	if !exists {
-		return ""
-	}
-
-	attrRegex := regexp.MustCompile(`(\w+)\s*=\s*["\']([^"\']*)["\']`)
-	matches := attrRegex.FindAllStringSubmatch(attributes, -1)
-
-	var safeAttrs []string
-
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
-		}
-
-		attrName := strings.ToLower(match[1])
-		attrValue := match[2]
-
-		if !allowedForTag[attrName] {
-			continue
-		}
-
-		switch attrName {
-		case "href":
-			if sanitizedURL := sanitizeEmailURL(attrValue); sanitizedURL != "" {
-				safeAttrs = append(safeAttrs, attrName+`="`+sanitizedURL+`"`)
-			}
-		case "src":
-			if sanitizedURL := sanitizeImageURL(attrValue); sanitizedURL != "" {
-				safeAttrs = append(safeAttrs, attrName+`="`+sanitizedURL+`"`)
-			}
-		case "style":
-			if safeCSS := sanitizeInlineCSS(attrValue); safeCSS != "" {
-				safeAttrs = append(safeAttrs, attrName+`="`+safeCSS+`"`)
-			}
-		case "alt", "title", "width", "height":
-			if cleanValue := sanitizeTextAttribute(attrValue); cleanValue != "" {
-				safeAttrs = append(safeAttrs, attrName+`="`+cleanValue+`"`)
-			}
-		case "target":
-			if attrValue == "_blank" || attrValue == "_self" {
-				safeAttrs = append(safeAttrs, attrName+`="`+attrValue+`"`)
-			}
-		}
-	}
-
-	if len(safeAttrs) == 0 {
-		return ""
-	}
-
-	return " " + strings.Join(safeAttrs, " ")
-}
-
-func sanitizeImageURL(url string) string {
-	if strings.HasPrefix(url, "data:image/") {
-		return url
-	}
-	return sanitizeEmailURL(url)
-}
-
-func sanitizeInlineCSS(css string) string {
-	dangerous := []string{
-		"javascript:", "expression(", "@import", "behavior:", "-moz-binding",
-	}
-
-	cssLower := strings.ToLower(css)
-	for _, danger := range dangerous {
-		if strings.Contains(cssLower, danger) {
-			return ""
-		}
-	}
-
-	safeProperties := map[string]bool{
-		"color": true, "background-color": true, "font-size": true,
-		"font-weight": true, "font-family": true, "text-align": true,
-		"text-decoration": true, "margin": true, "margin-top": true,
-		"margin-bottom": true, "margin-left": true, "margin-right": true,
-		"padding": true, "padding-top": true, "padding-bottom": true,
-		"padding-left": true, "padding-right": true, "border": true,
-		"border-radius": true, "width": true, "height": true,
-		"display": true, "line-height": true,
-	}
-
-	properties := strings.Split(css, ";")
-	var safeProps []string
-
-	for _, prop := range properties {
-		prop = strings.TrimSpace(prop)
-		if prop == "" {
-			continue
-		}
-
-		parts := strings.SplitN(prop, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		propName := strings.TrimSpace(strings.ToLower(parts[0]))
-		propValue := strings.TrimSpace(parts[1])
-
-		if safeProperties[propName] {
-			if !strings.Contains(propValue, "<") && !strings.Contains(propValue, ">") &&
-				!strings.Contains(strings.ToLower(propValue), "javascript:") {
-				safeProps = append(safeProps, propName+": "+propValue)
-			}
-		}
-	}
-
-	if len(safeProps) == 0 {
-		return ""
-	}
-
-	return strings.Join(safeProps, "; ")
-}
-
-func sanitizeTextAttribute(text string) string {
-	text = strings.ReplaceAll(text, "<", "&lt;")
-	text = strings.ReplaceAll(text, ">", "&gt;")
-	text = strings.ReplaceAll(text, "\"", "&quot;")
-	text = strings.ReplaceAll(text, "'", "&#39;")
-
-	if strings.Contains(strings.ToLower(text), "javascript:") {
-		return ""
-	}
-	return text
-}
-
-func sanitizeEmailURL(rawURL string) string {
+// RewriteEmailURL transforms relative URLs into absolute URLs using the provided SiteURL.
+func RewriteEmailURL(rawURL string, siteURL string) string {
 	if rawURL == "" {
 		return ""
 	}
 
-	// Support uncompiled Go template variables so they can be parsed later.
+	// Support uncompiled Go template variables.
 	if strings.HasPrefix(rawURL, "{{.") && strings.HasSuffix(rawURL, "}}") {
 		return rawURL
 	}
@@ -392,12 +235,36 @@ func sanitizeEmailURL(rawURL string) string {
 		return ""
 	}
 
+	// If no scheme is present, rewrite as a root-relative path under the SiteURL.
+	if parsedURL.Scheme == "" && siteURL != "" {
+		base := strings.TrimSuffix(siteURL, "/")
+		path := rawURL
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		return base + path
+	}
+
 	scheme := strings.ToLower(parsedURL.Scheme)
 	if scheme != "http" && scheme != "https" && scheme != "mailto" {
 		return ""
 	}
 
 	return parsedURL.String()
+}
+
+// RewriteFragmentURLs applies RewriteEmailURL logic to href and src attributes in a sanitized HTML string.
+func RewriteFragmentURLs(html string, siteURL string) string {
+	if siteURL == "" {
+		return html
+	}
+
+	// Target root-relative links standardized by bluemonday (double quotes).
+	res := html
+	res = strings.ReplaceAll(res, `href="/`, fmt.Sprintf(`href="%s/`, strings.TrimSuffix(siteURL, "/")))
+	res = strings.ReplaceAll(res, `src="/`, fmt.Sprintf(`src="%s/`, strings.TrimSuffix(siteURL, "/")))
+
+	return res
 }
 
 func sanitizeColor(color string) string {

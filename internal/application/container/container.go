@@ -149,7 +149,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	shopifyService := services.NewShopifyService(logger, tenantManager, resourceService)
 	shopifyReconciliationWorker := services.NewShopifyReconciliationWorker(shopifyService, tenantManager, logger)
 
-	emailTemplateService := services.NewEmailTemplateService(logger, perfTracker)
+	emailConfigLoader := tenant.NewLocalEmailConfigLoader()
+	emailTemplateService := services.NewEmailTemplateService(emailConfigLoader, logger, perfTracker)
 	var emailWorker *services.EmailWorker
 	if emailService != nil {
 		emailWorker = services.NewEmailWorker(emailService, emailTemplateService, tenantManager, logger)

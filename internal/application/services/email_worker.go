@@ -3,6 +3,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email"
@@ -66,11 +67,21 @@ func (w *EmailWorker) run() {
 }
 
 // processJobWithRetries attempts to process and dispatch the email, backing off on failure.
+// Deterministic errors (like missing or malformed templates) are dropped immediately.
 func (w *EmailWorker) processJobWithRetries(job EmailJob) {
 	maxRetries := 3
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		err := w.processJob(job)
 		if err == nil {
+			return
+		}
+
+		// Inspect error for fatal, non-retriable conditions
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "template not found") ||
+			strings.Contains(errMsg, "failed to parse") ||
+			strings.Contains(errMsg, "failed to compile") {
+			w.logger.System().Error("Email processing aborted due to deterministic error", "error", err, "tenantId", job.TenantID, "template", job.TemplateName)
 			return
 		}
 

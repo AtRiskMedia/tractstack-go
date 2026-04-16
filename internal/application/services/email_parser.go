@@ -55,10 +55,11 @@ func ParseEmailBlocks(blocks []json.RawMessage, siteURL string) (string, error) 
 			}
 			html := templates.GetParagraphWithOptions(templates.ParagraphProps{
 				Text:           textBlock.Content,
-				AllowBasicHTML: true, // Content should be plain text but we allow safe tags if passed
+				AllowBasicHTML: true,
 				Align:          textBlock.Align,
 				Color:          textBlock.Color,
 				IsBold:         textBlock.IsBold,
+				SiteURL:        siteURL,
 			})
 			builder.WriteString(html)
 
@@ -68,17 +69,12 @@ func ParseEmailBlocks(blocks []json.RawMessage, siteURL string) (string, error) 
 				return "", fmt.Errorf("failed to parse button block: %w", err)
 			}
 
-			// Enforce absolute URLs utilizing the tenant's SITE_URL
-			finalURL := buttonBlock.URL
-			if strings.HasPrefix(finalURL, "/") {
-				finalURL = fmt.Sprintf("%s%s", strings.TrimSuffix(siteURL, "/"), finalURL)
-			}
-
 			html := templates.GetButton(templates.ButtonProps{
 				Text:            buttonBlock.Label,
-				URL:             finalURL,
+				URL:             buttonBlock.URL,
 				BackgroundColor: buttonBlock.BgColor,
 				TextColor:       buttonBlock.TextColor,
+				SiteURL:         siteURL,
 			})
 			builder.WriteString(html)
 
