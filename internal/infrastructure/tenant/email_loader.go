@@ -2,20 +2,39 @@
 package tenant
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
+
+const emailManifestFilename = "manifest.json"
+
+// emailManifestEntry is one row in emails/manifest.json (system or tenant).
+type emailManifestEntry struct {
+	Category   string `json:"category"`
+	Name       string `json:"name"`
+	AdminTitle string `json:"adminTitle"`
+}
+
+type emailManifestDocument struct {
+	Templates []emailManifestEntry `json:"templates"`
+}
+
+// EmailTemplateListEntry is one template row for GET /emails/templates.
+type EmailTemplateListEntry struct {
+	Name       string `json:"name"`
+	AdminTitle string `json:"adminTitle"`
+}
 
 // EmailConfigLoader defines the interface for loading and saving email template configurations,
 // abstracting the underlying filesystem or storage layer.
 type EmailConfigLoader interface {
 	ReadTemplate(tenantID, category, filename string) ([]byte, error)
 	WriteTemplate(tenantID, category, filename string, data []byte) error
-	ListTemplates() (map[string][]string, error)
+	ListTemplates(tenantID string) (map[string][]EmailTemplateListEntry, error)
 }
 
 // LocalEmailConfigLoader implements EmailConfigLoader using the local filesystem.
@@ -63,41 +82,98 @@ func (l *LocalEmailConfigLoader) WriteTemplate(tenantID, category, filename stri
 	return nil
 }
 
-// ListTemplates discovers all available templates by inspecting the fallback directory structure.
-func (l *LocalEmailConfigLoader) ListTemplates() (map[string][]string, error) {
-	basePath := filepath.Join("pkg", "emails")
-	templates := make(map[string][]string)
-
-	entries, err := os.ReadDir(basePath)
+// ListTemplates loads the system manifest, merges the tenant manifest when present,
+// and returns only entries whose template JSON exists (tenant override or pkg fallback).
+func (l *LocalEmailConfigLoader) ListTemplates(tenantID string) (map[string][]EmailTemplateListEntry, error) {
+	systemPath := filepath.Join("pkg", "emails", emailManifestFilename)
+	systemEntries, err := l.readManifestFile(systemPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return templates, nil
-		}
-		return nil, fmt.Errorf("failed to read base emails directory: %w", err)
+		return nil, fmt.Errorf("read system email manifest: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			category := entry.Name()
-			categoryPath := filepath.Join(basePath, category)
-
-			files, err := os.ReadDir(categoryPath)
-			if err != nil {
-				continue // Skip unreadable subdirectories
-			}
-
-			var tplNames []string
-			for _, file := range files {
-				if !file.IsDir() && filepath.Ext(file.Name()) == ".json" {
-					name := strings.TrimSuffix(file.Name(), ".json")
-					tplNames = append(tplNames, name)
-				}
-			}
-			if len(tplNames) > 0 {
-				templates[category] = tplNames
-			}
+	tenantManifestPath := filepath.Join(pkgconfig.BackendPath, "config", tenantID, "emails", emailManifestFilename)
+	var tenantEntries []emailManifestEntry
+	if data, err := os.ReadFile(tenantManifestPath); err == nil {
+		var mf emailManifestDocument
+		if err := json.Unmarshal(data, &mf); err != nil {
+			return nil, fmt.Errorf("parse tenant email manifest: %w", err)
 		}
+		tenantEntries = mf.Templates
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read tenant email manifest: %w", err)
 	}
 
-	return templates, nil
+	merged := mergeEmailManifests(systemEntries, tenantEntries)
+	merged = l.filterResolvableTemplates(tenantID, merged)
+
+	out := make(map[string][]EmailTemplateListEntry)
+	for _, e := range merged {
+		if e.Category == "" || e.Name == "" {
+			continue
+		}
+		out[e.Category] = append(out[e.Category], EmailTemplateListEntry{
+			Name:       e.Name,
+			AdminTitle: e.AdminTitle,
+		})
+	}
+	return out, nil
 }
+
+func (l *LocalEmailConfigLoader) readManifestFile(path string) ([]emailManifestEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var mf emailManifestDocument
+	if err := json.Unmarshal(data, &mf); err != nil {
+		return nil, err
+	}
+	return mf.Templates, nil
+}
+
+type manifestKey struct {
+	category string
+	name     string
+}
+
+func mergeEmailManifests(system, tenant []emailManifestEntry) []emailManifestEntry {
+	mergedByKey := make(map[manifestKey]emailManifestEntry)
+	for _, e := range system {
+		k := manifestKey{e.Category, e.Name}
+		mergedByKey[k] = e
+	}
+	for _, e := range tenant {
+		k := manifestKey{e.Category, e.Name}
+		mergedByKey[k] = e
+	}
+
+	systemKeys := make(map[manifestKey]bool)
+	for _, e := range system {
+		systemKeys[manifestKey{e.Category, e.Name}] = true
+	}
+
+	out := make([]emailManifestEntry, 0, len(mergedByKey))
+	for _, e := range system {
+		k := manifestKey{e.Category, e.Name}
+		out = append(out, mergedByKey[k])
+	}
+	for _, e := range tenant {
+		k := manifestKey{e.Category, e.Name}
+		if !systemKeys[k] {
+			out = append(out, mergedByKey[k])
+		}
+	}
+	return out
+}
+
+func (l *LocalEmailConfigLoader) filterResolvableTemplates(tenantID string, entries []emailManifestEntry) []emailManifestEntry {
+	var out []emailManifestEntry
+	for _, e := range entries {
+		filename := fmt.Sprintf("%s.json", e.Name)
+		if _, err := l.ReadTemplate(tenantID, e.Category, filename); err == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+

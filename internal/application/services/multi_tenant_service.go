@@ -462,6 +462,7 @@ func (s *MultiTenantService) CompleteSetup(tenantID, hydrationToken string) erro
 }
 
 // copyDefaultEmails recursively copies the baseline email JSON templates to the tenant's specific config directory.
+// This includes pkg/emails/manifest.json (merged with the system default at list time) alongside category folders.
 // filepath.Walk is required here because the emails directory contains domain-specific subdirectories (e.g., shopify/, system/).
 func (s *MultiTenantService) copyDefaultEmails(tenantID string) error {
 	sourceDir := filepath.Join("pkg", "emails")

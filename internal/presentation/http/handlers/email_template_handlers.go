@@ -32,7 +32,7 @@ func NewEmailTemplateHandlers(
 	}
 }
 
-// HandleListTemplates returns a manifest of available templates based on the physical fallback structure.
+// HandleListTemplates returns merged system + tenant email manifests (names and administrative titles).
 func (h *EmailTemplateHandlers) HandleListTemplates(c *gin.Context) {
 	tenantCtx, exists := middleware.GetTenantContext(c)
 	if !exists {
@@ -44,7 +44,7 @@ func (h *EmailTemplateHandlers) HandleListTemplates(c *gin.Context) {
 	marker := h.perfTracker.StartOperation("handler_email_list", tenantCtx.TenantID)
 	defer marker.Complete()
 
-	templates, err := h.emailTemplateService.ListTemplates()
+	templates, err := h.emailTemplateService.ListTemplates(tenantCtx.TenantID)
 	if err != nil {
 		h.logger.System().Error("Failed to list email templates", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list templates"})

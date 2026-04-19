@@ -85,13 +85,12 @@ func (s *EmailTemplateService) SaveTemplate(tenantID, category, templateName str
 	return nil
 }
 
-// ListTemplates discovers all available templates by inspecting the fallback directory structure.
-// The fallback directory acts as the strict manifest for the available email matrix.
-func (s *EmailTemplateService) ListTemplates() (map[string][]string, error) {
-	marker := s.perfTracker.StartOperation("email_template_list", "system")
+// ListTemplates returns merged system + tenant email manifests (administrative titles and names).
+func (s *EmailTemplateService) ListTemplates(tenantID string) (map[string][]tenant.EmailTemplateListEntry, error) {
+	marker := s.perfTracker.StartOperation("email_template_list", tenantID)
 	defer marker.Complete()
 
-	templates, err := s.loader.ListTemplates()
+	templates, err := s.loader.ListTemplates(tenantID)
 	if err != nil {
 		marker.SetError(err)
 		return nil, fmt.Errorf("failed to list templates via loader: %w", err)

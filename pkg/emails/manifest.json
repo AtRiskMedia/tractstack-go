@@ -1,0 +1,24 @@
+{
+  "templates": [
+    {
+      "category": "shopify",
+      "name": "booking-cancelled",
+      "adminTitle": "Booking Cancelled"
+    },
+    {
+      "category": "shopify",
+      "name": "booking-confirmed",
+      "adminTitle": "Booking Confirmed"
+    },
+    {
+      "category": "shopify",
+      "name": "orphaned-payment",
+      "adminTitle": "Orphaned Payment"
+    },
+    {
+      "category": "system",
+      "name": "lead-activation",
+      "adminTitle": "Lead Activation"
+    }
+  ]
+}
