@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
@@ -397,7 +398,26 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		}
 	}
 
-	// 5. Image Processing and Change Detection
+	// 5. Canonicalize Shopify image warm fields when missing/empty.
+	// This keeps manual import payloads aligned with reconcile/webhook payload shape.
+	incomingMainURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
+	incomingVariantRaw, _ := resource.OptionsPayload["shopifyImage"].(string)
+	if strings.TrimSpace(incomingMainURL) == "" || !hasUsableShopifyVariantSourceMap(incomingVariantRaw) {
+		if rawData, ok := resource.OptionsPayload["shopifyData"].(string); ok && rawData != "" {
+			var node map[string]any
+			if err := json.Unmarshal([]byte(rawData), &node); err == nil {
+				warmMainURL, warmVariantJSON := buildShopifyImageWarmFieldsFromNode(node)
+				if strings.TrimSpace(incomingMainURL) == "" && warmMainURL != "" {
+					resource.OptionsPayload["shopifyImageSourceUrl"] = warmMainURL
+				}
+				if !hasUsableShopifyVariantSourceMap(incomingVariantRaw) && warmVariantJSON != "" {
+					resource.OptionsPayload["shopifyImage"] = warmVariantJSON
+				}
+			}
+		}
+	}
+
+	// 6. Image Processing and Change Detection
 	mediaPath := filepath.Join(config.BackendPath, "config", tenantCtx.TenantID, "media")
 	processor := media.NewImageProcessor(mediaPath)
 
@@ -409,7 +429,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		}
 	}
 
-	incomingMainURL, _ := resource.OptionsPayload["shopifyImageSourceUrl"].(string)
+	incomingMainURL, _ = resource.OptionsPayload["shopifyImageSourceUrl"].(string)
 	storedMainURL := ""
 	if existing != nil {
 		storedMainURL, _ = existing.OptionsPayload["shopifyImageSourceUrl"].(string)
@@ -503,7 +523,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		resource.OptionsPayload["shopifyImage"] = string(mapData)
 	}
 
-	// 6. Persistence
+	// 7. Persistence
 	resourceRepo := tenantCtx.ResourceRepo()
 	operation := "none"
 
@@ -541,7 +561,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		operation = "created"
 	}
 
-	// 7. Post-Sync Orchestration
+	// 8. Post-Sync Orchestration
 	if operation != "none" {
 		for _, fileID := range filesToDelete {
 			if err := s.imageFileService.Delete(tenantCtx, fileID); err != nil {
@@ -562,6 +582,28 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 
 	marker.SetSuccess(true)
 	return operation, nil
+}
+
+func hasUsableShopifyVariantSourceMap(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+
+	var variantMap map[string]shopifyVariantImagePayload
+	if err := json.Unmarshal([]byte(raw), &variantMap); err != nil {
+		return false
+	}
+	if len(variantMap) == 0 {
+		return false
+	}
+
+	for _, entry := range variantMap {
+		if strings.TrimSpace(entry.SourceURL) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // SyncShopifyDeletion handles the removal of a resource triggered by a Shopify deletion event.

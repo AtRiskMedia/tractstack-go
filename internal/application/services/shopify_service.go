@@ -42,6 +42,11 @@ type ShopifyService struct {
 	requestGroup    singleflight.Group
 }
 
+type shopifyVariantImagePayload struct {
+	FileID    string `json:"fileId,omitempty"`
+	SourceURL string `json:"sourceUrl,omitempty"`
+}
+
 // NewShopifyService creates a new Shopify service instance.
 func NewShopifyService(logger *logging.ChanneledLogger, tenantManager *tenant.Manager, resourceService *ResourceService) *ShopifyService {
 	return &ShopifyService{
@@ -639,25 +644,29 @@ func (s *ShopifyService) transformGraphQLNode(node map[string]any, category stri
 	optionsPayload["gid"] = id
 	jsonData, _ := json.Marshal(node)
 	optionsPayload["shopifyData"] = string(jsonData)
-
-	var mainImageURL string
-	if rawImages, ok := node["images"].([]any); ok && len(rawImages) > 0 {
-		if firstImg, ok := rawImages[0].(map[string]any); ok {
-			mainImageURL, _ = firstImg["url"].(string)
-		}
+	mainImageURL, shopifyImageJSON := buildShopifyImageWarmFieldsFromNode(node)
+	if shopifyImageJSON != "" {
+		optionsPayload["shopifyImage"] = shopifyImageJSON
+	}
+	if mainImageURL != "" {
+		optionsPayload["shopifyImageSourceUrl"] = mainImageURL
 	}
 
-	shopifyImageMap := make(map[string]any)
-	var rawVariants []any
-	if v, ok := node["variants"].([]any); ok {
-		rawVariants = v
+	return &content.ResourceNode{
+		Title:          title,
+		Slug:           fmt.Sprintf("%s-%s", category, handle),
+		CategorySlug:   &category,
+		OneLiner:       oneLiner,
+		NodeType:       "Resource",
+		OptionsPayload: optionsPayload,
 	}
+}
 
-	for _, rv := range rawVariants {
-		vMap, ok := rv.(map[string]any)
-		if !ok {
-			continue
-		}
+func buildShopifyImageWarmFieldsFromNode(node map[string]any) (string, string) {
+	mainImageURL := extractPrimaryShopifyImageURL(node["images"])
+	variantMap := make(map[string]shopifyVariantImagePayload)
+
+	for _, vMap := range toMapSlice(node["variants"]) {
 		vID, _ := vMap["id"].(string)
 		if vID == "" {
 			continue
@@ -670,31 +679,49 @@ func (s *ShopifyService) transformGraphQLNode(node map[string]any, category stri
 		if vImgURL == "" {
 			vImgURL = mainImageURL
 		}
+		if vImgURL == "" {
+			continue
+		}
 
-		if vImgURL != "" {
-			shopifyImageMap[vID] = map[string]string{
-				"sourceUrl": vImgURL,
+		variantMap[vID] = shopifyVariantImagePayload{
+			SourceURL: vImgURL,
+		}
+	}
+
+	if len(variantMap) == 0 {
+		return mainImageURL, ""
+	}
+
+	mapData, err := json.Marshal(variantMap)
+	if err != nil {
+		return mainImageURL, ""
+	}
+	return mainImageURL, string(mapData)
+}
+
+func extractPrimaryShopifyImageURL(imagesRaw any) string {
+	images := toMapSlice(imagesRaw)
+	if len(images) == 0 {
+		return ""
+	}
+	url, _ := images[0]["url"].(string)
+	return url
+}
+
+func toMapSlice(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		result := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if m, ok := item.(map[string]any); ok {
+				result = append(result, m)
 			}
 		}
-	}
-
-	if len(shopifyImageMap) > 0 {
-		if mapData, err := json.Marshal(shopifyImageMap); err == nil {
-			optionsPayload["shopifyImage"] = string(mapData)
-		}
-	}
-
-	if mainImageURL != "" {
-		optionsPayload["shopifyImageSourceUrl"] = mainImageURL
-	}
-
-	return &content.ResourceNode{
-		Title:          title,
-		Slug:           fmt.Sprintf("%s-%s", category, handle),
-		CategorySlug:   &category,
-		OneLiner:       oneLiner,
-		NodeType:       "Resource",
-		OptionsPayload: optionsPayload,
+		return result
+	default:
+		return nil
 	}
 }
 

@@ -176,4 +176,3 @@ func (l *LocalEmailConfigLoader) filterResolvableTemplates(tenantID string, entr
 	}
 	return out
 }
-
