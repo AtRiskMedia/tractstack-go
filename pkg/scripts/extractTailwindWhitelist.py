@@ -7,7 +7,6 @@ from bs4 import BeautifulSoup
 import re
 from typing import List, Optional, Set, Tuple
 
-
 JS_KEYWORDS = {
     "function",
     "return",
@@ -38,49 +37,48 @@ JS_KEYWORDS = {
 }
 
 STANDALONE_UTILITIES = {
-    "block",
-    "inline",
-    "inline-block",
-    "inline-flex",
-    "inline-grid",
-    "flex",
-    "grid",
-    "hidden",
-    "contents",
-    "table",
-    "flow-root",
-    "static",
-    "fixed",
     "absolute",
-    "relative",
-    "sticky",
-    "italic",
-    "not-italic",
-    "underline",
-    "overline",
-    "line-through",
-    "no-underline",
-    "uppercase",
-    "lowercase",
-    "capitalize",
-    "normal-case",
-    "truncate",
     "antialiased",
-    "subpixel-antialiased",
-    "sr-only",
-    "not-sr-only",
-    "visible",
+    "block",
+    "blur",
+    "border",
+    "capitalize",
+    "collapse",
+    "container",
+    "contents",
+    "fixed",
+    "flex",
+    "grayscale",
+    "grid",
+    "group",
+    "grow",
+    "hidden",
+    "inline",
+    "invert",
     "invisible",
     "isolate",
-    "isolation-auto",
+    "italic",
+    "lowercase",
+    "ordinal",
+    "outline",
+    "overline",
+    "peer",
+    "relative",
+    "resize",
+    "ring",
+    "rounded",
+    "sepia",
+    "shadow",
+    "shrink",
+    "static",
+    "sticky",
+    "table",
     "transform",
-    "transform-gpu",
-    "transform-none",
-    "filter",
-    "filter-none",
-    "backdrop-filter",
-    "backdrop-filter-none",
-    "appearance-none",
+    "transition",
+    "truncate",
+    "underline",
+    "uppercase",
+    "visible",
 }
 
 UTILITY_PREFIXES = {
@@ -289,6 +287,7 @@ VARIANT_PREFIXES = {
     "selection",
 }
 
+
 def extract_classes_from_html(html_content: str) -> Set[str]:
     """Extract classes from HTML using BeautifulSoup"""
     classes = set()
@@ -363,11 +362,15 @@ def is_obvious_noise(token: str) -> bool:
         return True
     if lowered in JS_KEYWORDS:
         return True
-    if lowered.startswith(("http://", "https://", "javascript:", "data:", "mailto:", "tel:")):
+    if lowered.startswith(
+        ("http://", "https://", "javascript:", "data:", "mailto:", "tel:")
+    ):
         return True
     if lowered.startswith(("./", "../", "/home/", "/usr/", "/tmp/")):
         return True
-    if lowered.endswith((".js", ".mjs", ".ts", ".tsx", ".go", ".json", ".svg", ".png", ".jpg", ".css")):
+    if lowered.endswith(
+        (".js", ".mjs", ".ts", ".tsx", ".go", ".json", ".svg", ".png", ".jpg", ".css")
+    ):
         return True
     if token.count("{") > 0 or token.count("}") > 0:
         return True
@@ -383,7 +386,9 @@ def is_valid_base_utility(base: str) -> bool:
         return True
     if base.startswith("[") and base.endswith("]"):
         inner = base[1:-1]
-        return bool(inner and ":" in inner and re.match(r"^[a-z0-9_\-()[\].,%#'\"/& ]+$", inner))
+        return bool(
+            inner and ":" in inner and re.match(r"^[a-z0-9_\-()[\].,%#'\"/& ]+$", inner)
+        )
 
     working = base
     if working.startswith("!"):
@@ -641,6 +646,7 @@ def extract_classes_from_code(code_content: str) -> Set[str]:
             classes.add(clean)
     return classes
 
+
 def scan_dist_directory(dist_path: Path) -> Set[str]:
     """Scan the built dist directory for all CSS classes"""
     all_classes = set()
@@ -681,6 +687,7 @@ def scan_dist_directory(dist_path: Path) -> Set[str]:
 
     return all_classes
 
+
 def scan_go_templates(go_templates_path: Path) -> Set[str]:
     """Scan Go template files for CSS classes"""
     all_classes = set()
@@ -701,9 +708,12 @@ def scan_go_templates(go_templates_path: Path) -> Set[str]:
 
     return all_classes
 
+
 def main():
     if len(sys.argv) != 3 and len(sys.argv) != 4:
-        print("Usage: python3 extractTailwindWhitelist.py <dist_path> <output_json> [go_templates_path]")
+        print(
+            "Usage: python3 extractTailwindWhitelist.py <dist_path> <output_json> [go_templates_path]"
+        )
         sys.exit(1)
 
     dist_path = Path(sys.argv[1])
@@ -733,9 +743,7 @@ def main():
     sorted_classes = sorted(tailwind_classes)
 
     # Create output structure
-    output_data = {
-        "safelist": sorted_classes
-    }
+    output_data = {"safelist": sorted_classes}
 
     # Ensure output directory exists
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -745,6 +753,7 @@ def main():
         json.dump(output_data, f, indent=2)
 
     print(f"Extracted {len(sorted_classes)} total classes to {output_path}")
+
 
 if __name__ == "__main__":
     main()
