@@ -177,7 +177,7 @@ func (a *AuthService) CreateLead(firstName, email, password, contactPersona, sho
 		}
 		activationURL := fmt.Sprintf("%s/storykeep/init?token=%s", siteURL, token)
 
-		a.emailWorker.Enqueue(EmailJob{
+		_ = a.emailWorker.Enqueue(EmailJob{
 			TenantID:     tenantCtx.TenantID,
 			To:           []string{email},
 			Category:     "system",

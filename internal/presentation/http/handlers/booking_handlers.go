@@ -21,11 +21,12 @@ type ConfirmBookingRequest struct {
 
 // HoldSlotRequest defines the payload for creating a temporary booking hold.
 type HoldSlotRequest struct {
-	TraceID     string    `json:"traceId" binding:"required"`
-	ResourceIDs []string  `json:"resourceIds" binding:"required"`
-	LeadID      string    `json:"leadId" binding:"required"`
-	StartTime   time.Time `json:"startTime" binding:"required"`
-	EndTime     time.Time `json:"endTime" binding:"required"`
+	TraceID         string    `json:"traceId" binding:"required"`
+	ResourceIDs     []string  `json:"resourceIds" binding:"required"`
+	LeadID          string    `json:"leadId" binding:"required"`
+	StartTime       time.Time `json:"startTime" binding:"required"`
+	EndTime         time.Time `json:"endTime" binding:"required"`
+	AppointmentMode string    `json:"appointmentMode" binding:"required"`
 }
 
 // BookingHandlers provides endpoints for the native booking engine.
@@ -115,6 +116,7 @@ func (h *BookingHandlers) HandleHoldSlot(c *gin.Context) {
 		req.LeadID,
 		req.StartTime.UTC(),
 		req.EndTime.UTC(),
+		req.AppointmentMode,
 	)
 	if err != nil {
 		h.logger.System().Warn("Failed to hold booking slot", "error", err, "traceId", req.TraceID)

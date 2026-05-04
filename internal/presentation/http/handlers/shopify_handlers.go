@@ -144,7 +144,7 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 						h.logger.System().Error("ORPHANED PAYMENT: User paid for an expired booking hold", "traceId", attr.Value, "shopifyOrderId", orderID)
 
 						if h.emailWorker != nil && tenantCtx.Config.BrandConfig != nil && tenantCtx.Config.BrandConfig.AdminEmail != "" {
-							h.emailWorker.Enqueue(services.EmailJob{
+							_ = h.emailWorker.Enqueue(services.EmailJob{
 								TenantID:     tenantCtx.TenantID,
 								To:           []string{tenantCtx.Config.BrandConfig.AdminEmail},
 								Category:     "shopify",

@@ -14,27 +14,33 @@ import (
 
 // Config represents the structure of a single tenant's configuration
 type Config struct {
-	TenantID               string             `json:"tenantId"`
-	Status                 string             `json:"status"`
-	DatabaseType           string             `json:"databaseType"`
-	TursoDatabase          string             `json:"TURSO_DATABASE_URL"`
-	TursoToken             string             `json:"TURSO_AUTH_TOKEN"`
-	AAIAPIKey              string             `json:"AAI_API_KEY"`
-	JWTSecret              string             `json:"JWT_SECRET"`
-	AESKey                 string             `json:"AES_KEY"`
-	TursoEnabled           bool               `json:"TURSO_ENABLED"`
-	AdminPasswordHash      string             `json:"ADMIN_PASSWORD_HASH,omitempty"`
-	EditorPasswordHash     string             `json:"EDITOR_PASSWORD_HASH,omitempty"`
-	HydrationToken         string             `json:"HYDRATION_TOKEN,omitempty"`
-	ShopifyStorefrontToken string             `json:"SHOPIFY_STOREFRONT_TOKEN"`
-	ShopifyAPISecret       string             `json:"SHOPIFY_API_SECRET"`
-	ShopifyStoreDomain     string             `json:"SHOPIFY_STORE_DOMAIN"`
-	ShopifyAPIVersion      string             `json:"SHOPIFY_API_VERSION"`
-	ShopifyAdminSlug       string             `json:"SHOPIFY_ADMIN_SLUG"`
-	UserSetupWebhooks      bool               `json:"USER_SETUP_WEBHOOKS"`
-	ResendAPIKey           string             `json:"RESEND_API_KEY"`
-	SQLitePath             string             `json:"-"`
-	BrandConfig            *types.BrandConfig `json:"-"`
+	TenantID                string             `json:"tenantId"`
+	Status                  string             `json:"status"`
+	DatabaseType            string             `json:"databaseType"`
+	TursoDatabase           string             `json:"TURSO_DATABASE_URL"`
+	TursoToken              string             `json:"TURSO_AUTH_TOKEN"`
+	AAIAPIKey               string             `json:"AAI_API_KEY"`
+	JWTSecret               string             `json:"JWT_SECRET"`
+	AESKey                  string             `json:"AES_KEY"`
+	TursoEnabled            bool               `json:"TURSO_ENABLED"`
+	AdminPasswordHash       string             `json:"ADMIN_PASSWORD_HASH,omitempty"`
+	EditorPasswordHash      string             `json:"EDITOR_PASSWORD_HASH,omitempty"`
+	HydrationToken          string             `json:"HYDRATION_TOKEN,omitempty"`
+	ShopifyStorefrontToken  string             `json:"SHOPIFY_STOREFRONT_TOKEN"`
+	ShopifyAPISecret        string             `json:"SHOPIFY_API_SECRET"`
+	ShopifyStoreDomain      string             `json:"SHOPIFY_STORE_DOMAIN"`
+	ShopifyAPIVersion       string             `json:"SHOPIFY_API_VERSION"`
+	ShopifyAdminSlug        string             `json:"SHOPIFY_ADMIN_SLUG"`
+	UserSetupWebhooks       bool               `json:"USER_SETUP_WEBHOOKS"`
+	ResendAPIKey            string             `json:"RESEND_API_KEY"`
+	GoogleOAuthClientID     string             `json:"GOOGLE_OAUTH_CLIENT_ID"`
+	GoogleOAuthClientSecret string             `json:"GOOGLE_OAUTH_CLIENT_SECRET"`
+	GoogleCalendarID        string             `json:"GOOGLE_CALENDAR_ID"`
+	GoogleAccessToken       string             `json:"GOOGLE_ACCESS_TOKEN"`
+	GoogleRefreshToken      string             `json:"GOOGLE_REFRESH_TOKEN"`
+	GoogleTokenExpiry       string             `json:"GOOGLE_TOKEN_EXPIRY"`
+	SQLitePath              string             `json:"-"`
+	BrandConfig             *types.BrandConfig `json:"-"`
 }
 
 // LoadTenantConfig loads configuration for a specific tenant from its env.json file.
@@ -115,6 +121,8 @@ func LoadBrandConfig(tenantID string) (*types.BrandConfig, error) {
 			ShowShopifyHelper:  true,
 			Scheduling: types.Scheduling{
 				MaxLengthMinutes: 180,
+				AllowRemote:      false,
+				RemoteOnly:       false,
 			},
 		}, nil
 	}

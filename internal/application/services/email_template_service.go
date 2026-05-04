@@ -121,13 +121,13 @@ func (s *EmailTemplateService) Compile(tmpl *EmailTemplate, data map[string]any,
 	compiledSubject := subjectBuf.String()
 
 	// 2. Compile Polymorphic JSON Blocks to Base HTML
-	rawHTML, err := ParseEmailBlocks(tmpl.Blocks, siteURL)
+	rawHTML, err := ParseEmailBlocks(tmpl.Blocks, siteURL, data)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to parse JSON blocks to HTML: %w", err)
 	}
 
 	// 3. Inject variables securely using context-aware html/template escaping
-	bodyTmpl, err := template.New("body").Option("missingkey=error").Parse(rawHTML)
+	bodyTmpl, err := template.New("body").Option("missingkey=default").Parse(rawHTML)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to parse html template string: %w", err)
 	}

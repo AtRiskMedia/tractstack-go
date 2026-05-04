@@ -12,6 +12,11 @@
     },
     {
       "category": "shopify",
+      "name": "booking-remote-confirmed",
+      "adminTitle": "Booking Remote Confirmed"
+    },
+    {
+      "category": "shopify",
       "name": "orphaned-payment",
       "adminTitle": "Orphaned Payment"
     },

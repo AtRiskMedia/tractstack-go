@@ -1,9 +1,9 @@
 {
-  "subject": "Booking Confirmed: {{.BookingForDisplayString}}",
+  "subject": "Remote Booking Confirmed {{.SubjectSuffix}}: {{.BookingForDisplayString}}",
   "blocks": [
     {
       "type": "text",
-      "content": "Hi {{.LeadName}}, your booking is confirmed!",
+      "content": "Hi {{.LeadName}}, your remote booking is confirmed!",
       "align": "center",
       "color": "#111827",
       "isBold": true
@@ -28,6 +28,13 @@
     },
     {
       "type": "text",
+      "content": "Join link: {{.GoogleMeetURL}}",
+      "align": "left",
+      "color": "#111827",
+      "isBold": false
+    },
+    {
+      "type": "text",
       "content": "Order #: {{.ShopifyOrderID}}",
       "align": "left",
       "color": "#374151",
@@ -35,10 +42,17 @@
     },
     {
       "type": "button",
-      "label": "View Order",
-      "url": "{{.ShopifyOrderUrl}}",
+      "label": "Join Meeting",
+      "url": "{{.GoogleMeetURL}}",
       "bgColor": "#0F172A",
       "textColor": "#FFFFFF"
+    },
+    {
+      "type": "button",
+      "label": "View Order",
+      "url": "{{.ShopifyOrderUrl}}",
+      "bgColor": "#FFFFFF",
+      "textColor": "#0F172A"
     }
   ]
 }

@@ -102,7 +102,7 @@ func (h *EmailTemplateHandlers) HandleSaveTemplate(c *gin.Context) {
 	}
 
 	siteURL := tenantCtx.Config.BrandConfig.SiteURL
-	rawHTML, err := services.ParseEmailBlocks(templateData.Blocks, siteURL)
+	rawHTML, err := services.ParseEmailBlocks(templateData.Blocks, siteURL, map[string]any{})
 	if err != nil {
 		h.logger.System().Warn("Pre-flight validation failed: invalid blocks", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template blocks"})

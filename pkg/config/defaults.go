@@ -188,6 +188,20 @@ var (
 
 	// BookingHoldTimeout defines how long a pending booking is held
 	BookingHoldTimeout time.Duration
+	// GoogleOAuthRefreshLead defines how early tokens are refreshed before expiry.
+	GoogleOAuthRefreshLead time.Duration
+	// GoogleOAuthRefreshRetries defines retry attempts for token refresh.
+	GoogleOAuthRefreshRetries int
+	// GoogleOAuthRefreshBackoffBase defines base backoff duration for oauth retries.
+	GoogleOAuthRefreshBackoffBase time.Duration
+	// GoogleOAuthRefreshBackoffMax defines max backoff duration for oauth retries.
+	GoogleOAuthRefreshBackoffMax time.Duration
+	// GoogleOAuthHTTPTimeout defines timeout for oauth token HTTP calls.
+	GoogleOAuthHTTPTimeout time.Duration
+	// GoogleCalendarHTTPTimeout defines timeout for google calendar API calls.
+	GoogleCalendarHTTPTimeout time.Duration
+	// GoogleOAuthStateTTL defines validity window for oauth state tokens.
+	GoogleOAuthStateTTL time.Duration
 
 	// CleanupInterval specifies how often background cleanup tasks run.
 	CleanupInterval time.Duration
@@ -274,6 +288,13 @@ func init() {
 
 	// Bookings
 	BookingHoldTimeout = time.Duration(getEnvInt("BOOKING_HOLD_TIMEOUT_MINUTES", 50)) * time.Minute
+	GoogleOAuthRefreshLead = time.Duration(getEnvInt("GOOGLE_OAUTH_REFRESH_LEAD_MINUTES", 10)) * time.Minute
+	GoogleOAuthRefreshRetries = getEnvInt("GOOGLE_OAUTH_REFRESH_RETRIES", 3)
+	GoogleOAuthRefreshBackoffBase = getEnvDuration("GOOGLE_OAUTH_REFRESH_BACKOFF_BASE", 2*time.Second)
+	GoogleOAuthRefreshBackoffMax = getEnvDuration("GOOGLE_OAUTH_REFRESH_BACKOFF_MAX", 30*time.Second)
+	GoogleOAuthHTTPTimeout = getEnvDuration("GOOGLE_OAUTH_HTTP_TIMEOUT", 15*time.Second)
+	GoogleCalendarHTTPTimeout = getEnvDuration("GOOGLE_CALENDAR_HTTP_TIMEOUT", 20*time.Second)
+	GoogleOAuthStateTTL = time.Duration(getEnvInt("GOOGLE_OAUTH_STATE_TTL_MINUTES", 10)) * time.Minute
 
 	// SSE Configuration
 	MaxSessionsPerClient = getEnvInt("MAX_SESSIONS_PER_CLIENT", 10000)

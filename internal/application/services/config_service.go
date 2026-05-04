@@ -91,24 +91,30 @@ type BrandConfigUpdateRequest struct {
 
 // AdvancedConfigUpdateRequest holds the request structure for advanced config updates
 type AdvancedConfigUpdateRequest struct {
-	TursoDatabaseURL       string `json:"turso_database_url,omitempty"`
-	TursoAuthToken         string `json:"turso_auth_token,omitempty"`
-	EmailHost              string `json:"email_host,omitempty"`
-	EmailPort              int    `json:"email_port,omitempty"`
-	EmailUser              string `json:"email_user,omitempty"`
-	EmailPass              string `json:"email_pass,omitempty"`
-	EmailFrom              string `json:"email_from,omitempty"`
-	AdminPassword          string `json:"admin_password,omitempty"`
-	EditorPassword         string `json:"editor_password,omitempty"`
-	AAIAPIKey              string `json:"aai_api_key,omitempty"`
-	ShopifyStorefrontToken string `json:"SHOPIFY_STOREFRONT_TOKEN,omitempty"`
-	ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET,omitempty"`
-	ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN,omitempty"`
-	ShopifyAPIVersion      string `json:"SHOPIFY_API_VERSION,omitempty"`
-	ShopifyAdminSlug       string `json:"SHOPIFY_ADMIN_SLUG,omitempty"`
-	UserSetupWebhooks      *bool  `json:"USER_SETUP_WEBHOOKS,omitempty"`
-	ResendAPIKey           string `json:"RESEND_API_KEY,omitempty"`
-	TursoEnabled           *bool  `json:"turso_enabled,omitempty"`
+	TursoDatabaseURL        string `json:"turso_database_url,omitempty"`
+	TursoAuthToken          string `json:"turso_auth_token,omitempty"`
+	EmailHost               string `json:"email_host,omitempty"`
+	EmailPort               int    `json:"email_port,omitempty"`
+	EmailUser               string `json:"email_user,omitempty"`
+	EmailPass               string `json:"email_pass,omitempty"`
+	EmailFrom               string `json:"email_from,omitempty"`
+	AdminPassword           string `json:"admin_password,omitempty"`
+	EditorPassword          string `json:"editor_password,omitempty"`
+	AAIAPIKey               string `json:"aai_api_key,omitempty"`
+	ShopifyStorefrontToken  string `json:"SHOPIFY_STOREFRONT_TOKEN,omitempty"`
+	ShopifyAPISecret        string `json:"SHOPIFY_API_SECRET,omitempty"`
+	ShopifyStoreDomain      string `json:"SHOPIFY_STORE_DOMAIN,omitempty"`
+	ShopifyAPIVersion       string `json:"SHOPIFY_API_VERSION,omitempty"`
+	ShopifyAdminSlug        string `json:"SHOPIFY_ADMIN_SLUG,omitempty"`
+	UserSetupWebhooks       *bool  `json:"USER_SETUP_WEBHOOKS,omitempty"`
+	ResendAPIKey            string `json:"RESEND_API_KEY,omitempty"`
+	GoogleOAuthClientID     string `json:"GOOGLE_OAUTH_CLIENT_ID,omitempty"`
+	GoogleOAuthClientSecret string `json:"GOOGLE_OAUTH_CLIENT_SECRET,omitempty"`
+	GoogleCalendarID        string `json:"GOOGLE_CALENDAR_ID,omitempty"`
+	GoogleAccessToken       string `json:"GOOGLE_ACCESS_TOKEN,omitempty"`
+	GoogleRefreshToken      string `json:"GOOGLE_REFRESH_TOKEN,omitempty"`
+	GoogleTokenExpiry       string `json:"GOOGLE_TOKEN_EXPIRY,omitempty"`
+	TursoEnabled            *bool  `json:"turso_enabled,omitempty"`
 }
 
 // ValidateAdminPermissions validates admin-only authentication
@@ -247,6 +253,24 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.ResendAPIKey != "" {
 		tenantCtx.Config.ResendAPIKey = request.ResendAPIKey
 	}
+	if request.GoogleOAuthClientID != "" {
+		tenantCtx.Config.GoogleOAuthClientID = request.GoogleOAuthClientID
+	}
+	if request.GoogleOAuthClientSecret != "" {
+		tenantCtx.Config.GoogleOAuthClientSecret = request.GoogleOAuthClientSecret
+	}
+	if request.GoogleCalendarID != "" {
+		tenantCtx.Config.GoogleCalendarID = request.GoogleCalendarID
+	}
+	if request.GoogleAccessToken != "" {
+		tenantCtx.Config.GoogleAccessToken = request.GoogleAccessToken
+	}
+	if request.GoogleRefreshToken != "" {
+		tenantCtx.Config.GoogleRefreshToken = request.GoogleRefreshToken
+	}
+	if request.GoogleTokenExpiry != "" {
+		tenantCtx.Config.GoogleTokenExpiry = request.GoogleTokenExpiry
+	}
 	if request.TursoEnabled != nil {
 		tenantCtx.Config.TursoEnabled = *request.TursoEnabled
 	}
@@ -336,21 +360,27 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 
 	// This matches the legacy pattern and prevents accidental exposure of computed fields
 	configData := map[string]any{
-		"TURSO_DATABASE_URL":       tenantCtx.Config.TursoDatabase,
-		"TURSO_AUTH_TOKEN":         tenantCtx.Config.TursoToken,
-		"ADMIN_PASSWORD_HASH":      tenantCtx.Config.AdminPasswordHash,
-		"EDITOR_PASSWORD_HASH":     tenantCtx.Config.EditorPasswordHash,
-		"AAI_API_KEY":              tenantCtx.Config.AAIAPIKey,
-		"JWT_SECRET":               tenantCtx.Config.JWTSecret,
-		"AES_KEY":                  tenantCtx.Config.AESKey,
-		"TURSO_ENABLED":            tenantCtx.Config.TursoEnabled,
-		"SHOPIFY_STOREFRONT_TOKEN": tenantCtx.Config.ShopifyStorefrontToken,
-		"SHOPIFY_API_SECRET":       tenantCtx.Config.ShopifyAPISecret,
-		"SHOPIFY_STORE_DOMAIN":     tenantCtx.Config.ShopifyStoreDomain,
-		"SHOPIFY_API_VERSION":      tenantCtx.Config.ShopifyAPIVersion,
-		"SHOPIFY_ADMIN_SLUG":       tenantCtx.Config.ShopifyAdminSlug,
-		"USER_SETUP_WEBHOOKS":      tenantCtx.Config.UserSetupWebhooks,
-		"RESEND_API_KEY":           tenantCtx.Config.ResendAPIKey,
+		"TURSO_DATABASE_URL":         tenantCtx.Config.TursoDatabase,
+		"TURSO_AUTH_TOKEN":           tenantCtx.Config.TursoToken,
+		"ADMIN_PASSWORD_HASH":        tenantCtx.Config.AdminPasswordHash,
+		"EDITOR_PASSWORD_HASH":       tenantCtx.Config.EditorPasswordHash,
+		"AAI_API_KEY":                tenantCtx.Config.AAIAPIKey,
+		"JWT_SECRET":                 tenantCtx.Config.JWTSecret,
+		"AES_KEY":                    tenantCtx.Config.AESKey,
+		"TURSO_ENABLED":              tenantCtx.Config.TursoEnabled,
+		"SHOPIFY_STOREFRONT_TOKEN":   tenantCtx.Config.ShopifyStorefrontToken,
+		"SHOPIFY_API_SECRET":         tenantCtx.Config.ShopifyAPISecret,
+		"SHOPIFY_STORE_DOMAIN":       tenantCtx.Config.ShopifyStoreDomain,
+		"SHOPIFY_API_VERSION":        tenantCtx.Config.ShopifyAPIVersion,
+		"SHOPIFY_ADMIN_SLUG":         tenantCtx.Config.ShopifyAdminSlug,
+		"USER_SETUP_WEBHOOKS":        tenantCtx.Config.UserSetupWebhooks,
+		"RESEND_API_KEY":             tenantCtx.Config.ResendAPIKey,
+		"GOOGLE_OAUTH_CLIENT_ID":     tenantCtx.Config.GoogleOAuthClientID,
+		"GOOGLE_OAUTH_CLIENT_SECRET": tenantCtx.Config.GoogleOAuthClientSecret,
+		"GOOGLE_CALENDAR_ID":         tenantCtx.Config.GoogleCalendarID,
+		"GOOGLE_ACCESS_TOKEN":        tenantCtx.Config.GoogleAccessToken,
+		"GOOGLE_REFRESH_TOKEN":       tenantCtx.Config.GoogleRefreshToken,
+		"GOOGLE_TOKEN_EXPIRY":        tenantCtx.Config.GoogleTokenExpiry,
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")
@@ -663,6 +693,9 @@ func (c *ConfigService) updateBrandConfigFields(config *types.BrandConfig, reque
 
 	// Update shopify scheduling config
 	if request.Scheduling != nil {
+		if request.Scheduling.RemoteOnly {
+			request.Scheduling.AllowRemote = true
+		}
 		config.Scheduling = *request.Scheduling
 	}
 

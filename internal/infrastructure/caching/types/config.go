@@ -176,6 +176,8 @@ type Scheduling struct {
 	Timezone          string               `json:"timezone"`
 	BufferGapsMinutes int                  `json:"bufferGapsMinutes"`
 	MaxLengthMinutes  int                  `json:"maxLengthMinutes"`
+	AllowRemote       bool                 `json:"allowRemote"`
+	RemoteOnly        bool                 `json:"remoteOnly"`
 	BusinessHours     map[string]TimeBlock `json:"businessHours"`
 	UnavailableHours  []TimeBlock          `json:"unavailableHours"`
 }

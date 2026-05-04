@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/booking"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
@@ -19,18 +21,25 @@ var ErrBookingNotFound = errors.New("booking not found for trace ID")
 
 // BookingService handles business logic and orchestration for reservations.
 type BookingService struct {
-	logger          *logging.ChanneledLogger
-	resourceService *ResourceService
-	emailWorker     *EmailWorker
-	locks           sync.Map // Maps tenantID string to *sync.Mutex for WAL-mode queueing
+	logger            *logging.ChanneledLogger
+	resourceService   *ResourceService
+	emailWorker       *EmailWorker
+	googleCalendarSvc *GoogleCalendarService
+	locks             sync.Map // Maps tenantID string to *sync.Mutex for WAL-mode queueing
 }
 
 // NewBookingService creates a new booking service instance.
-func NewBookingService(logger *logging.ChanneledLogger, resourceService *ResourceService, emailWorker *EmailWorker) *BookingService {
+func NewBookingService(
+	logger *logging.ChanneledLogger,
+	resourceService *ResourceService,
+	emailWorker *EmailWorker,
+	googleCalendarSvc *GoogleCalendarService,
+) *BookingService {
 	return &BookingService{
-		logger:          logger,
-		resourceService: resourceService,
-		emailWorker:     emailWorker,
+		logger:            logger,
+		resourceService:   resourceService,
+		emailWorker:       emailWorker,
+		googleCalendarSvc: googleCalendarSvc,
 	}
 }
 
@@ -48,13 +57,32 @@ func (s *BookingService) GetAvailability(tenantCtx *tenant.Context, start, end t
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch overlapping bookings: %w", err)
 	}
+	if s.googleCalendarSvc != nil {
+		busyRanges, googleErr := s.googleCalendarSvc.GetBusyRanges(context.Background(), tenantCtx, start, end)
+		if googleErr != nil {
+			s.logger.System().Warn("Failed to load Google busy ranges", "tenantId", tenantCtx.TenantID, "error", googleErr)
+		} else {
+			for idx, busy := range busyRanges {
+				existingBookings = append(existingBookings, &booking.Booking{
+					ID:               fmt.Sprintf("google_busy_%d", idx),
+					ResourceIDs:      []string{},
+					StartTime:        busy.Start.UTC(),
+					EndTime:          busy.End.UTC(),
+					Status:           booking.StatusConfirmed,
+					AppointmentMode:  booking.AppointmentModeInPerson,
+					GoogleSyncStatus: booking.GoogleSyncSynced,
+					CreatedAt:        time.Now().UTC(),
+				})
+			}
+		}
+	}
 
 	return existingBookings, nil
 }
 
 // HoldSlot attempts to lock a time slot for a user, using a tenant-level mutex before writing to the DB.
 // It enforces UnavailableHours checks and saves the initial hold as pending.
-func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context, traceID string, resourceIDs []string, leadID string, start, end time.Time) error {
+func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context, traceID string, resourceIDs []string, leadID string, start, end time.Time, appointmentModeRaw string) error {
 	mu := s.getTenantLock(tenantCtx.TenantID)
 	mu.Lock()
 	defer mu.Unlock()
@@ -132,15 +160,33 @@ func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context
 		return fmt.Errorf("time slot is no longer available")
 	}
 
+	serviceResources, err := s.resolveBookingServiceResources(tenantCtx, resources)
+	if err != nil {
+		return fmt.Errorf("failed to resolve booking service resources: %w", err)
+	}
+
+	appointmentMode := booking.AppointmentMode(strings.ToUpper(strings.TrimSpace(appointmentModeRaw)))
+	if appointmentMode != booking.AppointmentModeRemote {
+		appointmentMode = booking.AppointmentModeInPerson
+	}
+	appointmentMode, err = s.resolveAppointmentMode(tenantCtx, appointmentMode, serviceResources)
+	if err != nil {
+		return err
+	}
+
 	// 3. Create the Booking (Defaulting to Pending)
 	newBooking := &booking.Booking{
-		ID:          traceID,
-		ResourceIDs: resourceIDs,
-		LeadID:      leadID,
-		StartTime:   start,
-		EndTime:     secureEnd,
-		Status:      booking.StatusPending,
-		CreatedAt:   time.Now().UTC(),
+		ID:                    traceID,
+		ResourceIDs:           resourceIDs,
+		LeadID:                leadID,
+		StartTime:             start,
+		EndTime:               secureEnd,
+		Status:                booking.StatusPending,
+		AppointmentMode:       appointmentMode,
+		GoogleSyncStatus:      booking.GoogleSyncNotSynced,
+		ConfirmationEmailSent: false,
+		LinkAddedEmailSent:    false,
+		CreatedAt:             time.Now().UTC(),
 	}
 
 	if err := repo.Store(tenantCtx.TenantID, newBooking); err != nil {
@@ -153,6 +199,95 @@ func (s *BookingService) HoldSlot(ctx context.Context, tenantCtx *tenant.Context
 		"durationMinutes", snappedMinutes)
 
 	return nil
+}
+
+func (s *BookingService) resolveBookingServiceResources(tenantCtx *tenant.Context, resources []*content.ResourceNode) ([]*content.ResourceNode, error) {
+	serviceMap := map[string]*content.ResourceNode{}
+
+	for _, resource := range resources {
+		if resource == nil {
+			continue
+		}
+
+		if (resource.CategorySlug != nil && *resource.CategorySlug == "service") || hasBookingLength(resource.OptionsPayload) {
+			serviceMap[resource.ID] = resource
+		}
+
+		if boundSlug, ok := resource.OptionsPayload["serviceBound"].(string); ok && strings.TrimSpace(boundSlug) != "" {
+			boundService, err := s.resourceService.GetBySlug(tenantCtx, boundSlug)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve serviceBound resource %q: %w", boundSlug, err)
+			}
+			if boundService != nil {
+				serviceMap[boundService.ID] = boundService
+			}
+		}
+	}
+
+	out := make([]*content.ResourceNode, 0, len(serviceMap))
+	for _, service := range serviceMap {
+		out = append(out, service)
+	}
+	return out, nil
+}
+
+func (s *BookingService) resolveAppointmentMode(
+	tenantCtx *tenant.Context,
+	requestedMode booking.AppointmentMode,
+	serviceResources []*content.ResourceNode,
+) (booking.AppointmentMode, error) {
+	scheduling := tenantCtx.Config.BrandConfig.Scheduling
+	if scheduling.RemoteOnly {
+		return booking.AppointmentModeRemote, nil
+	}
+
+	if requestedMode == booking.AppointmentModeRemote && !scheduling.AllowRemote {
+		return "", fmt.Errorf("remote booking is disabled for this tenant")
+	}
+
+	finalMode := requestedMode
+	if finalMode != booking.AppointmentModeRemote {
+		finalMode = booking.AppointmentModeInPerson
+	}
+
+	for _, resource := range serviceResources {
+		allowRemote, remoteOnly := serviceRemoteFlags(resource.OptionsPayload)
+		if remoteOnly {
+			allowRemote = true
+			finalMode = booking.AppointmentModeRemote
+		}
+
+		if finalMode == booking.AppointmentModeRemote && !allowRemote {
+			return "", fmt.Errorf("service %s does not allow remote booking", resource.ID)
+		}
+	}
+
+	return finalMode, nil
+}
+
+func hasBookingLength(payload map[string]interface{}) bool {
+	_, ok := payload["bookingLengthMinutes"]
+	return ok
+}
+
+func serviceRemoteFlags(payload map[string]interface{}) (allowRemote bool, remoteOnly bool) {
+	allowRemote = parseBoolPayload(payload["allowRemote"])
+	remoteOnly = parseBoolPayload(payload["remoteOnly"])
+	if remoteOnly {
+		allowRemote = true
+	}
+	return
+}
+
+func parseBoolPayload(value interface{}) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
 }
 
 // ConfirmBooking finalizes a pending booking, transitioning it to CONFIRMED.
@@ -189,25 +324,35 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 
 	s.logger.System().Info("Booking confirmed", "traceId", traceID, "tenantId", tenantCtx.TenantID)
 
-	if s.emailWorker != nil && shopifyOrderID != nil {
-		lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
-		if lead != nil {
-			siteURL := tenantCtx.Config.BrandConfig.SiteURL
-			if siteURL == "" {
-				siteURL = "https://tractstack.com"
-			}
-			orderURL := fmt.Sprintf("%s/account/orders/%s", siteURL, *shopifyOrderID)
-			s.emailWorker.Enqueue(EmailJob{
-				TenantID:     tenantCtx.TenantID,
-				To:           []string{lead.Email},
-				Category:     "shopify",
-				TemplateName: "booking-confirmed",
-				Data: map[string]any{
-					"LeadName":        lead.FirstName,
-					"ShopifyOrderID":  *shopifyOrderID,
-					"ShopifyOrderUrl": orderURL,
-				},
-			})
+	lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
+
+	if s.googleCalendarSvc != nil {
+		leadName := b.LeadID
+		if lead != nil && lead.FirstName != "" {
+			leadName = lead.FirstName
+		}
+		go s.syncConfirmedBookingToGoogle(tenantCtx, traceID, leadName)
+	}
+
+	if s.emailWorker != nil && lead != nil && lead.Email != "" {
+		siteURL := tenantCtx.Config.BrandConfig.SiteURL
+		if siteURL == "" {
+			siteURL = "https://tractstack.com"
+		}
+		data := buildBookingTemplateData(tenantCtx, b, lead.FirstName, shopifyOrderID, siteURL)
+		templateName := "booking-confirmed"
+		if b.AppointmentMode == booking.AppointmentModeRemote {
+			templateName = "booking-remote-confirmed"
+		}
+		enqueued := s.emailWorker.Enqueue(EmailJob{
+			TenantID:     tenantCtx.TenantID,
+			To:           []string{lead.Email},
+			Category:     "shopify",
+			TemplateName: templateName,
+			Data:         data,
+		})
+		if enqueued {
+			_ = repo.MarkConfirmationEmailSent(tenantCtx.TenantID, traceID)
 		}
 	}
 
@@ -272,7 +417,7 @@ func (s *BookingService) CancelBooking(tenantCtx *tenant.Context, traceID string
 		lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
 		if lead != nil {
 			orderID := traceID
-			s.emailWorker.Enqueue(EmailJob{
+			_ = s.emailWorker.Enqueue(EmailJob{
 				TenantID:     tenantCtx.TenantID,
 				To:           []string{lead.Email},
 				Category:     "shopify",
@@ -285,5 +430,150 @@ func (s *BookingService) CancelBooking(tenantCtx *tenant.Context, traceID string
 		}
 	}
 
+	if s.googleCalendarSvc != nil {
+		go s.syncCancelledBookingToGoogle(tenantCtx, traceID)
+	}
+
 	return nil
+}
+
+func (s *BookingService) syncConfirmedBookingToGoogle(tenantCtx *tenant.Context, traceID string, leadName string) {
+	repo := tenantCtx.BookingRepo()
+	if err := repo.UpdateGoogleSyncPending(tenantCtx.TenantID, traceID); err != nil {
+		s.logger.System().Warn("Failed to mark google sync pending", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+	}
+
+	b, err := repo.FindByID(tenantCtx.TenantID, traceID)
+	if err != nil || b == nil {
+		s.logger.System().Warn("Failed to load booking for google create", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+		return
+	}
+	if b.Status == booking.StatusCancelled {
+		return
+	}
+
+	eventID, meetURL, err := s.googleCalendarSvc.CreateBookingEvent(context.Background(), tenantCtx, b, leadName)
+	if err != nil {
+		_ = repo.UpdateGoogleSyncFailure(tenantCtx.TenantID, traceID, booking.GoogleSyncFailed, err.Error())
+		s.logger.System().Warn("Google create event failed", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+		return
+	}
+	if err := repo.UpdateGoogleSyncSuccess(tenantCtx.TenantID, traceID, eventID, meetURL); err != nil {
+		s.logger.System().Warn("Failed to persist google sync success", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+	}
+
+	if b.AppointmentMode == booking.AppointmentModeRemote && meetURL != nil && s.emailWorker != nil {
+		latest, findErr := repo.FindByID(tenantCtx.TenantID, traceID)
+		if findErr != nil || latest == nil {
+			return
+		}
+		if latest.LinkAddedEmailSent || !latest.ConfirmationEmailSent {
+			return
+		}
+		lead, leadErr := tenantCtx.LeadRepo().FindByID(latest.LeadID)
+		if leadErr != nil || lead == nil || lead.Email == "" {
+			return
+		}
+		siteURL := tenantCtx.Config.BrandConfig.SiteURL
+		if siteURL == "" {
+			siteURL = "https://tractstack.com"
+		}
+		data := buildBookingTemplateData(tenantCtx, latest, lead.FirstName, latest.ShopifyOrderID, siteURL)
+		data["GoogleMeetURL"] = *meetURL
+		enqueued := s.emailWorker.Enqueue(EmailJob{
+			TenantID:     tenantCtx.TenantID,
+			To:           []string{lead.Email},
+			Category:     "shopify",
+			TemplateName: "booking-remote-confirmed",
+			Data: map[string]any{
+				// reusing compiled contract with subject suffix
+				"LeadName":                data["LeadName"],
+				"BookingID":               data["BookingID"],
+				"BookingTimezone":         data["BookingTimezone"],
+				"BookingStartDisplay":     data["BookingStartDisplay"],
+				"BookingEndDisplay":       data["BookingEndDisplay"],
+				"BookingForDisplayString": data["BookingForDisplayString"],
+				"ShopifyOrderID":          data["ShopifyOrderID"],
+				"ShopifyOrderUrl":         data["ShopifyOrderUrl"],
+				"GoogleMeetURL":           data["GoogleMeetURL"],
+				"SubjectSuffix":           "(LINK ADDED)",
+			},
+		})
+		if enqueued {
+			_ = repo.MarkLinkAddedEmailSent(tenantCtx.TenantID, traceID)
+		}
+	}
+}
+
+func (s *BookingService) syncCancelledBookingToGoogle(tenantCtx *tenant.Context, traceID string) {
+	repo := tenantCtx.BookingRepo()
+	if err := repo.UpdateGoogleDeletePending(tenantCtx.TenantID, traceID); err != nil {
+		s.logger.System().Warn("Failed to mark google delete pending", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+	}
+
+	b, err := repo.FindByID(tenantCtx.TenantID, traceID)
+	if err != nil || b == nil {
+		return
+	}
+
+	eventID := b.GoogleEventID
+	if eventID == nil || *eventID == "" {
+		lookupEventID, lookupErr := s.googleCalendarSvc.FindEventIDByBookingID(context.Background(), tenantCtx, traceID)
+		if lookupErr != nil {
+			_ = repo.UpdateGoogleSyncFailure(tenantCtx.TenantID, traceID, booking.GoogleSyncFailed, lookupErr.Error())
+			return
+		}
+		eventID = lookupEventID
+	}
+	if eventID == nil || *eventID == "" {
+		_ = repo.UpdateGoogleSyncFailure(tenantCtx.TenantID, traceID, booking.GoogleSyncFailed, "google event id not found for cancellation")
+		return
+	}
+
+	if err := s.googleCalendarSvc.DeleteEvent(context.Background(), tenantCtx, *eventID); err != nil {
+		_ = repo.UpdateGoogleSyncFailure(tenantCtx.TenantID, traceID, booking.GoogleSyncFailed, err.Error())
+		s.logger.System().Warn("Google delete event failed", "tenantId", tenantCtx.TenantID, "traceId", traceID, "eventId", *eventID, "error", err)
+		return
+	}
+	if err := repo.UpdateGoogleDeleteSuccess(tenantCtx.TenantID, traceID); err != nil {
+		s.logger.System().Warn("Failed to persist google delete success", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+	}
+}
+
+func buildBookingTemplateData(
+	tenantCtx *tenant.Context,
+	b *booking.Booking,
+	leadName string,
+	shopifyOrderID *string,
+	siteURL string,
+) map[string]any {
+	bookingTZ := tenantCtx.Config.BrandConfig.Scheduling.Timezone
+	if bookingTZ == "" {
+		bookingTZ = "UTC"
+	}
+	loc, err := time.LoadLocation(bookingTZ)
+	if err != nil {
+		loc = time.UTC
+		bookingTZ = "UTC"
+	}
+	startDisplay := b.StartTime.In(loc).Format("Jan 2, 2006 3:04 PM")
+	endDisplay := b.EndTime.In(loc).Format("Jan 2, 2006 3:04 PM")
+	bookingFor := fmt.Sprintf("%s to %s (%s)", startDisplay, endDisplay, bookingTZ)
+	data := map[string]any{
+		"LeadName":                leadName,
+		"BookingID":               b.ID,
+		"BookingTimezone":         bookingTZ,
+		"BookingStartDisplay":     startDisplay,
+		"BookingEndDisplay":       endDisplay,
+		"BookingForDisplayString": bookingFor,
+		"SubjectSuffix":           "",
+	}
+	if shopifyOrderID != nil {
+		data["ShopifyOrderID"] = *shopifyOrderID
+		data["ShopifyOrderUrl"] = fmt.Sprintf("%s/account/orders/%s", siteURL, *shopifyOrderID)
+	}
+	if b.GoogleMeetURL != nil {
+		data["GoogleMeetURL"] = *b.GoogleMeetURL
+	}
+	return data
 }

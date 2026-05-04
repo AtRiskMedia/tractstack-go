@@ -17,19 +17,26 @@ import (
 
 // AdvancedConfigStatusResponse represents the response structure for advanced config status
 type AdvancedConfigStatusResponse struct {
-	TursoConfigured           bool   `json:"tursoConfigured"`
-	TursoTokenSet             bool   `json:"tursoTokenSet"`
-	AdminPasswordSet          bool   `json:"adminPasswordSet"`
-	EditorPasswordSet         bool   `json:"editorPasswordSet"`
-	AAIAPIKeySet              bool   `json:"aaiAPIKeySet"`
-	TursoEnabled              bool   `json:"tursoEnabled"`
-	ShopifyStorefrontTokenSet bool   `json:"shopifyStorefrontTokenSet"`
-	ShopifyAPISecretSet       bool   `json:"shopifyApiSecretSet"`
-	ShopifyStoreDomainSet     bool   `json:"shopifyStoreDomainSet"`
-	ShopifyAPIVersion         string `json:"shopifyApiVersion"`
-	ShopifyAdminSlugSet       bool   `json:"shopifyAdminSlugSet"`
-	UserSetupWebhooks         bool   `json:"userSetupWebhooks"`
-	ResendAPIKeySet           bool   `json:"resendApiKeySet"`
+	TursoConfigured            bool   `json:"tursoConfigured"`
+	TursoTokenSet              bool   `json:"tursoTokenSet"`
+	AdminPasswordSet           bool   `json:"adminPasswordSet"`
+	EditorPasswordSet          bool   `json:"editorPasswordSet"`
+	AAIAPIKeySet               bool   `json:"aaiAPIKeySet"`
+	TursoEnabled               bool   `json:"tursoEnabled"`
+	ShopifyStorefrontTokenSet  bool   `json:"shopifyStorefrontTokenSet"`
+	ShopifyAPISecretSet        bool   `json:"shopifyApiSecretSet"`
+	ShopifyStoreDomainSet      bool   `json:"shopifyStoreDomainSet"`
+	ShopifyAPIVersion          string `json:"shopifyApiVersion"`
+	ShopifyAdminSlugSet        bool   `json:"shopifyAdminSlugSet"`
+	UserSetupWebhooks          bool   `json:"userSetupWebhooks"`
+	ResendAPIKeySet            bool   `json:"resendApiKeySet"`
+	GoogleOauthClientIDSet     bool   `json:"googleOauthClientIdSet"`
+	GoogleOauthClientSecretSet bool   `json:"googleOauthClientSecretSet"`
+	GoogleCalendarIDSet        bool   `json:"googleCalendarIdSet"`
+	GoogleAccessTokenSet       bool   `json:"googleAccessTokenSet"`
+	GoogleRefreshTokenSet      bool   `json:"googleRefreshTokenSet"`
+	GoogleTokenExpirySet       bool   `json:"googleTokenExpirySet"`
+	HasGoogleSync              bool   `json:"hasGoogleSync"`
 }
 
 // ConfigHandlers contains all config-related HTTP handlers
@@ -145,20 +152,31 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 
 	// Check configuration status (never expose actual values)
 	status := AdvancedConfigStatusResponse{
-		TursoConfigured:           tenantCtx.Config.TursoDatabase != "",
-		TursoTokenSet:             tenantCtx.Config.TursoToken != "",
-		AdminPasswordSet:          tenantCtx.Config.AdminPasswordHash != "",
-		EditorPasswordSet:         tenantCtx.Config.EditorPasswordHash != "",
-		AAIAPIKeySet:              tenantCtx.Config.AAIAPIKey != "",
-		TursoEnabled:              tenantCtx.Config.TursoEnabled,
-		ShopifyStorefrontTokenSet: tenantCtx.Config.ShopifyStorefrontToken != "",
-		ShopifyAPISecretSet:       tenantCtx.Config.ShopifyAPISecret != "",
-		ShopifyStoreDomainSet:     tenantCtx.Config.ShopifyStoreDomain != "",
-		ShopifyAPIVersion:         tenantCtx.Config.ShopifyAPIVersion,
-		ShopifyAdminSlugSet:       tenantCtx.Config.ShopifyAdminSlug != "",
-		UserSetupWebhooks:         tenantCtx.Config.UserSetupWebhooks,
-		ResendAPIKeySet:           tenantCtx.Config.ResendAPIKey != "",
+		TursoConfigured:            tenantCtx.Config.TursoDatabase != "",
+		TursoTokenSet:              tenantCtx.Config.TursoToken != "",
+		AdminPasswordSet:           tenantCtx.Config.AdminPasswordHash != "",
+		EditorPasswordSet:          tenantCtx.Config.EditorPasswordHash != "",
+		AAIAPIKeySet:               tenantCtx.Config.AAIAPIKey != "",
+		TursoEnabled:               tenantCtx.Config.TursoEnabled,
+		ShopifyStorefrontTokenSet:  tenantCtx.Config.ShopifyStorefrontToken != "",
+		ShopifyAPISecretSet:        tenantCtx.Config.ShopifyAPISecret != "",
+		ShopifyStoreDomainSet:      tenantCtx.Config.ShopifyStoreDomain != "",
+		ShopifyAPIVersion:          tenantCtx.Config.ShopifyAPIVersion,
+		ShopifyAdminSlugSet:        tenantCtx.Config.ShopifyAdminSlug != "",
+		UserSetupWebhooks:          tenantCtx.Config.UserSetupWebhooks,
+		ResendAPIKeySet:            tenantCtx.Config.ResendAPIKey != "",
+		GoogleOauthClientIDSet:     tenantCtx.Config.GoogleOAuthClientID != "",
+		GoogleOauthClientSecretSet: tenantCtx.Config.GoogleOAuthClientSecret != "",
+		GoogleCalendarIDSet:        tenantCtx.Config.GoogleCalendarID != "",
+		GoogleAccessTokenSet:       tenantCtx.Config.GoogleAccessToken != "",
+		GoogleRefreshTokenSet:      tenantCtx.Config.GoogleRefreshToken != "",
+		GoogleTokenExpirySet:       tenantCtx.Config.GoogleTokenExpiry != "",
 	}
+	status.HasGoogleSync = status.GoogleOauthClientIDSet &&
+		status.GoogleOauthClientSecretSet &&
+		status.GoogleCalendarIDSet &&
+		status.GoogleRefreshTokenSet &&
+		status.GoogleTokenExpirySet
 
 	h.logger.System().Info("Get advanced config request completed", "duration", time.Since(start))
 	marker.SetSuccess(true)
@@ -183,13 +201,16 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	// Define local request struct to include new fields without modifying service interface yet
 	var request struct {
 		services.AdvancedConfigUpdateRequest
-		ShopifyStorefrontToken string `json:"SHOPIFY_STOREFRONT_TOKEN"`
-		ShopifyAPISecret       string `json:"SHOPIFY_API_SECRET"`
-		ShopifyStoreDomain     string `json:"SHOPIFY_STORE_DOMAIN"`
-		ShopifyAPIVersion      string `json:"SHOPIFY_API_VERSION"`
-		ShopifyAdminSlug       string `json:"SHOPIFY_ADMIN_SLUG"`
-		UserSetupWebhooks      bool   `json:"USER_SETUP_WEBHOOKS"`
-		ResendAPIKey           string `json:"RESEND_API_KEY"`
+		ShopifyStorefrontToken  string `json:"SHOPIFY_STOREFRONT_TOKEN"`
+		ShopifyAPISecret        string `json:"SHOPIFY_API_SECRET"`
+		ShopifyStoreDomain      string `json:"SHOPIFY_STORE_DOMAIN"`
+		ShopifyAPIVersion       string `json:"SHOPIFY_API_VERSION"`
+		ShopifyAdminSlug        string `json:"SHOPIFY_ADMIN_SLUG"`
+		UserSetupWebhooks       bool   `json:"USER_SETUP_WEBHOOKS"`
+		ResendAPIKey            string `json:"RESEND_API_KEY"`
+		GoogleOAuthClientID     string `json:"GOOGLE_OAUTH_CLIENT_ID"`
+		GoogleOAuthClientSecret string `json:"GOOGLE_OAUTH_CLIENT_SECRET"`
+		GoogleCalendarID        string `json:"GOOGLE_CALENDAR_ID"`
 	}
 
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -240,6 +261,15 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	tenantCtx.Config.UserSetupWebhooks = request.UserSetupWebhooks
 	if request.ResendAPIKey != "" {
 		tenantCtx.Config.ResendAPIKey = request.ResendAPIKey
+	}
+	if request.GoogleOAuthClientID != "" {
+		tenantCtx.Config.GoogleOAuthClientID = request.GoogleOAuthClientID
+	}
+	if request.GoogleOAuthClientSecret != "" {
+		tenantCtx.Config.GoogleOAuthClientSecret = request.GoogleOAuthClientSecret
+	}
+	if request.GoogleCalendarID != "" {
+		tenantCtx.Config.GoogleCalendarID = request.GoogleCalendarID
 	}
 
 	// Process legacy advanced config update through service

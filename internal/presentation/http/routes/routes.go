@@ -55,6 +55,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.BookingService, container.EmailWorker, container.Logger, container.PerfTracker)
 	bookingHandlers := handlers.NewBookingHandlers(container.BookingService, container.Logger, container.PerfTracker)
 	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
+	googleHandlers := handlers.NewGoogleHandlers(container.GoogleOAuthService, container.ConfigService, container.Logger, container.PerfTracker)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -114,6 +115,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		api.POST("/bookings/hold", bookingHandlers.HandleHoldSlot)
 		api.POST("/bookings/confirm", bookingHandlers.HandleConfirmBooking)
 		api.DELETE("/bookings/hold/:traceId", bookingHandlers.HandleReleaseHold)
+		api.GET("/google/oauth/callback", googleHandlers.HandleOAuthCallback)
 		api.POST("/auth/verify-lead", authHandlers.HandleVerifyLead)
 		api.POST("/auth/lookup-lead", authHandlers.HandleLookupLead)
 
@@ -134,6 +136,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			emailGroup.GET("/templates/:category/:template", emailTemplateHandlers.HandleGetTemplate)
 			emailGroup.POST("/templates/:category/:template", emailTemplateHandlers.HandleSaveTemplate)
 			emailGroup.POST("/preview", emailTemplateHandlers.HandlePreviewTemplate)
+		}
+
+		googleGroup := api.Group("/google")
+		googleGroup.Use(authHandlers.AuthMiddleware())
+		{
+			googleGroup.GET("/oauth/start", googleHandlers.HandleOAuthStart)
+			googleGroup.GET("/oauth/status", googleHandlers.HandleOAuthStatus)
+			googleGroup.POST("/oauth/disconnect", authHandlers.AdminOnlyMiddleware(), googleHandlers.HandleOAuthDisconnect)
 		}
 
 		// Config endpoints

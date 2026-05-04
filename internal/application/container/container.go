@@ -62,6 +62,8 @@ type Container struct {
 	ConfigService               *services.ConfigService
 	EmailTemplateService        *services.EmailTemplateService
 	EmailWorker                 *services.EmailWorker
+	GoogleOAuthService          *services.GoogleOAuthService
+	GoogleCalendarService       *services.GoogleCalendarService
 	TailwindService             *services.TailwindService
 	MultiTenantService          *services.MultiTenantService
 	AAIService                  *services.AAIService
@@ -160,6 +162,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
+	googleOAuthService := services.NewGoogleOAuthService(logger)
+	googleCalendarService := services.NewGoogleCalendarService(logger, googleOAuthService, configService)
 	beliefRegistryService := services.NewBeliefRegistryService(logger)
 
 	// Create the orchestrator first, omitting the PaneService to break the dependency cycle.
@@ -188,7 +192,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
 	searchService := services.NewSearchService(paneService, storyFragmentService, resourceService, contentMapService)
-	bookingService := services.NewBookingService(logger, resourceService, emailWorker)
+	bookingService := services.NewBookingService(logger, resourceService, emailWorker, googleCalendarService)
 	bookingReconciliationWorker := services.NewBookingReconciliationWorker(tenantManager, logger)
 
 	// Create WarmingService, now injecting all its required content service dependencies.
@@ -266,6 +270,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ConfigService:               configService,
 		EmailTemplateService:        emailTemplateService,
 		EmailWorker:                 emailWorker,
+		GoogleOAuthService:          googleOAuthService,
+		GoogleCalendarService:       googleCalendarService,
 		TailwindService:             tailwindService,
 		MultiTenantService:          multiTenantService,
 		AAIService:                  aaiService,

@@ -2,9 +2,11 @@
 package services
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
+	texttemplate "text/template"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email/templates"
 )
@@ -38,7 +40,7 @@ type DividerBlock struct {
 
 // ParseEmailBlocks maps a generic array of json.RawMessage JSON objects
 // into strict, compiled Go HTML layout strings.
-func ParseEmailBlocks(blocks []json.RawMessage, siteURL string) (string, error) {
+func ParseEmailBlocks(blocks []json.RawMessage, siteURL string, data map[string]any) (string, error) {
 	var builder strings.Builder
 
 	for _, rawBlock := range blocks {
@@ -53,8 +55,13 @@ func ParseEmailBlocks(blocks []json.RawMessage, siteURL string) (string, error) 
 			if err := json.Unmarshal(rawBlock, &textBlock); err != nil {
 				return "", fmt.Errorf("failed to parse text block: %w", err)
 			}
+			content, err := renderTemplateFragment("text", textBlock.Content, data)
+			if err != nil {
+				// Optional tokens in body blocks are allowed to fail by omission.
+				continue
+			}
 			html := templates.GetParagraphWithOptions(templates.ParagraphProps{
-				Text:           textBlock.Content,
+				Text:           content,
 				AllowBasicHTML: true,
 				Align:          textBlock.Align,
 				Color:          textBlock.Color,
@@ -68,10 +75,18 @@ func ParseEmailBlocks(blocks []json.RawMessage, siteURL string) (string, error) 
 			if err := json.Unmarshal(rawBlock, &buttonBlock); err != nil {
 				return "", fmt.Errorf("failed to parse button block: %w", err)
 			}
+			label, err := renderTemplateFragment("button_label", buttonBlock.Label, data)
+			if err != nil {
+				continue
+			}
+			buttonURL, err := renderTemplateFragment("button_url", buttonBlock.URL, data)
+			if err != nil {
+				continue
+			}
 
 			html := templates.GetButton(templates.ButtonProps{
-				Text:            buttonBlock.Label,
-				URL:             buttonBlock.URL,
+				Text:            label,
+				URL:             buttonURL,
 				BackgroundColor: buttonBlock.BgColor,
 				TextColor:       buttonBlock.TextColor,
 				SiteURL:         siteURL,
@@ -93,4 +108,16 @@ func ParseEmailBlocks(blocks []json.RawMessage, siteURL string) (string, error) 
 	}
 
 	return builder.String(), nil
+}
+
+func renderTemplateFragment(name, value string, data map[string]any) (string, error) {
+	tmpl, err := texttemplate.New(name).Option("missingkey=error").Parse(value)
+	if err != nil {
+		return "", err
+	}
+	var out bytes.Buffer
+	if err := tmpl.Execute(&out, data); err != nil {
+		return "", err
+	}
+	return out.String(), nil
 }

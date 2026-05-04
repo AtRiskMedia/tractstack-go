@@ -51,12 +51,14 @@ func NewEmailWorker(
 }
 
 // Enqueue drops a non-blocking email dispatch request into the background pipeline.
-func (w *EmailWorker) Enqueue(job EmailJob) {
+func (w *EmailWorker) Enqueue(job EmailJob) bool {
 	select {
 	case w.jobQueue <- job:
 		w.logger.System().Debug("Email job enqueued", "tenantId", job.TenantID, "template", job.TemplateName)
+		return true
 	default:
 		w.logger.System().Error("Email worker queue is full; dropping email job", "tenantId", job.TenantID, "template", job.TemplateName)
+		return false
 	}
 }
 
