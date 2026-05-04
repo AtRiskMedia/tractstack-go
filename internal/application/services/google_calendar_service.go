@@ -201,14 +201,15 @@ func (s *GoogleCalendarService) GetBusyRanges(ctx context.Context, tenantCtx *te
 }
 
 // CreateBookingEvent creates a Google calendar event and optional Meet link.
-func (s *GoogleCalendarService) CreateBookingEvent(ctx context.Context, tenantCtx *tenant.Context, b *booking.Booking, leadName string) (*string, *string, error) {
+// summary and description are caller-built calendar copy for the business owner.
+func (s *GoogleCalendarService) CreateBookingEvent(ctx context.Context, tenantCtx *tenant.Context, b *booking.Booking, summary, description string) (*string, *string, error) {
 	if !s.IsConfigured(tenantCtx) {
 		return nil, nil, fmt.Errorf("google sync not configured")
 	}
 
 	payload := map[string]any{
-		"summary":     fmt.Sprintf("Booking %s", b.ID),
-		"description": fmt.Sprintf("TractStack booking for %s", leadName),
+		"summary":     summary,
+		"description": description,
 		"start": map[string]string{
 			"dateTime": b.StartTime.UTC().Format(time.RFC3339),
 		},

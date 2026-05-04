@@ -12,6 +12,7 @@ import (
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/booking"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
@@ -327,11 +328,7 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 	lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
 
 	if s.googleCalendarSvc != nil {
-		leadName := b.LeadID
-		if lead != nil && lead.FirstName != "" {
-			leadName = lead.FirstName
-		}
-		go s.syncConfirmedBookingToGoogle(tenantCtx, traceID, leadName)
+		go s.syncConfirmedBookingToGoogle(tenantCtx, traceID)
 	}
 
 	if s.emailWorker != nil && lead != nil && lead.Email != "" {
@@ -437,7 +434,7 @@ func (s *BookingService) CancelBooking(tenantCtx *tenant.Context, traceID string
 	return nil
 }
 
-func (s *BookingService) syncConfirmedBookingToGoogle(tenantCtx *tenant.Context, traceID string, leadName string) {
+func (s *BookingService) syncConfirmedBookingToGoogle(tenantCtx *tenant.Context, traceID string) {
 	repo := tenantCtx.BookingRepo()
 	if err := repo.UpdateGoogleSyncPending(tenantCtx.TenantID, traceID); err != nil {
 		s.logger.System().Warn("Failed to mark google sync pending", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
@@ -452,7 +449,19 @@ func (s *BookingService) syncConfirmedBookingToGoogle(tenantCtx *tenant.Context,
 		return
 	}
 
-	eventID, meetURL, err := s.googleCalendarSvc.CreateBookingEvent(context.Background(), tenantCtx, b, leadName)
+	lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
+	resources, resErr := s.resourceService.GetByIDs(tenantCtx, b.ResourceIDs)
+	if resErr != nil {
+		s.logger.System().Warn("Failed to load resources for google calendar copy", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", resErr)
+		resources = nil
+	}
+	siteURL := strings.TrimSpace(tenantCtx.Config.BrandConfig.SiteURL)
+	if siteURL == "" {
+		siteURL = "https://tractstack.com"
+	}
+	summary, description := buildCalendarEventCopy(tenantCtx, b, lead, resources, siteURL)
+
+	eventID, meetURL, err := s.googleCalendarSvc.CreateBookingEvent(context.Background(), tenantCtx, b, summary, description)
 	if err != nil {
 		_ = repo.UpdateGoogleSyncFailure(tenantCtx.TenantID, traceID, booking.GoogleSyncFailed, err.Error())
 		s.logger.System().Warn("Google create event failed", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
@@ -538,6 +547,124 @@ func (s *BookingService) syncCancelledBookingToGoogle(tenantCtx *tenant.Context,
 	if err := repo.UpdateGoogleDeleteSuccess(tenantCtx.TenantID, traceID); err != nil {
 		s.logger.System().Warn("Failed to persist google delete success", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
 	}
+}
+
+// buildCalendarEventCopy produces Google Calendar summary and description for the business owner.
+func buildCalendarEventCopy(
+	tenantCtx *tenant.Context,
+	b *booking.Booking,
+	lead *user.Lead,
+	resources []*content.ResourceNode,
+	siteURL string,
+) (summary string, description string) {
+	displayName, contactEmail := leadCalendarDisplayNameAndEmail(lead, b)
+	byID := resourceNodesByID(resources)
+
+	n := len(b.ResourceIDs)
+	var summaryBody string
+	switch {
+	case n == 0:
+		summaryBody = fmt.Sprintf("Booking – %s", displayName)
+	case n == 1:
+		id := b.ResourceIDs[0]
+		st := strings.TrimSpace(resourceTitleForCalendar(byID[id], id))
+		if st == "" {
+			st = "Service"
+		}
+		summaryBody = fmt.Sprintf("%s – %s", st, displayName)
+	default:
+		summaryBody = fmt.Sprintf("%d services – %s", n, displayName)
+	}
+	if b.AppointmentMode == booking.AppointmentModeRemote {
+		summary = "Remote · " + summaryBody
+	} else {
+		summary = summaryBody
+	}
+
+	bookingTZ := tenantCtx.Config.BrandConfig.Scheduling.Timezone
+	if bookingTZ == "" {
+		bookingTZ = "UTC"
+	}
+	loc, err := time.LoadLocation(bookingTZ)
+	if err != nil {
+		loc = time.UTC
+		bookingTZ = "UTC"
+	}
+	startDisplay := b.StartTime.In(loc).Format("Jan 2, 2006 3:04 PM")
+	endDisplay := b.EndTime.In(loc).Format("Jan 2, 2006 3:04 PM")
+	bookingFor := fmt.Sprintf("%s to %s (%s)", startDisplay, endDisplay, bookingTZ)
+
+	var formatLine string
+	if b.AppointmentMode == booking.AppointmentModeRemote {
+		formatLine = "Format: Remote (Google Meet link is on the calendar event)"
+	} else {
+		formatLine = "Format: In person"
+	}
+
+	var svcBlock strings.Builder
+	svcBlock.WriteString("Services:")
+	for _, id := range b.ResourceIDs {
+		title := strings.TrimSpace(resourceTitleForCalendar(byID[id], id))
+		if title == "" {
+			title = id
+		}
+		svcBlock.WriteString("\n- ")
+		svcBlock.WriteString(title)
+	}
+
+	var contactLine string
+	if strings.TrimSpace(contactEmail) != "" {
+		contactLine = fmt.Sprintf("Contact: %s <%s>", displayName, strings.TrimSpace(contactEmail))
+	} else {
+		contactLine = fmt.Sprintf("Contact: %s", displayName)
+	}
+
+	blocks := []string{bookingFor, formatLine, svcBlock.String(), contactLine}
+	if b.ShopifyOrderID != nil && strings.TrimSpace(*b.ShopifyOrderID) != "" {
+		oid := strings.TrimSpace(*b.ShopifyOrderID)
+		blocks = append(blocks,
+			fmt.Sprintf("Order: %s", oid),
+			fmt.Sprintf("Link: %s/account/orders/%s", siteURL, oid),
+		)
+	}
+	blocks = append(blocks, fmt.Sprintf("Booking ref: %s", b.ID))
+	description = strings.Join(blocks, "\n")
+	return summary, description
+}
+
+func leadCalendarDisplayNameAndEmail(lead *user.Lead, b *booking.Booking) (displayName string, email string) {
+	if lead != nil {
+		email = strings.TrimSpace(lead.Email)
+		fn := strings.TrimSpace(lead.FirstName)
+		if fn != "" {
+			displayName = fn
+		} else if email != "" {
+			if at := strings.Index(email, "@"); at > 0 {
+				displayName = strings.TrimSpace(email[:at])
+			}
+		}
+	}
+	if displayName == "" {
+		displayName = b.LeadID
+	}
+	return displayName, email
+}
+
+func resourceNodesByID(nodes []*content.ResourceNode) map[string]*content.ResourceNode {
+	m := make(map[string]*content.ResourceNode, len(nodes))
+	for _, n := range nodes {
+		if n != nil {
+			m[n.ID] = n
+		}
+	}
+	return m
+}
+
+func resourceTitleForCalendar(r *content.ResourceNode, idFallback string) string {
+	if r != nil && strings.TrimSpace(r.Title) != "" {
+		return r.Title
+	}
+	return idFallback
 }
 
 func buildBookingTemplateData(
