@@ -453,9 +453,9 @@ deploy_astro_frontend() {
 
   echo -e "${BLUE}Creating Astro frontend project...${RESET}"
   if [[ "${NON_INTERACTIVE}" == true ]]; then
-    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git --yes"
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --git --yes"
   else
-    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git" </dev/tty
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --git" </dev/tty
   fi
 
   echo -e "${BLUE}Installing TractStack integration...${RESET}"
@@ -1141,9 +1141,9 @@ EOF
 
   # This if/else handles non-interactive mode for Docker
   if [[ "${NON_INTERACTIVE}" == true ]]; then
-    pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git
+    pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --yes --no-git
   else
-    pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
+    pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
   fi
 
   echo -e "${BLUE}Installing and configuring TractStack integration...${RESET}"
