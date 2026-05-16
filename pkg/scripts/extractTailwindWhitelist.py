@@ -58,6 +58,7 @@ STANDALONE_UTILITIES = {
     "invisible",
     "isolate",
     "italic",
+    "line-through",
     "lowercase",
     "ordinal",
     "outline",
