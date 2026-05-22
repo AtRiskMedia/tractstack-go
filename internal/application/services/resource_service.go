@@ -27,6 +27,13 @@ type ResourceService struct {
 	imageFileService  *ImageFileService
 }
 
+var legacyShopifyServiceFields = []string{
+	"gid",
+	"shopifyData",
+	"shopifyImage",
+	"shopifyImageSourceUrl",
+}
+
 // NewResourceService creates a new resource service singleton
 func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService, imageFileService *ImageFileService) *ResourceService {
 	return &ResourceService{
@@ -35,6 +42,27 @@ func NewResourceService(logger *logging.ChanneledLogger, perfTracker *performanc
 		contentMapService: contentMapService,
 		imageFileService:  imageFileService,
 	}
+}
+
+func clearShopifyLinkage(options map[string]any) map[string]any {
+	if options == nil {
+		return map[string]any{}
+	}
+	clean := make(map[string]any, len(options))
+	for k, v := range options {
+		clean[k] = v
+	}
+	for _, key := range legacyShopifyServiceFields {
+		delete(clean, key)
+	}
+	return clean
+}
+
+func getResourceCategory(resource *content.ResourceNode) string {
+	if resource == nil || resource.CategorySlug == nil {
+		return ""
+	}
+	return *resource.CategorySlug
 }
 
 // GetAll returns all resources for a tenant, leveraging the cache-first repository.
@@ -254,12 +282,72 @@ func (s *ResourceService) Update(tenantCtx *tenant.Context, resource *content.Re
 
 // Delete deletes a resource and orchestrates the deletion of its associated image files.
 func (s *ResourceService) Delete(tenantCtx *tenant.Context, id string) error {
-	start := time.Now()
-	marker := s.perfTracker.StartOperation("delete_resource", tenantCtx.TenantID)
-	defer marker.Complete()
 	if id == "" {
 		return fmt.Errorf("resource ID cannot be empty")
 	}
+
+	resource, err := s.GetByID(tenantCtx, id)
+	if err != nil {
+		return fmt.Errorf("failed to load resource before delete: %w", err)
+	}
+	if resource == nil {
+		return fmt.Errorf("resource %s not found", id)
+	}
+
+	category := getResourceCategory(resource)
+	gid, _ := resource.OptionsPayload["gid"].(string)
+
+	if category == "product" && gid != "" {
+		services, err := s.GetByCategory(tenantCtx, "service")
+		if err != nil {
+			return fmt.Errorf("failed to load services for product delete guard: %w", err)
+		}
+		for _, svc := range services {
+			if linkedGID, _ := svc.OptionsPayload["gid"].(string); linkedGID == gid {
+				return fmt.Errorf("cannot delete product linked to services; unlink services first")
+			}
+		}
+	}
+
+	if category == "service" && gid != "" {
+		services, err := s.GetByCategory(tenantCtx, "service")
+		if err != nil {
+			return fmt.Errorf("failed to load services for delete workflow: %w", err)
+		}
+		var linkedServiceCount int
+		for _, svc := range services {
+			if linkedGID, _ := svc.OptionsPayload["gid"].(string); linkedGID == gid {
+				linkedServiceCount++
+			}
+		}
+
+		if err := s.deleteResourceByID(tenantCtx, id); err != nil {
+			return err
+		}
+
+		if linkedServiceCount == 1 {
+			products, err := s.GetByCategory(tenantCtx, "product")
+			if err != nil {
+				return fmt.Errorf("failed to load products for cascading delete: %w", err)
+			}
+			for _, product := range products {
+				if productGID, _ := product.OptionsPayload["gid"].(string); productGID == gid {
+					if err := s.deleteResourceByID(tenantCtx, product.ID); err != nil {
+						return fmt.Errorf("failed to delete canonical product %s after service delete: %w", product.ID, err)
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	return s.deleteResourceByID(tenantCtx, id)
+}
+
+func (s *ResourceService) deleteResourceByID(tenantCtx *tenant.Context, id string) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("delete_resource", tenantCtx.TenantID)
+	defer marker.Complete()
 
 	resourceRepo := tenantCtx.ResourceRepo()
 
@@ -359,10 +447,6 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 	if err != nil {
 		return "", fmt.Errorf("failed to pre-load products for upsert lookup: %w", err)
 	}
-	services, err := s.GetByCategory(tenantCtx, "service")
-	if err != nil {
-		return "", fmt.Errorf("failed to pre-load services for upsert lookup: %w", err)
-	}
 
 	// 2. Identify the Target GID from the incoming payload
 	targetGID, ok := resource.OptionsPayload["gid"].(string)
@@ -370,20 +454,12 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		return "", fmt.Errorf("incoming shopify resource missing required 'gid' in optionsPayload")
 	}
 
-	// 3. Scan for existing resource
+	// 3. Scan for existing canonical product resource only.
 	var existing *content.ResourceNode
 	for _, p := range products {
 		if gid, ok := p.OptionsPayload["gid"].(string); ok && gid == targetGID {
 			existing = p
 			break
-		}
-	}
-	if existing == nil {
-		for _, svc := range services {
-			if gid, ok := svc.OptionsPayload["gid"].(string); ok && gid == targetGID {
-				existing = svc
-				break
-			}
 		}
 	}
 
@@ -526,6 +602,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 	// 7. Persistence
 	resourceRepo := tenantCtx.ResourceRepo()
 	operation := "none"
+	productCategory := "product"
 
 	if existing != nil {
 		incomingData, _ := resource.OptionsPayload["shopifyData"].(string)
@@ -539,9 +616,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 
 		if hasChanged {
 			resource.ID = existing.ID
-			if resource.CategorySlug == nil {
-				resource.CategorySlug = existing.CategorySlug
-			}
+			resource.CategorySlug = &productCategory
 			if err := resourceRepo.Update(tenantCtx.TenantID, resource, allActiveFileIDs); err != nil {
 				return "", fmt.Errorf("failed to update shopify resource %s: %w", resource.ID, err)
 			}
@@ -551,10 +626,7 @@ func (s *ResourceService) UpsertShopifyResource(tenantCtx *tenant.Context, resou
 		if resource.ID == "" {
 			resource.ID = security.GenerateULID()
 		}
-		if resource.CategorySlug == nil {
-			defaultCat := "product"
-			resource.CategorySlug = &defaultCat
-		}
+		resource.CategorySlug = &productCategory
 		if err := resourceRepo.Store(tenantCtx.TenantID, resource, allActiveFileIDs); err != nil {
 			return "", fmt.Errorf("failed to create shopify resource: %w", err)
 		}
@@ -628,25 +700,22 @@ func (s *ResourceService) SyncShopifyDeletion(tenantCtx *tenant.Context, gid str
 		return "", fmt.Errorf("failed to load services for deletion lookup: %w", err)
 	}
 
-	// 2. Scan for existing resource by GID
-	var targetID string
+	// 2. Collect all canonical products and linked services by GID.
+	var productIDs []string
+	var linkedServices []*content.ResourceNode
 	for _, p := range products {
 		if val, ok := p.OptionsPayload["gid"].(string); ok && val == gid {
-			targetID = p.ID
-			break
+			productIDs = append(productIDs, p.ID)
 		}
 	}
-	if targetID == "" {
-		for _, svc := range services {
-			if val, ok := svc.OptionsPayload["gid"].(string); ok && val == gid {
-				targetID = svc.ID
-				break
-			}
+	for _, svc := range services {
+		if val, ok := svc.OptionsPayload["gid"].(string); ok && val == gid {
+			linkedServices = append(linkedServices, svc)
 		}
 	}
 
 	// 3. Idempotent check: if not found, we are done.
-	if targetID == "" {
+	if len(productIDs) == 0 && len(linkedServices) == 0 {
 		s.logger.Content().Debug("Shopify resource not found for deletion; skipping",
 			"tenantId", tenantCtx.TenantID,
 			"gid", gid)
@@ -654,18 +723,29 @@ func (s *ResourceService) SyncShopifyDeletion(tenantCtx *tenant.Context, gid str
 		return "none", nil
 	}
 
-	// 4. Perform the actual deletion using the existing orchestration method.
-	// This handles DB removal, junction tables, FTS, and cache invalidation.
-	if err := s.Delete(tenantCtx, targetID); err != nil {
-		return "", fmt.Errorf("failed to delete Shopify-linked resource %s: %w", targetID, err)
+	// 4. Delete canonical product rows for this gid.
+	for _, productID := range productIDs {
+		if err := s.deleteResourceByID(tenantCtx, productID); err != nil {
+			return "", fmt.Errorf("failed to delete Shopify-linked product %s: %w", productID, err)
+		}
+	}
+
+	// 5. Strip Shopify linkage from services and retain service rows.
+	for _, svc := range linkedServices {
+		next := *svc
+		next.OptionsPayload = clearShopifyLinkage(svc.OptionsPayload)
+		if err := s.Update(tenantCtx, &next, nil); err != nil {
+			return "", fmt.Errorf("failed to strip Shopify linkage from service %s: %w", svc.ID, err)
+		}
 	}
 
 	s.logger.Content().Info("Shopify resource deleted successfully",
 		"tenantId", tenantCtx.TenantID,
 		"gid", gid,
-		"resourceId", targetID,
+		"productCount", len(productIDs),
+		"serviceCount", len(linkedServices),
 		"duration", time.Since(start))
 
 	marker.SetSuccess(true)
-	return "deleted", nil
+	return "updated", nil
 }

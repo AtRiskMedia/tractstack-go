@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,7 +20,15 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 )
 
-const googleCalendarEventsScope = "https://www.googleapis.com/auth/calendar.events"
+const (
+	googleCalendarEventsScope   = "https://www.googleapis.com/auth/calendar.events"
+	googleCalendarReadonlyScope = "https://www.googleapis.com/auth/calendar.readonly"
+)
+
+var googleRequiredScopes = []string{
+	googleCalendarEventsScope,
+	googleCalendarReadonlyScope,
+}
 
 type oauthStateRecord struct {
 	TenantID  string
@@ -105,7 +114,7 @@ func (s *GoogleOAuthService) BuildAuthorizeURL(tenantCtx *tenant.Context, redire
 	query.Set("client_id", clientID)
 	query.Set("redirect_uri", redirectURI)
 	query.Set("response_type", "code")
-	query.Set("scope", googleCalendarEventsScope)
+	query.Set("scope", strings.Join(googleRequiredScopes, " "))
 	query.Set("access_type", "offline")
 	query.Set("include_granted_scopes", "true")
 	query.Set("prompt", "consent")
@@ -153,10 +162,28 @@ func (s *GoogleOAuthService) ExchangeCode(ctx context.Context, tenantCtx *tenant
 	if payload.AccessToken == "" {
 		return nil, fmt.Errorf("oauth response missing access token")
 	}
-	if payload.Scope != "" && payload.Scope != googleCalendarEventsScope {
-		s.logger.System().Warn("OAuth scope differs from expected", "scope", payload.Scope)
+	if payload.Scope != "" {
+		missingScopes := getMissingScopes(payload.Scope, googleRequiredScopes)
+		if len(missingScopes) > 0 {
+			s.logger.System().Warn("OAuth scope differs from expected", "scope", payload.Scope, "missingScopes", strings.Join(missingScopes, ","))
+		}
 	}
 	return &payload, nil
+}
+
+func getMissingScopes(grantedScopes string, requiredScopes []string) []string {
+	granted := make(map[string]struct{})
+	for _, scope := range strings.Fields(grantedScopes) {
+		granted[strings.TrimSpace(scope)] = struct{}{}
+	}
+
+	missing := make([]string, 0, len(requiredScopes))
+	for _, required := range requiredScopes {
+		if _, ok := granted[required]; !ok {
+			missing = append(missing, required)
+		}
+	}
+	return missing
 }
 
 // RefreshAccessToken refreshes Google access token using refresh token.

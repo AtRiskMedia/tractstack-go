@@ -306,12 +306,11 @@ func (s *ShopifyService) FetchProducts(tenantCtx *tenant.Context, queryStr strin
 // ReconcileAll performs targeted background synchronization of tracked Shopify products.
 func (s *ShopifyService) ReconcileAll(tenantCtx *tenant.Context) (int, int, int, error) {
 	localProducts, _ := s.resourceService.GetByCategory(tenantCtx, "product")
-	localServices, _ := s.resourceService.GetByCategory(tenantCtx, "service")
 
 	var allGIDs []string
 	gidToResource := make(map[string]*content.ResourceNode)
 
-	for _, local := range append(localProducts, localServices...) {
+	for _, local := range localProducts {
 		if gid, ok := local.OptionsPayload["gid"].(string); ok && gid != "" {
 			allGIDs = append(allGIDs, gid)
 			gidToResource[gid] = local

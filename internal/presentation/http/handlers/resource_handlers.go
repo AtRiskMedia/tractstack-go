@@ -207,6 +207,73 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 	}
 
 	if gid, ok := resource.OptionsPayload["gid"].(string); ok && strings.HasPrefix(gid, "gid://shopify/") {
+		category := ""
+		if resource.CategorySlug != nil {
+			category = *resource.CategorySlug
+		}
+
+		if category == "service" {
+			products, err := h.resourceService.GetByCategory(tenantCtx, "product")
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check canonical product", "details": err.Error()})
+				return
+			}
+
+			hasCanonicalProduct := false
+			for _, p := range products {
+				if existingGID, _ := p.OptionsPayload["gid"].(string); existingGID == gid {
+					hasCanonicalProduct = true
+					break
+				}
+			}
+
+			if !hasCanonicalProduct {
+				rawShopifyData, _ := resource.OptionsPayload["shopifyData"].(string)
+				if strings.TrimSpace(rawShopifyData) == "" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "missing canonical product for gid-linked service import"})
+					return
+				}
+
+				productCategory := "product"
+				canonical := content.ResourceNode{
+					Title:        resource.Title,
+					OneLiner:     resource.OneLiner,
+					Slug:         strings.Replace(resource.Slug, "service-", "product-", 1),
+					CategorySlug: &productCategory,
+					NodeType:     "Resource",
+					OptionsPayload: map[string]any{
+						"gid":         gid,
+						"shopifyData": rawShopifyData,
+					},
+				}
+				if _, err := h.resourceService.UpsertShopifyResource(tenantCtx, &canonical); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create canonical product", "details": err.Error()})
+					return
+				}
+			}
+
+			if resource.OptionsPayload == nil {
+				resource.OptionsPayload = map[string]any{}
+			}
+			delete(resource.OptionsPayload, "shopifyData")
+			delete(resource.OptionsPayload, "shopifyImage")
+			delete(resource.OptionsPayload, "shopifyImageSourceUrl")
+
+			fileIDs, err := h.processResourceImages(tenantCtx, &resource)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process resource images", "details": err.Error()})
+				return
+			}
+
+			if err := h.resourceService.Create(tenantCtx, &resource, fileIDs); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			marker.SetSuccess(true)
+			c.JSON(http.StatusCreated, resource)
+			return
+		}
+
 		_, err := h.resourceService.UpsertShopifyResource(tenantCtx, &resource)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sync shopify resource", "details": err.Error()})
