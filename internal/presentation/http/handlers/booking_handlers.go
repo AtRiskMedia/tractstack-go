@@ -74,6 +74,10 @@ func (h *BookingHandlers) HandleGetAvailability(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end time format"})
 		return
 	}
+	if !end.After(start) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "end time must be after start time"})
+		return
+	}
 
 	bookings, err := h.bookingService.GetAvailability(tenantCtx, start, end)
 	if err != nil {
