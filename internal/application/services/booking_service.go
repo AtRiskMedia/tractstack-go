@@ -20,6 +20,8 @@ import (
 // ErrBookingNotFound used for error return value
 var ErrBookingNotFound = errors.New("booking not found for trace ID")
 
+const remoteConfirmationEmailMaxWait = 60 * time.Second
+
 // BookingService handles business logic and orchestration for reservations.
 type BookingService struct {
 	logger            *logging.ChanneledLogger
@@ -48,6 +50,52 @@ func NewBookingService(
 func (s *BookingService) getTenantLock(tenantID string) *sync.Mutex {
 	lock, _ := s.locks.LoadOrStore(tenantID, &sync.Mutex{})
 	return lock.(*sync.Mutex)
+}
+
+func (s *BookingService) googleCalendarEnabled(tenantCtx *tenant.Context) bool {
+	return s.googleCalendarSvc != nil && s.googleCalendarSvc.IsConfigured(tenantCtx)
+}
+
+func (s *BookingService) sendRemoteBookingConfirmationOnce(tenantCtx *tenant.Context, traceID string) {
+	mu := s.getTenantLock(tenantCtx.TenantID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	if s.emailWorker == nil {
+		return
+	}
+
+	repo := tenantCtx.BookingRepo()
+	b, err := repo.FindByID(tenantCtx.TenantID, traceID)
+	if err != nil || b == nil {
+		return
+	}
+	if b.Status != booking.StatusConfirmed {
+		return
+	}
+	if b.AppointmentMode != booking.AppointmentModeRemote {
+		return
+	}
+	if b.ConfirmationEmailSent {
+		return
+	}
+
+	lead, err := tenantCtx.LeadRepo().FindByID(b.LeadID)
+	if err != nil || lead == nil || strings.TrimSpace(lead.Email) == "" {
+		return
+	}
+
+	data := buildBookingTemplateData(tenantCtx, b, lead.FirstName, b.ShopifyOrderID)
+	enqueued := s.emailWorker.Enqueue(EmailJob{
+		TenantID:     tenantCtx.TenantID,
+		To:           []string{lead.Email},
+		Category:     "shopify",
+		TemplateName: "booking-remote-confirmed",
+		Data:         data,
+	})
+	if enqueued {
+		_ = repo.MarkConfirmationEmailSent(tenantCtx.TenantID, traceID)
+	}
 }
 
 // GetAvailability returns overlapping bookings for a given time window to support availability math.
@@ -327,29 +375,33 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 
 	lead, _ := tenantCtx.LeadRepo().FindByID(b.LeadID)
 
-	if s.googleCalendarSvc != nil {
+	if s.googleCalendarEnabled(tenantCtx) {
 		go s.syncConfirmedBookingToGoogle(tenantCtx, traceID)
 	}
 
+	deferRemoteEmail := b.AppointmentMode == booking.AppointmentModeRemote && s.googleCalendarEnabled(tenantCtx)
+
 	if s.emailWorker != nil && lead != nil && lead.Email != "" {
-		siteURL := tenantCtx.Config.BrandConfig.SiteURL
-		if siteURL == "" {
-			siteURL = "https://tractstack.com"
-		}
-		data := buildBookingTemplateData(tenantCtx, b, lead.FirstName, shopifyOrderID, siteURL)
-		templateName := "booking-confirmed"
-		if b.AppointmentMode == booking.AppointmentModeRemote {
-			templateName = "booking-remote-confirmed"
-		}
-		enqueued := s.emailWorker.Enqueue(EmailJob{
-			TenantID:     tenantCtx.TenantID,
-			To:           []string{lead.Email},
-			Category:     "shopify",
-			TemplateName: templateName,
-			Data:         data,
-		})
-		if enqueued {
-			_ = repo.MarkConfirmationEmailSent(tenantCtx.TenantID, traceID)
+		if deferRemoteEmail {
+			time.AfterFunc(remoteConfirmationEmailMaxWait, func() {
+				s.sendRemoteBookingConfirmationOnce(tenantCtx, traceID)
+			})
+		} else {
+			data := buildBookingTemplateData(tenantCtx, b, lead.FirstName, shopifyOrderID)
+			templateName := "booking-confirmed"
+			if b.AppointmentMode == booking.AppointmentModeRemote {
+				templateName = "booking-remote-confirmed"
+			}
+			enqueued := s.emailWorker.Enqueue(EmailJob{
+				TenantID:     tenantCtx.TenantID,
+				To:           []string{lead.Email},
+				Category:     "shopify",
+				TemplateName: templateName,
+				Data:         data,
+			})
+			if enqueued {
+				_ = repo.MarkConfirmationEmailSent(tenantCtx.TenantID, traceID)
+			}
 		}
 	}
 
@@ -427,7 +479,7 @@ func (s *BookingService) CancelBooking(tenantCtx *tenant.Context, traceID string
 		}
 	}
 
-	if s.googleCalendarSvc != nil {
+	if s.googleCalendarEnabled(tenantCtx) {
 		go s.syncCancelledBookingToGoogle(tenantCtx, traceID)
 	}
 
@@ -455,61 +507,23 @@ func (s *BookingService) syncConfirmedBookingToGoogle(tenantCtx *tenant.Context,
 		s.logger.System().Warn("Failed to load resources for google calendar copy", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", resErr)
 		resources = nil
 	}
-	siteURL := strings.TrimSpace(tenantCtx.Config.BrandConfig.SiteURL)
-	if siteURL == "" {
-		siteURL = "https://tractstack.com"
-	}
-	summary, description := buildCalendarEventCopy(tenantCtx, b, lead, resources, siteURL)
+	summary, description := buildCalendarEventCopy(tenantCtx, b, lead, resources)
 
 	eventID, meetURL, err := s.googleCalendarSvc.CreateBookingEvent(context.Background(), tenantCtx, b, summary, description)
 	if err != nil {
 		_ = repo.UpdateGoogleSyncFailure(tenantCtx.TenantID, traceID, booking.GoogleSyncFailed, err.Error())
 		s.logger.System().Warn("Google create event failed", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
+		if b.AppointmentMode == booking.AppointmentModeRemote {
+			s.sendRemoteBookingConfirmationOnce(tenantCtx, traceID)
+		}
 		return
 	}
 	if err := repo.UpdateGoogleSyncSuccess(tenantCtx.TenantID, traceID, eventID, meetURL); err != nil {
 		s.logger.System().Warn("Failed to persist google sync success", "tenantId", tenantCtx.TenantID, "traceId", traceID, "error", err)
 	}
 
-	if b.AppointmentMode == booking.AppointmentModeRemote && meetURL != nil && s.emailWorker != nil {
-		latest, findErr := repo.FindByID(tenantCtx.TenantID, traceID)
-		if findErr != nil || latest == nil {
-			return
-		}
-		if latest.LinkAddedEmailSent || !latest.ConfirmationEmailSent {
-			return
-		}
-		lead, leadErr := tenantCtx.LeadRepo().FindByID(latest.LeadID)
-		if leadErr != nil || lead == nil || lead.Email == "" {
-			return
-		}
-		siteURL := tenantCtx.Config.BrandConfig.SiteURL
-		if siteURL == "" {
-			siteURL = "https://tractstack.com"
-		}
-		data := buildBookingTemplateData(tenantCtx, latest, lead.FirstName, latest.ShopifyOrderID, siteURL)
-		data["GoogleMeetURL"] = *meetURL
-		enqueued := s.emailWorker.Enqueue(EmailJob{
-			TenantID:     tenantCtx.TenantID,
-			To:           []string{lead.Email},
-			Category:     "shopify",
-			TemplateName: "booking-remote-confirmed",
-			Data: map[string]any{
-				// reusing compiled contract with subject suffix
-				"LeadName":                data["LeadName"],
-				"BookingID":               data["BookingID"],
-				"BookingTimezone":         data["BookingTimezone"],
-				"BookingStartDisplay":     data["BookingStartDisplay"],
-				"BookingEndDisplay":       data["BookingEndDisplay"],
-				"BookingForDisplayString": data["BookingForDisplayString"],
-				"ShopifyOrderID":          data["ShopifyOrderID"],
-				"GoogleMeetURL":           data["GoogleMeetURL"],
-				"SubjectSuffix":           "(LINK ADDED)",
-			},
-		})
-		if enqueued {
-			_ = repo.MarkLinkAddedEmailSent(tenantCtx.TenantID, traceID)
-		}
+	if b.AppointmentMode == booking.AppointmentModeRemote {
+		s.sendRemoteBookingConfirmationOnce(tenantCtx, traceID)
 	}
 }
 
@@ -554,7 +568,6 @@ func buildCalendarEventCopy(
 	b *booking.Booking,
 	lead *user.Lead,
 	resources []*content.ResourceNode,
-	siteURL string,
 ) (summary string, description string) {
 	displayName, contactEmail := leadCalendarDisplayNameAndEmail(lead, b)
 	byID := resourceNodesByID(resources)
@@ -668,7 +681,6 @@ func buildBookingTemplateData(
 	b *booking.Booking,
 	leadName string,
 	shopifyOrderID *string,
-	siteURL string,
 ) map[string]any {
 	bookingTZ := tenantCtx.Config.BrandConfig.Scheduling.Timezone
 	if bookingTZ == "" {
@@ -689,7 +701,6 @@ func buildBookingTemplateData(
 		"BookingStartDisplay":     startDisplay,
 		"BookingEndDisplay":       endDisplay,
 		"BookingForDisplayString": bookingFor,
-		"SubjectSuffix":           "",
 	}
 	if shopifyOrderID != nil {
 		data["ShopifyOrderID"] = *shopifyOrderID

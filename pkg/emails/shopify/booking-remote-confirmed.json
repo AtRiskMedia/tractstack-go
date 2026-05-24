@@ -1,5 +1,5 @@
 {
-  "subject": "Remote Booking Confirmed {{.SubjectSuffix}}: {{.BookingForDisplayString}}",
+  "subject": "Remote Booking Confirmed: {{.BookingForDisplayString}}",
   "blocks": [
     {
       "type": "text",
