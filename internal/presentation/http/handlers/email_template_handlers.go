@@ -147,8 +147,7 @@ func (h *EmailTemplateHandlers) HandlePreviewTemplate(c *gin.Context) {
 		return
 	}
 
-	siteURL := tenantCtx.Config.BrandConfig.SiteURL
-	subject, body, err := h.emailTemplateService.Compile(&req.Template, req.Data, siteURL)
+	subject, body, err := h.emailTemplateService.Compile(&req.Template, req.Data, tenantCtx.Config.BrandConfig)
 	if err != nil {
 		h.logger.System().Error("Failed to compile email preview", "error", err, "tenantId", tenantCtx.TenantID)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to compile preview"})

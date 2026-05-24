@@ -118,8 +118,7 @@ func (w *EmailWorker) processJob(job EmailJob) error {
 	}
 
 	// Compile high-fidelity subject and body using unified service logic
-	siteURL := ctx.Config.BrandConfig.SiteURL
-	compiledSubject, finalHTML, err := w.emailTemplateService.Compile(templateConfig, job.Data, siteURL)
+	compiledSubject, finalHTML, err := w.emailTemplateService.Compile(templateConfig, job.Data, ctx.Config.BrandConfig)
 	if err != nil {
 		return fmt.Errorf("failed to compile email: %w", err)
 	}

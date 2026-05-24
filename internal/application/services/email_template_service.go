@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"strings"
 	texttemplate "text/template"
 
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/email/templates"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
@@ -103,9 +105,14 @@ func (s *EmailTemplateService) ListTemplates(tenantID string) (map[string][]tena
 // Compile renders the EmailTemplate into its final subject and HTML body strings.
 // This serves as the single source of truth for rendering logic used by both
 // the background worker and the real-time previewer.
-func (s *EmailTemplateService) Compile(tmpl *EmailTemplate, data map[string]any, siteURL string) (string, string, error) {
-	if siteURL == "" {
-		siteURL = "https://tractstack.com"
+func (s *EmailTemplateService) Compile(tmpl *EmailTemplate, data map[string]any, brand *types.BrandConfig) (string, string, error) {
+	siteURL := "https://tractstack.com"
+	footerText := ""
+	if brand != nil {
+		if s := strings.TrimSpace(brand.SiteURL); s != "" {
+			siteURL = s
+		}
+		footerText = strings.TrimSpace(brand.Slogan)
 	}
 
 	// 1. Compile Subject (text/template)
@@ -140,7 +147,8 @@ func (s *EmailTemplateService) Compile(tmpl *EmailTemplate, data map[string]any,
 
 	// 4. Wrap inside the standard TractStack HTML layout
 	finalHTML := templates.GetEmailLayout(templates.EmailLayoutProps{
-		Content: compiledBody,
+		Content:    compiledBody,
+		FooterText: footerText,
 	})
 
 	return compiledSubject, finalHTML, nil
