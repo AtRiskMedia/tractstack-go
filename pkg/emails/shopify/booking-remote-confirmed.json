@@ -46,13 +46,6 @@
       "url": "{{.GoogleMeetURL}}",
       "bgColor": "#0F172A",
       "textColor": "#FFFFFF"
-    },
-    {
-      "type": "button",
-      "label": "View Order",
-      "url": "{{.ShopifyOrderUrl}}",
-      "bgColor": "#FFFFFF",
-      "textColor": "#0F172A"
     }
   ]
 }

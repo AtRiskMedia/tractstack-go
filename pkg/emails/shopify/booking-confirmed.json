@@ -32,13 +32,6 @@
       "align": "left",
       "color": "#374151",
       "isBold": false
-    },
-    {
-      "type": "button",
-      "label": "View Order",
-      "url": "{{.ShopifyOrderUrl}}",
-      "bgColor": "#0F172A",
-      "textColor": "#FFFFFF"
     }
   ]
 }

@@ -9,24 +9,20 @@ import (
 
 // EmailLayoutProps defines the content and configuration for the main email layout.
 type EmailLayoutProps struct {
-	Preheader      string
-	Content        string
-	FooterText     string
-	CompanyAddress string
-	UnsubscribeURL string
-	PoweredByText  string
-	PoweredByURL   string
+	Preheader     string
+	Content       string
+	FooterText    string
+	PoweredByText string
+	PoweredByURL  string
 }
 
 // Internal template data structure with safe HTML typing
 type emailTemplateData struct {
-	Preheader      string
-	Content        template.HTML // Mark as safe HTML to prevent escaping
-	FooterText     string
-	CompanyAddress string
-	UnsubscribeURL string
-	PoweredByText  string
-	PoweredByURL   string
+	Preheader     string
+	Content       template.HTML // Mark as safe HTML to prevent escaping
+	FooterText    string
+	PoweredByText string
+	PoweredByURL  string
 }
 
 // emailLayoutTemplate is the compiled template for email layout
@@ -55,7 +51,7 @@ var emailLayoutTemplate = template.Must(template.New("emailLayout").Parse(`
     </style>
   </head>
   <body style="font-family: Helvetica, sans-serif; -webkit-font-smoothing: antialiased; font-size: 16px; line-height: 1.3; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%; background-color: #f4f5f6; margin: 0; padding: 0;">
-    <span class="preheader" style="color: transparent; display: none; height: 0; max-height: 0; max-width: 0; opacity: 0; overflow: hidden; mso-hide: all; visibility: hidden; width: 0;">{{.Preheader}}</span>
+    {{if .Preheader}}<span class="preheader" style="color: transparent; display: none; height: 0; max-height: 0; max-width: 0; opacity: 0; overflow: hidden; mso-hide: all; visibility: hidden; width: 0;">{{.Preheader}}</span>{{end}}
     <table role="presentation" border="0" cellpadding="0" cellspacing="0" class="body" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; background-color: #f4f5f6; width: 100%;" width="100%" bgcolor="#f4f5f6">
       <tr>
         <td style="font-family: Helvetica, sans-serif; font-size: 16px; vertical-align: top;" valign="top">&nbsp;</td>
@@ -74,13 +70,13 @@ var emailLayoutTemplate = template.Must(template.New("emailLayout").Parse(`
             <!-- START FOOTER -->
             <div class="footer" style="clear: both; padding-top: 24px; text-align: center; width: 100%;">
               <table role="presentation" border="0" cellpadding="0" cellspacing="0" style="border-collapse: separate; mso-table-lspace: 0pt; mso-table-rspace: 0pt; width: 100%;" width="100%">
+                {{if .FooterText}}
                 <tr>
                   <td class="content-block" style="font-family: Helvetica, sans-serif; vertical-align: top; color: #9a9ea6; font-size: 16px; text-align: center;" valign="top" align="center">
                     <span class="apple-link" style="color: #9a9ea6; font-size: 16px; text-align: center;">{{.FooterText}}</span>
-                    <br>{{.CompanyAddress}}
-                    <br><a href="{{.UnsubscribeURL}}" style="text-decoration: underline; color: #9a9ea6; font-size: 16px; text-align: center;">Unsubscribe</a>.
                   </td>
                 </tr>
+                {{end}}
                 <tr>
                   <td class="content-block powered-by" style="font-family: Helvetica, sans-serif; vertical-align: top; color: #9a9ea6; font-size: 16px; text-align: center;" valign="top" align="center">
                     Powered by <a href="{{.PoweredByURL}}" style="color: #9a9ea6; font-size: 16px; text-align: center; text-decoration: none;">{{.PoweredByText}}</a>
@@ -99,27 +95,6 @@ var emailLayoutTemplate = template.Must(template.New("emailLayout").Parse(`
 
 // GetEmailLayout generates the complete HTML email structure with the provided content.
 func GetEmailLayout(props EmailLayoutProps) string {
-	// Set defaults exactly as before
-	preheader := props.Preheader
-	if preheader == "" {
-		preheader = "no-code community engine and website maker"
-	}
-
-	footerText := props.FooterText
-	if footerText == "" {
-		footerText = "no-code community engine and website maker"
-	}
-
-	companyAddress := props.CompanyAddress
-	if companyAddress == "" {
-		companyAddress = "Proudly Canadian"
-	}
-
-	unsubscribeURL := props.UnsubscribeURL
-	if unsubscribeURL == "" {
-		unsubscribeURL = "http://example.com/unsubscribe"
-	}
-
 	poweredByText := props.PoweredByText
 	if poweredByText == "" {
 		poweredByText = "TractStack"
@@ -130,18 +105,14 @@ func GetEmailLayout(props EmailLayoutProps) string {
 		poweredByURL = "https://tractstack.com"
 	}
 
-	// Create template data with defaults applied and safe HTML for Content
 	templateData := emailTemplateData{
-		Preheader:      preheader,
-		Content:        template.HTML(props.Content), // Convert to safe HTML type
-		FooterText:     footerText,
-		CompanyAddress: companyAddress,
-		UnsubscribeURL: unsubscribeURL,
-		PoweredByText:  poweredByText,
-		PoweredByURL:   poweredByURL,
+		Preheader:     props.Preheader,
+		Content:       template.HTML(props.Content),
+		FooterText:    props.FooterText,
+		PoweredByText: poweredByText,
+		PoweredByURL:  poweredByURL,
 	}
 
-	// Execute template
 	var buf bytes.Buffer
 	if err := emailLayoutTemplate.Execute(&buf, templateData); err != nil {
 		log.Printf("Error executing email layout template: %v", err)

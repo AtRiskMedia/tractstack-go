@@ -503,7 +503,6 @@ func (s *BookingService) syncConfirmedBookingToGoogle(tenantCtx *tenant.Context,
 				"BookingEndDisplay":       data["BookingEndDisplay"],
 				"BookingForDisplayString": data["BookingForDisplayString"],
 				"ShopifyOrderID":          data["ShopifyOrderID"],
-				"ShopifyOrderUrl":         data["ShopifyOrderUrl"],
 				"GoogleMeetURL":           data["GoogleMeetURL"],
 				"SubjectSuffix":           "(LINK ADDED)",
 			},
@@ -622,10 +621,7 @@ func buildCalendarEventCopy(
 	blocks := []string{bookingFor, formatLine, svcBlock.String(), contactLine}
 	if b.ShopifyOrderID != nil && strings.TrimSpace(*b.ShopifyOrderID) != "" {
 		oid := strings.TrimSpace(*b.ShopifyOrderID)
-		blocks = append(blocks,
-			fmt.Sprintf("Order: %s", oid),
-			fmt.Sprintf("Link: %s/account/orders/%s", siteURL, oid),
-		)
+		blocks = append(blocks, fmt.Sprintf("Order: %s", oid))
 	}
 	blocks = append(blocks, fmt.Sprintf("Booking ref: %s", b.ID))
 	description = strings.Join(blocks, "\n")
@@ -697,7 +693,6 @@ func buildBookingTemplateData(
 	}
 	if shopifyOrderID != nil {
 		data["ShopifyOrderID"] = *shopifyOrderID
-		data["ShopifyOrderUrl"] = fmt.Sprintf("%s/account/orders/%s", siteURL, *shopifyOrderID)
 	}
 	if b.GoogleMeetURL != nil {
 		data["GoogleMeetURL"] = *b.GoogleMeetURL
