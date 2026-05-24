@@ -85,7 +85,7 @@ func (s *BookingService) sendRemoteBookingConfirmationOnce(tenantCtx *tenant.Con
 		return
 	}
 
-	data := buildBookingTemplateData(tenantCtx, b, lead.FirstName, b.ShopifyOrderID)
+	data := s.buildBookingEmailData(tenantCtx, b, lead.FirstName, b.ShopifyOrderID, nil)
 	enqueued := s.emailWorker.Enqueue(EmailJob{
 		TenantID:     tenantCtx.TenantID,
 		To:           []string{lead.Email},
@@ -354,13 +354,14 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 	if b == nil {
 		return ErrBookingNotFound
 	}
+	var validatedResources []*content.ResourceNode
 	// Verify free cart bypass is legitimate
 	if shopifyOrderID == nil {
-		resources, err := s.resourceService.GetByIDs(tenantCtx, b.ResourceIDs)
+		validatedResources, err = s.resourceService.GetByIDs(tenantCtx, b.ResourceIDs)
 		if err != nil {
 			return fmt.Errorf("failed to retrieve resources for validation: %w", err)
 		}
-		for _, res := range resources {
+		for _, res := range validatedResources {
 			if _, hasGID := res.OptionsPayload["gid"]; hasGID {
 				return fmt.Errorf("unauthorized: cannot natively confirm paid resource %s", res.ID)
 			}
@@ -387,7 +388,7 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 				s.sendRemoteBookingConfirmationOnce(tenantCtx, traceID)
 			})
 		} else {
-			data := buildBookingTemplateData(tenantCtx, b, lead.FirstName, shopifyOrderID)
+			data := s.buildBookingEmailData(tenantCtx, b, lead.FirstName, shopifyOrderID, validatedResources)
 			templateName := "booking-confirmed"
 			if b.AppointmentMode == booking.AppointmentModeRemote {
 				templateName = "booking-remote-confirmed"
@@ -613,15 +614,9 @@ func buildCalendarEventCopy(
 		formatLine = "Format: In person"
 	}
 
-	var svcBlock strings.Builder
-	svcBlock.WriteString("Services:")
-	for _, id := range b.ResourceIDs {
-		title := strings.TrimSpace(resourceTitleForCalendar(byID[id], id))
-		if title == "" {
-			title = id
-		}
-		svcBlock.WriteString("\n- ")
-		svcBlock.WriteString(title)
+	svcBlock := formatBookingServicesList(b, resources, "\n")
+	if svcBlock == "" {
+		svcBlock = "Services:"
 	}
 
 	var contactLine string
@@ -631,7 +626,7 @@ func buildCalendarEventCopy(
 		contactLine = fmt.Sprintf("Contact: %s", displayName)
 	}
 
-	blocks := []string{bookingFor, formatLine, svcBlock.String(), contactLine}
+	blocks := []string{bookingFor, formatLine, svcBlock, contactLine}
 	if b.ShopifyOrderID != nil && strings.TrimSpace(*b.ShopifyOrderID) != "" {
 		oid := strings.TrimSpace(*b.ShopifyOrderID)
 		blocks = append(blocks, fmt.Sprintf("Order: %s", oid))
@@ -674,6 +669,55 @@ func resourceTitleForCalendar(r *content.ResourceNode, idFallback string) string
 		return r.Title
 	}
 	return idFallback
+}
+
+func formatBookingServicesList(b *booking.Booking, resources []*content.ResourceNode, lineSep string) string {
+	if len(b.ResourceIDs) == 0 {
+		return ""
+	}
+	byID := resourceNodesByID(resources)
+	var sb strings.Builder
+	sb.WriteString("Services:")
+	for _, id := range b.ResourceIDs {
+		title := strings.TrimSpace(resourceTitleForCalendar(byID[id], id))
+		sb.WriteString(lineSep)
+		sb.WriteString("- ")
+		sb.WriteString(title)
+	}
+	return sb.String()
+}
+
+func formatBookingServicesHTML(b *booking.Booking, resources []*content.ResourceNode) string {
+	return formatBookingServicesList(b, resources, "<br>")
+}
+
+func (s *BookingService) buildBookingEmailData(
+	tenantCtx *tenant.Context,
+	b *booking.Booking,
+	leadName string,
+	shopifyOrderID *string,
+	preloadedResources []*content.ResourceNode,
+) map[string]any {
+	data := buildBookingTemplateData(tenantCtx, b, leadName, shopifyOrderID)
+	if len(b.ResourceIDs) == 0 {
+		return data
+	}
+
+	resources := preloadedResources
+	if resources == nil {
+		var err error
+		resources, err = s.resourceService.GetByIDs(tenantCtx, b.ResourceIDs)
+		if err != nil {
+			s.logger.System().Warn("Failed to load resources for booking email",
+				"tenantId", tenantCtx.TenantID, "traceId", b.ID, "error", err)
+			return data
+		}
+	}
+
+	if display := formatBookingServicesHTML(b, resources); display != "" {
+		data["ServicesDisplay"] = display
+	}
+	return data
 }
 
 func buildBookingTemplateData(
