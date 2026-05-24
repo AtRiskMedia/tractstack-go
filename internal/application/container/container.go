@@ -3,7 +3,6 @@ package container
 
 import (
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -114,14 +113,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	}
 	logger.Startup().Info("Channeled logger initialized successfully", "logDirectory", loggerConfig.LogDirectory)
 
-	var emailService email.Service
-	if apiKey := os.Getenv("RESEND_API_KEY"); apiKey != "" {
-		emailService = email.NewService()
-		logger.Startup().Info("Email service initialized successfully with Resend API")
-	} else {
-		emailService = nil
-		logger.Startup().Warn("Email service disabled - RESEND_API_KEY not configured")
-	}
+	emailService := email.NewService()
+	logger.Startup().Info("Email worker started; tenant email readiness checked at send time")
 
 	aaiService := services.NewAAIService(logger, perfTracker)
 	ftsService := fts.NewService(logger)
@@ -153,10 +146,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 	emailConfigLoader := tenant.NewLocalEmailConfigLoader()
 	emailTemplateService := services.NewEmailTemplateService(emailConfigLoader, logger, perfTracker)
-	var emailWorker *services.EmailWorker
-	if emailService != nil {
-		emailWorker = services.NewEmailWorker(emailService, emailTemplateService, tenantManager, logger)
-	}
+	emailWorker := services.NewEmailWorker(emailService, emailTemplateService, tenantManager, logger)
 
 	authService := services.NewAuthService(logger, perfTracker, emailWorker)
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)

@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/AtRiskMedia/tractstack-go/pkg/config"
 	"github.com/gin-gonic/gin"
@@ -37,6 +39,7 @@ type AdvancedConfigStatusResponse struct {
 	GoogleRefreshTokenSet      bool   `json:"googleRefreshTokenSet"`
 	GoogleTokenExpirySet       bool   `json:"googleTokenExpirySet"`
 	HasGoogleSync              bool   `json:"hasGoogleSync"`
+	HasResend                  bool   `json:"hasResend"`
 }
 
 // ConfigHandlers contains all config-related HTTP handlers
@@ -80,7 +83,7 @@ func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 	brandConfig := *tenantCtx.Config.BrandConfig
 	brandConfig.HasAAI = tenantCtx.Config.AAIAPIKey != ""
 	brandConfig.HasShopify = tenantCtx.Config.ShopifyStorefrontToken != "" && tenantCtx.Config.ShopifyAPISecret != "" && tenantCtx.Config.ShopifyStoreDomain != "" && tenantCtx.Config.ShopifyAPIVersion != "" && tenantCtx.Config.ShopifyAdminSlug != "" && tenantCtx.Config.UserSetupWebhooks
-	brandConfig.HasResend = tenantCtx.Config.ResendAPIKey != ""
+	brandConfig.HasResend = computeHasResend(tenantCtx.Config)
 	brandConfig.HasHydrationToken = tenantCtx.Config.HydrationToken != ""
 	c.JSON(http.StatusOK, brandConfig)
 }
@@ -177,6 +180,7 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 		status.GoogleCalendarIDSet &&
 		status.GoogleRefreshTokenSet &&
 		status.GoogleTokenExpirySet
+	status.HasResend = computeHasResend(tenantCtx.Config)
 
 	h.logger.System().Info("Get advanced config request completed", "duration", time.Since(start))
 	marker.SetSuccess(true)
@@ -289,4 +293,15 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	h.logger.Perf().Info("Performance for UpdateAdvancedConfig request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Configuration updated successfully"})
+}
+
+func computeHasResend(cfg *tenant.Config) bool {
+	if cfg == nil || strings.TrimSpace(cfg.ResendAPIKey) == "" {
+		return false
+	}
+	if cfg.BrandConfig == nil {
+		return false
+	}
+	return strings.TrimSpace(cfg.BrandConfig.AdminEmail) != "" &&
+		strings.TrimSpace(cfg.BrandConfig.AdminEmailName) != ""
 }

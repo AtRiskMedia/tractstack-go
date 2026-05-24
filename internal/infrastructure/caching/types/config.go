@@ -219,6 +219,7 @@ type BrandConfig struct {
 	DesignLibrary      *DesignLibraryConfig  `json:"DESIGN_LIBRARY,omitempty"`
 	Scheduling         Scheduling            `json:"SCHEDULING"`
 	AdminEmail         string                `json:"ADMIN_EMAIL"`
+	AdminEmailName     string                `json:"ADMIN_EMAIL_NAME"`
 }
 
 // AdvancedConfig represents advanced configuration from main.go

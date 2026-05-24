@@ -124,6 +124,7 @@ func LoadBrandConfig(tenantID string) (*types.BrandConfig, error) {
 				AllowRemote:      false,
 				RemoteOnly:       false,
 			},
+			AdminEmailName: "",
 		}, nil
 	}
 

@@ -82,7 +82,10 @@ func (w *EmailWorker) processJobWithRetries(job EmailJob) {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "template not found") ||
 			strings.Contains(errMsg, "failed to parse") ||
-			strings.Contains(errMsg, "failed to compile") {
+			strings.Contains(errMsg, "failed to compile") ||
+			strings.Contains(errMsg, "resend API key not configured for tenant") ||
+			strings.Contains(errMsg, "admin email not configured for tenant") ||
+			strings.Contains(errMsg, "admin email name not configured for tenant") {
 			w.logger.System().Error("Email processing aborted due to deterministic error", "error", err, "tenantId", job.TenantID, "template", job.TemplateName)
 			return
 		}

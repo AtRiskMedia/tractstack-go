@@ -3,7 +3,7 @@ package email
 
 import (
 	"fmt"
-	"os"
+	"strings"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	"github.com/resend/resend-go/v2"
@@ -15,46 +15,42 @@ type Service interface {
 }
 
 // ResendClient is the concrete implementation of the email Service using the Resend API.
-type ResendClient struct {
-	fromEmail string
-	fromName  string
-}
+type ResendClient struct{}
 
 // NewService creates a new email service client.
-// It initializes defaults but delegates API key resolution to the runtime methods.
+// Tenant key and From address are resolved per send via LoadTenantConfig.
 func NewService() Service {
-	fromEmail := os.Getenv("TENANT_EMAIL_FROM")
-	if fromEmail == "" {
-		fromEmail = "noreply@tractstack.com"
-	}
-
-	fromName := os.Getenv("TENANT_EMAIL_FROM_NAME")
-	if fromName == "" {
-		fromName = "TractStack"
-	}
-
-	return &ResendClient{
-		fromEmail: fromEmail,
-		fromName:  fromName,
-	}
+	return &ResendClient{}
 }
 
 // SendDynamicHTML dispatches a pre-compiled HTML payload via Resend.
-// It resolves the tenant-specific API key at runtime to ensure absolute domain isolation.
+// It resolves the tenant-specific API key and From address at runtime.
 func (c *ResendClient) SendDynamicHTML(tenantID string, to []string, subject string, htmlBody string) error {
 	config, err := tenant.LoadTenantConfig(tenantID, nil)
 	if err != nil {
 		return fmt.Errorf("failed to load tenant config for email sending: %w", err)
 	}
 
-	if config.ResendAPIKey == "" {
+	if strings.TrimSpace(config.ResendAPIKey) == "" {
 		return fmt.Errorf("resend API key not configured for tenant %s", tenantID)
+	}
+
+	var adminEmail, adminEmailName string
+	if config.BrandConfig != nil {
+		adminEmail = config.BrandConfig.AdminEmail
+		adminEmailName = config.BrandConfig.AdminEmailName
+	}
+	if strings.TrimSpace(adminEmail) == "" {
+		return fmt.Errorf("admin email not configured for tenant %s", tenantID)
+	}
+	if strings.TrimSpace(adminEmailName) == "" {
+		return fmt.Errorf("admin email name not configured for tenant %s", tenantID)
 	}
 
 	client := resend.NewClient(config.ResendAPIKey)
 
 	params := &resend.SendEmailRequest{
-		From:    fmt.Sprintf("%s <%s>", c.fromName, c.fromEmail),
+		From:    fmt.Sprintf("%s <%s>", adminEmailName, adminEmail),
 		To:      to,
 		Subject: subject,
 		Html:    htmlBody,
