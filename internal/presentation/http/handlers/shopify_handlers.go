@@ -3,8 +3,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -27,8 +25,7 @@ type CreateCheckoutRequest struct {
 type ShopifyHandlers struct {
 	shopifyService  *services.ShopifyService
 	resourceService *services.ResourceService
-	bookingService  *services.BookingService
-	emailWorker     *services.EmailWorker
+	saleService     *services.SaleService
 	logger          *logging.ChanneledLogger
 	perfTracker     *performance.Tracker
 }
@@ -37,16 +34,14 @@ type ShopifyHandlers struct {
 func NewShopifyHandlers(
 	shopifyService *services.ShopifyService,
 	resourceService *services.ResourceService,
-	bookingService *services.BookingService,
-	emailWorker *services.EmailWorker,
+	saleService *services.SaleService,
 	logger *logging.ChanneledLogger,
 	perfTracker *performance.Tracker,
 ) *ShopifyHandlers {
 	return &ShopifyHandlers{
 		shopifyService:  shopifyService,
 		resourceService: resourceService,
-		bookingService:  bookingService,
-		emailWorker:     emailWorker,
+		saleService:     saleService,
 		logger:          logger,
 		perfTracker:     perfTracker,
 	}
@@ -124,44 +119,17 @@ func (h *ShopifyHandlers) HandleWebhook(c *gin.Context) {
 	switch topic {
 	case "orders/paid":
 		// AUTHORITATIVE REST PATH: Headless Storefront API cannot query Order objects by ID.
-		var order struct {
-			ID             int64 `json:"id"`
-			NoteAttributes []struct {
-				Name  string `json:"name"`
-				Value string `json:"value"`
-			} `json:"note_attributes"`
-		}
+		var order services.ShopifyPaidOrder
 		if err := json.Unmarshal(body, &order); err != nil {
 			h.logger.System().Error("Failed to parse orders/paid webhook", "error", err)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid orders/paid payload"})
 			return
 		}
 
-		orderID := fmt.Sprintf("%d", order.ID)
-		for _, attr := range order.NoteAttributes {
-			if attr.Name == "bookingId" || attr.Name == "Trace ID" {
-				if err := h.bookingService.ConfirmBooking(tenantCtx, attr.Value, &orderID); err != nil {
-					if errors.Is(err, services.ErrBookingNotFound) {
-						h.logger.System().Error("ORPHANED PAYMENT: User paid for an expired booking hold", "traceId", attr.Value, "shopifyOrderId", orderID)
-
-						if h.emailWorker != nil && tenantCtx.Config.BrandConfig != nil && tenantCtx.Config.BrandConfig.AdminEmail != "" {
-							_ = h.emailWorker.Enqueue(services.EmailJob{
-								TenantID:     tenantCtx.TenantID,
-								To:           []string{tenantCtx.Config.BrandConfig.AdminEmail},
-								Category:     "shopify",
-								TemplateName: "orphaned-payment",
-								Data: map[string]any{
-									"TraceID":        attr.Value,
-									"ShopifyOrderID": orderID,
-								},
-							})
-						}
-						return
-					}
-					h.logger.System().Error("Failed to confirm booking from webhook", "error", err, "traceId", attr.Value)
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "database lock or confirmation failure, forcing retry"})
-					return
-				}
-			}
+		if err := h.saleService.ProcessOrdersPaid(tenantCtx, order); err != nil {
+			h.logger.System().Error("Failed to process orders/paid webhook", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "paid order processing failure, forcing retry"})
+			return
 		}
 
 	case "products/delete", "products/update":

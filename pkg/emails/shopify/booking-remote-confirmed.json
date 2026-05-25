@@ -35,6 +35,13 @@
     },
     {
       "type": "text",
+      "content": "{{.PickupProductsDisplay}}",
+      "align": "left",
+      "color": "#374151",
+      "isBold": false
+    },
+    {
+      "type": "text",
       "content": "Join link: {{.GoogleMeetURL}}",
       "align": "left",
       "color": "#111827",

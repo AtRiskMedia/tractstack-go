@@ -37,6 +37,7 @@ type Container struct {
 	RegistryRebuildOrchestrator *services.RegistryRebuildOrchestrator
 	SearchService               *services.SearchService
 	BookingService              *services.BookingService
+	SaleService                 *services.SaleService
 	BookingReconciliationWorker *services.BookingReconciliationWorker
 
 	// Fragment Services
@@ -183,6 +184,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	epinetService := services.NewEpinetService(logger, perfTracker, contentMapService)
 	searchService := services.NewSearchService(paneService, storyFragmentService, resourceService, contentMapService)
 	bookingService := services.NewBookingService(logger, resourceService, emailWorker, googleCalendarService)
+	saleService := services.NewSaleService(resourceService, bookingService, emailWorker, logger)
 	bookingReconciliationWorker := services.NewBookingReconciliationWorker(tenantManager, logger)
 
 	// Create WarmingService, now injecting all its required content service dependencies.
@@ -236,6 +238,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		RegistryRebuildOrchestrator: registryRebuildOrchestrator,
 		SearchService:               searchService,
 		BookingService:              bookingService,
+		SaleService:                 saleService,
 		BookingReconciliationWorker: bookingReconciliationWorker,
 
 		// Fragment Services

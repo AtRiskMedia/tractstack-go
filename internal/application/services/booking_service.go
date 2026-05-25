@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/booking"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/entities/content"
+	saleEntity "github.com/AtRiskMedia/tractstack-go/internal/domain/entities/sale"
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
@@ -387,7 +389,7 @@ func (s *BookingService) ConfirmBooking(tenantCtx *tenant.Context, traceID strin
 			time.AfterFunc(remoteConfirmationEmailMaxWait, func() {
 				s.sendRemoteBookingConfirmationOnce(tenantCtx, traceID)
 			})
-		} else {
+		} else if !b.ConfirmationEmailSent {
 			data := s.buildBookingEmailData(tenantCtx, b, lead.FirstName, shopifyOrderID, validatedResources)
 			templateName := "booking-confirmed"
 			if b.AppointmentMode == booking.AppointmentModeRemote {
@@ -691,6 +693,51 @@ func formatBookingServicesHTML(b *booking.Booking, resources []*content.Resource
 	return formatBookingServicesList(b, resources, "<br>")
 }
 
+func formatServiceResourcesList(services []*content.ResourceNode, lineSep string) string {
+	if len(services) == 0 {
+		return ""
+	}
+	sorted := append([]*content.ResourceNode(nil), services...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return strings.ToLower(resourceTitleForCalendar(sorted[i], "")) < strings.ToLower(resourceTitleForCalendar(sorted[j], ""))
+	})
+
+	var sb strings.Builder
+	sb.WriteString("Services:")
+	for _, service := range sorted {
+		title := strings.TrimSpace(resourceTitleForCalendar(service, service.ID))
+		sb.WriteString(lineSep)
+		sb.WriteString("- ")
+		sb.WriteString(title)
+	}
+	return sb.String()
+}
+
+func formatServiceResourcesHTML(services []*content.ResourceNode) string {
+	return formatServiceResourcesList(services, "<br>")
+}
+
+func formatPickupProductsHTML(lines []saleEntity.SaleProductLine) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("Local pickup:")
+	for _, line := range lines {
+		title := strings.TrimSpace(line.Title)
+		if title == "" {
+			title = line.ResourceID
+		}
+		sb.WriteString("<br>")
+		sb.WriteString("- ")
+		sb.WriteString(title)
+		if line.Quantity > 1 {
+			sb.WriteString(fmt.Sprintf(" x%d", line.Quantity))
+		}
+	}
+	return sb.String()
+}
+
 func (s *BookingService) buildBookingEmailData(
 	tenantCtx *tenant.Context,
 	b *booking.Booking,
@@ -714,8 +761,33 @@ func (s *BookingService) buildBookingEmailData(
 		}
 	}
 
-	if display := formatBookingServicesHTML(b, resources); display != "" {
+	serviceResources, err := s.resolveBookingServiceResources(tenantCtx, resources)
+	if err != nil {
+		s.logger.System().Warn("Failed to resolve service resources for booking email",
+			"tenantId", tenantCtx.TenantID, "traceId", b.ID, "error", err)
+		return data
+	}
+
+	if display := formatServiceResourcesHTML(serviceResources); display != "" {
 		data["ServicesDisplay"] = display
+	}
+
+	sale, err := tenantCtx.SaleRepo().FindByID(tenantCtx.TenantID, b.ID)
+	if err != nil {
+		s.logger.System().Warn("Failed to load sale for booking email",
+			"tenantId", tenantCtx.TenantID, "traceId", b.ID, "error", err)
+		return data
+	}
+	if sale != nil {
+		pickupLines := make([]saleEntity.SaleProductLine, 0)
+		for _, line := range sale.Products {
+			if line.IsLocalPickup {
+				pickupLines = append(pickupLines, line)
+			}
+		}
+		if display := formatPickupProductsHTML(pickupLines); display != "" {
+			data["PickupProductsDisplay"] = display
+		}
 	}
 	return data
 }

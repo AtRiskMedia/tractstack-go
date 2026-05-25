@@ -13,6 +13,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/bulk"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/content"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/database"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/sale"
 	persistenceUser "github.com/AtRiskMedia/tractstack-go/internal/infrastructure/persistence/user"
 )
 
@@ -164,4 +165,9 @@ func (ctx *Context) VisitRepo() domainUser.VisitRepository {
 // BookingRepo returns the repository for appointments
 func (ctx *Context) BookingRepo() repositories.BookingRepository {
 	return booking.NewBookingRepository(ctx.Database.Conn, ctx.Logger)
+}
+
+// SaleRepo returns the repository for paid Shopify receipt logs.
+func (ctx *Context) SaleRepo() repositories.SaleRepository {
+	return sale.NewSaleRepository(ctx.Database.Conn, ctx.Logger)
 }

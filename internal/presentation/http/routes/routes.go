@@ -52,8 +52,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	aaiHandlers := handlers.NewAAIHandlers(container.AAIService, container.Logger, container.PerfTracker)
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 	searchHandlers := handlers.NewSearchHandlers(container.SearchService, container.Logger, container.PerfTracker)
-	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.BookingService, container.EmailWorker, container.Logger, container.PerfTracker)
+	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.SaleService, container.Logger, container.PerfTracker)
 	bookingHandlers := handlers.NewBookingHandlers(container.BookingService, container.Logger, container.PerfTracker)
+	saleHandlers := handlers.NewSaleHandlers(container.SaleService, container.Logger, container.PerfTracker)
 	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
 	googleHandlers := handlers.NewGoogleHandlers(container.GoogleOAuthService, container.ConfigService, container.Logger, container.PerfTracker)
 
@@ -126,6 +127,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			protectedBookings.GET("/list", bookingHandlers.HandleListBookings)
 			protectedBookings.GET("/metrics", bookingHandlers.HandleGetMetrics)
 			protectedBookings.POST("/:traceId/cancel", bookingHandlers.HandleCancelBooking)
+		}
+
+		// Protected Sales endpoints (Admin/Editor)
+		protectedSales := api.Group("/sales")
+		protectedSales.Use(authHandlers.AuthMiddleware())
+		{
+			protectedSales.GET("/list", saleHandlers.HandleListSales)
+			protectedSales.GET("/metrics", saleHandlers.HandleGetMetrics)
 		}
 
 		// Email Templates
