@@ -2,11 +2,9 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
@@ -26,19 +24,27 @@ type StoryFragmentIDsRequest struct {
 
 // StoryFragmentHandlers contains all storyfragment-related HTTP handlers
 type StoryFragmentHandlers struct {
-	storyFragmentService *services.StoryFragmentService
-	fragmentService      *services.FragmentService
-	logger               *logging.ChanneledLogger
-	perfTracker          *performance.Tracker
+	storyFragmentService  *services.StoryFragmentService
+	fragmentService       *services.FragmentService
+	beliefRegistryService *services.BeliefRegistryService
+	logger                *logging.ChanneledLogger
+	perfTracker           *performance.Tracker
 }
 
 // NewStoryFragmentHandlers creates storyfragment handlers with injected dependencies
-func NewStoryFragmentHandlers(storyFragmentService *services.StoryFragmentService, fragmentService *services.FragmentService, logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *StoryFragmentHandlers {
+func NewStoryFragmentHandlers(
+	storyFragmentService *services.StoryFragmentService,
+	fragmentService *services.FragmentService,
+	beliefRegistryService *services.BeliefRegistryService,
+	logger *logging.ChanneledLogger,
+	perfTracker *performance.Tracker,
+) *StoryFragmentHandlers {
 	return &StoryFragmentHandlers{
-		storyFragmentService: storyFragmentService,
-		fragmentService:      fragmentService,
-		logger:               logger,
-		perfTracker:          perfTracker,
+		storyFragmentService:  storyFragmentService,
+		fragmentService:       fragmentService,
+		beliefRegistryService: beliefRegistryService,
+		logger:                logger,
+		perfTracker:           perfTracker,
 	}
 }
 
@@ -481,58 +487,7 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		impressions = []map[string]any{}
 	}
 
-	resourcesPayload := make(map[string][]map[string]any)
-	if len(storyFragment.PaneIDs) > 0 {
-		paneRepo := tenantCtx.PaneRepo()
-		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
-		if err == nil {
-			allCategories := make([]string, 0)
-			allSlugs := make([]string, 0)
-
-			for _, pane := range panes {
-				if pane != nil && pane.CodeHookPayload != nil {
-					if optionsStr, ok := pane.CodeHookPayload["options"]; ok {
-						var options map[string]any
-						if json.Unmarshal([]byte(optionsStr), &options) == nil {
-							if categoryStr, ok := options["category"].(string); ok && categoryStr != "" {
-								categories := strings.Split(categoryStr, "|")
-								allCategories = append(allCategories, categories...)
-							}
-							if slugsStr, ok := options["slugs"].(string); ok && slugsStr != "" {
-								slugs := strings.Split(slugsStr, ",")
-								allSlugs = append(allSlugs, slugs...)
-							}
-							if slugStr, ok := options["slug"].(string); ok && slugStr != "" {
-								allSlugs = append(allSlugs, slugStr)
-							}
-						}
-					}
-				}
-			}
-
-			if len(allCategories) > 0 || len(allSlugs) > 0 {
-				resourceRepo := tenantCtx.ResourceRepo()
-				resources, err := resourceRepo.FindByFilters(tenantCtx.TenantID, []string{}, allCategories, allSlugs)
-				if err == nil {
-					for _, resource := range resources {
-						categoryKey := "default"
-						if resource.CategorySlug != nil {
-							categoryKey = *resource.CategorySlug
-						}
-						resourcesPayload[categoryKey] = append(resourcesPayload[categoryKey], map[string]any{
-							"id":             resource.ID,
-							"title":          resource.Title,
-							"slug":           resource.Slug,
-							"oneLiner":       resource.OneLiner,
-							"optionsPayload": resource.OptionsPayload,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	codeHookVisibility := h.calculateInitialCodeHookVisibility(tenantCtx, sessionID, storyFragment.ID)
+	codeHookVisibility := h.calculateInitialCodeHookVisibility(tenantCtx, sessionID, storyFragment)
 
 	h.logger.Content().Debug("Final impressions before response", "count", len(impressions), "impressions", impressions)
 
@@ -543,7 +498,6 @@ func (h *StoryFragmentHandlers) GetStoryFragmentPersonalizedPayloadBySlug(c *gin
 		"paneIds":            storyFragment.PaneIDs,
 		"codeHookTargets":    storyFragment.CodeHookTargets,
 		"codeHookVisibility": codeHookVisibility,
-		"resourcesPayload":   resourcesPayload,
 		"menu":               storyFragment.Menu,
 		"isHome":             storyFragment.IsHome,
 		"created":            storyFragment.Created,
@@ -643,44 +597,6 @@ func (h *StoryFragmentHandlers) UpdateStoryFragmentComplete(c *gin.Context) {
 	})
 }
 
-func (h *StoryFragmentHandlers) calculateInitialCodeHookVisibility(tenantCtx *tenant.Context, sessionID, storyfragmentID string) map[string]any {
-	codeHookVisibility := make(map[string]any)
-
-	storyFragment, exists := tenantCtx.CacheManager.GetStoryFragment(tenantCtx.TenantID, storyfragmentID)
-	if !exists {
-		return codeHookVisibility
-	}
-	if storyFragment.CodeHookTargets == nil {
-		return codeHookVisibility
-	}
-
-	var userBeliefs map[string][]string
-	sessionData, sessionExists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
-	if sessionExists {
-		fpState, fpExists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID)
-		if fpExists && fpState.HeldBeliefs != nil {
-			userBeliefs = fpState.HeldBeliefs
-		}
-	}
-	if userBeliefs == nil {
-		userBeliefs = make(map[string][]string)
-	}
-
-	beliefRegistry, exists := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyfragmentID)
-	if !exists {
-		return codeHookVisibility
-	}
-
-	beliefEngine := services.NewBeliefEvaluationService()
-
-	for paneID := range storyFragment.CodeHookTargets {
-		if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
-			visibilityState := beliefEngine.CalculateCodeHookVisibilityState(paneBeliefs, userBeliefs)
-			codeHookVisibility[paneID] = visibilityState
-		} else {
-			codeHookVisibility[paneID] = true
-		}
-	}
-
-	return codeHookVisibility
+func (h *StoryFragmentHandlers) calculateInitialCodeHookVisibility(tenantCtx *tenant.Context, sessionID string, storyFragment *content.StoryFragmentNode) map[string]any {
+	return h.beliefRegistryService.ComputeCodeHookVisibility(tenantCtx, sessionID, storyFragment, nil)
 }

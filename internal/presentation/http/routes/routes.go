@@ -23,7 +23,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	menuHandlers := handlers.NewMenuHandlers(container.MenuService, container.Logger, container.PerfTracker)
 	paneHandlers := handlers.NewPaneHandlers(container.PaneService, container.Logger, container.PerfTracker)
 	resourceHandlers := handlers.NewResourceHandlers(container.ResourceService, container.ImageFileService, container.Logger, container.PerfTracker)
-	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.FragmentService, container.Logger, container.PerfTracker)
+	storyFragmentHandlers := handlers.NewStoryFragmentHandlers(container.StoryFragmentService, container.FragmentService, container.BeliefRegistryService, container.Logger, container.PerfTracker)
 	tractStackHandlers := handlers.NewTractStackHandlers(container.TractStackService, container.Logger, container.PerfTracker)
 	beliefHandlers := handlers.NewBeliefHandlers(container.BeliefService, container.Logger, container.PerfTracker)
 	imageFileHandlers := handlers.NewImageFileHandlers(container.ImageFileService, container.Logger, container.PerfTracker)

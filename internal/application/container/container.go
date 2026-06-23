@@ -120,8 +120,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	aaiService := services.NewAAIService(logger, perfTracker)
 	ftsService := fts.NewService(logger)
 	beliefEvaluationService := services.NewBeliefEvaluationService()
-	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager)
-	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
+	beliefRegistryService := services.NewBeliefRegistryService(logger)
 	sessionBeliefService := services.NewSessionBeliefService()
 	widgetContextService := services.NewWidgetContextService(sessionBeliefService)
 	scrollTargetService := services.NewScrollTargetService()
@@ -150,12 +149,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	emailWorker := services.NewEmailWorker(emailService, emailTemplateService, tenantManager, logger)
 
 	authService := services.NewAuthService(logger, perfTracker, emailWorker)
+	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager, beliefRegistryService, tenantManager)
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
+	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
 	googleOAuthService := services.NewGoogleOAuthService(logger)
 	googleCalendarService := services.NewGoogleCalendarService(logger, googleOAuthService, configService)
-	beliefRegistryService := services.NewBeliefRegistryService(logger)
 
 	// Create the orchestrator first, omitting the PaneService to break the dependency cycle.
 	registryRebuildOrchestrator := services.NewRegistryRebuildOrchestrator(
@@ -177,7 +177,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	// Now that PaneService is created, inject it back into the orchestrator.
 	registryRebuildOrchestrator.SetPaneService(paneService)
 
-	storyFragmentService := services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService)
+	storyFragmentService := services.NewStoryFragmentService(logger, perfTracker, contentMapService, sessionBeliefService, beliefRegistryService)
 	tractStackService := services.NewTractStackService(logger, perfTracker, contentMapService)
 	menuService := services.NewMenuService(logger, perfTracker, contentMapService)
 	beliefService := services.NewBeliefService(logger, perfTracker, contentMapService)

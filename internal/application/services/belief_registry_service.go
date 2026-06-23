@@ -82,6 +82,137 @@ func (brs *BeliefRegistryService) BuildRegistryFromLoadedPanes(tenantCtx *tenant
 	return registry, nil
 }
 
+// RebuildForStoryFragment invalidates and synchronously rebuilds the belief registry
+// for a storyfragment from its current pane IDs.
+func (brs *BeliefRegistryService) RebuildForStoryFragment(tenantCtx *tenant.Context, storyFragmentID string, paneIDs []string) error {
+	tenantCtx.CacheManager.InvalidateStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyFragmentID)
+
+	var loadedPanes []*content.PaneNode
+	if len(paneIDs) > 0 {
+		panes, err := tenantCtx.PaneRepo().FindByIDs(tenantCtx.TenantID, paneIDs)
+		if err != nil {
+			return err
+		}
+		loadedPanes = panes
+	}
+
+	_, err := brs.BuildRegistryFromLoadedPanes(tenantCtx, storyFragmentID, loadedPanes)
+	return err
+}
+
+// ComputeCodeHookVisibility returns initial codehook pane visibility for page load or SSE.
+// storyFragment must carry enriched CodeHookTargets; paneFilter limits to affected panes (SSE).
+func (brs *BeliefRegistryService) ComputeCodeHookVisibility(
+	tenantCtx *tenant.Context,
+	sessionID string,
+	storyFragment *content.StoryFragmentNode,
+	paneFilter []string,
+) map[string]any {
+	codeHookVisibility := make(map[string]any)
+	if storyFragment == nil {
+		return codeHookVisibility
+	}
+
+	codeHookTargets := brs.resolveCodeHookTargets(tenantCtx, storyFragment)
+	if len(codeHookTargets) == 0 {
+		return codeHookVisibility
+	}
+
+	storyFragmentWithTargets := *storyFragment
+	storyFragmentWithTargets.CodeHookTargets = codeHookTargets
+
+	codeHookPaneIDs := brs.codeHookPaneIDs(&storyFragmentWithTargets, paneFilter)
+	if len(codeHookPaneIDs) == 0 {
+		return codeHookVisibility
+	}
+
+	if _, found := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyFragment.ID); !found {
+		if err := brs.RebuildForStoryFragment(tenantCtx, storyFragment.ID, storyFragment.PaneIDs); err != nil {
+			brs.logger.Content().Error("Failed to rebuild belief registry for codehook visibility",
+				"error", err, "storyFragmentId", storyFragment.ID, "tenantId", tenantCtx.TenantID)
+		}
+	}
+
+	beliefRegistry, found := tenantCtx.CacheManager.GetStoryfragmentBeliefRegistry(tenantCtx.TenantID, storyFragment.ID)
+	userBeliefs := brs.loadUserBeliefs(tenantCtx, sessionID)
+	beliefEngine := NewBeliefEvaluationService()
+
+	for _, paneID := range codeHookPaneIDs {
+		if !found {
+			codeHookVisibility[paneID] = true
+			continue
+		}
+		if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
+			codeHookVisibility[paneID] = beliefEngine.CalculateCodeHookVisibilityState(paneBeliefs, userBeliefs)
+		} else {
+			codeHookVisibility[paneID] = true
+		}
+	}
+
+	return codeHookVisibility
+}
+
+func (brs *BeliefRegistryService) resolveCodeHookTargets(tenantCtx *tenant.Context, storyFragment *content.StoryFragmentNode) map[string]string {
+	if storyFragment.CodeHookTargets != nil && len(storyFragment.CodeHookTargets) > 0 {
+		return storyFragment.CodeHookTargets
+	}
+
+	targets := make(map[string]string)
+	if len(storyFragment.PaneIDs) == 0 {
+		return targets
+	}
+
+	panes, err := tenantCtx.PaneRepo().FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
+	if err != nil {
+		brs.logger.Content().Debug("Failed to load panes for codehook target resolution", "error", err, "storyFragmentId", storyFragment.ID)
+		return targets
+	}
+
+	for _, pane := range panes {
+		if pane == nil || pane.CodeHookTarget == nil || *pane.CodeHookTarget == "" {
+			continue
+		}
+		targets[pane.ID] = *pane.CodeHookTarget
+		if pane.CodeHookPayload != nil {
+			if optionsStr, ok := pane.CodeHookPayload["options"]; ok {
+				targets[pane.ID+"-"+*pane.CodeHookTarget] = optionsStr
+			}
+		}
+	}
+
+	return targets
+}
+
+func (brs *BeliefRegistryService) codeHookPaneIDs(storyFragment *content.StoryFragmentNode, paneFilter []string) []string {
+	candidates := storyFragment.PaneIDs
+	if len(paneFilter) > 0 {
+		candidates = paneFilter
+	}
+
+	var paneIDs []string
+	for _, paneID := range candidates {
+		if hook, ok := storyFragment.CodeHookTargets[paneID]; ok && hook != "" {
+			paneIDs = append(paneIDs, paneID)
+		}
+	}
+	return paneIDs
+}
+
+func (brs *BeliefRegistryService) loadUserBeliefs(tenantCtx *tenant.Context, sessionID string) map[string][]string {
+	var userBeliefs map[string][]string
+	sessionData, sessionExists := tenantCtx.CacheManager.GetSession(tenantCtx.TenantID, sessionID)
+	if sessionExists {
+		fpState, fpExists := tenantCtx.CacheManager.GetFingerprintState(tenantCtx.TenantID, sessionData.FingerprintID)
+		if fpExists && fpState.HeldBeliefs != nil {
+			userBeliefs = fpState.HeldBeliefs
+		}
+	}
+	if userBeliefs == nil {
+		userBeliefs = make(map[string][]string)
+	}
+	return userBeliefs
+}
+
 // extractPaneBeliefData translates the belief rules from a PaneNode's OptionsPayload
 // into the structured PaneBeliefData format used by the registry.
 func (brs *BeliefRegistryService) extractPaneBeliefData(paneNode *content.PaneNode) types.PaneBeliefData {

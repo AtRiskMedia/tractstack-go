@@ -153,6 +153,9 @@ func (r *PaneRepository) Store(tenantID string, pane *content.PaneNode, markdown
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	// Derive in-memory fields (CodeHookTarget/CodeHookPayload/BgColour/HTMLAST)
+	// from OptionsPayload so the cached pane matches a DB-loaded pane.
+	r.extractPaneDataFromOptions(pane)
 	r.cache.SetPane(tenantID, pane)
 	return nil
 }
@@ -219,6 +222,9 @@ func (r *PaneRepository) Update(tenantID string, pane *content.PaneNode, markdow
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	// Derive in-memory fields (CodeHookTarget/CodeHookPayload/BgColour/HTMLAST)
+	// from OptionsPayload so the cached pane matches a DB-loaded pane.
+	r.extractPaneDataFromOptions(pane)
 	r.cache.SetPane(tenantID, pane)
 	return nil
 }

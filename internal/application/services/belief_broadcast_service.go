@@ -6,16 +6,27 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/interfaces"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/messaging"
+	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 )
 
 // BeliefBroadcastService handles tenant-scoped targeted broadcasting when beliefs change.
 type BeliefBroadcastService struct {
-	cacheManager interfaces.Cache
+	cacheManager          interfaces.Cache
+	beliefRegistryService *BeliefRegistryService
+	tenantManager         *tenant.Manager
 }
 
 // NewBeliefBroadcastService creates a new belief broadcast service.
-func NewBeliefBroadcastService(cacheManager interfaces.Cache) *BeliefBroadcastService {
-	return &BeliefBroadcastService{cacheManager: cacheManager}
+func NewBeliefBroadcastService(
+	cacheManager interfaces.Cache,
+	beliefRegistryService *BeliefRegistryService,
+	tenantManager *tenant.Manager,
+) *BeliefBroadcastService {
+	return &BeliefBroadcastService{
+		cacheManager:          cacheManager,
+		beliefRegistryService: beliefRegistryService,
+		tenantManager:         tenantManager,
+	}
 }
 
 // StoryfragmentUpdate represents an update for a single storyfragment
@@ -151,45 +162,23 @@ func (b *BeliefBroadcastService) BroadcastBeliefChange(tenantID, sessionID, stor
 }
 
 func (b *BeliefBroadcastService) calculateSSECodeHookVisibility(tenantID, sessionID, storyfragmentID string, affectedPanes []string) map[string]any {
-	codeHookVisibility := make(map[string]any)
 	storyFragment, exists := b.cacheManager.GetStoryFragment(tenantID, storyfragmentID)
-	if !exists {
-		return codeHookVisibility
-	}
-	if storyFragment.CodeHookTargets == nil {
-		return codeHookVisibility
+	if !exists || storyFragment == nil {
+		return map[string]any{}
 	}
 
-	var userBeliefs map[string][]string
-	sessionData, sessionExists := b.cacheManager.GetSession(tenantID, sessionID)
-	if sessionExists {
-		fpState, fpExists := b.cacheManager.GetFingerprintState(tenantID, sessionData.FingerprintID)
-		if fpExists && fpState.HeldBeliefs != nil {
-			userBeliefs = fpState.HeldBeliefs
+	tenantCtx, err := b.tenantManager.NewContextFromID(tenantID)
+	if err != nil {
+		return map[string]any{}
+	}
+	defer func() {
+		if closeErr := tenantCtx.Close(); closeErr != nil {
+			// Best-effort close during SSE visibility compute
+			_ = closeErr
 		}
-	}
-	if userBeliefs == nil {
-		userBeliefs = make(map[string][]string)
-	}
+	}()
 
-	beliefRegistry, exists := b.cacheManager.GetStoryfragmentBeliefRegistry(tenantID, storyfragmentID)
-	if !exists {
-		return codeHookVisibility
-	}
-
-	beliefEngine := NewBeliefEvaluationService()
-
-	for _, paneID := range affectedPanes {
-		if _, isCodeHook := storyFragment.CodeHookTargets[paneID]; isCodeHook {
-			if paneBeliefs, exists := beliefRegistry.PaneBeliefPayloads[paneID]; exists {
-				visibilityState := beliefEngine.CalculateCodeHookVisibilityState(paneBeliefs, userBeliefs)
-				codeHookVisibility[paneID] = visibilityState
-			} else {
-				codeHookVisibility[paneID] = true
-			}
-		}
-	}
-	return codeHookVisibility
+	return b.beliefRegistryService.ComputeCodeHookVisibility(tenantCtx, sessionID, storyFragment, affectedPanes)
 }
 
 // FindAffectedStoryfragments identifies story fragments affected by the given belief changes.

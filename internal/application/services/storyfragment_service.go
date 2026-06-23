@@ -24,19 +24,27 @@ type StoryFragmentFullPayload struct {
 
 // StoryFragmentService orchestrates storyfragment operations with cache-first repository pattern
 type StoryFragmentService struct {
-	logger               *logging.ChanneledLogger
-	perfTracker          *performance.Tracker
-	contentMapService    *ContentMapService
-	sessionBeliefService *SessionBeliefService
+	logger                *logging.ChanneledLogger
+	perfTracker           *performance.Tracker
+	contentMapService     *ContentMapService
+	sessionBeliefService  *SessionBeliefService
+	beliefRegistryService *BeliefRegistryService
 }
 
 // NewStoryFragmentService creates a new storyfragment service singleton
-func NewStoryFragmentService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, contentMapService *ContentMapService, sessionBeliefService *SessionBeliefService) *StoryFragmentService {
+func NewStoryFragmentService(
+	logger *logging.ChanneledLogger,
+	perfTracker *performance.Tracker,
+	contentMapService *ContentMapService,
+	sessionBeliefService *SessionBeliefService,
+	beliefRegistryService *BeliefRegistryService,
+) *StoryFragmentService {
 	return &StoryFragmentService{
-		logger:               logger,
-		perfTracker:          perfTracker,
-		contentMapService:    contentMapService,
-		sessionBeliefService: sessionBeliefService,
+		logger:                logger,
+		perfTracker:           perfTracker,
+		contentMapService:     contentMapService,
+		sessionBeliefService:  sessionBeliefService,
+		beliefRegistryService: beliefRegistryService,
 	}
 }
 
@@ -264,6 +272,11 @@ func (s *StoryFragmentService) Create(tenantCtx *tenant.Context, sf *content.Sto
 		return fmt.Errorf("failed to update pane relationships for storyfragment %s: %w", sf.ID, err)
 	}
 
+	if err := s.beliefRegistryService.RebuildForStoryFragment(tenantCtx, sf.ID, sf.PaneIDs); err != nil {
+		s.logger.Content().Error("Failed to rebuild belief registry after storyfragment create",
+			"error", err, "storyFragmentId", sf.ID, "tenantId", tenantCtx.TenantID)
+	}
+
 	// Surgically add the new item to the item cache and the master ID list
 	tenantCtx.CacheManager.SetStoryFragment(tenantCtx.TenantID, sf)
 	tenantCtx.CacheManager.AddStoryFragmentID(tenantCtx.TenantID, sf.ID)
@@ -401,8 +414,11 @@ func (s *StoryFragmentService) EnrichWithMetadata(tenantCtx *tenant.Context, sto
 		}
 	}
 
-	// 3. Extract and attach CodeHookTargets with options
-	if storyFragment.CodeHookTargets == nil && len(storyFragment.PaneIDs) > 0 {
+	// 3. Extract and attach CodeHookTargets with options.
+	// Always recompute from the (cache-first) panes rather than short-circuiting
+	// on a non-nil map, so a newly added/changed codehook pane is reflected
+	// without depending on the storyfragment cache being reset.
+	if len(storyFragment.PaneIDs) > 0 {
 		paneRepo := tenantCtx.PaneRepo()
 		panes, err := paneRepo.FindByIDs(tenantCtx.TenantID, storyFragment.PaneIDs)
 		if err != nil {
@@ -616,6 +632,11 @@ func (s *StoryFragmentService) UpdateComplete(tenantCtx *tenant.Context, payload
 	err = storyFragmentRepo.UpdatePaneRelationships(tenantCtx.TenantID, payload.ID, payload.PaneIDs)
 	if err != nil {
 		return fmt.Errorf("failed to update pane relationships for storyfragment %s: %w", payload.ID, err)
+	}
+
+	if err := s.beliefRegistryService.RebuildForStoryFragment(tenantCtx, payload.ID, payload.PaneIDs); err != nil {
+		s.logger.Content().Error("Failed to rebuild belief registry after storyfragment complete update",
+			"error", err, "storyFragmentId", payload.ID, "tenantId", tenantCtx.TenantID)
 	}
 
 	// Update topics if provided
