@@ -453,9 +453,9 @@ deploy_astro_frontend() {
 
   echo -e "${BLUE}Creating Astro frontend project...${RESET}"
   if [[ "${NON_INTERACTIVE}" == true ]]; then
-    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --git --yes"
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git --yes"
   else
-    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --git" </dev/tty
+    sudo -i -u t8k bash -c "cd '${src_dir}' && pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --git" </dev/tty
   fi
 
   echo -e "${BLUE}Installing TractStack integration...${RESET}"
@@ -575,7 +575,7 @@ show_install_instructions() {
 check_essential_prerequisites() {
   echo -e "${BLUE}Checking essential prerequisites...${RESET}"
   local MISSING_DEPS=()
-  if ! command -v go &>/dev/null; then MISSING_DEPS+=("Go"); elif ! check_go_version; then MISSING_DEPS+=("Go 1.42+"); fi
+  if ! command -v go &>/dev/null; then MISSING_DEPS+=("Go"); elif ! check_go_version; then MISSING_DEPS+=("Go 1.25+"); fi
   if ! command -v node &>/dev/null; then MISSING_DEPS+=("Node.js"); fi
   if ! command -v git &>/dev/null; then MISSING_DEPS+=("Git"); fi
   if ! command -v npm &>/dev/null; then MISSING_DEPS+=("npm"); fi
@@ -1141,9 +1141,9 @@ EOF
 
   # This if/else handles non-interactive mode for Docker
   if [[ "${NON_INTERACTIVE}" == true ]]; then
-    pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --yes --no-git
+    pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git
   else
-    pnpm create astro@5 my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
+    pnpm create astro@latest my-tractstack --template minimal --typescript strict --install --yes --no-git </dev/tty
   fi
 
   echo -e "${BLUE}Installing and configuring TractStack integration...${RESET}"
@@ -1230,8 +1230,8 @@ check_go_version() {
   major=$(echo "$full_version" | cut -d. -f1)
   minor=$(echo "$full_version" | cut -d. -f2)
 
-  if [[ $major -lt 1 ]] || [[ $major -eq 1 && $minor -lt 24 ]]; then
-    echo -e "${RED}❌ Go version $full_version found, but TractStack requires Go 1.24+${RESET}"
+  if [[ $major -lt 1 ]] || [[ $major -eq 1 && $minor -lt 25 ]]; then
+    echo -e "${RED}❌ Go version $full_version found, but TractStack requires Go 1.25+${RESET}"
     return 1
   fi
   echo -e "${GREEN}✅ Go $full_version found${RESET}"

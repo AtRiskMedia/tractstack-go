@@ -11,9 +11,6 @@ clean:
 	go clean
 	rm -f $(BINARY_NAME)
 
-lint:
-	golangci-lint run --build-tags fts5 --enable revive,gocritic ./...
-
 fmt:
 	go fmt ./...
 
