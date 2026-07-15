@@ -39,7 +39,11 @@ func NewDetector(logger *logging.ChanneledLogger) (*Detector, error) {
 	}, nil
 }
 
-// DetectTenant extracts tenant ID from request and auto-registers if needed
+// DetectTenant extracts the tenant ID from the request and verifies it against
+// the registry. Detection is read-only: the registry is authoritative and is
+// populated by the provisioning flow (initialize -> ProvisionTenant -> reserved),
+// so an ID absent from the registry is reported as an error rather than being
+// silently registered here.
 func (d *Detector) DetectTenant(c *gin.Context) (string, error) {
 	var tenantID string
 
@@ -60,20 +64,15 @@ func (d *Detector) DetectTenant(c *gin.Context) (string, error) {
 		tenantID = "default"
 	}
 
-	// Check if tenant exists in registry
+	// Check if tenant exists in registry. The registry is authoritative; we do
+	// not register here. A config directory without a registry row indicates a
+	// desync (the tenant was not created through the provisioning flow), which
+	// we surface explicitly instead of masking it.
 	if _, exists := d.registry.Tenants[tenantID]; !exists {
-		// Auto-register tenant if it has a config directory or if it's default
-		if tenantID == "default" || d.hasConfigDirectory(tenantID) {
-			if err := d.registerTenant(tenantID); err != nil {
-				return "", fmt.Errorf("failed to auto-register tenant %s: %w", tenantID, err)
-			}
-			// Reload registry after registration
-			if err := d.RefreshRegistry(); err != nil {
-				return "", fmt.Errorf("failed to reload registry after auto-registration: %w", err)
-			}
-		} else {
-			return "", fmt.Errorf("unknown tenant: %s", tenantID)
+		if d.hasConfigDirectory(tenantID) {
+			return "", fmt.Errorf("tenant %s has a config directory but no registry entry (registry/config desync)", tenantID)
 		}
+		return "", fmt.Errorf("unknown tenant: %s", tenantID)
 	}
 
 	return tenantID, nil
@@ -86,29 +85,6 @@ func (d *Detector) hasConfigDirectory(tenantID string) bool {
 		return true
 	}
 	return false
-}
-
-// registerTenant registers a new tenant (simplified version for auto-registration)
-func (d *Detector) registerTenant(tenantID string) error {
-	// This is a simplified version - in full implementation would call
-	// the actual tenant registration logic from baseline tenant/registration.go
-	// For now, we'll assume the tenant directory exists and just add to registry
-
-	// Create basic tenant info
-	tenantInfo := Info{
-		TenantID:     tenantID,
-		Domains:      []string{"*"}, // Default to allow all domains
-		Status:       "inactive",
-		DatabaseType: "",
-	}
-
-	// Add to in-memory registry
-	d.registry.Tenants[tenantID] = tenantInfo
-
-	// In full implementation, would also save registry to disk
-	// For now, we'll rely on the existing registry management
-
-	return nil
 }
 
 // ValidateDomain checks if the request domain is allowed for the tenant
