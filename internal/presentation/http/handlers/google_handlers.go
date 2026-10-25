@@ -145,9 +145,9 @@ func (h *GoogleHandlers) HandleOAuthStart(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":      true,
+		"success":       true,
 		"authorization": authURL,
-		"callbackUri":  callbackURI,
+		"callbackUri":   callbackURI,
 	})
 }
 
@@ -222,13 +222,13 @@ func (h *GoogleHandlers) HandleOAuthStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"hasGoogleSync":            hasGoogleSync,
-			"googleOauthClientIdSet":   tenantCtx.Config.GoogleOAuthClientID != "",
+			"hasGoogleSync":              hasGoogleSync,
+			"googleOauthClientIdSet":     tenantCtx.Config.GoogleOAuthClientID != "",
 			"googleOauthClientSecretSet": tenantCtx.Config.GoogleOAuthClientSecret != "",
-			"googleCalendarIdSet":      tenantCtx.Config.GoogleCalendarID != "",
-			"googleAccessTokenSet":     tenantCtx.Config.GoogleAccessToken != "",
-			"googleRefreshTokenSet":    tenantCtx.Config.GoogleRefreshToken != "",
-			"googleTokenExpirySet":     tenantCtx.Config.GoogleTokenExpiry != "",
+			"googleCalendarIdSet":        tenantCtx.Config.GoogleCalendarID != "",
+			"googleAccessTokenSet":       tenantCtx.Config.GoogleAccessToken != "",
+			"googleRefreshTokenSet":      tenantCtx.Config.GoogleRefreshToken != "",
+			"googleTokenExpirySet":       tenantCtx.Config.GoogleTokenExpiry != "",
 		},
 	})
 }

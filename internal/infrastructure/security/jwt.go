@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/domain/user"
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // ValidateJWT validates a JWT token and returns the claims

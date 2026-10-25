@@ -61,6 +61,9 @@ func Initialize() error {
 	if err != nil {
 		return fmt.Errorf("failed to load tenant registry: %w", err)
 	}
+	// This is the sole legitimate caller of tenant.RegisterTenant. It only fires
+	// when tenants.json exists but has an empty tenants map (LoadTenantRegistry
+	// already seeds default when the file is absent), seeding the default tenant.
 	if len(registry.Tenants) == 0 {
 		log.Println("No tenants found in registry - creating default tenant")
 		if err := tenant.RegisterTenant("default"); err != nil {

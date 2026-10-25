@@ -208,7 +208,7 @@ type Registry struct {
 type Info struct {
 	TenantID     string   `json:"tenantId"`
 	Domains      []string `json:"domains"`
-	Status       string   `json:"status"`       // "unknown", "inactive", "active"
+	Status       string   `json:"status"`       // stored: "inactive" (awaiting setup), "reserved" (provisioned, awaiting activation), "active". "unknown" is only a runtime not-in-map return from GetTenantStatus, never persisted.
 	DatabaseType string   `json:"databaseType"` // "turso", "sqlite3"
 }
 
@@ -260,7 +260,11 @@ func LoadTenantRegistry() (*Registry, error) {
 	return &registry, nil
 }
 
-// RegisterTenant adds a new tenant to the registry
+// RegisterTenant is the canonical registry-seed writer. It is invoked only by
+// the startup empty-registry fallback (when tenants.json exists but contains an
+// empty tenants map) to seed the default tenant as "inactive" (awaiting setup).
+// Normal tenant creation does not go through here; it flows through
+// ProvisionTenant, which writes a "reserved" row plus materialized config.
 func RegisterTenant(tenantID string) error {
 	registryPath := filepath.Join(config.BackendPath, "config", "t8k", "tenants.json")
 
