@@ -57,6 +57,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	saleHandlers := handlers.NewSaleHandlers(container.SaleService, container.Logger, container.PerfTracker)
 	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
 	googleHandlers := handlers.NewGoogleHandlers(container.GoogleOAuthService, container.ConfigService, container.Logger, container.PerfTracker)
+	extendAssetHandlers := handlers.NewExtendAssetHandlers(container.ExtendAssetService, container.Logger, container.PerfTracker)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -166,6 +167,21 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			configGroup.PUT("/brand", configHandlers.UpdateBrandConfig)
 			configGroup.GET("/advanced", configHandlers.GetAdvancedConfig)
 			configGroup.PUT("/advanced", authHandlers.AdminOnlyMiddleware(), configHandlers.UpdateAdvancedConfig)
+		}
+
+		// Extend asset endpoints (admin only; per-tenant under config/<tenant>/custom)
+		extendAssets := api.Group("/extend/assets")
+		extendAssets.Use(authHandlers.AdminOnlyMiddleware())
+		{
+			extendAssets.GET("/tree", extendAssetHandlers.GetTree)
+			extendAssets.GET("/file", extendAssetHandlers.GetFile)
+			extendAssets.PUT("/file", extendAssetHandlers.PutFile)
+			extendAssets.POST("/upload", extendAssetHandlers.Upload)
+			extendAssets.POST("/mkdir", extendAssetHandlers.Mkdir)
+			extendAssets.POST("/rename", extendAssetHandlers.Rename)
+			extendAssets.DELETE("/file", extendAssetHandlers.DeleteFile)
+			extendAssets.POST("/unzip", extendAssetHandlers.Unzip)
+			extendAssets.GET("/references", extendAssetHandlers.GetReferences)
 		}
 
 		// Tailwind

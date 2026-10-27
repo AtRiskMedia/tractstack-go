@@ -806,13 +806,27 @@ configure_nginx() {
       cat <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name www.${DOMAIN};
+    return 301 https://${DOMAIN}\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.${DOMAIN};
+    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    return 301 https://${DOMAIN}\$request_uri;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
     return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name ${DOMAIN};
     ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     
@@ -829,6 +843,13 @@ server {
         expires 30d;
         add_header Cache-Control "public, immutable";
     }
+
+    location /custom/ {
+        alias /home/t8k/t8k-go-server/config/default/custom/;
+        etag on;
+        add_header Cache-Control "no-cache";
+        types { application/wasm wasm; }
+    }
 }
 EOF
     )
@@ -838,13 +859,27 @@ EOF
       cat <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
+    server_name www.${DOMAIN};
+    return 301 https://${DOMAIN}\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.${DOMAIN};
+    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    return 301 https://${DOMAIN}\$request_uri;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN} *.${DOMAIN};
     return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN} *.${DOMAIN};
+    server_name ${DOMAIN} *.${DOMAIN};
     ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     
@@ -865,6 +900,17 @@ server {
         expires 30d;
         add_header Cache-Control "public, immutable";
     }
+
+    location /custom/ {
+        set \$tenant_dir "default";
+        if (\$host ~* ^([^.]+)\\.${DOMAIN//./\\.}\$) {
+            set \$tenant_dir \$1;
+        }
+        alias /home/t8k/t8k-go-server/config/\$tenant_dir/custom/;
+        etag on;
+        add_header Cache-Control "no-cache";
+        types { application/wasm wasm; }
+    }
 }
 EOF
     )
@@ -874,13 +920,27 @@ EOF
       cat <<EOF
 server {
     listen 80;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name www.${DOMAIN};
+    return 301 https://${DOMAIN}\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name www.${DOMAIN};
+    ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    return 301 https://${DOMAIN}\$request_uri;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
     return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
+    server_name ${DOMAIN};
     ssl_certificate /home/t8k/etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
     ssl_certificate_key /home/t8k/etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     
@@ -896,6 +956,13 @@ server {
         alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/media/;
         expires 30d;
         add_header Cache-Control "public, immutable";
+    }
+
+    location /custom/ {
+        alias /home/t8k/sites/${SITE_ID}/t8k-go-server/config/default/custom/;
+        etag on;
+        add_header Cache-Control "no-cache";
+        types { application/wasm wasm; }
     }
 }
 EOF
