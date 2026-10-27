@@ -58,6 +58,12 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
 	googleHandlers := handlers.NewGoogleHandlers(container.GoogleOAuthService, container.ConfigService, container.Logger, container.PerfTracker)
 	extendAssetHandlers := handlers.NewExtendAssetHandlers(container.ExtendAssetService, container.Logger, container.PerfTracker)
+	extendSourceHandlers := handlers.NewExtendSourceHandlers(
+		container.ExtendSourceService,
+		container.ExtendRegistryService,
+		container.Logger,
+		container.PerfTracker,
+	)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -182,6 +188,20 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			extendAssets.DELETE("/file", extendAssetHandlers.DeleteFile)
 			extendAssets.POST("/unzip", extendAssetHandlers.Unzip)
 			extendAssets.GET("/references", extendAssetHandlers.GetReferences)
+		}
+
+		// Extend source endpoints: Admin on prod/dedicated/quick; SysOp on multi (§10/11)
+		extendSource := api.Group("/extend/source")
+		if config.EnableMultiTenant {
+			extendSource.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendSource.Use(authHandlers.AdminOnlyMiddleware())
+		}
+		{
+			extendSource.GET("/tree", extendSourceHandlers.GetTree)
+			extendSource.GET("/file", extendSourceHandlers.GetFile)
+			extendSource.PUT("/file", extendSourceHandlers.PutFile)
+			extendSource.GET("/registry", extendSourceHandlers.GetRegistry)
 		}
 
 		// Tailwind

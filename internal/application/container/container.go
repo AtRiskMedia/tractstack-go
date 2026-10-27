@@ -74,7 +74,9 @@ type Container struct {
 	ShopifyService              *services.ShopifyService
 	ShopifyReconciliationWorker *services.ShopifyReconciliationWorker
 	Service                     *fts.Service
-	ExtendAssetService          *services.ExtendAssetService
+	ExtendAssetService    *services.ExtendAssetService
+	ExtendSourceService   *services.ExtendSourceService
+	ExtendRegistryService *services.ExtendRegistryService
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -221,6 +223,8 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	go sysOpBroadcaster.Run()
 
 	extendAssetService := services.NewExtendAssetService(logger, perfTracker)
+	extendSourceService := services.NewExtendSourceService(logger, perfTracker)
+	extendRegistryService := services.NewExtendRegistryService(logger, perfTracker)
 
 	logger.Startup().Info("Dependency injection container services initialized")
 
@@ -278,7 +282,9 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ShopifyService:              shopifyService,
 		ShopifyReconciliationWorker: shopifyReconciliationWorker,
 		Service:                     ftsService,
-		ExtendAssetService:          extendAssetService,
+		ExtendAssetService:    extendAssetService,
+		ExtendSourceService:   extendSourceService,
+		ExtendRegistryService: extendRegistryService,
 
 		// Infrastructure
 		TenantManager: tenantManager,

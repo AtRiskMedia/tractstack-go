@@ -44,16 +44,6 @@ var (
 		".md": {}, ".html": {}, ".svg": {}, ".csv": {},
 	}
 
-	// Platform page dirs excluded from src/pages/<route>/** asset reference walks.
-	// codehooks is scanned separately.
-	assetScanSkipPageDirs = map[string]struct{}{
-		"api": {}, "privacy": {}, "terms": {}, "collections": {},
-		"create": {}, "edit": {}, "concierge": {}, "context": {},
-		"products": {}, "storykeep": {}, "cart": {}, "404": {},
-		"transcribe": {}, "sitemap": {}, "sandbox": {}, "robots": {},
-		"llm": {}, "custom": {}, "media": {}, "codehooks": {},
-	}
-
 	ErrAssetNotFound      = errors.New("asset not found")
 	ErrAssetNotText       = errors.New("not a text asset")
 	ErrAssetInvalidPath   = errors.New("invalid asset path")
@@ -434,10 +424,7 @@ func (s *ExtendAssetService) FindReferences(tenantID, rel string) ([]AssetRefere
 			continue
 		}
 		name := e.Name()
-		if _, skip := assetScanSkipPageDirs[name]; skip {
-			continue
-		}
-		if strings.HasPrefix(name, "[...") {
+		if IsPlatformDirectory(name) {
 			continue
 		}
 		dirAbs := filepath.Join(pagesRoot, name)

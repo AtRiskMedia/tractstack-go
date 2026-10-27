@@ -215,3 +215,123 @@ func GuardSourcePath(sourceRoot, relPath string) (string, error) {
 	}
 	return ResolveUnderRoot(sourceRoot, relPath)
 }
+
+// PlatformDirectories is the §7 set: reservedSlugs after Phase 0 plus media/codehooks/custom
+// (already in that list) and any directory whose name begins with "[".
+var PlatformDirectories = map[string]struct{}{
+	"api": {}, "privacy": {}, "terms": {}, "collections": {},
+	"create": {}, "edit": {}, "concierge": {}, "context": {},
+	"products": {}, "storykeep": {}, "cart": {}, "404": {},
+	"transcribe": {}, "sitemap": {}, "sandbox": {}, "robots": {},
+	"llm": {}, "custom": {}, "media": {}, "codehooks": {},
+}
+
+// IsPlatformDirectory reports whether name is a platform page directory (§7).
+func IsPlatformDirectory(name string) bool {
+	if strings.HasPrefix(name, "[") {
+		return true
+	}
+	_, ok := PlatformDirectories[name]
+	return ok
+}
+
+// CoreBladeIDs are refused for create/edit/delete (invariant 3).
+var CoreBladeIDs = map[string]struct{}{
+	"featured-article": {},
+	"list-content":     {},
+	"search-widget":    {},
+	"bunny-video":      {},
+	"epinet":           {},
+	"[...hookId]":      {},
+}
+
+// IsCoreBladeID reports whether id is a core (inject-overwritten) codehook blade.
+func IsCoreBladeID(id string) bool {
+	_, ok := CoreBladeIDs[id]
+	return ok
+}
+
+// SourcePathFlag is the tree flag for a relative source path.
+// Values: "", "protected", "platform".
+func SourcePathFlag(relPath string) string {
+	p := filepath.ToSlash(filepath.Clean(relPath))
+	switch p {
+	case "src/custom/codehooks.ts",
+		"src/custom/CustomRoutes.astro",
+		"src/custom/HeaderWidget.astro",
+		"src/custom/customHelpers.ts":
+		return "protected"
+	}
+	if p == "src/pages/codehooks/shopify-product-grid.astro" ||
+		p == "src/pages/codehooks/shopify-service-list.astro" ||
+		p == "src/custom/shopify" ||
+		strings.HasPrefix(p, "src/custom/shopify/") {
+		return "platform"
+	}
+	return ""
+}
+
+// IsCoreCodehookBladePath reports whether rel is a core blade under src/pages/codehooks/.
+func IsCoreCodehookBladePath(relPath string) bool {
+	p := filepath.ToSlash(filepath.Clean(relPath))
+	const prefix = "src/pages/codehooks/"
+	if !strings.HasPrefix(p, prefix) || !strings.HasSuffix(p, ".astro") {
+		return false
+	}
+	base := strings.TrimSuffix(strings.TrimPrefix(p, prefix), ".astro")
+	return IsCoreBladeID(base) || base == "[...hookId]"
+}
+
+// IsAllowlistedSourcePath reports whether rel is admitted by invariant 2 / §5 Source tree
+// for GET/PUT file (positive allowlist, not merely "not denied").
+// routeNames are extend.json routes[].name values (may be nil/empty).
+func IsAllowlistedSourcePath(relPath string, routeNames map[string]struct{}) bool {
+	p := filepath.ToSlash(filepath.Clean(relPath))
+	if p == "." || p == "" || IsDeniedSourcePath(p) {
+		return false
+	}
+	// Excluded even though allowlist names it: concierge-only stamp.
+	if p == "src/generated/buildStamp.ts" || strings.HasPrefix(p, "src/generated/") {
+		return false
+	}
+	if p == "src/custom/extend.json" {
+		return true
+	}
+	if p == "src/custom" || strings.HasPrefix(p, "src/custom/") {
+		return true
+	}
+	if strings.HasPrefix(p, "src/pages/codehooks/") && strings.HasSuffix(p, ".astro") {
+		base := strings.TrimSuffix(filepath.Base(p), ".astro")
+		if IsCoreBladeID(base) || base == "[...hookId]" {
+			return false
+		}
+		// Only direct children of codehooks/ (no nested dirs in allowlist for blades).
+		rel := strings.TrimPrefix(p, "src/pages/codehooks/")
+		return !strings.Contains(rel, "/")
+	}
+	// src/pages/<name>/[param1].astro for registry routes
+	if strings.HasPrefix(p, "src/pages/") && strings.HasSuffix(p, "/[param1].astro") {
+		rest := strings.TrimPrefix(p, "src/pages/")
+		parts := strings.Split(rest, "/")
+		if len(parts) == 2 && parts[1] == "[param1].astro" {
+			name := parts[0]
+			if IsPlatformDirectory(name) {
+				return false
+			}
+			if routeNames == nil {
+				return false
+			}
+			_, ok := routeNames[name]
+			return ok
+		}
+	}
+	return false
+}
+
+// GuardAllowlistedSourcePath resolves an allowlisted source path under sourceRoot.
+func GuardAllowlistedSourcePath(sourceRoot, relPath string, routeNames map[string]struct{}) (string, error) {
+	if !IsAllowlistedSourcePath(relPath, routeNames) {
+		return "", fmt.Errorf("path denied: %s", relPath)
+	}
+	return ResolveUnderRoot(sourceRoot, relPath)
+}
