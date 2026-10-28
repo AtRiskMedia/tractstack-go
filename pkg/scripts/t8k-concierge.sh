@@ -132,6 +132,7 @@ iso_now() {
 }
 
 # Write job JSON (rebuild-frontend). Extra optional JSON object fields as raw suffix.
+# Always includes jobId from CSV_JOB. Includes builtAt when JOB_BUILT_AT is set (after stamp).
 write_job_record() {
   local job_file="$1"
   local status="$2"
@@ -146,8 +147,12 @@ write_job_record() {
   if [[ -n "$CSV_SITE" ]]; then
     site_json="\"$CSV_SITE\""
   fi
+  local built_at_json=""
+  if [[ -n "${JOB_BUILT_AT:-}" ]]; then
+    built_at_json=", \"builtAt\":\"$JOB_BUILT_AT\""
+  fi
   cat >"$job_file" <<EOF
-{"status":"$status","startedAt":"$JOB_STARTED_AT","type":"$CSV_TYPE","site":${site_json}${extra_json}}
+{"status":"$status","jobId":"$CSV_JOB","startedAt":"$JOB_STARTED_AT","type":"$CSV_TYPE","site":${site_json}${built_at_json}${extra_json}}
 EOF
 }
 
@@ -253,6 +258,8 @@ build_astro_release() {
   mkdir -p src/generated releases
   local built_at
   built_at=$(iso_now)
+  # Same ISO for stamp and later job records (JOB_BUILT_AT read by write_job_record).
+  JOB_BUILT_AT="$built_at"
   cat >src/generated/buildStamp.ts <<EOF
 export const buildStamp = { jobId: '${stamp_id}', builtAt: '${built_at}' };
 EOF

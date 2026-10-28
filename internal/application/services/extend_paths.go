@@ -11,6 +11,11 @@ import (
 // StateDir is the concierge state directory (t8k-concierge.sh hardcodes it).
 const StateDir = "/home/t8k/state"
 
+// JobsDir is StateDir/jobs (concierge job JSON + logs).
+func JobsDir() string {
+	return filepath.Join(StateDir, "jobs")
+}
+
 var dedicatedSitePath = regexp.MustCompile(`^/home/t8k/sites/([a-z0-9-]{3,12})$`)
 
 // PublishTarget describes where rebuild csvs should land for this install.

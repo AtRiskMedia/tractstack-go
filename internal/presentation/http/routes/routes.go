@@ -65,6 +65,11 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.Logger,
 		container.PerfTracker,
 	)
+	extendRebuildHandlers := handlers.NewExtendRebuildHandlers(
+		container.ExtendRebuildService,
+		container.Logger,
+		container.PerfTracker,
+	)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -209,6 +214,19 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			extendSource.POST("/routes", extendSourceHandlers.CreateRoute)
 			extendSource.DELETE("/routes/:name", extendSourceHandlers.DeleteRoute)
 			extendSource.GET("/routes/:name/usages", extendSourceHandlers.GetRouteUsages)
+		}
+
+		// Extend rebuild: same source auth; GET /latest before /:jobId
+		extendRebuild := api.Group("/extend/rebuild")
+		if config.EnableMultiTenant {
+			extendRebuild.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendRebuild.Use(authHandlers.AdminOnlyMiddleware())
+		}
+		{
+			extendRebuild.POST("", extendRebuildHandlers.PostRebuild)
+			extendRebuild.GET("/latest", extendRebuildHandlers.GetLatest)
+			extendRebuild.GET("/:jobId", extendRebuildHandlers.GetJob)
 		}
 
 		// Tailwind

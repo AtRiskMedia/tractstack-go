@@ -209,12 +209,22 @@ func (h *DatabaseHandlers) GetGeneralHealth(c *gin.Context) {
 	if exists {
 		// Case 1: Active Tenant -> Return Healthy
 		if tenantCtx.Status == "active" {
-			c.JSON(http.StatusOK, gin.H{
+			body := gin.H{
 				"status":    "ok",
 				"healthy":   true,
 				"timestamp": time.Now().UTC().Unix(),
 				"tenantId":  tenantCtx.TenantID,
-			})
+			}
+			// Optional frontendBuild from latest.json when PublishEnabled (Phase 4b).
+			// Badge/modal never use this; they use /api/extend/stamp (invariant 9).
+			if jobID, status, builtAt, ok := services.ReadLatestFrontendBuild(); ok {
+				body["frontendBuild"] = gin.H{
+					"jobId":   jobID,
+					"status":  status,
+					"builtAt": builtAt,
+				}
+			}
+			c.JSON(http.StatusOK, body)
 			return
 		}
 
