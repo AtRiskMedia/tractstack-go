@@ -339,7 +339,14 @@ func (s *ExtendAssetService) Delete(tenantID, rel string, force bool) error {
 		}
 	}
 	if info.IsDir() {
-		return os.RemoveAll(abs)
+		entries, err := os.ReadDir(abs)
+		if err != nil {
+			return err
+		}
+		if len(entries) > 0 {
+			return fmt.Errorf("%w: directory not empty", ErrAssetForbidden)
+		}
+		return os.Remove(abs)
 	}
 	return os.Remove(abs)
 }

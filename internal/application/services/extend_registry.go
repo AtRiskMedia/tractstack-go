@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
@@ -23,14 +22,13 @@ var (
 
 // ExtendRegistry is the on-disk / in-memory extend.json shape (version 1).
 type ExtendRegistry struct {
-	Version    int                    `json:"version"`
-	Manifest   ExtendManifestEntry    `json:"manifest"`
-	Dispatcher ExtendManifestEntry    `json:"dispatcher"`
-	Hooks      []ExtendHookEntry      `json:"hooks"`
-	Routes     []ExtendRouteEntry     `json:"routes"`
+	Version  int                 `json:"version"`
+	Manifest ExtendManifestEntry `json:"manifest"`
+	Hooks    []ExtendHookEntry   `json:"hooks"`
+	Routes   []ExtendRouteEntry  `json:"routes"`
 }
 
-// ExtendManifestEntry describes codehooks.ts or CustomRoutes.astro mode.
+// ExtendManifestEntry describes codehooks.ts mode.
 type ExtendManifestEntry struct {
 	File string `json:"file"`
 	Mode string `json:"mode"` // managed | manual
@@ -47,20 +45,26 @@ type ExtendHookEntry struct {
 
 // ExtendRouteEntry is one discovered or registered route.
 type ExtendRouteEntry struct {
-	Name       string   `json:"name"`
-	Enabled    bool     `json:"enabled"`
-	Shell      string   `json:"shell"`
-	View       string   `json:"view,omitempty"`
-	Categories []string `json:"categories,omitempty"`
-	Missing    string   `json:"missing,omitempty"`
-	Origin     string   `json:"origin"`
-	ShellMode  string   `json:"shellMode"`
+	Name      string `json:"name"`
+	Shell     string `json:"shell"`
+	View      string `json:"view,omitempty"`
+	Origin    string `json:"origin"`
+	ShellMode string `json:"shellMode"`
 }
 
-// ExtendRegistryService serves GET /source/registry (discovery + read).
+// RegistryJSONPath is GO_BACKEND_PATH/config/<tenantID>/extend.json.
+func RegistryJSONPath(tenantID string) string {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	return filepath.Join(config.BackendPath, "config", tenantID, "extend.json")
+}
+
+// ExtendRegistryService serves GET /source/registry (discovery + read) and registry writes.
 type ExtendRegistryService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+	usage       *ExtendUsageService
 }
 
 // NewExtendRegistryService creates the registry service.
@@ -77,14 +81,15 @@ func (s *ExtendRegistryService) sourceRoot() (string, error) {
 	return root, nil
 }
 
-// GetRegistry returns the registry. If extend.json is absent, runs discovery and writes it.
+// GetRegistry returns the registry. If config/<tenant>/extend.json is absent, runs discovery and writes it.
 // Core blade ids are never returned (invariant 3), even if present in an older extend.json.
-func (s *ExtendRegistryService) GetRegistry() (*ExtendRegistry, error) {
+// Old src/custom/extend.json is ignored.
+func (s *ExtendRegistryService) GetRegistry(tenantID string) (*ExtendRegistry, error) {
 	root, err := s.sourceRoot()
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(root, "src", "custom", "extend.json")
+	path := RegistryJSONPath(tenantID)
 	if b, err := os.ReadFile(path); err == nil {
 		var reg ExtendRegistry
 		if err := json.Unmarshal(b, &reg); err != nil {
@@ -140,15 +145,11 @@ func (s *ExtendRegistryService) discover(root string) (*ExtendRegistry, error) {
 			File: "src/custom/codehooks.ts",
 			Mode: "manual",
 		},
-		Dispatcher: ExtendManifestEntry{
-			File: "src/custom/CustomRoutes.astro",
-			Mode: "manual",
-		},
 		Hooks:  []ExtendHookEntry{},
 		Routes: []ExtendRouteEntry{},
 	}
 
-	// Step 1–2: codehooks.ts + blades
+	// codehooks.ts + blades
 	codehooksPath := filepath.Join(root, "src", "custom", "codehooks.ts")
 	if b, err := os.ReadFile(codehooksPath); err == nil {
 		mode, ids := parseCodehooksTS(string(b))
@@ -178,13 +179,7 @@ func (s *ExtendRegistryService) discover(root string) (*ExtendRegistry, error) {
 		}
 	}
 
-	// Step 3: CustomRoutes.astro
-	dispatcherPath := filepath.Join(root, "src", "custom", "CustomRoutes.astro")
-	if b, err := os.ReadFile(dispatcherPath); err == nil {
-		reg.Dispatcher.Mode = classifyCustomRoutes(string(b))
-	}
-
-	// Step 4: src/pages/<dir>/[param1].astro minus PlatformDirectories
+	// src/pages/<dir>/[param1].astro minus PlatformDirectories
 	pagesRoot := filepath.Join(root, "src", "pages")
 	entries, err := os.ReadDir(pagesRoot)
 	if err != nil && !os.IsNotExist(err) {
@@ -200,16 +195,26 @@ func (s *ExtendRegistryService) discover(root string) (*ExtendRegistry, error) {
 		}
 		shellRel := "src/pages/" + name + "/[param1].astro"
 		shellAbs := filepath.Join(root, filepath.FromSlash(shellRel))
-		if _, err := os.Stat(shellAbs); err != nil {
+		b, err := os.ReadFile(shellAbs)
+		if err != nil {
 			continue
 		}
-		reg.Routes = append(reg.Routes, ExtendRouteEntry{
+		shellMode := "manual"
+		if ShellMatchesGenerated(string(b), name) {
+			shellMode = "generated"
+		}
+		viewRel := RouteViewRelPath(name)
+		viewAbs := filepath.Join(root, filepath.FromSlash(viewRel))
+		route := ExtendRouteEntry{
 			Name:      name,
-			Enabled:   true,
 			Shell:     shellRel,
 			Origin:    "discovered",
-			ShellMode: "manual",
-		})
+			ShellMode: shellMode,
+		}
+		if _, err := os.Stat(viewAbs); err == nil {
+			route.View = viewRel
+		}
+		reg.Routes = append(reg.Routes, route)
 	}
 
 	return reg, nil
@@ -363,91 +368,3 @@ func resolveLocalImport(sourceRoot, fromDir, spec string) (rel string, ok bool) 
 	return "", false
 }
 
-// classifyCustomRoutes: managed only if frontmatter is imports + Props + destructure + export const routes,
-// and body is route === '…' chains. Otherwise manual.
-func classifyCustomRoutes(src string) string {
-	fm := astroFrontmatter(src)
-	body := src
-	if i := strings.Index(src, "---"); i >= 0 {
-		rest := src[i+3:]
-		if j := strings.Index(rest, "---"); j >= 0 {
-			body = rest[j+3:]
-		}
-	}
-	// sneaky calls extractResources → manual
-	if strings.Contains(fm, "extractResources") || strings.Contains(body, "extractResources") {
-		return "manual"
-	}
-	// Frontmatter: only imports, interface Props, const destructure, export const routes
-	for _, line := range strings.Split(fm, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" {
-			continue
-		}
-		if strings.HasPrefix(t, "import ") {
-			continue
-		}
-		if strings.HasPrefix(t, "export interface Props") || strings.HasPrefix(t, "interface Props") {
-			continue
-		}
-		if strings.HasPrefix(t, "const {") || strings.HasPrefix(t, "const{") {
-			continue
-		}
-		if strings.HasPrefix(t, "export const routes") {
-			continue
-		}
-		if strings.HasPrefix(t, "//") {
-			continue
-		}
-		// Allow closing braces of interface / destructure
-		if t == "}" || t == "};" {
-			continue
-		}
-		if strings.HasPrefix(t, "route:") || strings.HasPrefix(t, "slug:") || strings.HasPrefix(t, "resources:") {
-			continue
-		}
-		// Type-only lines inside Props
-		if strings.Contains(t, ":") && !strings.HasPrefix(t, "export ") {
-			continue
-		}
-		return "manual"
-	}
-	// Body: only route === 'name' ? … : or && chains (and whitespace/comments)
-	stripped := stripHTMLComments(body)
-	stripped = strings.TrimSpace(stripped)
-	if stripped == "" {
-		return "managed"
-	}
-	// Allow simple conditional chains
-	okBody := regexp.MustCompile(`(?s)^(?:\s*\{?\s*route\s*===\s*['"][^'"]+['"]\s*(?:\?[\s\S]*?:|\s*&&\s*)[\s\S]*)+\s*\}?\s*$`)
-	if okBody.MatchString(stripped) {
-		return "managed"
-	}
-	// miracles minimal: mostly empty / comments
-	onlyWS := true
-	for _, r := range stripped {
-		if !unicode.IsSpace(r) && r != '{' && r != '}' {
-			onlyWS = false
-			break
-		}
-	}
-	if onlyWS {
-		return "managed"
-	}
-	return "manual"
-}
-
-func stripHTMLComments(s string) string {
-	for {
-		start := strings.Index(s, "<!--")
-		if start < 0 {
-			break
-		}
-		end := strings.Index(s[start:], "-->")
-		if end < 0 {
-			break
-		}
-		s = s[:start] + s[start+end+3:]
-	}
-	return s
-}

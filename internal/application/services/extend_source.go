@@ -62,9 +62,9 @@ func (s *ExtendSourceService) sourceRoot() (string, error) {
 	return root, nil
 }
 
-func (s *ExtendSourceService) loadRouteNames(root string) map[string]struct{} {
+func (s *ExtendSourceService) loadRouteNames(tenantID string) map[string]struct{} {
 	names := make(map[string]struct{})
-	b, err := os.ReadFile(filepath.Join(root, "src", "custom", "extend.json"))
+	b, err := os.ReadFile(RegistryJSONPath(tenantID))
 	if err != nil {
 		return names
 	}
@@ -85,12 +85,12 @@ func (s *ExtendSourceService) loadRouteNames(root string) map[string]struct{} {
 }
 
 // Tree walks the invariant-2 / §5 Source tree allowlist. Ephemeral — never writes extend.json.
-func (s *ExtendSourceService) Tree() ([]SourceNode, error) {
+func (s *ExtendSourceService) Tree(tenantID string) ([]SourceNode, error) {
 	root, err := s.sourceRoot()
 	if err != nil {
 		return nil, err
 	}
-	routeNames := s.loadRouteNames(root)
+	routeNames := s.loadRouteNames(tenantID)
 	var nodes []SourceNode
 	seen := make(map[string]struct{})
 
@@ -172,6 +172,9 @@ func (s *ExtendSourceService) Tree() ([]SourceNode, error) {
 				}
 				return nil
 			}
+			if relSlash == "src/custom/extend.json" {
+				return nil
+			}
 			fi, err := d.Info()
 			if err != nil {
 				return err
@@ -239,12 +242,12 @@ func (s *ExtendSourceService) Tree() ([]SourceNode, error) {
 }
 
 // GetFile returns text content for an allowlisted source file.
-func (s *ExtendSourceService) GetFile(rel string) (string, error) {
+func (s *ExtendSourceService) GetFile(tenantID, rel string) (string, error) {
 	root, err := s.sourceRoot()
 	if err != nil {
 		return "", err
 	}
-	routeNames := s.loadRouteNames(root)
+	routeNames := s.loadRouteNames(tenantID)
 	abs, err := GuardAllowlistedSourcePath(root, rel, routeNames)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrSourceInvalidPath, err)
@@ -273,7 +276,7 @@ func (s *ExtendSourceService) GetFile(rel string) (string, error) {
 }
 
 // PutFile writes text to an allowlisted source file. Refuses core blades.
-func (s *ExtendSourceService) PutFile(rel, content string) error {
+func (s *ExtendSourceService) PutFile(tenantID, rel, content string) error {
 	root, err := s.sourceRoot()
 	if err != nil {
 		return err
@@ -281,7 +284,7 @@ func (s *ExtendSourceService) PutFile(rel, content string) error {
 	if IsCoreCodehookBladePath(rel) {
 		return fmt.Errorf("%w: core blade", ErrSourceForbidden)
 	}
-	routeNames := s.loadRouteNames(root)
+	routeNames := s.loadRouteNames(tenantID)
 	abs, err := GuardAllowlistedSourcePath(root, rel, routeNames)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrSourceInvalidPath, err)

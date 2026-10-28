@@ -61,6 +61,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	extendSourceHandlers := handlers.NewExtendSourceHandlers(
 		container.ExtendSourceService,
 		container.ExtendRegistryService,
+		container.ExtendUsageService,
 		container.Logger,
 		container.PerfTracker,
 	)
@@ -202,6 +203,12 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			extendSource.GET("/file", extendSourceHandlers.GetFile)
 			extendSource.PUT("/file", extendSourceHandlers.PutFile)
 			extendSource.GET("/registry", extendSourceHandlers.GetRegistry)
+			extendSource.POST("/hooks", extendSourceHandlers.CreateHook)
+			extendSource.DELETE("/hooks/:id", extendSourceHandlers.DeleteHook)
+			extendSource.GET("/hooks/:id/usages", extendSourceHandlers.GetHookUsages)
+			extendSource.POST("/routes", extendSourceHandlers.CreateRoute)
+			extendSource.DELETE("/routes/:name", extendSourceHandlers.DeleteRoute)
+			extendSource.GET("/routes/:name/usages", extendSourceHandlers.GetRouteUsages)
 		}
 
 		// Tailwind

@@ -257,7 +257,6 @@ func SourcePathFlag(relPath string) string {
 	p := filepath.ToSlash(filepath.Clean(relPath))
 	switch p {
 	case "src/custom/codehooks.ts",
-		"src/custom/CustomRoutes.astro",
 		"src/custom/HeaderWidget.astro",
 		"src/custom/customHelpers.ts":
 		return "protected"
@@ -295,7 +294,7 @@ func IsAllowlistedSourcePath(relPath string, routeNames map[string]struct{}) boo
 		return false
 	}
 	if p == "src/custom/extend.json" {
-		return true
+		return false
 	}
 	if p == "src/custom" || strings.HasPrefix(p, "src/custom/") {
 		return true
