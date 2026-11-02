@@ -79,6 +79,7 @@ type Container struct {
 	ExtendRegistryService *services.ExtendRegistryService
 	ExtendUsageService    *services.ExtendUsageService
 	ExtendRebuildService  *services.ExtendRebuildService
+	ExtendCustomCSSService *services.ExtendCustomCSSService
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -230,6 +231,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	extendUsageService := services.NewExtendUsageService(tenantManager, logger, perfTracker)
 	extendRegistryService.SetUsageService(extendUsageService)
 	extendRebuildService := services.NewExtendRebuildService(logger, perfTracker)
+	extendCustomCSSService := services.NewExtendCustomCSSService(configService, logger, perfTracker)
 
 	logger.Startup().Info("Dependency injection container services initialized")
 
@@ -292,6 +294,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ExtendRegistryService: extendRegistryService,
 		ExtendUsageService:    extendUsageService,
 		ExtendRebuildService:  extendRebuildService,
+		ExtendCustomCSSService: extendCustomCSSService,
 
 		// Infrastructure
 		TenantManager: tenantManager,

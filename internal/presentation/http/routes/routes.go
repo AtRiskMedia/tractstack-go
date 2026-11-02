@@ -70,6 +70,11 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.Logger,
 		container.PerfTracker,
 	)
+	extendCustomCSSHandlers := handlers.NewExtendCustomCSSHandlers(
+		container.ExtendCustomCSSService,
+		container.Logger,
+		container.PerfTracker,
+	)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -194,6 +199,14 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			extendAssets.DELETE("/file", extendAssetHandlers.DeleteFile)
 			extendAssets.POST("/unzip", extendAssetHandlers.Unzip)
 			extendAssets.GET("/references", extendAssetHandlers.GetReferences)
+		}
+
+		// Extend custom.css (admin only; config/<tenant>/media/css/custom.css; bumps STYLES_VER)
+		extendCustomCSS := api.Group("/extend/custom-css")
+		extendCustomCSS.Use(authHandlers.AdminOnlyMiddleware())
+		{
+			extendCustomCSS.GET("", extendCustomCSSHandlers.Get)
+			extendCustomCSS.PUT("", extendCustomCSSHandlers.Put)
 		}
 
 		// Extend source endpoints: Admin on prod/dedicated/quick; SysOp on multi (§10/11)
