@@ -112,6 +112,28 @@ func (s *ExtendRegistryService) GetRegistry(tenantID string) (*ExtendRegistry, e
 	return reg, nil
 }
 
+// RegenerateAll discovers SourceRoot once and overwrites config/<tenant>/extend.json
+// for each tenantID. If Extend is disabled (no SourceRoot), returns nil.
+func (s *ExtendRegistryService) RegenerateAll(tenantIDs []string) error {
+	root, err := s.sourceRoot()
+	if err != nil {
+		if err == ErrExtendDisabled {
+			return nil
+		}
+		return err
+	}
+	reg, err := s.discover(root)
+	if err != nil {
+		return err
+	}
+	for _, tenantID := range tenantIDs {
+		if err := writeExtendJSON(RegistryJSONPath(tenantID), reg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func stripCoreHooks(reg *ExtendRegistry) {
 	if reg == nil {
 		return
