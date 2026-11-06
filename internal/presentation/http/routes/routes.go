@@ -186,9 +186,9 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			configGroup.PUT("/advanced", authHandlers.AdminOnlyMiddleware(), configHandlers.UpdateAdvancedConfig)
 		}
 
-		// Extend asset endpoints (admin only; per-tenant under config/<tenant>/custom)
+		// Extend asset endpoints (admin/editor; per-tenant under config/<tenant>/custom)
 		extendAssets := api.Group("/extend/assets")
-		extendAssets.Use(authHandlers.AdminOnlyMiddleware())
+		extendAssets.Use(authHandlers.AuthMiddleware())
 		{
 			extendAssets.GET("/tree", extendAssetHandlers.GetTree)
 			extendAssets.GET("/file", extendAssetHandlers.GetFile)
@@ -201,20 +201,20 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			extendAssets.GET("/references", extendAssetHandlers.GetReferences)
 		}
 
-		// Extend custom.css (admin only; config/<tenant>/media/css/custom.css; bumps STYLES_VER)
+		// Extend custom.css (admin/editor; config/<tenant>/media/css/custom.css; bumps STYLES_VER)
 		extendCustomCSS := api.Group("/extend/custom-css")
-		extendCustomCSS.Use(authHandlers.AdminOnlyMiddleware())
+		extendCustomCSS.Use(authHandlers.AuthMiddleware())
 		{
 			extendCustomCSS.GET("", extendCustomCSSHandlers.Get)
 			extendCustomCSS.PUT("", extendCustomCSSHandlers.Put)
 		}
 
-		// Extend source endpoints: Admin on prod/dedicated/quick; SysOp on multi (§10/11)
+		// Extend source endpoints: Admin/Editor on prod/dedicated/quick; SysOp on multi (§10/11)
 		extendSource := api.Group("/extend/source")
 		if config.EnableMultiTenant {
 			extendSource.Use(sysopHandlers.SysOpAuthMiddleware())
 		} else {
-			extendSource.Use(authHandlers.AdminOnlyMiddleware())
+			extendSource.Use(authHandlers.AuthMiddleware())
 		}
 		{
 			extendSource.GET("/tree", extendSourceHandlers.GetTree)
@@ -234,7 +234,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		if config.EnableMultiTenant {
 			extendRebuild.Use(sysopHandlers.SysOpAuthMiddleware())
 		} else {
-			extendRebuild.Use(authHandlers.AdminOnlyMiddleware())
+			extendRebuild.Use(authHandlers.AuthMiddleware())
 		}
 		{
 			extendRebuild.POST("", extendRebuildHandlers.PostRebuild)
