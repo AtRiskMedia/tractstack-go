@@ -75,6 +75,13 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.Logger,
 		container.PerfTracker,
 	)
+	extendHistoryHandlers := handlers.NewExtendHistoryHandlers(
+		container.ExtendHistoryService,
+		container.ExtendRegistryService,
+		container.TenantManager,
+		container.Logger,
+		container.PerfTracker,
+	)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -240,6 +247,41 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			extendRebuild.POST("", extendRebuildHandlers.PostRebuild)
 			extendRebuild.GET("/latest", extendRebuildHandlers.GetLatest)
 			extendRebuild.GET("/:jobId", extendRebuildHandlers.GetJob)
+		}
+
+		// Extend design history — per-kind gates match the resources they restore
+		extendHistoryAssets := api.Group("/extend/history/assets")
+		extendHistoryAssets.Use(authHandlers.AuthMiddleware())
+		{
+			extendHistoryAssets.GET("", extendHistoryHandlers.GetAssetSlots)
+			extendHistoryAssets.POST("/restore", extendHistoryHandlers.RestoreAsset)
+		}
+		extendHistoryCSS := api.Group("/extend/history/custom-css")
+		extendHistoryCSS.Use(authHandlers.AuthMiddleware())
+		{
+			extendHistoryCSS.GET("", extendHistoryHandlers.GetCustomCSSSlots)
+			extendHistoryCSS.POST("/restore", extendHistoryHandlers.RestoreCustomCSS)
+		}
+		extendHistorySource := api.Group("/extend/history/source")
+		if config.EnableMultiTenant {
+			extendHistorySource.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendHistorySource.Use(authHandlers.AuthMiddleware())
+		}
+		{
+			extendHistorySource.GET("", extendHistoryHandlers.GetSourceSlots)
+			extendHistorySource.POST("/restore", extendHistoryHandlers.RestoreSource)
+		}
+		extendHistorySite := api.Group("/extend/history/site")
+		if config.EnableMultiTenant {
+			extendHistorySite.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendHistorySite.Use(authHandlers.AuthMiddleware())
+		}
+		{
+			extendHistorySite.GET("", extendHistoryHandlers.GetSitePoints)
+			extendHistorySite.GET("/:jobId", extendHistoryHandlers.GetSiteManifest)
+			extendHistorySite.POST("/:jobId/restore", extendHistoryHandlers.RestoreSite)
 		}
 
 		// Tailwind

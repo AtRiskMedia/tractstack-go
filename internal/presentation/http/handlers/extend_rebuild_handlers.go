@@ -7,6 +7,7 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/application/services"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
+	"github.com/AtRiskMedia/tractstack-go/internal/presentation/http/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -47,7 +48,12 @@ func (h *ExtendRebuildHandlers) writeRebuildError(c *gin.Context, err error) {
 
 // PostRebuild handles POST /api/v1/extend/rebuild
 func (h *ExtendRebuildHandlers) PostRebuild(c *gin.Context) {
-	jobID, err := h.rebuildService.QueueRebuild()
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
+	jobID, err := h.rebuildService.QueueRebuild(tenantCtx.TenantID)
 	if err != nil {
 		h.writeRebuildError(c, err)
 		return

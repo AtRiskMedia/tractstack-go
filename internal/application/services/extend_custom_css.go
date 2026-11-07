@@ -38,6 +38,7 @@ type ExtendCustomCSSService struct {
 	configService *ConfigService
 	logger        *logging.ChanneledLogger
 	perfTracker   *performance.Tracker
+	history       *ExtendHistoryService
 }
 
 // NewExtendCustomCSSService creates the custom.css service.
@@ -51,6 +52,11 @@ func NewExtendCustomCSSService(
 		logger:        logger,
 		perfTracker:   perfTracker,
 	}
+}
+
+// SetHistory attaches design-history snapshots for writes.
+func (s *ExtendCustomCSSService) SetHistory(h *ExtendHistoryService) {
+	s.history = h
 }
 
 // Get returns custom.css content and mtime (RFC3339).
@@ -94,6 +100,9 @@ func (s *ExtendCustomCSSService) Put(tenantCtx *tenant.Context, content string) 
 	path := CustomCSSPath(config.BackendPath, tenantCtx.TenantID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return 0, fmt.Errorf("create css directory: %w", err)
+	}
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(tenantCtx.TenantID, HistoryNsCustomCSS(), path)
 	}
 
 	tmpPath := path + ".tmp"

@@ -88,11 +88,24 @@ func (e *AssetInUseError) Unwrap() error {
 type ExtendAssetService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+	history     *ExtendHistoryService
 }
 
 // NewExtendAssetService creates the asset manager singleton.
 func NewExtendAssetService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ExtendAssetService {
 	return &ExtendAssetService{logger: logger, perfTracker: perfTracker}
+}
+
+// SetHistory attaches design-history snapshots for writes.
+func (s *ExtendAssetService) SetHistory(h *ExtendHistoryService) {
+	s.history = h
+}
+
+func (s *ExtendAssetService) snapshotAsset(tenantID, rel, abs string) {
+	if s.history == nil {
+		return
+	}
+	_ = s.history.SnapshotBeforeWrite(tenantID, HistoryNsAsset(rel), abs)
 }
 
 func probeMarkerName(tenantID string) string {
@@ -273,6 +286,7 @@ func (s *ExtendAssetService) PutFile(tenantID, rel, content string) error {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return err
 	}
+	s.snapshotAsset(tenantID, rel, abs)
 	return os.WriteFile(abs, []byte(content), 0o644)
 }
 
@@ -312,6 +326,8 @@ func (s *ExtendAssetService) Rename(tenantID, from, to string) error {
 	if err := os.MkdirAll(filepath.Dir(toAbs), 0o755); err != nil {
 		return err
 	}
+	s.snapshotAsset(tenantID, from, fromAbs)
+	s.snapshotAsset(tenantID, to, toAbs)
 	return os.Rename(fromAbs, toAbs)
 }
 
@@ -346,8 +362,10 @@ func (s *ExtendAssetService) Delete(tenantID, rel string, force bool) error {
 		if len(entries) > 0 {
 			return fmt.Errorf("%w: directory not empty", ErrAssetForbidden)
 		}
+		s.snapshotAsset(tenantID, rel, abs)
 		return os.Remove(abs)
 	}
+	s.snapshotAsset(tenantID, rel, abs)
 	return os.Remove(abs)
 }
 
@@ -549,6 +567,7 @@ func (s *ExtendAssetService) streamUpload(tenantID, rel string, r io.Reader, rem
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	s.snapshotAsset(tenantID, rel, abs)
 	if err := os.Rename(tmpName, abs); err != nil {
 		return err
 	}
@@ -638,6 +657,7 @@ func (s *ExtendAssetService) Unzip(tenantID, zipRel, targetRel string, keep bool
 		if err := os.MkdirAll(filepath.Dir(destAbs), 0o755); err != nil {
 			return err
 		}
+		s.snapshotAsset(tenantID, destRel, destAbs)
 		rc, err := f.Open()
 		if err != nil {
 			return err

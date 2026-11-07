@@ -74,12 +74,13 @@ type Container struct {
 	ShopifyService              *services.ShopifyService
 	ShopifyReconciliationWorker *services.ShopifyReconciliationWorker
 	Service                     *fts.Service
-	ExtendAssetService    *services.ExtendAssetService
-	ExtendSourceService   *services.ExtendSourceService
-	ExtendRegistryService *services.ExtendRegistryService
-	ExtendUsageService    *services.ExtendUsageService
-	ExtendRebuildService  *services.ExtendRebuildService
+	ExtendAssetService     *services.ExtendAssetService
+	ExtendSourceService    *services.ExtendSourceService
+	ExtendRegistryService  *services.ExtendRegistryService
+	ExtendUsageService     *services.ExtendUsageService
+	ExtendRebuildService   *services.ExtendRebuildService
 	ExtendCustomCSSService *services.ExtendCustomCSSService
+	ExtendHistoryService   *services.ExtendHistoryService
 
 	// Infrastructure Dependencies
 	TenantManager  *tenant.Manager
@@ -232,6 +233,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	extendRegistryService.SetUsageService(extendUsageService)
 	extendRebuildService := services.NewExtendRebuildService(logger, perfTracker)
 	extendCustomCSSService := services.NewExtendCustomCSSService(configService, logger, perfTracker)
+	extendHistoryService := services.NewExtendHistoryService(logger, perfTracker)
+	extendHistoryService.SetCustomCSSService(extendCustomCSSService)
+	extendAssetService.SetHistory(extendHistoryService)
+	extendSourceService.SetHistory(extendHistoryService)
+	extendRegistryService.SetHistory(extendHistoryService)
+	extendCustomCSSService.SetHistory(extendHistoryService)
+	extendRebuildService.SetHistory(extendHistoryService)
 
 	logger.Startup().Info("Dependency injection container services initialized")
 
@@ -289,12 +297,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		ShopifyService:              shopifyService,
 		ShopifyReconciliationWorker: shopifyReconciliationWorker,
 		Service:                     ftsService,
-		ExtendAssetService:    extendAssetService,
-		ExtendSourceService:   extendSourceService,
-		ExtendRegistryService: extendRegistryService,
-		ExtendUsageService:    extendUsageService,
-		ExtendRebuildService:  extendRebuildService,
+		ExtendAssetService:     extendAssetService,
+		ExtendSourceService:    extendSourceService,
+		ExtendRegistryService:  extendRegistryService,
+		ExtendUsageService:     extendUsageService,
+		ExtendRebuildService:   extendRebuildService,
 		ExtendCustomCSSService: extendCustomCSSService,
+		ExtendHistoryService:   extendHistoryService,
 
 		// Infrastructure
 		TenantManager: tenantManager,

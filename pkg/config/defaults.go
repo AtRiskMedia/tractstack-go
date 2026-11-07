@@ -239,6 +239,11 @@ var (
 
 	// ExposeAnalytics indicates whether analytics data should be exposed via API.
 	ExposeAnalytics bool
+
+	// ExtendFileHistorySlots is the max immutable per-file history slots per path (keyed by build stamp).
+	ExtendFileHistorySlots int
+	// ExtendSiteHistorySlots is the max sealed site design-history points (keyed by rebuild jobId).
+	ExtendSiteHistorySlots int
 )
 
 func parseCollectionRoutes(value string) []string {
@@ -340,4 +345,14 @@ func init() {
 
 	// Analytics Configuration
 	ExposeAnalytics = getEnvBool("EXPOSE_ANALYTICS", false)
+
+	// Extend design history
+	ExtendFileHistorySlots = getEnvInt("EXTEND_FILE_HISTORY_SLOTS", 3)
+	if ExtendFileHistorySlots < 1 {
+		ExtendFileHistorySlots = 1
+	}
+	ExtendSiteHistorySlots = getEnvInt("EXTEND_SITE_HISTORY_SLOTS", 3)
+	if ExtendSiteHistorySlots < 1 {
+		ExtendSiteHistorySlots = 1
+	}
 }

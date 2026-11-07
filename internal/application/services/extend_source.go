@@ -46,11 +46,17 @@ type SourceNode struct {
 type ExtendSourceService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+	history     *ExtendHistoryService
 }
 
 // NewExtendSourceService creates the source file service.
 func NewExtendSourceService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ExtendSourceService {
 	return &ExtendSourceService{logger: logger, perfTracker: perfTracker}
+}
+
+// SetHistory attaches design-history snapshots for writes.
+func (s *ExtendSourceService) SetHistory(h *ExtendHistoryService) {
+	s.history = h
 }
 
 func (s *ExtendSourceService) sourceRoot() (string, error) {
@@ -301,6 +307,9 @@ func (s *ExtendSourceService) PutFile(tenantID, rel, content string) error {
 		}
 	} else if info.IsDir() {
 		return ErrSourceNotFound
+	}
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(tenantID, HistoryNsSource(rel), abs)
 	}
 	return os.WriteFile(abs, []byte(content), 0o644)
 }

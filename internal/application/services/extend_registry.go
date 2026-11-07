@@ -65,11 +65,17 @@ type ExtendRegistryService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
 	usage       *ExtendUsageService
+	history     *ExtendHistoryService
 }
 
 // NewExtendRegistryService creates the registry service.
 func NewExtendRegistryService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ExtendRegistryService {
 	return &ExtendRegistryService{logger: logger, perfTracker: perfTracker}
+}
+
+// SetHistory attaches design-history snapshots for trunk writes.
+func (s *ExtendRegistryService) SetHistory(h *ExtendHistoryService) {
+	s.history = h
 }
 
 func (s *ExtendRegistryService) sourceRoot() (string, error) {

@@ -110,6 +110,9 @@ func (s *ExtendRegistryService) CreateHook(tenantID, id, kind string) (*HookCrea
 	if err := os.MkdirAll(filepath.Dir(bladeAbs), 0o755); err != nil {
 		return nil, err
 	}
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(tenantID, HistoryNsSource(bladeRel), bladeAbs)
+	}
 	if err := os.WriteFile(bladeAbs, []byte(GenerateHookScaffold(id, kind)), 0o644); err != nil {
 		return nil, err
 	}
@@ -125,7 +128,7 @@ func (s *ExtendRegistryService) CreateHook(tenantID, id, kind string) (*HookCrea
 
 	manifestManual := reg.Manifest.Mode != "managed"
 	if !manifestManual {
-		if err := s.writeManagedManifest(root, reg); err != nil {
+		if err := s.writeManagedManifest(root, tenantID, reg); err != nil {
 			return nil, err
 		}
 	}
@@ -176,13 +179,17 @@ func (s *ExtendRegistryService) DeleteHook(requestTenantID, id string) (*Registr
 	if blade == "" {
 		blade = "src/pages/codehooks/" + id + ".astro"
 	}
-	_ = os.Remove(filepath.Join(root, filepath.FromSlash(blade)))
+	bladeAbs := filepath.Join(root, filepath.FromSlash(blade))
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(requestTenantID, HistoryNsSource(blade), bladeAbs)
+	}
+	_ = os.Remove(bladeAbs)
 
 	reg.Hooks = append(reg.Hooks[:idx], reg.Hooks[idx+1:]...)
 
 	manifestManual := reg.Manifest.Mode != "managed"
 	if !manifestManual {
-		if err := s.writeManagedManifest(root, reg); err != nil {
+		if err := s.writeManagedManifest(root, requestTenantID, reg); err != nil {
 			return nil, err
 		}
 	}
@@ -250,6 +257,9 @@ func (s *ExtendRegistryService) CreateRoute(requestTenantID, name string) (*Rout
 	if err := os.MkdirAll(filepath.Dir(shellAbs), 0o755); err != nil {
 		return nil, err
 	}
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(requestTenantID, HistoryNsSource(shellRel), shellAbs)
+	}
 	if err := os.WriteFile(shellAbs, []byte(GenerateShell(name)), 0o644); err != nil {
 		return nil, err
 	}
@@ -260,6 +270,9 @@ func (s *ExtendRegistryService) CreateRoute(requestTenantID, name string) (*Rout
 		return nil, err
 	}
 	if _, err := os.Stat(viewAbs); os.IsNotExist(err) {
+		if s.history != nil {
+			_ = s.history.SnapshotBeforeWrite(requestTenantID, HistoryNsSource(viewRel), viewAbs)
+		}
 		if err := os.WriteFile(viewAbs, []byte(GenerateRouteView(name)), 0o644); err != nil {
 			return nil, err
 		}
@@ -325,10 +338,16 @@ func (s *ExtendRegistryService) DeleteRoute(requestTenantID, name string) (*Regi
 	}
 
 	removed := []string{}
-	if err := os.Remove(filepath.Join(root, filepath.FromSlash(shellRel))); err == nil {
+	shellAbs := filepath.Join(root, filepath.FromSlash(shellRel))
+	viewAbs := filepath.Join(root, filepath.FromSlash(viewRel))
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(requestTenantID, HistoryNsSource(shellRel), shellAbs)
+		_ = s.history.SnapshotBeforeWrite(requestTenantID, HistoryNsSource(viewRel), viewAbs)
+	}
+	if err := os.Remove(shellAbs); err == nil {
 		removed = append(removed, shellRel)
 	}
-	if err := os.Remove(filepath.Join(root, filepath.FromSlash(viewRel))); err == nil {
+	if err := os.Remove(viewAbs); err == nil {
 		removed = append(removed, viewRel)
 	}
 
@@ -363,14 +382,15 @@ func listLeftovers(dirAbs, sourceRoot string) []string {
 	return out
 }
 
-func (s *ExtendRegistryService) writeManagedManifest(root string, reg *ExtendRegistry) error {
+func (s *ExtendRegistryService) writeManagedManifest(root, tenantID string, reg *ExtendRegistry) error {
 	ids := make([]string, 0, len(reg.Hooks))
 	for _, h := range reg.Hooks {
 		ids = append(ids, h.ID)
 	}
-	return os.WriteFile(
-		filepath.Join(root, "src", "custom", "codehooks.ts"),
-		[]byte(GenerateManagedManifest(ids)),
-		0o644,
-	)
+	rel := "src/custom/codehooks.ts"
+	abs := filepath.Join(root, filepath.FromSlash(rel))
+	if s.history != nil {
+		_ = s.history.SnapshotBeforeWrite(tenantID, HistoryNsSource(rel), abs)
+	}
+	return os.WriteFile(abs, []byte(GenerateManagedManifest(ids)), 0o644)
 }

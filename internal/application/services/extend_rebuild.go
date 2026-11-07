@@ -62,11 +62,17 @@ type RebuildJobResponse struct {
 type ExtendRebuildService struct {
 	logger      *logging.ChanneledLogger
 	perfTracker *performance.Tracker
+	history     *ExtendHistoryService
 }
 
 // NewExtendRebuildService creates the rebuild job service.
 func NewExtendRebuildService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker) *ExtendRebuildService {
 	return &ExtendRebuildService{logger: logger, perfTracker: perfTracker}
+}
+
+// SetHistory attaches site-seal on rebuild queue.
+func (s *ExtendRebuildService) SetHistory(h *ExtendHistoryService) {
+	s.history = h
 }
 
 func (s *ExtendRebuildService) requirePublish() error {
@@ -76,8 +82,9 @@ func (s *ExtendRebuildService) requirePublish() error {
 	return nil
 }
 
-// QueueRebuild mints a ULID, writes queued job + csv, returns jobId.
-func (s *ExtendRebuildService) QueueRebuild() (string, error) {
+// QueueRebuild seals a site history point for tenantID, mints a ULID, writes queued job + csv.
+// Seal failure aborts before job/CSV are written.
+func (s *ExtendRebuildService) QueueRebuild(tenantID string) (string, error) {
 	if err := s.requirePublish(); err != nil {
 		return "", err
 	}
@@ -91,6 +98,12 @@ func (s *ExtendRebuildService) QueueRebuild() (string, error) {
 	}
 
 	jobID := security.GenerateULID()
+	if s.history != nil {
+		if err := s.history.SealSitePoint(tenantID, jobID); err != nil {
+			return "", fmt.Errorf("seal site history: %w", err)
+		}
+	}
+
 	jobsDir := JobsDir()
 	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir jobs: %w", err)
