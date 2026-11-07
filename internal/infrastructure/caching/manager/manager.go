@@ -603,14 +603,27 @@ func (m *Manager) GetContentBySlug(tenantID, slug string) (string, bool) {
 
 // GetResourcesByCategory retrieves all resource IDs belonging to a specific category for a tenant.
 func (m *Manager) GetResourcesByCategory(tenantID, category string) ([]string, bool) {
-	cache, err := m.GetTenantContentCache(tenantID)
-	if err != nil {
-		return nil, false
-	}
-	cache.Mu.RLock()
-	defer cache.Mu.RUnlock()
-	ids, exists := cache.CategoryToIDs[category]
-	return ids, exists
+	return m.contentStore.GetResourcesByCategory(tenantID, category)
+}
+
+// SetCategoryIDs stores the ordered resource ID list for a category.
+func (m *Manager) SetCategoryIDs(tenantID, category string, ids []string) {
+	m.contentStore.SetCategoryIDs(tenantID, category, ids)
+}
+
+// InvalidateCategoryIndex clears the category-to-IDs index for a tenant.
+func (m *Manager) InvalidateCategoryIndex(tenantID string) {
+	m.contentStore.InvalidateCategoryIndex(tenantID)
+}
+
+// TouchResourcesVersion bumps the per-tenant resources version.
+func (m *Manager) TouchResourcesVersion(tenantID string) {
+	m.contentStore.TouchResourcesVersion(tenantID)
+}
+
+// GetResourcesVersion returns the per-tenant resources version.
+func (m *Manager) GetResourcesVersion(tenantID string) (time.Time, bool) {
+	return m.contentStore.GetResourcesVersion(tenantID)
 }
 
 // GetFullContentMap retrieves the complete hierarchical content map for a tenant.

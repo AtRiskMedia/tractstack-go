@@ -37,6 +37,10 @@ type TenantContentCache struct {
 	FullContentMap        []FullContentMapItem `json:"fullContentMap,omitempty"`
 	ContentMapLastUpdated time.Time            `json:"contentMapLastUpdated"`
 
+	// ResourcesVersion is bumped only on resource writes (create/update/delete/bulk).
+	// It is not cleared by content-cache TTL flush or InvalidateContentCache.
+	ResourcesVersion time.Time `json:"resourcesVersion"`
+
 	// Shopify Data
 	ShopifyCatalog            []byte
 	ShopifyCatalogLastUpdated time.Time

@@ -54,6 +54,7 @@ func CORSMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
 			"X-Tenant-ID", "X-Requested-With", "X-TractStack-Session-ID", "X-StoryFragment-ID",
 			"hx-current-url", "hx-request", "hx-target", "hx-trigger", "hx-boosted",
 			"Cache-Control",
+			"If-None-Match",
 			"hx-trigger-name",
 			"hx-active-element",
 			"hx-active-element-name",
@@ -61,7 +62,7 @@ func CORSMiddleware(tenantManager *tenant.Manager) gin.HandlerFunc {
 		},
 		AllowCredentials: true,
 		ExposeHeaders: []string{
-			"Content-Type", "Cache-Control", "Connection",
+			"Content-Type", "Cache-Control", "Connection", "ETag",
 		},
 	}
 

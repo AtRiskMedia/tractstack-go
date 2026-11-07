@@ -55,6 +55,7 @@ func (cs *ContentStore) InitializeTenant(tenantID string) {
 			AllPaneIDs:                    make([]string, 0),
 			FullContentMap:                make([]types.FullContentMapItem, 0),
 			ContentMapLastUpdated:         time.Now().UTC(),
+			ResourcesVersion:              time.Now().UTC(),
 			LastUpdated:                   time.Now().UTC(),
 			OrphanAnalysis:                nil,
 		}
@@ -643,9 +644,81 @@ func (cs *ContentStore) InvalidateResource(tenantID, id string) {
 	cache.Mu.Lock()
 	defer cache.Mu.Unlock()
 	if resource, ok := cache.Resources[id]; ok {
-		delete(cache.SlugToID, "resource:"+resource.Slug)
+		delete(cache.SlugToID, resource.Slug)
 	}
 	delete(cache.Resources, id)
+	// Category index may be stale after a delete; clear it.
+	cache.CategoryToIDs = make(map[string][]string)
+}
+
+// TouchResourcesVersion bumps the per-tenant resources version (write-only signal).
+func (cs *ContentStore) TouchResourcesVersion(tenantID string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		cs.InitializeTenant(tenantID)
+		cache, _ = cs.GetTenantCache(tenantID)
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.ResourcesVersion = time.Now().UTC()
+}
+
+// GetResourcesVersion returns the per-tenant resources version and whether it is set.
+func (cs *ContentStore) GetResourcesVersion(tenantID string) (time.Time, bool) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return time.Time{}, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	if cache.ResourcesVersion.IsZero() {
+		return time.Time{}, false
+	}
+	return cache.ResourcesVersion, true
+}
+
+// SetCategoryIDs stores the ordered resource ID list for a category.
+func (cs *ContentStore) SetCategoryIDs(tenantID, category string, ids []string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		cs.InitializeTenant(tenantID)
+		cache, _ = cs.GetTenantCache(tenantID)
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	copied := make([]string, len(ids))
+	copy(copied, ids)
+	cache.CategoryToIDs[category] = copied
+}
+
+// InvalidateCategoryIndex clears the category-to-IDs index for a tenant.
+func (cs *ContentStore) InvalidateCategoryIndex(tenantID string) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return
+	}
+	cache.Mu.Lock()
+	defer cache.Mu.Unlock()
+	cache.CategoryToIDs = make(map[string][]string)
+}
+
+// GetResourcesByCategory retrieves cached resource IDs for a category.
+// Returns false when the category key is absent (including never-queried).
+// An empty slice with true means the category was queried and has no resources.
+func (cs *ContentStore) GetResourcesByCategory(tenantID, category string) ([]string, bool) {
+	cache, exists := cs.GetTenantCache(tenantID)
+	if !exists {
+		return nil, false
+	}
+	cache.Mu.RLock()
+	defer cache.Mu.RUnlock()
+	ids, exists := cache.CategoryToIDs[category]
+	if !exists {
+		return nil, false
+	}
+	copied := make([]string, len(ids))
+	copy(copied, ids)
+	return copied, true
 }
 
 // AddResourceID adds a resource ID to the tenant's cached list of resources.
