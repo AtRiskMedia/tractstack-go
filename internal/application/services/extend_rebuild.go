@@ -70,7 +70,7 @@ func NewExtendRebuildService(logger *logging.ChanneledLogger, perfTracker *perfo
 	return &ExtendRebuildService{logger: logger, perfTracker: perfTracker}
 }
 
-// SetHistory attaches site-seal on rebuild queue.
+// SetHistory attaches provisional site history on rebuild queue / finalize.
 func (s *ExtendRebuildService) SetHistory(h *ExtendHistoryService) {
 	s.history = h
 }
@@ -82,8 +82,21 @@ func (s *ExtendRebuildService) requirePublish() error {
 	return nil
 }
 
-// QueueRebuild seals a site history point for tenantID, mints a ULID, writes queued job + csv.
-// Seal failure aborts before job/CSV are written.
+// finalizeSiteHistory commits provisional seals on succeeded, aborts on failed/unsupported.
+func (s *ExtendRebuildService) finalizeSiteHistory(tenantID, jobID, status string) {
+	if s.history == nil || tenantID == "" || jobID == "" {
+		return
+	}
+	switch status {
+	case "succeeded":
+		_ = s.history.CommitSitePoint(tenantID, jobID)
+	case "failed", "unsupported":
+		_ = s.history.AbortSitePoint(tenantID, jobID)
+	}
+}
+
+// QueueRebuild begins a provisional site history point, mints a ULID, writes queued job + csv.
+// Begin failure aborts before job/CSV are written. Later write failures AbortSitePoint.
 func (s *ExtendRebuildService) QueueRebuild(tenantID string) (string, error) {
 	if err := s.requirePublish(); err != nil {
 		return "", err
@@ -99,13 +112,16 @@ func (s *ExtendRebuildService) QueueRebuild(tenantID string) (string, error) {
 
 	jobID := security.GenerateULID()
 	if s.history != nil {
-		if err := s.history.SealSitePoint(tenantID, jobID); err != nil {
-			return "", fmt.Errorf("seal site history: %w", err)
+		if err := s.history.BeginSitePoint(tenantID, jobID); err != nil {
+			return "", fmt.Errorf("begin site history: %w", err)
 		}
 	}
 
 	jobsDir := JobsDir()
 	if err := os.MkdirAll(jobsDir, 0o755); err != nil {
+		if s.history != nil {
+			_ = s.history.AbortSitePoint(tenantID, jobID)
+		}
 		return "", fmt.Errorf("mkdir jobs: %w", err)
 	}
 
@@ -117,6 +133,9 @@ func (s *ExtendRebuildService) QueueRebuild(tenantID string) (string, error) {
 	}
 	jobPath := filepath.Join(jobsDir, jobID+".json")
 	if err := writeJobJSON(jobPath, &job); err != nil {
+		if s.history != nil {
+			_ = s.history.AbortSitePoint(tenantID, jobID)
+		}
 		return "", err
 	}
 
@@ -129,17 +148,24 @@ func (s *ExtendRebuildService) QueueRebuild(tenantID string) (string, error) {
 		csvLine = fmt.Sprintf("type=dedicated,site=%s,command=rebuild-frontend,job=%s\n", target.Site, jobID)
 	default:
 		_ = os.Remove(jobPath)
+		if s.history != nil {
+			_ = s.history.AbortSitePoint(tenantID, jobID)
+		}
 		return "", ErrRebuildUnavailable
 	}
 	if err := os.WriteFile(csvPath, []byte(csvLine), 0o644); err != nil {
 		_ = os.Remove(jobPath)
+		if s.history != nil {
+			_ = s.history.AbortSitePoint(tenantID, jobID)
+		}
 		return "", fmt.Errorf("write csv: %w", err)
 	}
 	return jobID, nil
 }
 
-// GetJob returns job JSON plus log tail when building|failed; applies unsupported timeout.
-func (s *ExtendRebuildService) GetJob(jobID string) (*RebuildJobResponse, error) {
+// GetJob returns job JSON plus log tail when building|failed; applies unsupported timeout
+// and finalizes provisional site history on terminal status.
+func (s *ExtendRebuildService) GetJob(tenantID, jobID string) (*RebuildJobResponse, error) {
 	if err := s.requirePublish(); err != nil {
 		return nil, err
 	}
@@ -160,12 +186,14 @@ func (s *ExtendRebuildService) GetJob(jobID string) (*RebuildJobResponse, error)
 	}
 
 	if job.Status == "queued" {
-		if marked, markErr := s.maybeMarkUnsupported(job, jobPath, jobID); markErr != nil {
+		if marked, markErr := s.maybeMarkUnsupported(tenantID, job, jobPath, jobID); markErr != nil {
 			return nil, markErr
 		} else if marked != nil {
 			job = marked
 		}
 	}
+
+	s.finalizeSiteHistory(tenantID, jobID, job.Status)
 
 	resp := &RebuildJobResponse{RebuildJob: *job}
 	if job.Status == "building" || job.Status == "failed" {
@@ -211,7 +239,7 @@ func ReadLatestFrontendBuild() (jobID, status, builtAt string, ok bool) {
 	return job.JobID, job.Status, job.BuiltAt, true
 }
 
-func (s *ExtendRebuildService) maybeMarkUnsupported(job *RebuildJob, jobPath, jobID string) (*RebuildJob, error) {
+func (s *ExtendRebuildService) maybeMarkUnsupported(tenantID string, job *RebuildJob, jobPath, jobID string) (*RebuildJob, error) {
 	queuedAt, err := time.Parse(time.RFC3339, job.QueuedAt)
 	if err != nil {
 		// try without monotonic / Z variants
@@ -233,6 +261,7 @@ func (s *ExtendRebuildService) maybeMarkUnsupported(job *RebuildJob, jobPath, jo
 	if err := writeJobJSON(jobPath, job); err != nil {
 		return nil, err
 	}
+	s.finalizeSiteHistory(tenantID, jobID, "unsupported")
 	return job, nil
 }
 

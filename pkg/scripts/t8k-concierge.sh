@@ -260,14 +260,11 @@ build_astro_release() {
   mkdir -p src/generated releases
   local built_at
   built_at=$(iso_now)
-  # Same ISO for stamp and later job records (JOB_BUILT_AT read by write_job_record).
+  # Same ISO for stamp (written only after swap) and job records.
   JOB_BUILT_AT="$built_at"
-  cat >src/generated/buildStamp.ts <<EOF
-export const buildStamp = { jobId: '${stamp_id}', builtAt: '${built_at}' };
-EOF
 
   if ! run_logged pnpm build --outDir "releases/${release_name}"; then
-    log_error "Astro build failed (symlink left unchanged)"
+    log_error "Astro build failed (symlink left unchanged; stamp unchanged)"
     return 1
   fi
 
@@ -276,12 +273,17 @@ EOF
   fi
 
   if [[ ! -f "$release_dir/server/entry.mjs" ]]; then
-    log_error "Release entry missing: $release_dir/server/entry.mjs (symlink left unchanged)"
+    log_error "Release entry missing: $release_dir/server/entry.mjs (symlink left unchanged; stamp unchanged)"
     return 1
   fi
 
   ln -sfn "releases/${release_name}" dist.tmp && mv -Tf dist.tmp dist
   log "Swapped dist → releases/${release_name}"
+
+  # Stamp only after a successful swap so failed builds leave prior "current" intact.
+  cat >src/generated/buildStamp.ts <<EOF
+export const buildStamp = { jobId: '${stamp_id}', builtAt: '${built_at}' };
+EOF
 
   log "Extracting Tailwind whitelist from built assets..."
   local astro_dist_dir="$astro_src_dir/dist"

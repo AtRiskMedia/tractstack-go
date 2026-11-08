@@ -77,8 +77,13 @@ func (h *ExtendRebuildHandlers) GetLatest(c *gin.Context) {
 
 // GetJob handles GET /api/v1/extend/rebuild/:jobId
 func (h *ExtendRebuildHandlers) GetJob(c *gin.Context) {
+	tenantCtx, exists := middleware.GetTenantContext(c)
+	if !exists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "tenant context not found"})
+		return
+	}
 	jobID := c.Param("jobId")
-	resp, err := h.rebuildService.GetJob(jobID)
+	resp, err := h.rebuildService.GetJob(tenantCtx.TenantID, jobID)
 	if err != nil {
 		h.writeRebuildError(c, err)
 		return

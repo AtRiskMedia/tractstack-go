@@ -143,7 +143,7 @@ func TestSnapshotBeforeWrite_TombstoneAndPrune(t *testing.T) {
 	}
 }
 
-func TestSealSitePoint_ManifestAndPrune(t *testing.T) {
+func TestBeginCommitAbortSitePoint(t *testing.T) {
 	_, srcRoot, tenantID, cleanup := withHistoryFixture(t)
 	defer cleanup()
 	config.ExtendSiteHistorySlots = 2
@@ -161,7 +161,7 @@ func TestSealSitePoint_ManifestAndPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.SealSitePoint(tenantID, "job-1"); err != nil {
+	if err := svc.BeginSitePoint(tenantID, "job-1"); err != nil {
 		t.Fatal(err)
 	}
 	m, err := svc.ReadManifest(tenantID, "job-1")
@@ -181,14 +181,41 @@ func TestSealSitePoint_ManifestAndPrune(t *testing.T) {
 	if !found["src/custom/A.astro"] || !found["custom/logo.png"] || !found["media/css/custom.css"] {
 		t.Fatalf("paths missing: %+v", found)
 	}
-
-	if err := svc.SealSitePoint(tenantID, "job-2"); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.SealSitePoint(tenantID, "job-3"); err != nil {
-		t.Fatal(err)
-	}
 	points, err := svc.ListSitePoints(tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 0 {
+		t.Fatalf("provisional must not list in Sites, got %d", len(points))
+	}
+
+	if err := svc.CommitSitePoint(tenantID, "job-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitSitePoint(tenantID, "job-1"); err != nil {
+		t.Fatal(err) // idempotent
+	}
+	points, err = svc.ListSitePoints(tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 1 || points[0].JobID != "job-1" {
+		t.Fatalf("want committed job-1, got %+v", points)
+	}
+
+	if err := svc.BeginSitePoint(tenantID, "job-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitSitePoint(tenantID, "job-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BeginSitePoint(tenantID, "job-3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitSitePoint(tenantID, "job-3"); err != nil {
+		t.Fatal(err)
+	}
+	points, err = svc.ListSitePoints(tenantID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,6 +224,23 @@ func TestSealSitePoint_ManifestAndPrune(t *testing.T) {
 	}
 	if _, err := svc.ReadManifest(tenantID, "job-1"); err == nil {
 		t.Fatal("job-1 should be pruned")
+	}
+
+	if err := svc.BeginSitePoint(tenantID, "job-abort"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AbortSitePoint(tenantID, "job-abort"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ReadManifest(tenantID, "job-abort"); err == nil {
+		t.Fatal("aborted seal should be gone")
+	}
+	points, err = svc.ListSitePoints(tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 2 {
+		t.Fatalf("abort of provisional must not change Sites, got %d", len(points))
 	}
 }
 
@@ -209,7 +253,10 @@ func TestRestoreSitePoint_SwapAndDeleteExtras(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcRoot, "src", "custom", "Keep.astro"), []byte("keep"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.SealSitePoint(tenantID, "job-seal"); err != nil {
+	if err := svc.BeginSitePoint(tenantID, "job-seal"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CommitSitePoint(tenantID, "job-seal"); err != nil {
 		t.Fatal(err)
 	}
 

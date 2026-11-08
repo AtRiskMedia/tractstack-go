@@ -572,8 +572,10 @@ func (s *ExtendHistoryService) EnumerateDesignTree(tenantID string) ([]designFil
 	return out, nil
 }
 
-// SealSitePoint seals the full design tree as site/<jobID>/. Immutable; fails if already present.
-func (s *ExtendHistoryService) SealSitePoint(tenantID, jobID string) error {
+// BeginSitePoint provisionally seals the design tree as site/<jobID>/.
+// Does not append to meta.Sites (not restorable until CommitSitePoint).
+// Immutable; fails if site/<jobID>/ already present.
+func (s *ExtendHistoryService) BeginSitePoint(tenantID, jobID string) error {
 	if !isSafeJobID(jobID) {
 		return ErrHistoryInvalidJob
 	}
@@ -617,7 +619,7 @@ func (s *ExtendHistoryService) SealSitePoint(tenantID, jobID string) error {
 	manifest := SiteManifest{
 		SchemaVersion: historySchemaVersion,
 		JobID:         jobID,
-		BuiltAt:       "", // filled later by concierge success; empty at seal time
+		BuiltAt:       "", // filled at commit / concierge success; empty while provisional
 		SealedAt:      sealedAt,
 		TenantID:      tenantID,
 		Stamp:         stamp,
@@ -635,7 +637,6 @@ func (s *ExtendHistoryService) SealSitePoint(tenantID, jobID string) error {
 		_ = os.RemoveAll(tmpDir)
 		return err
 	}
-	// fsync directory best-effort via re-open
 	if d, err := os.Open(tmpDir); err == nil {
 		_ = d.Sync()
 		_ = d.Close()
@@ -648,16 +649,47 @@ func (s *ExtendHistoryService) SealSitePoint(tenantID, jobID string) error {
 		_ = os.RemoveAll(tmpDir)
 		return err
 	}
+	return nil
+}
+
+// CommitSitePoint promotes a provisional site/<jobID>/ into meta.Sites (durable history).
+// Idempotent if already listed. Requires the seal directory to exist.
+func (s *ExtendHistoryService) CommitSitePoint(tenantID, jobID string) error {
+	if !isSafeJobID(jobID) {
+		return ErrHistoryInvalidJob
+	}
+	mu := s.lock(tenantID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	finalDir := filepath.Join(historyRoot(tenantID), "site", jobID)
+	manifestPath := filepath.Join(finalDir, historyManifestFile)
+	b, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return ErrHistoryNotFound
+		}
+		return err
+	}
+	var manifest SiteManifest
+	if err := json.Unmarshal(b, &manifest); err != nil {
+		return err
+	}
 
 	meta, err := s.loadMeta(tenantID)
 	if err != nil {
 		return err
 	}
+	for _, p := range meta.Sites {
+		if p.JobID == jobID {
+			return nil // already committed
+		}
+	}
 	meta.Sites = append([]SiteHistoryMeta{{
 		JobID:      jobID,
-		SealedAt:   sealedAt,
-		FileCount:  len(entries),
-		TotalBytes: total,
+		SealedAt:   manifest.SealedAt,
+		FileCount:  manifest.FileCount,
+		TotalBytes: manifest.TotalBytes,
 	}}, meta.Sites...)
 
 	maxSites := config.ExtendSiteHistorySlots
@@ -669,6 +701,39 @@ func (s *ExtendHistoryService) SealSitePoint(tenantID, jobID string) error {
 		meta.Sites = meta.Sites[:len(meta.Sites)-1]
 		_ = os.RemoveAll(filepath.Join(historyRoot(tenantID), "site", old.JobID))
 	}
+	return s.saveMeta(tenantID, meta)
+}
+
+// AbortSitePoint discards a provisional (or committed) site/<jobID>/ and removes it from meta.Sites.
+// Idempotent when the seal is already gone.
+func (s *ExtendHistoryService) AbortSitePoint(tenantID, jobID string) error {
+	if !isSafeJobID(jobID) {
+		return ErrHistoryInvalidJob
+	}
+	mu := s.lock(tenantID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	_ = os.RemoveAll(filepath.Join(historyRoot(tenantID), "site", jobID))
+	_ = os.RemoveAll(filepath.Join(historyRoot(tenantID), "site", ".tmp-"+jobID))
+
+	meta, err := s.loadMeta(tenantID)
+	if err != nil {
+		return err
+	}
+	filtered := meta.Sites[:0]
+	changed := false
+	for _, p := range meta.Sites {
+		if p.JobID == jobID {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	if !changed {
+		return nil
+	}
+	meta.Sites = filtered
 	return s.saveMeta(tenantID, meta)
 }
 
@@ -721,6 +786,25 @@ func (s *ExtendHistoryService) RestoreSitePoint(tenantCtx *tenant.Context, jobID
 	tenantID := tenantCtx.TenantID
 	if !isSafeJobID(jobID) {
 		return nil, ErrHistoryInvalidJob
+	}
+	// Only committed points (meta.Sites) are restorable.
+	mu := s.lock(tenantID)
+	mu.Lock()
+	meta, err := s.loadMeta(tenantID)
+	if err != nil {
+		mu.Unlock()
+		return nil, err
+	}
+	committed := false
+	for _, p := range meta.Sites {
+		if p.JobID == jobID {
+			committed = true
+			break
+		}
+	}
+	mu.Unlock()
+	if !committed {
+		return nil, ErrHistoryNotFound
 	}
 	manifest, err := s.ReadManifest(tenantID, jobID)
 	if err != nil {
