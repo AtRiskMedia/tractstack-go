@@ -33,8 +33,10 @@ run_logged() {
   "$@"
 }
 
-# State directory (single location for all installations)
+# CSV trigger mailbox (watched by t8k-build-watcher.path)
 STATE_DIR="/home/t8k/state"
+# Rebuild job JSON/logs/latest.json — outside STATE_DIR so path watches do not false-trigger
+JOBS_DIR="/home/t8k/jobs"
 LOG_FILE="/home/t8k/log/concierge.log"
 
 # Ensure log directory exists
@@ -343,7 +345,7 @@ build_astro_frontend() {
 # Author rebuild-frontend: no git pull, pnpm up, go build, or systemctl restart
 process_rebuild_frontend() {
   local csv_file="$1"
-  local jobs_dir="$STATE_DIR/jobs"
+  local jobs_dir="$JOBS_DIR"
   local job_id="$CSV_JOB"
   local astro_src_dir
 

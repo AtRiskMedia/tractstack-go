@@ -8,12 +8,16 @@ import (
 	"strings"
 )
 
-// StateDir is the concierge state directory (t8k-concierge.sh hardcodes it).
+// StateDir is the concierge CSV trigger mailbox (t8k-concierge.sh hardcodes it).
+// Watched by t8k-build-watcher.path — must not hold durable job artifacts.
 const StateDir = "/home/t8k/state"
 
-// JobsDir is StateDir/jobs (concierge job JSON + logs).
+// JobsDirPath is the machine-global rebuild job JSON/log directory (sibling of StateDir).
+const JobsDirPath = "/home/t8k/jobs"
+
+// JobsDir returns JobsDirPath (concierge job JSON + logs + latest.json).
 func JobsDir() string {
-	return filepath.Join(StateDir, "jobs")
+	return JobsDirPath
 }
 
 var dedicatedSitePath = regexp.MustCompile(`^/home/t8k/sites/([a-z0-9-]{3,12})$`)

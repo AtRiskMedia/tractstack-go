@@ -3,6 +3,7 @@ package services
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,16 @@ func TestSourceRootAndAssetRoot(t *testing.T) {
 	}
 	if got := AssetRoot(backend, "default"); got != "/home/t8k/t8k-go-server/config/default/custom" {
 		t.Fatalf("AssetRoot = %q", got)
+	}
+}
+
+func TestJobsDir_OutsideStateDir(t *testing.T) {
+	got := JobsDir()
+	if got != "/home/t8k/jobs" {
+		t.Fatalf("JobsDir() = %q, want /home/t8k/jobs", got)
+	}
+	if got == StateDir || strings.HasPrefix(got, StateDir+string(os.PathSeparator)) {
+		t.Fatalf("JobsDir() %q must not be under StateDir %q", got, StateDir)
 	}
 }
 
