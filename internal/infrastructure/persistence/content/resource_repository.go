@@ -72,7 +72,7 @@ func (r *ResourceRepository) FindByCategory(tenantID, category string) ([]*conte
 		return r.FindByIDs(tenantID, resourceIDs)
 	}
 
-	ids, err := r.getIDsByCategoryFromDB(category)
+	ids, err := r.getIDsByCategoryFromDB(tenantID, category)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +202,8 @@ func (r *ResourceRepository) Store(tenantID string, resource *content.ResourceNo
 	}
 
 	r.cache.SetResource(tenantID, resource)
+	r.cache.InvalidateCategoryIndex(tenantID)
+	r.cache.TouchResourcesVersion(tenantID)
 	return nil
 }
 
@@ -246,6 +248,8 @@ func (r *ResourceRepository) Update(tenantID string, resource *content.ResourceN
 	}
 
 	r.cache.SetResource(tenantID, resource)
+	r.cache.InvalidateCategoryIndex(tenantID)
+	r.cache.TouchResourcesVersion(tenantID)
 	return nil
 }
 
@@ -278,6 +282,8 @@ func (r *ResourceRepository) Delete(tenantID, id string) error {
 	}
 
 	r.cache.InvalidateResource(tenantID, id)
+	r.cache.InvalidateCategoryIndex(tenantID)
+	r.cache.TouchResourcesVersion(tenantID)
 
 	return nil
 }
@@ -483,7 +489,7 @@ func (r *ResourceRepository) getIDBySlugFromDB(slug string) (string, error) {
 	return id, nil
 }
 
-func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, error) {
+func (r *ResourceRepository) getIDsByCategoryFromDB(tenantID, category string) ([]string, error) {
 	query := `SELECT id FROM resources WHERE category_slug = ? ORDER BY title`
 
 	start := time.Now()
@@ -509,22 +515,55 @@ func (r *ResourceRepository) getIDsByCategoryFromDB(category string) ([]string, 
 		resourceIDs = append(resourceIDs, id)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	r.cache.SetCategoryIDs(tenantID, category, resourceIDs)
+
 	r.logger.Database().Info("Resource IDs loaded by category", "category", category, "count", len(resourceIDs), "duration", time.Since(start))
 	duration := time.Since(start)
 	if duration > config.SlowQueryThreshold {
 		r.logger.LogSlowQuery(query, duration, "system")
 	}
-	return resourceIDs, rows.Err()
+	return resourceIDs, nil
 }
 
 // FindByFilters performs a complex search for resources using optional IDs, categories, and slugs.
 func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, categories []string, slugs []string) ([]*content.ResourceNode, error) {
-	resourceMap := make(map[string]*content.ResourceNode)
+	// Categories-only: serve from CategoryToIDs when every requested category is indexed.
+	if len(queryIDs) == 0 && len(slugs) == 0 && len(categories) > 0 {
+		allIndexed := true
+		var unionIDs []string
+		seenID := make(map[string]struct{})
+		for _, category := range categories {
+			ids, found := r.cache.GetResourcesByCategory(tenantID, category)
+			if !found {
+				allIndexed = false
+				break
+			}
+			for _, id := range ids {
+				if _, exists := seenID[id]; !exists {
+					seenID[id] = struct{}{}
+					unionIDs = append(unionIDs, id)
+				}
+			}
+		}
+		if allIndexed {
+			return r.FindByIDs(tenantID, unionIDs)
+		}
+	}
 
-	// Check cache first for individual IDs
+	seen := make(map[string]struct{})
+	finalResources := make([]*content.ResourceNode, 0)
+
+	// Cache-hit queryIDs first, in request order.
 	for _, id := range queryIDs {
 		if resource, found := r.cache.GetResource(tenantID, id); found {
-			resourceMap[resource.ID] = resource
+			if _, exists := seen[resource.ID]; !exists {
+				seen[resource.ID] = struct{}{}
+				finalResources = append(finalResources, resource)
+			}
 		}
 	}
 
@@ -556,6 +595,8 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 	}
 
 	if len(args) > 0 {
+		queryBuilder.WriteString(" ORDER BY category_slug, title, id")
+
 		start := time.Now()
 		r.logger.Database().Debug("Executing resource filter query", "filters", map[string]any{
 			"queryIDs":   queryIDs,
@@ -574,6 +615,12 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 			}
 		}()
 
+		// Per-category ID lists for index population (categories-only queries).
+		categoryIDs := make(map[string][]string)
+		for _, category := range categories {
+			categoryIDs[category] = []string{}
+		}
+
 		for rows.Next() {
 			var resource content.ResourceNode
 			var categorySlug, actionLisp sql.NullString
@@ -584,6 +631,8 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 			}
 
 			if err := json.Unmarshal([]byte(optionsPayloadStr), &resource.OptionsPayload); err != nil {
+				r.logger.Database().Warn("Skipping resource with malformed options_payload",
+					"tenantId", tenantID, "resourceId", resource.ID, "error", err.Error())
 				continue
 			}
 
@@ -595,21 +644,29 @@ func (r *ResourceRepository) FindByFilters(tenantID string, queryIDs []string, c
 			}
 
 			resource.NodeType = "Resource"
-			if _, exists := resourceMap[resource.ID]; !exists {
-				resourceMap[resource.ID] = &resource
+			if _, exists := seen[resource.ID]; !exists {
+				seen[resource.ID] = struct{}{}
+				finalResources = append(finalResources, &resource)
 				r.cache.SetResource(tenantID, &resource)
+			}
+			if categorySlug.Valid {
+				if _, tracked := categoryIDs[categorySlug.String]; tracked {
+					categoryIDs[categorySlug.String] = append(categoryIDs[categorySlug.String], resource.ID)
+				}
 			}
 		}
 		if err := rows.Err(); err != nil {
 			return nil, err
 		}
 
-		r.logger.Database().Info("Resource filter query completed", "loaded", len(resourceMap), "duration", time.Since(start))
-	}
+		// Populate category index after a categories-only SQL run (including empty).
+		if len(queryIDs) == 0 && len(slugs) == 0 && len(categories) > 0 {
+			for category, ids := range categoryIDs {
+				r.cache.SetCategoryIDs(tenantID, category, ids)
+			}
+		}
 
-	finalResources := make([]*content.ResourceNode, 0, len(resourceMap))
-	for _, resource := range resourceMap {
-		finalResources = append(finalResources, resource)
+		r.logger.Database().Info("Resource filter query completed", "loaded", len(finalResources), "duration", time.Since(start))
 	}
 
 	return finalResources, nil
@@ -733,6 +790,10 @@ func (r *ResourceRepository) BatchUpsert(tenantID string, creates []*content.Res
 	}
 	for _, resource := range updates {
 		r.cache.SetResource(tenantID, resource)
+	}
+	if len(creates) > 0 || len(updates) > 0 {
+		r.cache.InvalidateCategoryIndex(tenantID)
+		r.cache.TouchResourcesVersion(tenantID)
 	}
 
 	return nil

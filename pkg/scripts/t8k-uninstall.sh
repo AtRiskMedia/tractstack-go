@@ -301,6 +301,7 @@ remove_directories() {
 
     if [[ ! -d "/home/t8k/sites" ]] || [[ -z "$(ls -A /home/t8k/sites 2>/dev/null)" ]]; then
       rm -rf /home/t8k/state/
+      rm -rf /home/t8k/jobs/
     fi
     ;;
   "site")

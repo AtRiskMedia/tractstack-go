@@ -84,6 +84,21 @@ func Initialize() error {
 	tenantManager.SetService(appContainer.Service)
 	log.Printf("%s✓ DI Container Built       %s(%s)%s", cyan, darkGrey, time.Since(stepStart), reset)
 
+	// --- Step 3b: Regenerate extend.json for all non-inactive tenants ---
+	stepStart = time.Now()
+	extendTenantIDs := make([]string, 0, len(registry.Tenants))
+	for tenantID, tenantInfo := range registry.Tenants {
+		if tenantInfo.Status == "inactive" {
+			continue
+		}
+		extendTenantIDs = append(extendTenantIDs, tenantID)
+	}
+	if err := appContainer.ExtendRegistryService.RegenerateAll(extendTenantIDs); err != nil {
+		log.Printf("%s✗ Extend registry regenerate failed: %v%s", yellow, err, reset)
+	} else {
+		log.Printf("%s✓ Extend Registries Synced %s(%d tenants in %s)%s", cyan, darkGrey, len(extendTenantIDs), time.Since(stepStart), reset)
+	}
+
 	// --- Step 4: Run Startup Migrations for ALL Tenants ---
 	stepStart = time.Now()
 	log.Printf("\n%s✓ RUNNING STARTUP MIGRATIONS FOR ALL TENANTS%s", purple, reset)

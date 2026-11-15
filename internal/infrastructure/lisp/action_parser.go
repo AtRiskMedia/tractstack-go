@@ -165,6 +165,29 @@ func Parse(actionLisp string, paneID string, homeSlug string) *ParsedAction {
 			Href:     "",
 			HxVals:   hxVals,
 		}
+
+	case "modal":
+		if len(params) >= 2 && params[1] != "" {
+			switch params[0] {
+			case "codehook":
+				return &ParsedAction{
+					IsValid:             true,
+					RenderAs:            "button",
+					IsClientSideEvent:   true,
+					ClientSideEventName: "open-modal",
+					ClientSidePayload:   map[string]string{"hookId": params[1]},
+				}
+			case "url":
+				return &ParsedAction{
+					IsValid:             true,
+					RenderAs:            "button",
+					IsClientSideEvent:   true,
+					ClientSideEventName: "open-modal",
+					ClientSidePayload:   map[string]string{"url": params[1]},
+				}
+			}
+		}
+		return defaultAction
 	}
 
 	log.Printf("WARN: lisp.Parse encountered unhandled command: %q", command)

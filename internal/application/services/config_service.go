@@ -187,21 +187,35 @@ func (c *ConfigService) ProcessBrandConfigUpdate(
 	}
 
 	// Update custom CSS if brand colors changed
-	if request.BrandColours != "" && request.BrandColours != currentConfig.BrandColours {
+	colorsChanged := request.BrandColours != "" && request.BrandColours != currentConfig.BrandColours
+	if colorsChanged {
 		if err := c.updateBrandColorsInCustomCSS(mediaPath, request.BrandColours); err != nil {
 			return nil, fmt.Errorf("failed to update brand colors in CSS: %w", err)
 		}
 	}
 
+	// Asset processing may have bumped StylesVer; capture before field updates.
+	assetVer := processedConfig.StylesVer
+
 	// Update configuration fields with proper protection
 	finalConfig := c.updateBrandConfigFields(processedConfig, request)
 
-	// Update version tracking
-	if request.StylesVer > 0 {
-		finalConfig.StylesVer = request.StylesVer
-	} else {
-		finalConfig.StylesVer = time.Now().Unix()
+	// STYLES_VER never decreases: clients echo the value they loaded, which may be stale.
+	ver := currentConfig.StylesVer
+	if assetVer > ver {
+		ver = assetVer
 	}
+	if request.StylesVer > ver {
+		ver = request.StylesVer
+	}
+	if colorsChanged {
+		now := time.Now().Unix()
+		if now <= ver {
+			now = ver + 1
+		}
+		ver = now
+	}
+	finalConfig.StylesVer = ver
 
 	// This preserves existing SiteInit state when not specified
 	if request.SiteInit != nil && *request.SiteInit {

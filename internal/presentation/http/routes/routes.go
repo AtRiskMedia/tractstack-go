@@ -57,6 +57,31 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	saleHandlers := handlers.NewSaleHandlers(container.SaleService, container.Logger, container.PerfTracker)
 	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
 	googleHandlers := handlers.NewGoogleHandlers(container.GoogleOAuthService, container.ConfigService, container.Logger, container.PerfTracker)
+	extendAssetHandlers := handlers.NewExtendAssetHandlers(container.ExtendAssetService, container.Logger, container.PerfTracker)
+	extendSourceHandlers := handlers.NewExtendSourceHandlers(
+		container.ExtendSourceService,
+		container.ExtendRegistryService,
+		container.ExtendUsageService,
+		container.Logger,
+		container.PerfTracker,
+	)
+	extendRebuildHandlers := handlers.NewExtendRebuildHandlers(
+		container.ExtendRebuildService,
+		container.Logger,
+		container.PerfTracker,
+	)
+	extendCustomCSSHandlers := handlers.NewExtendCustomCSSHandlers(
+		container.ExtendCustomCSSService,
+		container.Logger,
+		container.PerfTracker,
+	)
+	extendHistoryHandlers := handlers.NewExtendHistoryHandlers(
+		container.ExtendHistoryService,
+		container.ExtendRegistryService,
+		container.TenantManager,
+		container.Logger,
+		container.PerfTracker,
+	)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "alive"})
@@ -166,6 +191,97 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			configGroup.PUT("/brand", configHandlers.UpdateBrandConfig)
 			configGroup.GET("/advanced", configHandlers.GetAdvancedConfig)
 			configGroup.PUT("/advanced", authHandlers.AdminOnlyMiddleware(), configHandlers.UpdateAdvancedConfig)
+		}
+
+		// Extend asset endpoints (admin/editor; per-tenant under config/<tenant>/custom)
+		extendAssets := api.Group("/extend/assets")
+		extendAssets.Use(authHandlers.AuthMiddleware())
+		{
+			extendAssets.GET("/tree", extendAssetHandlers.GetTree)
+			extendAssets.GET("/file", extendAssetHandlers.GetFile)
+			extendAssets.PUT("/file", extendAssetHandlers.PutFile)
+			extendAssets.POST("/upload", extendAssetHandlers.Upload)
+			extendAssets.POST("/mkdir", extendAssetHandlers.Mkdir)
+			extendAssets.POST("/rename", extendAssetHandlers.Rename)
+			extendAssets.DELETE("/file", extendAssetHandlers.DeleteFile)
+			extendAssets.POST("/unzip", extendAssetHandlers.Unzip)
+			extendAssets.GET("/references", extendAssetHandlers.GetReferences)
+		}
+
+		// Extend custom.css (admin/editor; config/<tenant>/media/css/custom.css; bumps STYLES_VER)
+		extendCustomCSS := api.Group("/extend/custom-css")
+		extendCustomCSS.Use(authHandlers.AuthMiddleware())
+		{
+			extendCustomCSS.GET("", extendCustomCSSHandlers.Get)
+			extendCustomCSS.PUT("", extendCustomCSSHandlers.Put)
+		}
+
+		// Extend source endpoints: Admin/Editor on prod/dedicated/quick; SysOp on multi (§10/11)
+		extendSource := api.Group("/extend/source")
+		if config.EnableMultiTenant {
+			extendSource.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendSource.Use(authHandlers.AuthMiddleware())
+		}
+		{
+			extendSource.GET("/tree", extendSourceHandlers.GetTree)
+			extendSource.GET("/file", extendSourceHandlers.GetFile)
+			extendSource.PUT("/file", extendSourceHandlers.PutFile)
+			extendSource.GET("/registry", extendSourceHandlers.GetRegistry)
+			extendSource.POST("/hooks", extendSourceHandlers.CreateHook)
+			extendSource.DELETE("/hooks/:id", extendSourceHandlers.DeleteHook)
+			extendSource.GET("/hooks/:id/usages", extendSourceHandlers.GetHookUsages)
+			extendSource.POST("/routes", extendSourceHandlers.CreateRoute)
+			extendSource.DELETE("/routes/:name", extendSourceHandlers.DeleteRoute)
+			extendSource.GET("/routes/:name/usages", extendSourceHandlers.GetRouteUsages)
+		}
+
+		// Extend rebuild: same source auth; GET /latest before /:jobId
+		extendRebuild := api.Group("/extend/rebuild")
+		if config.EnableMultiTenant {
+			extendRebuild.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendRebuild.Use(authHandlers.AuthMiddleware())
+		}
+		{
+			extendRebuild.POST("", extendRebuildHandlers.PostRebuild)
+			extendRebuild.GET("/latest", extendRebuildHandlers.GetLatest)
+			extendRebuild.GET("/:jobId", extendRebuildHandlers.GetJob)
+		}
+
+		// Extend design history — per-kind gates match the resources they restore
+		extendHistoryAssets := api.Group("/extend/history/assets")
+		extendHistoryAssets.Use(authHandlers.AuthMiddleware())
+		{
+			extendHistoryAssets.GET("", extendHistoryHandlers.GetAssetSlots)
+			extendHistoryAssets.POST("/restore", extendHistoryHandlers.RestoreAsset)
+		}
+		extendHistoryCSS := api.Group("/extend/history/custom-css")
+		extendHistoryCSS.Use(authHandlers.AuthMiddleware())
+		{
+			extendHistoryCSS.GET("", extendHistoryHandlers.GetCustomCSSSlots)
+			extendHistoryCSS.POST("/restore", extendHistoryHandlers.RestoreCustomCSS)
+		}
+		extendHistorySource := api.Group("/extend/history/source")
+		if config.EnableMultiTenant {
+			extendHistorySource.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendHistorySource.Use(authHandlers.AuthMiddleware())
+		}
+		{
+			extendHistorySource.GET("", extendHistoryHandlers.GetSourceSlots)
+			extendHistorySource.POST("/restore", extendHistoryHandlers.RestoreSource)
+		}
+		extendHistorySite := api.Group("/extend/history/site")
+		if config.EnableMultiTenant {
+			extendHistorySite.Use(sysopHandlers.SysOpAuthMiddleware())
+		} else {
+			extendHistorySite.Use(authHandlers.AuthMiddleware())
+		}
+		{
+			extendHistorySite.GET("", extendHistoryHandlers.GetSitePoints)
+			extendHistorySite.GET("/:jobId", extendHistoryHandlers.GetSiteManifest)
+			extendHistorySite.POST("/:jobId/restore", extendHistoryHandlers.RestoreSite)
 		}
 
 		// Tailwind

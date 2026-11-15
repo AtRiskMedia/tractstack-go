@@ -91,6 +91,17 @@ func (h *ResourceHandlers) GetResourcesByIDs(c *gin.Context) {
 		return
 	}
 
+	etag := resourcesETag(tenantCtx)
+	if etag != "" {
+		c.Header("ETag", etag)
+		c.Header("Cache-Control", "no-cache")
+		if match := c.GetHeader("If-None-Match"); match != "" && match == etag {
+			c.Status(http.StatusNotModified)
+			marker.SetSuccess(true)
+			return
+		}
+	}
+
 	// Handle different request patterns
 	var resources []*content.ResourceNode
 	var err error
@@ -494,4 +505,16 @@ func (h *ResourceHandlers) processResourceImages(tenantCtx *tenant.Context, reso
 	}
 
 	return createdFileIDs, nil
+}
+
+// resourcesETag builds a weak ETag from the tenant's ResourcesVersion.
+func resourcesETag(tenantCtx *tenant.Context) string {
+	if tenantCtx == nil || tenantCtx.CacheManager == nil {
+		return ""
+	}
+	version, ok := tenantCtx.CacheManager.GetResourcesVersion(tenantCtx.TenantID)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(`W/"%d"`, version.UnixNano())
 }
