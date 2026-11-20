@@ -148,6 +148,18 @@ func (ctx *Context) LeadRepo() domainUser.LeadRepository {
 	return persistenceUser.NewSQLLeadRepository(db, ctx.Logger)
 }
 
+// AdminRepo returns an admin repository instance.
+func (ctx *Context) AdminRepo() domainUser.AdminRepository {
+	db := &database.DB{DB: ctx.Database.Conn}
+	return persistenceUser.NewSQLAdminRepository(db, ctx.Logger)
+}
+
+// AdminTokenRepo returns an admin token repository instance.
+func (ctx *Context) AdminTokenRepo() domainUser.AdminTokenRepository {
+	db := &database.DB{DB: ctx.Database.Conn}
+	return persistenceUser.NewSQLAdminTokenRepository(db, ctx.Logger)
+}
+
 // FingerprintRepo returns a fingerprint repository instance.
 // It returns the interface type from the domain layer.
 func (ctx *Context) FingerprintRepo() domainUser.FingerprintRepository {

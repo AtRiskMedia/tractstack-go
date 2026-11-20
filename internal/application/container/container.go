@@ -56,6 +56,7 @@ type Container struct {
 
 	// System & State Services
 	AuthService                 *services.AuthService
+	AdminAccountService         *services.AdminAccountService
 	SessionService              *services.SessionService
 	EventProcessingService      *services.EventProcessingService
 	DBService                   *services.DBService
@@ -155,12 +156,13 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	emailTemplateService := services.NewEmailTemplateService(emailConfigLoader, logger, perfTracker)
 	emailWorker := services.NewEmailWorker(emailService, emailTemplateService, tenantManager, logger)
 
-	authService := services.NewAuthService(logger, perfTracker, emailWorker)
 	beliefBroadcastService := services.NewBeliefBroadcastService(cacheManager, beliefRegistryService, tenantManager)
 	sessionService := services.NewSessionService(beliefBroadcastService, logger, perfTracker)
 	eventProcessingService := services.NewEventProcessingService(beliefBroadcastService, beliefEvaluationService, logger)
 	dbService := services.NewDBService(logger, perfTracker)
 	configService := services.NewConfigService(logger, perfTracker)
+	authService := services.NewAuthService(logger, perfTracker, emailWorker, configService)
+	adminAccountService := services.NewAdminAccountService(logger, authService)
 	googleOAuthService := services.NewGoogleOAuthService(logger)
 	googleCalendarService := services.NewGoogleCalendarService(logger, googleOAuthService, configService)
 
@@ -279,6 +281,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 
 		// System & State Services
 		AuthService:                 authService,
+		AdminAccountService:         adminAccountService,
 		SessionService:              sessionService,
 		EventProcessingService:      eventProcessingService,
 		DBService:                   dbService,

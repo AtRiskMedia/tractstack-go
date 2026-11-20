@@ -162,6 +162,19 @@ func (m *Manager) RunStartupMigrations() error {
 			continue
 		}
 
+		adminEmail := ""
+		if ctx.Config != nil && ctx.Config.BrandConfig != nil {
+			adminEmail = ctx.Config.BrandConfig.AdminEmail
+		}
+		if err := database.EnsureMainAdmin(ctx.Database.Conn, adminEmail); err != nil {
+			m.logger.System().Error("EnsureMainAdmin failed for tenant", "error", err, "tenantId", tenantID)
+			if closeErr := ctx.Close(); closeErr != nil {
+				m.logger.System().Warn("Failed to close context after EnsureMainAdmin error", "error", closeErr, "tenantId", tenantID)
+			}
+			failedTenants = append(failedTenants, tenantID)
+			continue
+		}
+
 		// 2. Check if FTS tables are populated
 		var paneCount, sfCount int
 

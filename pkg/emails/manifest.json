@@ -24,6 +24,11 @@
       "category": "system",
       "name": "lead-activation",
       "adminTitle": "Lead Activation"
+    },
+    {
+      "category": "system",
+      "name": "admin-password-reset",
+      "adminTitle": "Admin Password Reset"
     }
   ]
 }

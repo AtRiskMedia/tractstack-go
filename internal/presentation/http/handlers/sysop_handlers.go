@@ -93,6 +93,8 @@ func (h *SysOpHandlers) GetTenantToken(c *gin.Context) {
 	}()
 
 	claims := map[string]any{
+		"sub":      "sysop",
+		"main":     true,
 		"role":     "admin",
 		"tenantId": tenantCtx.Config.TenantID,
 		"type":     "admin_auth",

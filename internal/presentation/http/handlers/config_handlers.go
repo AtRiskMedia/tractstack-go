@@ -22,7 +22,6 @@ type AdvancedConfigStatusResponse struct {
 	TursoConfigured            bool   `json:"tursoConfigured"`
 	TursoTokenSet              bool   `json:"tursoTokenSet"`
 	AdminPasswordSet           bool   `json:"adminPasswordSet"`
-	EditorPasswordSet          bool   `json:"editorPasswordSet"`
 	AAIAPIKeySet               bool   `json:"aaiAPIKeySet"`
 	TursoEnabled               bool   `json:"tursoEnabled"`
 	ShopifyStorefrontTokenSet  bool   `json:"shopifyStorefrontTokenSet"`
@@ -158,7 +157,6 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 		TursoConfigured:            tenantCtx.Config.TursoDatabase != "",
 		TursoTokenSet:              tenantCtx.Config.TursoToken != "",
 		AdminPasswordSet:           tenantCtx.Config.AdminPasswordHash != "",
-		EditorPasswordSet:          tenantCtx.Config.EditorPasswordHash != "",
 		AAIAPIKeySet:               tenantCtx.Config.AAIAPIKey != "",
 		TursoEnabled:               tenantCtx.Config.TursoEnabled,
 		ShopifyStorefrontTokenSet:  tenantCtx.Config.ShopifyStorefrontToken != "",
@@ -220,6 +218,14 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
 		return
+	}
+
+	if request.AdminPassword != "" {
+		p := getPrincipal(c)
+		if p == nil || !p.IsMain {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Only the main site admin can change the main admin password"})
+			return
+		}
 	}
 
 	// Validate Turso pair requirement

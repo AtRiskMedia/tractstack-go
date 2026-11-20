@@ -198,6 +198,15 @@ func (s *MultiTenantService) ActivateTenant(tenantID string) error {
 		return fmt.Errorf("database seeding failed: %w", err)
 	}
 
+	adminEmail := ""
+	if ctx.Config != nil && ctx.Config.BrandConfig != nil {
+		adminEmail = ctx.Config.BrandConfig.AdminEmail
+	}
+	if err := database.EnsureMainAdmin(ctx.Database.Conn, adminEmail); err != nil {
+		marker.SetError(err)
+		return fmt.Errorf("main admin seed failed: %w", err)
+	}
+
 	if err := s.updateTenantRegistry(tenantID, "active", nil); err != nil {
 		marker.SetError(err)
 		return err

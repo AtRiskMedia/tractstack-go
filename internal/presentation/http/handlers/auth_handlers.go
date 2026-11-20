@@ -125,42 +125,16 @@ func (h *AuthHandlers) GetAuthStatus(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received auth status request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	// Check Authorization header for bearer token
-	authHeader := c.GetHeader("Authorization")
-	var tokenInfo *services.TokenInfo
-	var authenticated bool
-	var authMethod string
-
-	if authHeader != "" && len(authHeader) > 7 && authHeader[:7] == "Bearer " {
-		token := authHeader[7:]
-		tokenInfo = h.authService.GetTokenInfo(token, tenantCtx)
-		if tokenInfo.Valid {
-			authenticated = true
-			authMethod = "bearer"
-		}
+	token := extractAuthToken(c)
+	authMethod := ""
+	if c.GetHeader("Authorization") != "" {
+		authMethod = "bearer"
+	} else if token != "" {
+		authMethod = "cookie"
 	}
-
-	// If no bearer token, check cookies
+	p, authenticated := h.authService.ValidateTokenWithRolesPrincipal(token, tenantCtx, []string{"admin", "editor"})
 	if !authenticated {
-		adminCookie, err := c.Cookie("admin_auth")
-		if err == nil && adminCookie != "" {
-			tokenInfo = h.authService.GetTokenInfo(adminCookie, tenantCtx)
-			if tokenInfo.Valid {
-				authenticated = true
-				authMethod = "cookie"
-			}
-		}
-
-		if !authenticated {
-			editorCookie, err := c.Cookie("editor_auth")
-			if err == nil && editorCookie != "" {
-				tokenInfo = h.authService.GetTokenInfo(editorCookie, tenantCtx)
-				if tokenInfo.Valid {
-					authenticated = true
-					authMethod = "cookie"
-				}
-			}
-		}
+		authMethod = ""
 	}
 
 	response := gin.H{
@@ -168,10 +142,14 @@ func (h *AuthHandlers) GetAuthStatus(c *gin.Context) {
 		"method":        authMethod,
 	}
 
-	if authenticated && tokenInfo != nil {
-		response["role"] = tokenInfo.Role
-		response["tenantId"] = tokenInfo.TenantID
-		response["expiresAt"] = tokenInfo.ExpiresAt
+	if authenticated && p != nil {
+		response["role"] = p.Role
+		response["tenantId"] = tenantCtx.TenantID
+		response["sub"] = p.Sub
+		response["email"] = p.Email
+		response["username"] = p.Username
+		response["isMain"] = p.IsMain
+		response["mustChangePassword"] = p.MustChangePassword
 	}
 
 	h.logger.Auth().Info("Auth status check completed", "tenantId", tenantCtx.TenantID, "authenticated", authenticated, "method", authMethod, "duration", time.Since(start))
@@ -191,34 +169,14 @@ func (h *AuthHandlers) AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Check for valid authentication
-		authHeader := c.GetHeader("Authorization")
-		authenticated := false
-
-		if authHeader != "" {
-			if h.authService.ValidateAdminOrEditorToken(authHeader, tenantCtx) {
-				authenticated = true
-			}
-		} else {
-			// Check cookies WITHOUT adding "Bearer " prefix
-			if adminCookie, err := c.Cookie("admin_auth"); err == nil {
-				if h.authService.ValidateAdminOrEditorToken(adminCookie, tenantCtx) {
-					authenticated = true
-				}
-			} else if editorCookie, err := c.Cookie("editor_auth"); err == nil {
-				if h.authService.ValidateAdminOrEditorToken(editorCookie, tenantCtx) {
-					authenticated = true
-				}
-			}
-		}
-
-		if !authenticated {
+		p, ok := resolvePrincipal(h, c, tenantCtx, []string{"admin", "editor"})
+		if !ok {
 			h.logger.Auth().Warn("Unauthorized access attempt", "tenantId", tenantCtx.TenantID, "path", c.Request.URL.Path)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 			c.Abort()
 			return
 		}
-
+		setPrincipal(c, p)
 		c.Next()
 	}
 }
@@ -233,29 +191,14 @@ func (h *AuthHandlers) AdminOnlyMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Check for valid admin authentication
-		authHeader := c.GetHeader("Authorization")
-		authenticated := false
-
-		if authHeader != "" {
-			if h.authService.ValidateAdminToken(authHeader, tenantCtx) {
-				authenticated = true
-			}
-		} else {
-			if adminCookie, err := c.Cookie("admin_auth"); err == nil {
-				if h.authService.ValidateAdminToken(adminCookie, tenantCtx) {
-					authenticated = true
-				}
-			}
-		}
-
-		if !authenticated {
+		p, ok := resolvePrincipal(h, c, tenantCtx, []string{"admin"})
+		if !ok {
 			h.logger.Auth().Warn("Unauthorized admin access attempt", "tenantId", tenantCtx.TenantID, "path", c.Request.URL.Path)
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
 			c.Abort()
 			return
 		}
-
+		setPrincipal(c, p)
 		c.Next()
 	}
 }
@@ -319,6 +262,7 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 	h.logger.Auth().Debug("Received login request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
 	var loginReq struct {
+		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
 	}
 
@@ -328,7 +272,12 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 		return
 	}
 
-	result := h.authService.AuthenticateAdmin(loginReq.Password, tenantCtx)
+	if !allowAuthAttempt(tenantCtx.TenantID, c.ClientIP(), loginReq.Username) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Too many attempts"})
+		return
+	}
+
+	result := h.authService.AuthenticateAdminUsername(loginReq.Username, loginReq.Password, tenantCtx)
 
 	if !result.Success {
 		h.logger.Auth().Warn("Login attempt failed", "tenantId", tenantCtx.TenantID, "error", result.Error, "duration", time.Since(start))
@@ -344,38 +293,25 @@ func (h *AuthHandlers) PostLogin(c *gin.Context) {
 		cookieName = "editor_auth"
 	}
 
-	cookieDomain := ""
-	if len(tenantCtx.Domains) > 0 {
-		shortest := tenantCtx.Domains[0]
-		for _, d := range tenantCtx.Domains {
-			if len(d) < len(shortest) {
-				shortest = d
-			}
-		}
-		if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
-			cookieDomain = shortest
-		}
-	}
-
-	c.SetCookie(
-		cookieName,
-		result.Token,
-		86400,
-		"/",
-		cookieDomain,
-		false,
-		true,
-	)
+	cookieDomain := cookieDomainFor(tenantCtx)
+	c.SetCookie(cookieName, result.Token, 86400, "/", cookieDomain, cookieSecure(c), true)
 
 	h.logger.Auth().Info("Login successful", "tenantId", tenantCtx.TenantID, "role", result.Role, "domain", cookieDomain, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for PostLogin request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"status": "ok",
 		"role":   result.Role,
 		"token":  result.Token,
-	})
+	}
+	if result.Principal != nil {
+		resp["mustChangePassword"] = result.Principal.MustChangePassword
+		resp["isMain"] = result.Principal.IsMain
+		resp["sub"] = result.Principal.Sub
+		resp["email"] = result.Principal.Email
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // PostLogout handles POST /api/v1/auth/logout - clears authentication cookies
@@ -391,21 +327,10 @@ func (h *AuthHandlers) PostLogout(c *gin.Context) {
 	defer marker.Complete()
 	h.logger.Auth().Debug("Received logout request", "method", c.Request.Method, "path", c.Request.URL.Path, "tenantId", tenantCtx.TenantID)
 
-	cookieDomain := ""
-	if len(tenantCtx.Domains) > 0 {
-		shortest := tenantCtx.Domains[0]
-		for _, d := range tenantCtx.Domains {
-			if len(d) < len(shortest) {
-				shortest = d
-			}
-		}
-		if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
-			cookieDomain = shortest
-		}
-	}
-
-	c.SetCookie("admin_auth", "", -1, "/", cookieDomain, false, true)
-	c.SetCookie("editor_auth", "", -1, "/", cookieDomain, false, true)
+	cookieDomain := cookieDomainFor(tenantCtx)
+	secure := cookieSecure(c)
+	c.SetCookie("admin_auth", "", -1, "/", cookieDomain, secure, true)
+	c.SetCookie("editor_auth", "", -1, "/", cookieDomain, secure, true)
 
 	h.logger.Auth().Info("Logout completed", "tenantId", tenantCtx.TenantID, "domain", cookieDomain, "duration", time.Since(start))
 	marker.SetSuccess(true)
@@ -453,50 +378,36 @@ func (h *AuthHandlers) PostRefreshToken(c *gin.Context) {
 		return
 	}
 
-	tokenInfo := h.authService.GetTokenInfo(currentToken, tenantCtx)
-	if !tokenInfo.Valid {
+	p, ok := h.authService.ValidateTokenWithRolesPrincipal(currentToken, tenantCtx, []string{"admin", "editor"})
+	if !ok {
 		h.logger.Auth().Warn("Refresh token request with invalid current token", "tenantId", tenantCtx.TenantID, "source", tokenSource)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 		return
 	}
 
-	newResult := h.authService.AuthenticateAdmin("", tenantCtx)
-	if !newResult.Success {
-		h.logger.Auth().Error("Token refresh failed", "tenantId", tenantCtx.TenantID, "error", newResult.Error)
+	newToken, err := h.authService.MintTokenForPrincipal(p, tenantCtx)
+	if err != nil {
+		h.logger.Auth().Error("Token refresh failed", "tenantId", tenantCtx.TenantID, "error", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token refresh failed"})
 		return
 	}
 
 	if tokenSource == "admin_cookie" || tokenSource == "editor_cookie" {
 		cookieName := "admin_auth"
-		if tokenInfo.Role == "editor" {
+		if p.Role == "editor" {
 			cookieName = "editor_auth"
 		}
-
-		cookieDomain := ""
-		if len(tenantCtx.Domains) > 0 {
-			shortest := tenantCtx.Domains[0]
-			for _, d := range tenantCtx.Domains {
-				if len(d) < len(shortest) {
-					shortest = d
-				}
-			}
-			if !strings.HasPrefix(shortest, "localhost") && !strings.HasPrefix(shortest, "127.0.0.1") {
-				cookieDomain = shortest
-			}
-		}
-
-		c.SetCookie(cookieName, newResult.Token, 86400, "/", cookieDomain, false, true)
+		c.SetCookie(cookieName, newToken, 86400, "/", cookieDomainFor(tenantCtx), cookieSecure(c), true)
 	}
 
-	h.logger.Auth().Info("Token refresh successful", "tenantId", tenantCtx.TenantID, "role", tokenInfo.Role, "source", tokenSource, "duration", time.Since(start))
+	h.logger.Auth().Info("Token refresh successful", "tenantId", tenantCtx.TenantID, "role", p.Role, "source", tokenSource, "duration", time.Since(start))
 	marker.SetSuccess(true)
 	h.logger.Perf().Info("Performance for PostRefreshToken request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"role":    tokenInfo.Role,
-		"token":   newResult.Token,
+		"role":    p.Role,
+		"token":   newToken,
 		"message": "Token refreshed successfully",
 	})
 }

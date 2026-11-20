@@ -44,6 +44,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 		container.PerfTracker,
 	)
 	authHandlers := handlers.NewAuthHandlers(container.AuthService, container.Logger, container.PerfTracker)
+	adminAccountHandlers := handlers.NewAdminAccountHandlers(container.AdminAccountService, container.Logger, container.PerfTracker)
 	visitHandlers := handlers.NewVisitHandlers(container.SessionService, container.AuthService, container.Broadcaster, container.Logger, container.PerfTracker)
 	stateHandlers := handlers.NewStateHandlers(container.EventProcessingService, container.Broadcaster, container.Logger, container.PerfTracker)
 	dbHandlers := handlers.NewDBHandlers(container.DBService, container.Logger, container.PerfTracker, container.TenantManager)
@@ -302,6 +303,22 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 			auth.POST("/logout", authHandlers.PostLogout)
 			auth.GET("/status", authHandlers.GetAuthStatus)
 			auth.POST("/refresh", authHandlers.PostRefreshToken)
+			auth.POST("/password/forgot", authHandlers.PostForgotPassword)
+			auth.POST("/password/reset", authHandlers.PostResetPassword)
+			auth.GET("/password/token", authHandlers.GetPasswordTokenStatus)
+			auth.GET("/me", authHandlers.AuthMiddleware(), authHandlers.GetMe)
+			auth.PUT("/me", authHandlers.AuthMiddleware(), authHandlers.PutMe)
+			auth.DELETE("/me", authHandlers.AuthMiddleware(), authHandlers.DeleteMe)
+			auth.POST("/password", authHandlers.AuthMiddleware(), authHandlers.PostChangePassword)
+		}
+
+		adminsGroup := api.Group("/admins")
+		adminsGroup.Use(authHandlers.AuthMiddleware(), authHandlers.AdminOnlyMiddleware())
+		{
+			adminsGroup.GET("", adminAccountHandlers.List)
+			adminsGroup.POST("", adminAccountHandlers.Create)
+			adminsGroup.PUT("/:id", adminAccountHandlers.Update)
+			adminsGroup.DELETE("/:id", adminAccountHandlers.Delete)
 		}
 
 		// State management (separate from auth)
