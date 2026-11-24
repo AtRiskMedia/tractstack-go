@@ -254,7 +254,7 @@ build_astro_release() {
   # First-run conversion: real dist directory → releases/legacy + symlink
   if [[ -d dist && ! -L dist ]]; then
     log "Converting dist directory to releases/legacy + symlink"
-    mkdir -p releases && mv dist releases/legacy && ln -s releases/legacy dist && touch "$STATE_DIR/.layout-releases"
+    mkdir -p releases && mv dist releases/legacy && ln -s releases/legacy dist && touch "$JOBS_DIR/.layout-releases"
   fi
 
   mkdir -p src/generated releases
