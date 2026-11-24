@@ -116,6 +116,31 @@ var tables = []string{
 	`CREATE VIRTUAL TABLE IF NOT EXISTS pane_content_fts USING fts5(pane_id UNINDEXED, content, tokenize = 'porter unicode61')`,
 	`CREATE VIRTUAL TABLE IF NOT EXISTS storyfragment_metadata_fts USING fts5(storyfragment_id UNINDEXED, content, tokenize = 'porter unicode61')`,
 	`CREATE VIRTUAL TABLE IF NOT EXISTS resource_body_fts USING fts5(resource_id UNINDEXED, content, tokenize = 'porter unicode61')`,
+	`CREATE TABLE IF NOT EXISTS admins (
+		id TEXT PRIMARY KEY,
+		username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+		email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+		display_name TEXT,
+		role TEXT NOT NULL CHECK (role IN ('admin','editor')),
+		is_main INTEGER NOT NULL DEFAULT 0 CHECK (is_main IN (0,1)),
+		password_hash TEXT NOT NULL,
+		must_change_password INTEGER NOT NULL DEFAULT 0,
+		token_version INTEGER NOT NULL DEFAULT 0,
+		created_by TEXT,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		changed TIMESTAMP,
+		last_login_at TIMESTAMP,
+		CHECK (is_main = 0 OR role = 'admin')
+	)`,
+	`CREATE TABLE IF NOT EXISTS admin_tokens (
+		id TEXT PRIMARY KEY,
+		admin_id TEXT NOT NULL REFERENCES admins(id),
+		purpose TEXT NOT NULL CHECK (purpose IN ('reset')),
+		token_hash TEXT NOT NULL UNIQUE,
+		expires_at TIMESTAMP NOT NULL,
+		used_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	)`,
 }
 
 var indexes = []string{
@@ -156,4 +181,7 @@ var indexes = []string{
 	`CREATE INDEX IF NOT EXISTS idx_bookings_time ON bookings(start_time, end_time)`,
 	`CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status)`,
 	`CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales(created_at DESC)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_admins_one_main ON admins(is_main) WHERE is_main = 1`,
+	`CREATE INDEX IF NOT EXISTS idx_admin_tokens_admin ON admin_tokens(admin_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_admin_tokens_expires ON admin_tokens(expires_at)`,
 }

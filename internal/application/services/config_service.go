@@ -15,7 +15,6 @@ import (
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/caching/types"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/logging"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/observability/performance"
-	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/security"
 	"github.com/AtRiskMedia/tractstack-go/internal/infrastructure/tenant"
 	pkgconfig "github.com/AtRiskMedia/tractstack-go/pkg/config"
 
@@ -100,7 +99,6 @@ type AdvancedConfigUpdateRequest struct {
 	EmailPass               string `json:"email_pass,omitempty"`
 	EmailFrom               string `json:"email_from,omitempty"`
 	AdminPassword           string `json:"admin_password,omitempty"`
-	EditorPassword          string `json:"editor_password,omitempty"`
 	AAIAPIKey               string `json:"aai_api_key,omitempty"`
 	ShopifyStorefrontToken  string `json:"SHOPIFY_STOREFRONT_TOKEN,omitempty"`
 	ShopifyAPISecret        string `json:"SHOPIFY_API_SECRET,omitempty"`
@@ -116,60 +114,6 @@ type AdvancedConfigUpdateRequest struct {
 	GoogleRefreshToken      string `json:"GOOGLE_REFRESH_TOKEN,omitempty"`
 	GoogleTokenExpiry       string `json:"GOOGLE_TOKEN_EXPIRY,omitempty"`
 	TursoEnabled            *bool  `json:"turso_enabled,omitempty"`
-}
-
-// ValidateAdminPermissions validates admin-only authentication
-func (c *ConfigService) ValidateAdminPermissions(authHeader string, tenantCtx *tenant.Context) error {
-	if authHeader == "" {
-		return fmt.Errorf("authorization header required")
-	}
-
-	// Extract token from Bearer header
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == authHeader {
-		return fmt.Errorf("invalid authorization format")
-	}
-
-	// Validate JWT token
-	claims, err := security.ValidateJWT(token, tenantCtx.Config.JWTSecret)
-	if err != nil {
-		return fmt.Errorf("invalid JWT token: %w", err)
-	}
-
-	// Check role
-	role, ok := claims["role"].(string)
-	if !ok || role != "admin" {
-		return fmt.Errorf("admin permissions required")
-	}
-
-	return nil
-}
-
-// ValidateEditorPermissions validates admin or editor authentication
-func (c *ConfigService) ValidateEditorPermissions(authHeader string, tenantCtx *tenant.Context) error {
-	if authHeader == "" {
-		return fmt.Errorf("authorization header required")
-	}
-
-	// Extract token from Bearer header
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	if token == authHeader {
-		return fmt.Errorf("invalid authorization format")
-	}
-
-	// Validate JWT token
-	claims, err := security.ValidateJWT(token, tenantCtx.Config.JWTSecret)
-	if err != nil {
-		return fmt.Errorf("invalid JWT token: %w", err)
-	}
-
-	// Check role
-	role, ok := claims["role"].(string)
-	if !ok || (role != "admin" && role != "editor") {
-		return fmt.Errorf("admin or editor permissions required")
-	}
-
-	return nil
 }
 
 // ProcessBrandConfigUpdate processes brand configuration updates including base64 assets
@@ -242,13 +186,6 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 			return fmt.Errorf("failed to hash admin password: %w", err)
 		}
 		tenantCtx.Config.AdminPasswordHash = string(hash)
-	}
-	if request.EditorPassword != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(request.EditorPassword), bcrypt.DefaultCost)
-		if err != nil {
-			return fmt.Errorf("failed to hash editor password: %w", err)
-		}
-		tenantCtx.Config.EditorPasswordHash = string(hash)
 	}
 	if request.AAIAPIKey != "" {
 		tenantCtx.Config.AAIAPIKey = request.AAIAPIKey
@@ -378,7 +315,6 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		"TURSO_DATABASE_URL":         tenantCtx.Config.TursoDatabase,
 		"TURSO_AUTH_TOKEN":           tenantCtx.Config.TursoToken,
 		"ADMIN_PASSWORD_HASH":        tenantCtx.Config.AdminPasswordHash,
-		"EDITOR_PASSWORD_HASH":       tenantCtx.Config.EditorPasswordHash,
 		"AAI_API_KEY":                tenantCtx.Config.AAIAPIKey,
 		"JWT_SECRET":                 tenantCtx.Config.JWTSecret,
 		"AES_KEY":                    tenantCtx.Config.AESKey,

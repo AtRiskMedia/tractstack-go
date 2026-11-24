@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -20,17 +19,19 @@ import (
 
 // AuthService handles authentication workflows and JWT operations
 type AuthService struct {
-	logger      *logging.ChanneledLogger
-	perfTracker *performance.Tracker
-	emailWorker *EmailWorker
+	logger        *logging.ChanneledLogger
+	perfTracker   *performance.Tracker
+	emailWorker   *EmailWorker
+	configService *ConfigService
 }
 
 // NewAuthService creates a new authentication service
-func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, emailWorker *EmailWorker) *AuthService {
+func NewAuthService(logger *logging.ChanneledLogger, perfTracker *performance.Tracker, emailWorker *EmailWorker, configService *ConfigService) *AuthService {
 	return &AuthService{
-		logger:      logger,
-		perfTracker: perfTracker,
-		emailWorker: emailWorker,
+		logger:        logger,
+		perfTracker:   perfTracker,
+		emailWorker:   emailWorker,
+		configService: configService,
 	}
 }
 
@@ -77,48 +78,11 @@ func (a *AuthService) DecodeProfileToken(tokenString string, tenantCtx *tenant.C
 	return &ProfileDecodeResult{Profile: profile, Valid: true}
 }
 
-// AuthenticateAdmin validates admin or editor credentials and generates JWT
+// AuthenticateAdmin is deprecated password-only login; use AuthenticateAdminUsername.
 func (a *AuthService) AuthenticateAdmin(password string, tenantCtx *tenant.Context) *AuthResult {
-	var role string
-
-	// Check Admin
-	if tenantCtx.Config.AdminPasswordHash != "" {
-		err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.AdminPasswordHash), []byte(password))
-		if err == nil {
-			role = "admin"
-		}
-	}
-
-	// Check Editor (if not already Admin)
-	if role == "" && tenantCtx.Config.EditorPasswordHash != "" {
-		err := bcrypt.CompareHashAndPassword([]byte(tenantCtx.Config.EditorPasswordHash), []byte(password))
-		if err == nil {
-			role = "editor"
-		}
-	}
-
-	if role == "" {
-		return &AuthResult{Success: false, Error: "Invalid credentials"}
-	}
-
-	claims := jwt.MapClaims{
-		"role":     role,
-		"tenantId": tenantCtx.Config.TenantID,
-		"type":     "admin_auth",
-		"iat":      time.Now().UTC().Unix(),
-		"exp":      time.Now().UTC().Add(24 * time.Hour).Unix(),
-	}
-
-	token, err := a.GenerateJWT(claims, tenantCtx.Config.JWTSecret)
-	if err != nil {
-		return &AuthResult{Success: false, Error: "Token generation failed"}
-	}
-
-	return &AuthResult{
-		Token:   token,
-		Role:    role,
-		Success: true,
-	}
+	_ = password
+	_ = tenantCtx
+	return &AuthResult{Success: false, Error: "Invalid credentials"}
 }
 
 // CreateLead creates a new lead with encrypted credentials
@@ -223,33 +187,8 @@ func (a *AuthService) ValidateAdminOrEditorToken(tokenString string, tenantCtx *
 
 // ValidateTokenWithRoles validates a token and checks if the role is in the allowed list
 func (a *AuthService) ValidateTokenWithRoles(tokenString string, tenantCtx *tenant.Context, allowedRoles []string) bool {
-	if tokenString == "" {
-		return false
-	}
-
-	token := strings.TrimPrefix(tokenString, "Bearer ")
-
-	claims, err := security.ValidateJWT(token, tenantCtx.Config.JWTSecret)
-	if err != nil {
-		return false
-	}
-
-	tokenType, ok := claims["type"].(string)
-	if !ok || tokenType != "admin_auth" {
-		return false
-	}
-
-	tokenTenantID, ok := claims["tenantId"].(string)
-	if !ok || tokenTenantID != tenantCtx.TenantID {
-		return false
-	}
-
-	tokenRole, ok := claims["role"].(string)
-	if !ok {
-		return false
-	}
-
-	return slices.Contains(allowedRoles, tokenRole)
+	_, ok := a.ValidateTokenWithRolesPrincipal(tokenString, tenantCtx, allowedRoles)
+	return ok
 }
 
 // GenerateSecureToken generates a cryptographically secure random token

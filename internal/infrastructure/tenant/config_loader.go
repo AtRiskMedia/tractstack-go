@@ -24,7 +24,6 @@ type Config struct {
 	AESKey                  string             `json:"AES_KEY"`
 	TursoEnabled            bool               `json:"TURSO_ENABLED"`
 	AdminPasswordHash       string             `json:"ADMIN_PASSWORD_HASH,omitempty"`
-	EditorPasswordHash      string             `json:"EDITOR_PASSWORD_HASH,omitempty"`
 	HydrationToken          string             `json:"HYDRATION_TOKEN,omitempty"`
 	ShopifyStorefrontToken  string             `json:"SHOPIFY_STOREFRONT_TOKEN"`
 	ShopifyAPISecret        string             `json:"SHOPIFY_API_SECRET"`

@@ -14,7 +14,7 @@ import (
 func ValidateJWT(tokenString, jwtSecret string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(_ *jwt.Token) (any, error) {
 		return []byte(jwtSecret), nil
-	})
+	}, jwt.WithValidMethods([]string{"HS256"}))
 	if err != nil {
 		return nil, err
 	}
