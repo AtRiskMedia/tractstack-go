@@ -39,11 +39,16 @@ type AdvancedConfigStatusResponse struct {
 	GoogleTokenExpirySet       bool   `json:"googleTokenExpirySet"`
 	HasGoogleSync              bool   `json:"hasGoogleSync"`
 	HasResend                  bool   `json:"hasResend"`
+	BunnyAPIKeySet             bool   `json:"bunnyApiKeySet"`
+	BunnyLibraryID             string `json:"bunnyLibraryId"`
+	BunnyLibraryName           string `json:"bunnyLibraryName"`
+	BunnyReadOnlyKeySet        bool   `json:"bunnyReadOnlyKeySet"`
 }
 
 // ConfigHandlers contains all config-related HTTP handlers
 type ConfigHandlers struct {
 	configService *services.ConfigService
+	bunnyService  *services.BunnyService
 	logger        *logging.ChanneledLogger
 	perfTracker   *performance.Tracker
 }
@@ -51,11 +56,13 @@ type ConfigHandlers struct {
 // NewConfigHandlers creates config handlers with injected dependencies
 func NewConfigHandlers(
 	configService *services.ConfigService,
+	bunnyService *services.BunnyService,
 	logger *logging.ChanneledLogger,
 	perfTracker *performance.Tracker,
 ) *ConfigHandlers {
 	return &ConfigHandlers{
 		configService: configService,
+		bunnyService:  bunnyService,
 		logger:        logger,
 		perfTracker:   perfTracker,
 	}
@@ -82,6 +89,7 @@ func (h *ConfigHandlers) GetBrandConfig(c *gin.Context) {
 	brandConfig := *tenantCtx.Config.BrandConfig
 	brandConfig.HasAAI = tenantCtx.Config.AAIAPIKey != ""
 	brandConfig.HasShopify = tenantCtx.Config.ShopifyStorefrontToken != "" && tenantCtx.Config.ShopifyAPISecret != "" && tenantCtx.Config.ShopifyStoreDomain != "" && tenantCtx.Config.ShopifyAPIVersion != "" && tenantCtx.Config.ShopifyAdminSlug != "" && tenantCtx.Config.UserSetupWebhooks
+	brandConfig.HasBunny = computeHasBunny(tenantCtx.Config)
 	brandConfig.HasResend = computeHasResend(tenantCtx.Config)
 	brandConfig.HasHydrationToken = tenantCtx.Config.HydrationToken != ""
 	c.JSON(http.StatusOK, brandConfig)
@@ -172,6 +180,10 @@ func (h *ConfigHandlers) GetAdvancedConfig(c *gin.Context) {
 		GoogleAccessTokenSet:       tenantCtx.Config.GoogleAccessToken != "",
 		GoogleRefreshTokenSet:      tenantCtx.Config.GoogleRefreshToken != "",
 		GoogleTokenExpirySet:       tenantCtx.Config.GoogleTokenExpiry != "",
+		BunnyAPIKeySet:             tenantCtx.Config.BunnyAPIKey != "",
+		BunnyLibraryID:             tenantCtx.Config.BunnyLibraryID,
+		BunnyLibraryName:           tenantCtx.Config.BunnyLibraryName,
+		BunnyReadOnlyKeySet:        tenantCtx.Config.BunnyReadOnlyAPIKey != "",
 	}
 	status.HasGoogleSync = status.GoogleOauthClientIDSet &&
 		status.GoogleOauthClientSecretSet &&
@@ -252,6 +264,25 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 			return
 		}
 	}
+
+	// Resolve the Bunny library before anything is applied to the shared in-memory
+	// config, so a failed lookup returns 400 with nothing applied and nothing saved.
+	// Runs only when the request carries BUNNY_LIBRARY_ID.
+	var bunnyLibrary *services.BunnyResolvedLibrary
+	if request.BunnyLibraryID != "" {
+		accountKey := request.BunnyAPIKey
+		if accountKey == "" {
+			accountKey = tenantCtx.Config.BunnyAPIKey
+		}
+		resolved, err := h.bunnyService.ResolveLibrary(accountKey, request.BunnyLibraryID)
+		if err != nil {
+			h.logger.System().Warn("Bunny library resolution failed", "error", err, "tenantId", tenantCtx.TenantID)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Bunny library lookup failed: " + err.Error()})
+			return
+		}
+		bunnyLibrary = resolved
+	}
+
 	// Manually update new fields in context config
 	if request.ShopifyStorefrontToken != "" {
 		tenantCtx.Config.ShopifyStorefrontToken = request.ShopifyStorefrontToken
@@ -288,6 +319,11 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 		return
 	}
 
+	// Store the resolved Bunny library fields alongside the two request fields
+	if bunnyLibrary != nil {
+		h.bunnyService.StoreResolvedLibrary(tenantCtx, bunnyLibrary)
+	}
+
 	// Save configuration through service
 	if err := h.configService.SaveAdvancedConfig(tenantCtx); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -299,6 +335,14 @@ func (h *ConfigHandlers) UpdateAdvancedConfig(c *gin.Context) {
 	h.logger.Perf().Info("Performance for UpdateAdvancedConfig request", "duration", marker.Duration, "tenantId", tenantCtx.TenantID, "success", true)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Configuration updated successfully"})
+}
+
+// computeHasBunny reports whether the tenant has a resolved Bunny Stream library.
+func computeHasBunny(cfg *tenant.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	return cfg.BunnyLibraryID != "" && cfg.BunnyLibraryAPIKey != "" && cfg.BunnyCDNHostname != ""
 }
 
 func computeHasResend(cfg *tenant.Config) bool {

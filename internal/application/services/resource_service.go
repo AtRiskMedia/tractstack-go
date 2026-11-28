@@ -749,3 +749,112 @@ func (s *ResourceService) SyncShopifyDeletion(tenantCtx *tenant.Context, gid str
 	marker.SetSuccess(true)
 	return "updated", nil
 }
+
+// GetByBunnyGUID finds the bunny-video resource for a Bunny video guid. It scans the
+// category in memory, as UpsertShopifyResource does for products. It returns nil when
+// no resource holds the guid.
+func (s *ResourceService) GetByBunnyGUID(tenantCtx *tenant.Context, guid string) (*content.ResourceNode, error) {
+	if guid == "" {
+		return nil, fmt.Errorf("bunny video guid cannot be empty")
+	}
+
+	videos, err := s.GetByCategory(tenantCtx, BunnyVideoCategory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load bunny videos for guid lookup: %w", err)
+	}
+
+	for _, video := range videos {
+		if existingGUID, ok := video.OptionsPayload["guid"].(string); ok && existingGUID == guid {
+			return video, nil
+		}
+	}
+	return nil, nil
+}
+
+// MergeSystemFields writes system-managed fields of a bunny-video resource with a
+// targeted update of only those optionsPayload keys.
+//
+// It deliberately does not go through Update: that rewrites the resource's file links
+// and refreshes the whole content map. System fields are not in the content map, so no
+// refresh is needed. The resources version is touched so cached bulk reads see the change.
+func (s *ResourceService) MergeSystemFields(tenantCtx *tenant.Context, resourceID string, partial map[string]any) error {
+	start := time.Now()
+	marker := s.perfTracker.StartOperation("merge_resource_system_fields", tenantCtx.TenantID)
+	defer marker.Complete()
+
+	if resourceID == "" {
+		return fmt.Errorf("resource ID cannot be empty")
+	}
+	if len(partial) == 0 {
+		return nil
+	}
+	for key := range partial {
+		if !isBunnyVideoSystemField(key) {
+			return fmt.Errorf("%q is not a system field of %s resources", key, BunnyVideoCategory)
+		}
+	}
+
+	resourceRepo := tenantCtx.ResourceRepo()
+	existing, err := resourceRepo.FindByID(tenantCtx.TenantID, resourceID)
+	if err != nil {
+		return fmt.Errorf("failed to load resource %s: %w", resourceID, err)
+	}
+	if existing == nil {
+		return fmt.Errorf("resource %s not found", resourceID)
+	}
+	if getResourceCategory(existing) != BunnyVideoCategory {
+		return fmt.Errorf("resource %s is not a %s resource", resourceID, BunnyVideoCategory)
+	}
+
+	if err := resourceRepo.MergeOptionsPayloadFields(tenantCtx.TenantID, resourceID, partial); err != nil {
+		return fmt.Errorf("failed to merge system fields for resource %s: %w", resourceID, err)
+	}
+
+	s.logger.Content().Info("Merged resource system fields", "tenantId", tenantCtx.TenantID, "resourceId", resourceID, "fields", len(partial), "duration", time.Since(start))
+	marker.SetSuccess(true)
+	return nil
+}
+
+func isBunnyVideoSystemField(name string) bool {
+	for _, field := range BunnyVideoSystemFields {
+		if field == name {
+			return true
+		}
+	}
+	return false
+}
+
+// GuardBunnyVideoUpdate protects a bunny-video resource from editor writes. When the
+// existing resource's category is bunny-video, the stored values of every system field,
+// guid, libraryId, the slug and the category are overlaid onto the incoming node, so
+// only the title and the oneliner can change. It returns true when the guard applied.
+// The existing node is a shared cache pointer and is only read.
+func GuardBunnyVideoUpdate(existing *content.ResourceNode, incoming *content.ResourceNode) bool {
+	if existing == nil || incoming == nil || getResourceCategory(existing) != BunnyVideoCategory {
+		return false
+	}
+
+	category := BunnyVideoCategory
+	incoming.CategorySlug = &category
+	incoming.Slug = existing.Slug
+
+	if incoming.OptionsPayload == nil {
+		incoming.OptionsPayload = make(map[string]any)
+	}
+	protected := make([]string, 0, len(BunnyVideoFixedFields)+len(BunnyVideoSystemFields))
+	protected = append(protected, BunnyVideoFixedFields...)
+	protected = append(protected, BunnyVideoSystemFields...)
+	for _, field := range protected {
+		if stored, found := existing.OptionsPayload[field]; found {
+			incoming.OptionsPayload[field] = stored
+		} else {
+			delete(incoming.OptionsPayload, field)
+		}
+	}
+	return true
+}
+
+// IsBunnyVideoResource reports whether a resource node is in the bunny-video category.
+func IsBunnyVideoResource(resource *content.ResourceNode) bool {
+	return getResourceCategory(resource) == BunnyVideoCategory
+}

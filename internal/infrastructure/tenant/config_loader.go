@@ -38,6 +38,12 @@ type Config struct {
 	GoogleAccessToken       string             `json:"GOOGLE_ACCESS_TOKEN"`
 	GoogleRefreshToken      string             `json:"GOOGLE_REFRESH_TOKEN"`
 	GoogleTokenExpiry       string             `json:"GOOGLE_TOKEN_EXPIRY"`
+	BunnyAPIKey             string             `json:"BUNNY_API_KEY"`
+	BunnyLibraryID          string             `json:"BUNNY_LIBRARY_ID"`
+	BunnyLibraryName        string             `json:"BUNNY_LIBRARY_NAME"`
+	BunnyLibraryAPIKey      string             `json:"BUNNY_LIBRARY_API_KEY"`
+	BunnyReadOnlyAPIKey     string             `json:"BUNNY_READONLY_API_KEY"`
+	BunnyCDNHostname        string             `json:"BUNNY_CDN_HOSTNAME"`
 	SQLitePath              string             `json:"-"`
 	BrandConfig             *types.BrandConfig `json:"-"`
 }

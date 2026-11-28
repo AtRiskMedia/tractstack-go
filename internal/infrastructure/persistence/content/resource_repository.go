@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -823,4 +824,86 @@ func (r *ResourceRepository) ExistsByShopifyGID(_ string, gid string) (bool, err
 	}
 
 	return exists == 1, nil
+}
+
+// MergeOptionsPayloadFields sets individual top-level keys of a resource's options_payload
+// with one targeted json_set UPDATE. Every other key, the resource's other columns and
+// its file links are left untouched. Field names must be validated by the caller: they
+// are written into the JSON path.
+//
+// The cached resource is a shared pointer, so it is replaced by an updated copy rather
+// than mutated. The resources version is touched so that bulk reads carrying
+// If-None-Match stop returning 304.
+func (r *ResourceRepository) MergeOptionsPayloadFields(tenantID, id string, fields map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	// Normalise values to what a JSON round trip through the database yields, so the
+	// cached copy and a fresh load from the database hold the same types.
+	normalised := make(map[string]any, len(fields))
+	var setClause strings.Builder
+	args := make([]any, 0, len(keys)+1)
+	for _, key := range keys {
+		var value any
+		switch v := fields[key].(type) {
+		case nil:
+			value = nil
+		case string:
+			value = v
+		case bool:
+			return fmt.Errorf("unsupported boolean value for options payload field %s", key)
+		case int:
+			value = float64(v)
+		case int32:
+			value = float64(v)
+		case int64:
+			value = float64(v)
+		case float32:
+			value = float64(v)
+		case float64:
+			value = v
+		default:
+			return fmt.Errorf("unsupported value type %T for options payload field %s", v, key)
+		}
+		normalised[key] = value
+		setClause.WriteString(", '$.")
+		setClause.WriteString(key)
+		setClause.WriteString("', ?")
+		args = append(args, value)
+	}
+	args = append(args, id)
+
+	query := `UPDATE resources SET options_payload = json_set(options_payload` + setClause.String() + `) WHERE id = ?`
+	result, err := r.db.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to merge options payload fields for resource %s: %w", id, err)
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return fmt.Errorf("resource %s not found", id)
+	}
+
+	if cached, found := r.cache.GetResource(tenantID, id); found && cached != nil {
+		updated := *cached
+		if cached.CategorySlug != nil {
+			category := *cached.CategorySlug
+			updated.CategorySlug = &category
+		}
+		updated.OptionsPayload = make(map[string]any, len(cached.OptionsPayload)+len(normalised))
+		for k, v := range cached.OptionsPayload {
+			updated.OptionsPayload[k] = v
+		}
+		for k, v := range normalised {
+			updated.OptionsPayload[k] = v
+		}
+		r.cache.SetResource(tenantID, &updated)
+	}
+	r.cache.TouchResourcesVersion(tenantID)
+	return nil
 }

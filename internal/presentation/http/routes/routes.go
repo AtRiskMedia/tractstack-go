@@ -30,7 +30,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	epinetHandlers := handlers.NewEpinetHandlers(container.EpinetService, container.Logger, container.PerfTracker)
 	contentMapHandlers := handlers.NewContentMapHandlers(container.ContentMapService, container.Logger, container.PerfTracker)
 	orphanHandlers := handlers.NewOrphanAnalysisHandlers(container.OrphanAnalysisService, container.Logger, container.PerfTracker)
-	configHandlers := handlers.NewConfigHandlers(container.ConfigService, container.Logger, container.PerfTracker)
+	configHandlers := handlers.NewConfigHandlers(container.ConfigService, container.BunnyService, container.Logger, container.PerfTracker)
 	fragmentHandlers := handlers.NewFragmentHandlers(container.FragmentService, container.Logger, container.PerfTracker)
 	analyticsHandlers := handlers.NewAnalyticsHandlers(
 		container.AnalyticsService,
@@ -54,6 +54,7 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 	tailwindHandlers := handlers.NewTailwindHandlers(container.TailwindService, container.Logger, container.PerfTracker)
 	searchHandlers := handlers.NewSearchHandlers(container.SearchService, container.Logger, container.PerfTracker)
 	shopifyHandlers := handlers.NewShopifyHandlers(container.ShopifyService, container.ResourceService, container.SaleService, container.Logger, container.PerfTracker)
+	bunnyHandlers := handlers.NewBunnyHandlers(container.BunnyService, container.Logger, container.PerfTracker)
 	bookingHandlers := handlers.NewBookingHandlers(container.BookingService, container.Logger, container.PerfTracker)
 	saleHandlers := handlers.NewSaleHandlers(container.SaleService, container.Logger, container.PerfTracker)
 	emailTemplateHandlers := handlers.NewEmailTemplateHandlers(container.EmailTemplateService, container.Logger, container.PerfTracker)
@@ -138,6 +139,11 @@ func SetupRoutes(container *container.Container) *gin.Engine {
 
 		api.GET("/shopify/products", authHandlers.AuthMiddleware(), shopifyHandlers.HandleGetProducts)
 		api.POST("/shopify/checkout", shopifyHandlers.HandleCreateCheckout)
+		api.GET("/bunny/videos", authHandlers.AuthMiddleware(), bunnyHandlers.HandleGetVideos)
+		api.POST("/bunny/import", authHandlers.AuthMiddleware(), bunnyHandlers.HandleImport)
+		api.GET("/bunny/libraries", authHandlers.AuthMiddleware(), authHandlers.AdminOnlyMiddleware(), bunnyHandlers.HandleGetLibraries)
+		api.GET("/bunny/library/status", authHandlers.AuthMiddleware(), authHandlers.AdminOnlyMiddleware(), bunnyHandlers.HandleGetLibraryStatus)
+		api.POST("/bunny/library/apply-recommended", authHandlers.AuthMiddleware(), authHandlers.AdminOnlyMiddleware(), bunnyHandlers.HandleApplyRecommended)
 		api.GET("/bookings/availability", bookingHandlers.HandleGetAvailability)
 		api.POST("/bookings/hold", bookingHandlers.HandleHoldSlot)
 		api.POST("/bookings/confirm", bookingHandlers.HandleConfirmBooking)

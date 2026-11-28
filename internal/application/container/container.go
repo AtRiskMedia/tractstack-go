@@ -74,6 +74,7 @@ type Container struct {
 	SysOpService                *services.SysOpService
 	ShopifyService              *services.ShopifyService
 	ShopifyReconciliationWorker *services.ShopifyReconciliationWorker
+	BunnyService                *services.BunnyService
 	Service                     *fts.Service
 	ExtendAssetService     *services.ExtendAssetService
 	ExtendSourceService    *services.ExtendSourceService
@@ -151,6 +152,9 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 	// Shopify integration with now-defined ResourceService
 	shopifyService := services.NewShopifyService(logger, tenantManager, resourceService)
 	shopifyReconciliationWorker := services.NewShopifyReconciliationWorker(shopifyService, tenantManager, logger)
+
+	// Bunny Stream integration (video resources)
+	bunnyService := services.NewBunnyService(logger, tenantManager, resourceService)
 
 	emailConfigLoader := tenant.NewLocalEmailConfigLoader()
 	emailTemplateService := services.NewEmailTemplateService(emailConfigLoader, logger, perfTracker)
@@ -299,6 +303,7 @@ func NewContainer(tenantManager *tenant.Manager, cacheManager *manager.Manager) 
 		SysOpBroadcaster:            sysOpBroadcaster,
 		ShopifyService:              shopifyService,
 		ShopifyReconciliationWorker: shopifyReconciliationWorker,
+		BunnyService:                bunnyService,
 		Service:                     ftsService,
 		ExtendAssetService:     extendAssetService,
 		ExtendSourceService:    extendSourceService,

@@ -213,6 +213,7 @@ type BrandConfig struct {
 	KnownResources     *KnownResourcesConfig `json:"KNOWN_RESOURCES,omitempty"`
 	HasAAI             bool                  `json:"HAS_AAI"`
 	HasShopify         bool                  `json:"HAS_SHOPIFY"`
+	HasBunny           bool                  `json:"HAS_BUNNY"`
 	ShowShopifyHelper  bool                  `json:"SHOW_SHOPIFY_HELPER"`
 	HasResend          bool                  `json:"HAS_RESEND"`
 	HasHydrationToken  bool                  `json:"HAS_HYDRATION_TOKEN"`

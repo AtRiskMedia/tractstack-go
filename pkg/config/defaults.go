@@ -141,6 +141,8 @@ var (
 	ShopifyDataTTL time.Duration
 	// ShopifyRequestTimeout is the maximum duration to wait for a Shopify API response
 	ShopifyRequestTimeout time.Duration
+	// BunnyRequestTimeout is the maximum duration to wait for a Bunny API response
+	BunnyRequestTimeout time.Duration
 
 	// MaxTenants sets the maximum number of tenants allowed in memory.
 	MaxTenants int
@@ -278,6 +280,9 @@ func init() {
 	ShopifyReconcileStartupDelay = time.Duration(getEnvInt("SHOPIFY_RECONCILE_STARTUP_DELAY_MINUTES", 48)) * time.Minute
 	ShopifyDataTTL = time.Duration(getEnvInt("SHOPIFY_DATA_TTL", 5)) * time.Minute
 	ShopifyRequestTimeout = getEnvDuration("SHOPIFY_REQUEST_TIMEOUT", 30*time.Second)
+
+	// Bunny service
+	BunnyRequestTimeout = getEnvDuration("BUNNY_REQUEST_TIMEOUT", 30*time.Second)
 
 	// Memory Management
 	MaxTenants = getEnvInt("MAX_TENANTS", 0)

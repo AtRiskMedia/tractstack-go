@@ -113,6 +113,8 @@ type AdvancedConfigUpdateRequest struct {
 	GoogleAccessToken       string `json:"GOOGLE_ACCESS_TOKEN,omitempty"`
 	GoogleRefreshToken      string `json:"GOOGLE_REFRESH_TOKEN,omitempty"`
 	GoogleTokenExpiry       string `json:"GOOGLE_TOKEN_EXPIRY,omitempty"`
+	BunnyAPIKey             string `json:"BUNNY_API_KEY,omitempty"`
+	BunnyLibraryID          string `json:"BUNNY_LIBRARY_ID,omitempty"`
 	TursoEnabled            *bool  `json:"turso_enabled,omitempty"`
 }
 
@@ -223,6 +225,12 @@ func (c *ConfigService) ProcessAdvancedConfigUpdate(
 	if request.GoogleTokenExpiry != "" {
 		tenantCtx.Config.GoogleTokenExpiry = request.GoogleTokenExpiry
 	}
+	if request.BunnyAPIKey != "" {
+		tenantCtx.Config.BunnyAPIKey = request.BunnyAPIKey
+	}
+	if request.BunnyLibraryID != "" {
+		tenantCtx.Config.BunnyLibraryID = request.BunnyLibraryID
+	}
 	if request.TursoEnabled != nil {
 		tenantCtx.Config.TursoEnabled = *request.TursoEnabled
 	}
@@ -332,6 +340,16 @@ func (c *ConfigService) SaveAdvancedConfig(tenantCtx *tenant.Context) error {
 		"GOOGLE_ACCESS_TOKEN":        tenantCtx.Config.GoogleAccessToken,
 		"GOOGLE_REFRESH_TOKEN":       tenantCtx.Config.GoogleRefreshToken,
 		"GOOGLE_TOKEN_EXPIRY":        tenantCtx.Config.GoogleTokenExpiry,
+		"BUNNY_API_KEY":              tenantCtx.Config.BunnyAPIKey,
+		"BUNNY_LIBRARY_ID":           tenantCtx.Config.BunnyLibraryID,
+		"BUNNY_LIBRARY_NAME":         tenantCtx.Config.BunnyLibraryName,
+		"BUNNY_LIBRARY_API_KEY":      tenantCtx.Config.BunnyLibraryAPIKey,
+		"BUNNY_READONLY_API_KEY":     tenantCtx.Config.BunnyReadOnlyAPIKey,
+		"BUNNY_CDN_HOSTNAME":         tenantCtx.Config.BunnyCDNHostname,
+	}
+	// HYDRATION_TOKEN is loaded with omitempty, so it is only written while it is set.
+	if tenantCtx.Config.HydrationToken != "" {
+		configData["HYDRATION_TOKEN"] = tenantCtx.Config.HydrationToken
 	}
 
 	data, err := json.MarshalIndent(configData, "", "  ")

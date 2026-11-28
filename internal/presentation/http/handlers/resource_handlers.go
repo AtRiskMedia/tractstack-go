@@ -217,6 +217,12 @@ func (h *ResourceHandlers) CreateResource(c *gin.Context) {
 		return
 	}
 
+	// bunny-video resources are created only by the Bunny import (POST /bunny/import).
+	if services.IsBunnyVideoResource(&resource) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bunny-video resources cannot be created here. Import the video from the Videos area instead."})
+		return
+	}
+
 	if gid, ok := resource.OptionsPayload["gid"].(string); ok && strings.HasPrefix(gid, "gid://shopify/") {
 		category := ""
 		if resource.CategorySlug != nil {
@@ -377,6 +383,10 @@ func (h *ResourceHandlers) UpdateResource(c *gin.Context) {
 		return
 	}
 	updatedResource.ID = resourceID // Ensure ID is set correctly.
+
+	// System-managed fields of a bunny-video resource are owned by Go: an editor write
+	// can change only the title and the oneliner.
+	services.GuardBunnyVideoUpdate(existingResource, &updatedResource)
 
 	// Step 3: Compare payloads to find files that are being replaced.
 	orphanedFileIDs := h.findOrphanedFileIDs(existingResource, &updatedResource)
